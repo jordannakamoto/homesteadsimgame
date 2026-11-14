@@ -1,13 +1,14 @@
 # Homestead sim game (World Engine prototype)
 
-Top-down browser action RPG: Valheim-style world engine, skill combat, party play, build mode.
+Browser homestead builder (heading toward a Stardew-style sim) on a Valheim-style world engine.
 
-Branches being merged into `main`:
-- `combat` — main game source (world engine, combat, allies, camps)
-- `build-mode` — build mode, furniture, touch controls, realism passes
-- `fx` — post-processing, firelight, smoke, tree variety, procedural anime characters (`fx.js` add-on)
+`main` = the `build-mode` branch + the `fx` add-on. The `combat` branch is archived and not merged.
 
-## `build-mode` branch layout
+- `combat`: the old action-RPG source (world engine, combat, allies, camps), kept for reference
+- `build-mode`: what `main` was built from
+- `fx`: the add-on as it was before merging
+
+## Layout
 
 `npm install && npm run build` writes `dist/index.html`, a single self-contained page.
 
@@ -17,6 +18,9 @@ Branches being merged into `main`:
 - `src/nature.js`: ground cover, ivy, fallen logs, insects, animals, unified soft lighting, pine level of detail.
 - `src/relight.js`: screen-space ambient occlusion, colour spill, haze and grade (High quality only).
 - `src/fxpost.js`: the post pass from the `fx` add-on (depth of field, sun shafts, glow, vignette), adapted to this build's `window.__game`.
+- `src/fxhost.js`: builds the `window.__fxHost` bridge `src/fx.js` expects, with a once-per-frame hook on `scene.onBeforeRender`.
+- `src/fx.js`: campfires and embers, soft smoke and particles, per-tree shape variety, and the procedural cel-shaded characters ("Models: anime / blocks" button). Its own post pass stays off here, because `fxpost.js` already installs it.
+- `fx/`: the character generator source (`fx/body/body.js`, synced into `src/fx.js` between the markers) and viewer/screenshot tools.
 - `template/head.html`, `template/tail.html`: page shell and CSS around the scripts.
 
 The add-ons talk to the engine through `window.__game` and the hooks `window.__build` and `window.__nature`.

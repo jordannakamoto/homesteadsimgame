@@ -34322,6 +34322,10 @@ varying float vCamDepth; uniform vec2 uPlayerPx; uniform float uPlayerDepth; uni
   yo("axe");
   qc();
   window.__game = {
+    pm: Qt,
+    get seed() {
+      return xs;
+    },
     enemies: fn,
     spawnEnemy: Ld,
     arrows: Ks,
