@@ -1,0 +1,13 @@
+{
+  "name": "homesteadsimgame-build-mode",
+  "version": "1.0.0",
+  "private": true,
+  "description": "World Engine prototype, Build Mode branch: single-file HTML build",
+  "scripts": {
+    "build": "sh build.sh"
+  },
+  "dependencies": {
+    "esbuild": "^0.28.2",
+    "prettier": "^3.10.1"
+  }
+}

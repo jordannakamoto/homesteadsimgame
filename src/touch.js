@@ -1,0 +1,276 @@
+/* Touch controls: two thumb sticks, action buttons, and the extra build buttons a keyboard would give. */
+(() => {
+  const G = window.__game,
+    BL = window.__build;
+  if (!G || !BL) return;
+  const B = BL.state,
+    P = G.player,
+    K = G.keys,
+    M = G.mouse,
+    $ = (id) => document.getElementById(id),
+    canvas = $("view"),
+    clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  let on = false,
+    rx = 0,
+    ry = 0;
+
+  const ui = document.createElement("div");
+  ui.id = "touchui";
+  ui.hidden = true;
+  ui.innerHTML =
+    '<div class="stick" id="tsl" role="group" aria-label="Move"><div class="nub"></div></div>' +
+    '<div class="stick" id="tsr" role="group" aria-label="Turn the view"><div class="nub"></div></div>' +
+    '<div id="tact" role="group" aria-label="Actions">' +
+    '<button type="button" id="tbow">Bow</button><button type="button" id="tkick">Kick</button><button type="button" id="tparry">Parry</button>' +
+    '<button type="button" id="tdash">Dash</button><button type="button" id="tjump">Jump</button><button type="button" id="troll">Roll</button>' +
+    "</div>" +
+    '<button type="button" id="tatk">Attack</button>';
+  document.body.appendChild(ui);
+
+  // build-mode buttons for what the keyboard and mouse do
+  const extra = document.createElement("div");
+  extra.id = "btouch";
+  extra.innerHTML =
+    '<button type="button" id="tbrem" aria-pressed="false" title="Remove instead of build">Remove</button>' +
+    '<button type="button" id="tbcancel" title="Drop what you are drawing">Cancel</button>' +
+    '<button type="button" id="tblo" title="Lower the next floor">Floor &minus;</button>' +
+    '<button type="button" id="tbhi" title="Raise the next floor">Floor +</button>' +
+    '<button type="button" id="tbwing" aria-pressed="false" title="Start the next piece as a separate wing">Wing</button>' +
+    '<button type="button" id="tbpaint" aria-pressed="false" title="Tap pieces to paint them with the current material">Paint</button>' +
+    '<button type="button" id="tbpick" aria-pressed="false" title="Tap a piece to pick up its material">Pick</button>' +
+    '<button type="button" id="tbprev" title="Step the style back">Style &lsaquo;</button>';
+  const row = document.querySelector("#buildbar .row");
+  row && row.appendChild(extra);
+
+  function enable() {
+    if (on) return;
+    on = true;
+    document.body.classList.add("touch");
+    ui.hidden = false;
+    const k = $("bkeys");
+    if (k) k.textContent = "One finger draws or places; lift to confirm. Two fingers pinch to zoom, twist to turn, slide up or down to tilt. The left stick walks, the right stick turns and zooms.";
+  }
+  if (window.matchMedia && matchMedia("(pointer: coarse)").matches) enable();
+  window.addEventListener("pointerdown", (e) => e.pointerType === "touch" && enable(), true);
+  window.__touch = { enable };
+
+  /* ---------- sticks ---------- */
+  function stick(el, cb) {
+    let id = null;
+    const nub = el.firstElementChild;
+    const put = (e) => {
+      const r = el.getBoundingClientRect(),
+        R = r.width * 0.36;
+      let x = (e.clientX - (r.left + r.width / 2)) / R,
+        y = (e.clientY - (r.top + r.height / 2)) / R;
+      const l = Math.hypot(x, y);
+      if (l > 1) ((x /= l), (y /= l));
+      nub.style.transform = "translate(" + x * R + "px," + y * R + "px)";
+      l < 0.16 ? cb(0, 0) : cb(x, y);
+    };
+    const end = (e) => {
+      if (e.pointerId !== id) return;
+      id = null;
+      nub.style.transform = "";
+      el.classList.remove("on");
+      cb(0, 0);
+    };
+    el.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      id = e.pointerId;
+      try {
+        el.setPointerCapture(id);
+      } catch {}
+      el.classList.add("on");
+      put(e);
+    });
+    el.addEventListener("pointermove", (e) => e.pointerId === id && put(e));
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+    el.addEventListener("lostpointercapture", end);
+  }
+  stick($("tsl"), (x, y) => {
+    K.joyX = x;
+    K.joyY = -y;
+  });
+  stick($("tsr"), (x, y) => {
+    rx = x;
+    ry = y;
+  });
+
+  /* ---------- buttons ---------- */
+  function hold(el, down, up) {
+    let id = null;
+    el.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      id = e.pointerId;
+      try {
+        el.setPointerCapture(id);
+      } catch {}
+      el.classList.add("on");
+      down();
+    });
+    const end = (e) => {
+      if (e.pointerId !== id) return;
+      id = null;
+      el.classList.remove("on");
+      up && up();
+    };
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+    el.addEventListener("contextmenu", (e) => e.preventDefault());
+  }
+  const strike = () => {
+    M.left = true;
+    M.click = 0.25;
+    P.levelTarget = P.y;
+  };
+  hold($("tatk"), strike, () => (M.left = false));
+  hold(
+    $("tjump"),
+    () => (K.Space = true),
+    () => (K.Space = false),
+  );
+  hold(
+    $("troll"),
+    () => (K.ShiftLeft = true),
+    () => (K.ShiftLeft = false),
+  );
+  hold(
+    $("tparry"),
+    () => (K.KeyE = true),
+    () => (K.KeyE = false),
+  );
+  hold(
+    $("tkick"),
+    () => (K.KeyQ = true),
+    () => (K.KeyQ = false),
+  );
+  hold(
+    $("tdash"),
+    () => {
+      K.AltLeft = true;
+      strike();
+    },
+    () => {
+      M.left = false;
+      setTimeout(() => (K.AltLeft = false), 140);
+    },
+  );
+  hold($("tbow"), () => (M.right = !M.right));
+
+  const key = (code, shiftKey) => BL.key({ code, shiftKey: !!shiftKey, repeat: false, preventDefault() {} });
+  const tap = (id, fn) =>
+    $(id).addEventListener("click", () => {
+      fn();
+      B.key = "";
+    });
+  tap("tbrem", () => (B.alt = !B.alt));
+  tap("tbcancel", () => BL.cancel());
+  tap("tblo", () => key("Minus"));
+  tap("tbhi", () => key("Equal"));
+  tap("tbwing", () => (B.wingNext = !B.wingNext));
+  tap("tbpaint", () => (B.tapMode = B.tapMode === "paint" ? "" : "paint"));
+  tap("tbpick", () => (B.tapMode = B.tapMode === "pick" ? "" : "pick"));
+  tap("tbprev", () => key("KeyR", true));
+
+  /* ---------- touches on the view, outside build mode ---------- */
+  // Dragging turns the camera. With a terrain tool in hand, a touch works the ground there instead.
+  const look = new Map();
+  let brush = null;
+  const aimAt = (e) => {
+    const r = canvas.getBoundingClientRect();
+    M.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+    M.y = -(((e.clientY - r.top) / r.height) * 2 - 1);
+  };
+  const mine = (e) => on && e.pointerType === "touch" && e.target === canvas && P.tool !== "build";
+  window.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (!mine(e)) return;
+      e.stopPropagation();
+      e.preventDefault();
+      if (P.tool !== "axe" && brush === null) {
+        brush = e.pointerId;
+        aimAt(e);
+        strike();
+      } else look.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    },
+    true,
+  );
+  window.addEventListener(
+    "pointermove",
+    (e) => {
+      if (!mine(e)) return;
+      e.stopPropagation();
+      if (e.pointerId === brush) return aimAt(e);
+      const q = look.get(e.pointerId);
+      if (!q) return;
+      const c = G.cam,
+        dx = e.clientX - q.x,
+        dy = e.clientY - q.y;
+      q.x = e.clientX;
+      q.y = e.clientY;
+      c.yaw -= dx * 0.0062;
+      if (c.aimK > 0.5) c.aimPitch = clamp(c.aimPitch + dy * 0.004, -0.28, 0.9);
+      else c.pitch = clamp(c.pitch + dy * 0.004, 0.5, 1.35);
+    },
+    true,
+  );
+  const lift = (e) => {
+    if (e.pointerType !== "touch") return;
+    if (e.pointerId === brush) {
+      brush = null;
+      M.left = false;
+      e.stopPropagation();
+    }
+    if (look.delete(e.pointerId)) e.stopPropagation();
+  };
+  window.addEventListener("pointerup", lift, true);
+  window.addEventListener("pointercancel", lift, true);
+
+  /* ---------- every frame ---------- */
+  const press = (id, v) => $(id).setAttribute("aria-pressed", v ? "true" : "false");
+  let last = performance.now(),
+    n = 0,
+    mode = "";
+  function frame(t) {
+    const dt = Math.min(0.05, (t - last) / 1000);
+    last = t;
+    if (on) {
+      const c = G.cam;
+      if (B.on) {
+        if (rx || ry) {
+          c.yaw -= rx * 2.2 * dt;
+          c.dist = clamp(c.dist * Math.exp(ry * 1.3 * dt), 9, 50);
+          B.camT = 0;
+        }
+      } else {
+        c.yaw -= rx * 2.9 * dt;
+        if (c.aimK > 0.5) c.aimPitch = clamp(c.aimPitch + ry * 1.1 * dt, -0.28, 0.9);
+        else c.pitch = clamp(c.pitch + ry * 0.9 * dt, 0.5, 1.35);
+      }
+      M.inside = false;
+      const now = B.on ? "build" : P.tool;
+      if (now !== mode) {
+        mode = now;
+        ui.dataset.mode = mode;
+        if (mode !== "axe") M.right = false;
+      }
+      if (n++ % 6 === 0) {
+        // the sticks ride just above whichever bar is at the bottom
+        const bar = B.on ? $("buildbar") : $("tools"),
+          r = bar.getBoundingClientRect();
+        ui.style.setProperty("--lift", Math.max(8, window.innerHeight - r.top + 8) + "px");
+        press("tbrem", B.alt);
+        press("tbwing", B.wingNext);
+        press("tbpaint", B.tapMode === "paint");
+        press("tbpick", B.tapMode === "pick");
+        $("tbow").classList.toggle("lit", !!M.right);
+        $("tatk").textContent = M.right ? "Loose" : "Attack";
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
