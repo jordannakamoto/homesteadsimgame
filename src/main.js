@@ -1,0 +1,3107 @@
+import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+
+// ============================================================ utilities
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const lerp = (a, b, t) => a + (b - a) * t;
+const smoothstep = (a, b, x) => {
+  const t = clamp((x - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function hash2(x, z, seed) {
+  let h = seed ^ Math.imul(x, 374761393) ^ Math.imul(z, 668265263);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+function makeSimplex(seed) {
+  const rand = mulberry32(seed);
+  const p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    const t = p[i]; p[i] = p[j]; p[j] = t;
+  }
+  const perm = new Uint8Array(512);
+  for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+  const GX = [1, -1, 1, -1, 1, -1, 0, 0], GY = [1, 1, -1, -1, 0, 0, 1, -1];
+  const F2 = 0.5 * (Math.sqrt(3) - 1), G2 = (3 - Math.sqrt(3)) / 6;
+  return function (xin, yin) {
+    const s = (xin + yin) * F2;
+    const i = Math.floor(xin + s), j = Math.floor(yin + s);
+    const t = (i + j) * G2;
+    const x0 = xin - (i - t), y0 = yin - (j - t);
+    const i1 = x0 > y0 ? 1 : 0, j1 = x0 > y0 ? 0 : 1;
+    const x1 = x0 - i1 + G2, y1 = y0 - j1 + G2;
+    const x2 = x0 - 1 + 2 * G2, y2 = y0 - 1 + 2 * G2;
+    const ii = i & 255, jj = j & 255;
+    let n = 0;
+    let t0 = 0.5 - x0 * x0 - y0 * y0;
+    if (t0 > 0) { const g = perm[ii + perm[jj]] & 7; t0 *= t0; n += t0 * t0 * (GX[g] * x0 + GY[g] * y0); }
+    let t1 = 0.5 - x1 * x1 - y1 * y1;
+    if (t1 > 0) { const g = perm[ii + i1 + perm[jj + j1]] & 7; t1 *= t1; n += t1 * t1 * (GX[g] * x1 + GY[g] * y1); }
+    let t2 = 0.5 - x2 * x2 - y2 * y2;
+    if (t2 > 0) { const g = perm[ii + 1 + perm[jj + 1]] & 7; t2 *= t2; n += t2 * t2 * (GX[g] * x2 + GY[g] * y2); }
+    return 70 * n;
+  };
+}
+
+// ============================================================ sound (synthesised, no files)
+const sfx = (() => {
+  let ctx = null, noise = null, muted = false;
+  const init = () => {
+    if (ctx) return;
+    try {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const n = Math.floor(ctx.sampleRate * 0.6); noise = ctx.createBuffer(1, n, ctx.sampleRate);
+      const d = noise.getChannelData(0); for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    } catch (err) { ctx = null; }
+  };
+  const env = (g, t, dur, peak) => { g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(peak, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.008 + dur); };
+  const nz = (freq, q, dur, peak, sweep) => {
+    if (!ctx || muted) return;
+    try {
+      const t = ctx.currentTime, src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+      src.buffer = noise; f.type = 'bandpass'; f.Q.value = q; f.frequency.setValueAtTime(freq, t);
+      if (sweep) f.frequency.exponentialRampToValueAtTime(sweep, t + dur);
+      env(g, t, dur, peak); src.connect(f); f.connect(g); g.connect(ctx.destination); src.start(t); src.stop(t + dur + 0.05);
+    } catch (err) { /* audio is optional */ }
+  };
+  const tone = (freq, dur, peak, type, to) => {
+    if (!ctx || muted) return;
+    try {
+      const t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = type || 'sine'; o.frequency.setValueAtTime(freq, t);
+      if (to) o.frequency.exponentialRampToValueAtTime(to, t + dur);
+      env(g, t, dur, peak); o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + dur + 0.05);
+    } catch (err) { /* audio is optional */ }
+  };
+  return {
+    init, toggle: () => { muted = !muted; return muted; },
+    whoosh: (c = 0) => nz(700 + c * 300, 1.1, 0.15 + c * 0.07, 0.22 + c * 0.1, 2800),
+    hit: () => { nz(320, 0.8, 0.12, 0.5, 110); tone(120, 0.12, 0.4, 'sine', 55); },
+    clang: () => { tone(1250, 0.25, 0.16, 'triangle'); tone(1870, 0.2, 0.1, 'triangle'); nz(3200, 2, 0.05, 0.18); },
+    parry: () => { tone(1760, 0.4, 0.2, 'sine'); tone(2640, 0.32, 0.12, 'sine'); nz(4000, 3, 0.04, 0.15); },
+    thud: () => { nz(240, 1, 0.1, 0.4, 90); tone(95, 0.1, 0.3, 'sine', 50); },
+    twang: () => { tone(230, 0.2, 0.2, 'triangle', 110); nz(1800, 1.5, 0.1, 0.1, 600); },
+    hurt: () => { tone(170, 0.22, 0.3, 'sawtooth', 70); nz(500, 1, 0.1, 0.25, 150); },
+  };
+})();
+
+// ============================================================ world constants
+const CS = 32;          // chunk size in metres
+const N = CS + 1;       // vertices per chunk side
+const P = N + 2;        // padded height grid (one extra ring for normals)
+const LOAD_R = 3;       // chunk load radius
+const SEA = 0;
+
+let SEED = 1337;
+{
+  const m = /^#seed-(\d+)$/.exec(location.hash || '');
+  if (m) SEED = parseInt(m[1], 10) >>> 0;
+}
+let noise;
+function fbm(x, z, oct) {
+  let a = 1, f = 1, s = 0, n = 0;
+  for (let o = 0; o < oct; o++) { s += a * noise(x * f, z * f); n += a; a *= 0.5; f *= 2.03; }
+  return s / n;
+}
+function baseHeight(x, z) {
+  const cont = fbm(x * 0.0022, z * 0.0022, 4);
+  const hills = fbm(x * 0.011 + 37, z * 0.011 - 91, 4);
+  const detail = fbm(x * 0.06 + 11, z * 0.06 + 5, 2);
+  const land = smoothstep(-0.25, 0.35, cont);
+  let h = cont * 16 + 1.2 + hills * 6 * (0.35 + 0.65 * land) + detail * 0.45;
+  const mmask = smoothstep(0.45, 0.8, fbm(x * 0.004 + 300, z * 0.004 + 300, 3) * 0.5 + 0.5) * land;
+  if (mmask > 0) {
+    const r = 1 - Math.abs(noise(x * 0.009 + 50, z * 0.009 + 50));
+    h += mmask * r * r * 26;
+  }
+  const d2 = x * x + z * z;
+  h += 6 * Math.exp(-d2 / (90 * 90));
+  const f = Math.exp(-d2 / (22 * 22));
+  h = lerp(h, Math.max(h, 3.2), f);
+  return h;
+}
+const forestAt = (x, z) => fbm(x * 0.008 + 500, z * 0.008 - 500, 3);
+
+// ---------------------------------------------------------- terrain edits (the save diff)
+const world = {
+  chunks: new Map(),
+  edits: new Map(),       // tile key -> Float32Array(CS*CS) of height deltas
+  removed: new Set(),     // ids of felled trees / broken rocks
+  queue: [],
+  fallers: [], logs: [], pickups: [], shakes: [],
+  wood: 0, stone: 0, kills: 0,
+  time: 0.34,
+};
+const ckey = (cx, cz) => cx + ',' + cz;
+function getDelta(gx, gz) {
+  const tx = Math.floor(gx / CS), tz = Math.floor(gz / CS);
+  const t = world.edits.get(ckey(tx, tz));
+  if (!t) return 0;
+  return t[(gz - tz * CS) * CS + (gx - tx * CS)];
+}
+function setDelta(gx, gz, v) {
+  const tx = Math.floor(gx / CS), tz = Math.floor(gz / CS);
+  const k = ckey(tx, tz);
+  let t = world.edits.get(k);
+  if (!t) { t = new Float32Array(CS * CS); world.edits.set(k, t); }
+  t[(gz - tz * CS) * CS + (gx - tx * CS)] = v;
+}
+function heightAt(x, z) {
+  const cx = Math.floor(x / CS), cz = Math.floor(z / CS);
+  const c = world.chunks.get(ckey(cx, cz));
+  if (c) return c.heightLocal(x - cx * CS, z - cz * CS);
+  const ix = Math.floor(x), iz = Math.floor(z), fx = x - ix, fz = z - iz;
+  const v = (a, b) => baseHeight(a, b) + getDelta(a, b);
+  return lerp(lerp(v(ix, iz), v(ix + 1, iz), fx), lerp(v(ix, iz + 1), v(ix + 1, iz + 1), fx), fz);
+}
+
+// ============================================================ renderer
+const canvas = document.getElementById('view');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xa9c4d6);
+scene.fog = new THREE.Fog(0xa9c4d6, 40, 120);
+const camera = new THREE.PerspectiveCamera(40, 1, 0.5, 400);
+
+const sun = new THREE.DirectionalLight(0xfff1d6, 2.6);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -48; sun.shadow.camera.right = 48;
+sun.shadow.camera.top = 48; sun.shadow.camera.bottom = -48;
+sun.shadow.camera.near = 10; sun.shadow.camera.far = 220;
+sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.06;
+scene.add(sun, sun.target);
+const hemi = new THREE.HemisphereLight(0xbcd7ff, 0x5a6b3c, 0.9);
+scene.add(hemi);
+
+let composer = null, bloom = null;
+const quality = { level: 'high' };
+function buildComposer() {
+  const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+  const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
+  composer = new EffectComposer(renderer, rt);
+  composer.addPass(new RenderPass(scene, camera));
+  bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.3, 0.7, 0.92);
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
+}
+function resize() {
+  const w = canvas.clientWidth || window.innerWidth, h = canvas.clientHeight || window.innerHeight;
+  const pr = quality.level === 'high' ? Math.min(window.devicePixelRatio || 1, 1.5) : 1;
+  renderer.setPixelRatio(pr);
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+  if (composer) { composer.setPixelRatio(pr); composer.setSize(w, h); }
+}
+window.addEventListener('resize', resize);
+
+// ============================================================ shared uniforms and materials
+const U = {
+  time: { value: 0 },
+  playerPx: { value: new THREE.Vector2() },
+  playerDepth: { value: 0 },
+  fadeR: { value: 100 },
+};
+function makePixelTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'); const img = g.createImageData(64, 64);
+  const r = mulberry32(99);
+  for (let y = 0; y < 64; y += 2) for (let x = 0; x < 64; x += 2) {
+    const base = 205 + Math.floor(r() * 50);
+    for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+      const v = clamp(base + Math.floor((r() - 0.5) * 26), 0, 255);
+      const i = ((y + dy) * 64 + x + dx) * 4;
+      img.data[i] = v; img.data[i + 1] = v; img.data[i + 2] = v; img.data[i + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.NearestMipmapLinearFilter;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const pixelTex = makePixelTexture();
+
+// Wind sway (and optional see-through fade around the player) injected into a Lambert material.
+function addWind(mat, y0, yr, amp, fade, upNormal) {
+  mat.customProgramCacheKey = () => 'wind' + (fade ? 1 : 0) + (upNormal ? 1 : 0);
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = U.time;
+    sh.uniforms.uWind = { value: new THREE.Vector3(y0, yr, amp) };
+    sh.uniforms.uPlayerPx = U.playerPx;
+    sh.uniforms.uPlayerDepth = U.playerDepth;
+    sh.uniforms.uFadeR = U.fadeR;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uTime; uniform vec3 uWind; varying float vCamDepth;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        #ifdef USE_INSTANCING
+          vec3 wp = (instanceMatrix * vec4(position, 1.0)).xyz;
+        #else
+          vec3 wp = (modelMatrix * vec4(position, 1.0)).xyz;
+        #endif
+        float sw = pow(clamp((position.y - uWind.x) / uWind.y, 0.0, 1.0), 1.6) * uWind.z;
+        sw *= 0.55 + 0.6 * sin(uTime * 0.6 + wp.x * 0.05 + wp.z * 0.035);
+        float ph = uTime * 1.4 + wp.x * 0.21 + wp.z * 0.17;
+        transformed.x += (sin(ph) + 0.5 * sin(ph * 2.3 + 1.7)) * sw;
+        transformed.z += (cos(ph * 0.8) + 0.5 * sin(ph * 1.9)) * sw;`)
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvCamDepth = -mvPosition.z;');
+    if (upNormal) sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\nnormal = normalize(vNormal);');
+    if (fade) {
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying float vCamDepth; uniform vec2 uPlayerPx; uniform float uPlayerDepth; uniform float uFadeR;')
+        .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+          {
+            vec2 dd = (gl_FragCoord.xy - uPlayerPx) / uFadeR;
+            float d2 = dot(dd, dd);
+            if (d2 < 1.0 && vCamDepth < uPlayerDepth - 0.6) {
+              float dn = fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(0.06711056, 0.00583715))));
+              if (dn > d2 * d2 + 0.12) discard;
+            }
+          }`);
+    }
+  };
+}
+const terrainMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: pixelTex });
+const solidMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: pixelTex });
+
+// ============================================================ geometry library
+const col = (hex) => new THREE.Color(hex);
+function paint(geo, fn) {
+  const g = geo.index ? geo.toNonIndexed() : geo;
+  const pos = g.attributes.position, n = pos.count;
+  const c = new Float32Array(n * 3);
+  const tmp = new THREE.Color();
+  for (let i = 0; i < n; i++) {
+    fn(tmp, pos.getX(i), pos.getY(i), pos.getZ(i));
+    c[i * 3] = tmp.r; c[i * 3 + 1] = tmp.g; c[i * 3 + 2] = tmp.b;
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+  return g;
+}
+// ---- tree atlas: bark, birch bark, leaf cluster, pine bough (pixel art, generated)
+function makeAtlas() {
+  const W = 128, c = document.createElement('canvas'); c.width = c.height = W;
+  const g = c.getContext('2d'); const img = g.createImageData(W, W); const d = img.data;
+  const r = mulberry32(4242);
+  const put = (x, y, l, a = 255) => {
+    if (x < 0 || y < 0 || x >= W || y >= W) return;
+    const i = (y * W + x) * 4, v = clamp(Math.round(l * 255), 0, 255);
+    d[i] = v; d[i + 1] = v; d[i + 2] = v; d[i + 3] = a;
+  };
+  // bark (top left): vertical streaks with cracks
+  const colR = []; for (let i = 0; i < 32; i++) colR.push(r());
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+    let l = 0.8 + 0.16 * colR[x >> 1] + (r() - 0.5) * 0.08;
+    if ((hash2(x >> 1, y >> 3, 77) & 255) < 34) l *= 0.62;
+    put(x, y, l);
+  }
+  // birch bark (top right): pale with dark dashes
+  for (let y = 0; y < 64; y++) for (let x = 64; x < 128; x++) put(x, y, 0.92 + (r() - 0.5) * 0.1);
+  for (let k = 0; k < 16; k++) {
+    const y0 = Math.floor(r() * 62), x0 = 64 + Math.floor(r() * 54), len = 5 + Math.floor(r() * 12), th = 1 + (r() < 0.4 ? 1 : 0);
+    for (let x = x0; x < Math.min(x0 + len, 128); x++) for (let t = 0; t < th; t++) put(x, y0 + t, 0.25 + r() * 0.1);
+  }
+  // leaf cluster (bottom left): many small pointed leaves
+  for (let k = 0; k < 34; k++) {
+    const rr = Math.sqrt(r()) * 26, an = r() * 6.283;
+    const cx = 32 + Math.cos(an) * rr, cy = 96 + Math.sin(an) * rr;
+    const rot = r() * 6.283, a = 2.1 + r() * 1.0, b = 4.4 + r() * 2.4, base = 0.74 + 0.26 * r();
+    const co = Math.cos(rot), si = Math.sin(rot);
+    for (let y = Math.floor(cy - 8); y <= cy + 8; y++) for (let x = Math.floor(cx - 8); x <= cx + 8; x++) {
+      if (x < 1 || x > 62 || y < 65 || y > 126) continue;
+      const dx = x + 0.5 - cx, dy = y + 0.5 - cy;
+      const u = dx * co + dy * si, v = -dx * si + dy * co;
+      const taper = a * (1 - 0.55 * Math.max(0, v / b));
+      if ((u / taper) ** 2 + (v / b) ** 2 >= 1) continue;
+      put(x, y, base * (Math.abs(u) < 0.6 ? 0.82 : 1) * (0.9 + 0.1 * (v / b)));
+    }
+  }
+  // pine bough (bottom right): stem with slanted needles, base at the left edge
+  for (let x = 1; x < 63; x++) {
+    const f = x / 63;
+    const hw = 25 * Math.min(1, x / 12) * Math.pow(1 - f, 0.7) + 1.5;
+    for (let y = 2; y < 62; y++) {
+      const dy = y - 32, ad = Math.abs(dy);
+      if (ad <= 1) { put(64 + x, 64 + y, 0.62); continue; }
+      if (ad >= hw) continue;
+      if ((((x - ad) % 4) + 4) % 4 < 2 || r() < 0.12) put(64 + x, 64 + y, 0.72 + 0.28 * (ad / hw) + (r() - 0.5) * 0.08);
+    }
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.magFilter = THREE.NearestFilter; t.minFilter = THREE.LinearFilter; t.generateMipmaps = false;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const atlasTex = makeAtlas();
+const Q = { bark: [0, 0.5], birch: [0.5, 0.5], leaf: [0, 0], pine: [0.5, 0] };
+const treeMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: atlasTex, alphaTest: 0.5, alphaToCoverage: true });
+addWind(treeMat, 1.5, 7.0, 0.13, true);
+const treeDepthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: atlasTex, alphaTest: 0.5 });
+
+const V3 = THREE.Vector3;
+const v3 = (x, y, z) => new V3(x, y, z);
+function newB() { return { pos: [], nor: [], uv: [], col: [] }; }
+function pushV(B, p, n, q, s, t, c) {
+  B.pos.push(p.x, p.y, p.z); B.nor.push(n.x, n.y, n.z);
+  B.uv.push(q[0] + (0.02 + 0.96 * s) * 0.5, q[1] + (0.02 + 0.96 * t) * 0.5);
+  B.col.push(c.r, c.g, c.b);
+}
+const _e1 = new V3(), _e2 = new V3();
+// tapered tube along a list of {p, r}; triangles are wound to face outward
+function tube(B, pts, sides, q, cA, cB) {
+  const last = pts.length - 1;
+  const axis = new V3().subVectors(pts[last].p, pts[0].p).normalize();
+  const ref = Math.abs(axis.y) > 0.9 ? v3(1, 0, 0) : v3(0, 1, 0);
+  const rings = [];
+  for (let i = 0; i <= last; i++) {
+    const dir = new V3().subVectors(pts[Math.min(i + 1, last)].p, pts[Math.max(i - 1, 0)].p).normalize();
+    const u = new V3().crossVectors(dir, ref).normalize(), w = new V3().crossVectors(dir, u).normalize();
+    const ring = [];
+    for (let k = 0; k <= sides; k++) {
+      const a = (k / sides) * Math.PI * 2;
+      const n = u.clone().multiplyScalar(Math.cos(a)).addScaledVector(w, Math.sin(a));
+      ring.push({ p: pts[i].p.clone().addScaledVector(n, pts[i].r), n, s: k / sides, t: i / last, c: cA.clone().lerp(cB, i / last) });
+    }
+    rings.push(ring);
+  }
+  const tri = (a, b, c) => {
+    _e1.subVectors(b.p, a.p); _e2.subVectors(c.p, a.p); _e1.cross(_e2);
+    if (_e1.dot(a.n) < 0) { const x = b; b = c; c = x; }
+    for (const o of [a, b, c]) pushV(B, o.p, o.n, q, o.s, o.t, o.c);
+  };
+  for (let i = 0; i < last; i++) for (let k = 0; k < sides; k++) {
+    tri(rings[i][k], rings[i + 1][k], rings[i][k + 1]);
+    tri(rings[i][k + 1], rings[i + 1][k], rings[i + 1][k + 1]);
+  }
+}
+// textured card, emitted with both windings and one shared normal so both faces light the same
+function card(B, c, U, W, q, nFn, cFn) {
+  const mk = (s, t) => {
+    const p = c.clone().addScaledVector(U, s * 2 - 1).addScaledVector(W, t * 2 - 1);
+    return { p, n: nFn(p), s, t, c: cFn(s, t, p) };
+  };
+  const a = mk(0, 0), b = mk(1, 0), d = mk(1, 1), e = mk(0, 1);
+  for (const o of [a, b, d, a, d, e, a, d, b, a, e, d]) pushV(B, o.p, o.n, q, o.s, o.t, o.c);
+}
+function finish(B) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(B.pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(B.nor, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(B.uv, 2));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(B.col, 3));
+  g.computeBoundingSphere();
+  return g;
+}
+// a canopy of leaf cards scattered through an ellipsoid, shaded as one rounded mass
+function canopy(B, r, C, rad, n, sMin, sMax, dark, light, anchors) {
+  const nFn = (p) => v3((p.x - C.x) / rad.x, (p.y - C.y) / rad.y + 0.7, (p.z - C.z) / rad.z).normalize();
+  for (let i = 0; i < n; i++) {
+    let p, dir;
+    if (i < anchors.length) { p = anchors[i].clone(); dir = new V3().subVectors(p, C).normalize(); }
+    else {
+      dir = v3(r() * 2 - 1, r() * 1.5 - 0.45, r() * 2 - 1).normalize();
+      const f = 0.5 + 0.5 * r();
+      p = v3(C.x + dir.x * rad.x * f, C.y + dir.y * rad.y * f, C.z + dir.z * rad.z * f);
+    }
+    const N = dir.clone().add(v3((r() - 0.5) * 0.9, 0.55 + r() * 0.4, (r() - 0.5) * 0.9)).normalize();
+    const size = lerp(sMin, sMax, r()) * 0.5;
+    const U = new V3().crossVectors(N, v3(r() - 0.5, r() - 0.5, r() - 0.5)).normalize();
+    const W = new V3().crossVectors(N, U).normalize();
+    const tint = 0.84 + 0.3 * r();
+    card(B, p, U.multiplyScalar(size), W.multiplyScalar(size), Q.leaf, nFn, (s, t, pp) => {
+      const k = smoothstep(C.y - rad.y, C.y + rad.y * 0.9, pp.y);
+      return dark.clone().lerp(light, k).multiplyScalar(tint);
+    });
+  }
+}
+function branch(B, r, from, to, r0, q, c) {
+  const mid = from.clone().lerp(to, 0.5); mid.y += 0.25;
+  tube(B, [{ p: from, r: r0 }, { p: mid, r: r0 * 0.65 }, { p: to, r: r0 * 0.25 }], 4, q, c, c);
+}
+const TRUNK = [
+  { pts: [[0, -0.3, 0, 0.36], [0, 3, 0, 0.24], [0.03, 6, 0, 0.13], [0, 8.7, 0, 0.03]], sides: 6, q: 'bark', c0: 0x5d4735, c1: 0x7c634c },
+  { pts: [[0, -0.3, 0, 0.2], [0.1, 1.6, 0.02, 0.15], [0, 3.3, 0.1, 0.12], [0.16, 4.9, 0.02, 0.08], [0.1, 6.3, 0, 0.03]], sides: 6, q: 'birch', c0: 0xd6d2c4, c1: 0xf1eee4 },
+  { pts: [[0, -0.3, 0, 0.46], [0.05, 0.9, 0.02, 0.31], [-0.08, 2.1, 0.06, 0.26], [0.06, 3.4, 0, 0.17], [0, 4.7, 0, 0.09]], sides: 7, q: 'bark', c0: 0x5a4332, c1: 0x7d6048 },
+];
+const trunkPts = (t) => TRUNK[t].pts.map((a) => ({ p: v3(a[0], a[1], a[2]), r: a[3] }));
+function buildOak() {
+  const B = newB(), r = mulberry32(11);
+  const b0 = col(0x5a4332), b1 = col(0x7d6048);
+  tube(B, trunkPts(2), 7, Q.bark, b0, b1);
+  const C = v3(0, 4.3, 0), rad = v3(2.7, 1.7, 2.7), ends = [];
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * 6.283 + r() * 0.7, len = 1.5 + r() * 0.9;
+    const end = v3(Math.cos(a) * len, 3.5 + r() * 1.3, Math.sin(a) * len);
+    branch(B, r, v3(0, 2.0 + r() * 1.0, 0), end, 0.13, Q.bark, b1);
+    ends.push(end);
+  }
+  canopy(B, r, C, rad, 30, 1.7, 2.4, col(0x2a5a26), col(0x77b347), ends);
+  return finish(B);
+}
+function buildBirch() {
+  const B = newB(), r = mulberry32(23);
+  const b0 = col(0xd6d2c4), b1 = col(0xf1eee4);
+  tube(B, trunkPts(1), 6, Q.birch, b0, b1);
+  const C = v3(0.08, 4.9, 0.02), rad = v3(1.6, 2.1, 1.6), ends = [];
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * 6.283 + r(), len = 0.9 + r() * 0.7, y = 3.2 + i * 0.5;
+    const end = v3(0.1 + Math.cos(a) * len, y + 0.6 + r() * 0.4, Math.sin(a) * len);
+    branch(B, r, v3(0.06, y, 0.04), end, 0.06, Q.birch, b1);
+    ends.push(end);
+  }
+  canopy(B, r, C, rad, 22, 1.1, 1.6, col(0x6c9a30), col(0xcbe060), ends);
+  return finish(B);
+}
+function buildPine() {
+  const B = newB(), r = mulberry32(37);
+  const b0 = col(0x5d4735), b1 = col(0x7c634c);
+  tube(B, trunkPts(0), 6, Q.bark, b0, b1);
+  const dark = col(0x1c4630), tip = col(0x55995c);
+  const TIERS = 10;
+  for (let ti = 0; ti <= TIERS; ti++) {
+    const f = ti / TIERS, y = 2.1 + ti * 0.66;
+    const top = ti === TIERS;
+    const len = (top ? 0.9 : lerp(2.9, 0.85, f)) * (0.9 + 0.2 * r());
+    const nb = top ? 4 : Math.round(lerp(7, 4, f));
+    const droop = top ? -0.9 : lerp(0.5, 0.12, f);
+    for (let b = 0; b < nb; b++) {
+      const a = (b / nb) * 6.283 + ti * 0.9 + r() * 0.35;
+      const dir = v3(Math.cos(a), 0, Math.sin(a));
+      const out = dir.clone().multiplyScalar(Math.cos(droop)).add(v3(0, -Math.sin(droop), 0));
+      const tan = v3(-Math.sin(a), (r() - 0.5) * 0.5, Math.cos(a)).normalize();
+      const c = v3(0, y, 0).addScaledVector(out, len * 0.5);
+      const n = v3(dir.x * 0.5, 1, dir.z * 0.5).normalize();
+      const shade = lerp(0.8, 1.12, f) * (0.9 + 0.2 * r());
+      card(B, c, out.clone().multiplyScalar(len * 0.5), tan.multiplyScalar(len * 0.44), Q.pine, () => n,
+        (s) => dark.clone().lerp(tip, smoothstep(0.15, 1, s)).multiplyScalar(shade));
+    }
+  }
+  return finish(B);
+}
+const PINE = 0, BIRCH = 1, OAK = 2;
+const TREE = [
+  { name: 'pine', h: 8.6, r: 0.34, hp: 4, logs: 2, logR: 0.22 },
+  { name: 'birch', h: 6.3, r: 0.2, hp: 3, logs: 2, logR: 0.13 },
+  { name: 'oak', h: 5.8, r: 0.42, hp: 5, logs: 2, logR: 0.3 },
+];
+const treeGeo = [buildPine(), buildBirch(), buildOak()];
+// ---- felled trunks: the same trunk the standing tree had, whole and then as two halves
+function trunkPiece(type, y0, y1) {
+  const T = TRUNK[type], src = T.pts;
+  const at = (y) => {
+    for (let i = 0; i < src.length - 1; i++) {
+      if (y <= src[i + 1][1] || i === src.length - 2) {
+        const a = src[i], b = src[i + 1], k = clamp((y - a[1]) / (b[1] - a[1]), 0, 1);
+        return { p: v3(lerp(a[0], b[0], k), y, lerp(a[2], b[2], k)), r: lerp(a[3], b[3], k) };
+      }
+    }
+  };
+  const pts = [at(y0)];
+  for (const a of src) if (a[1] > y0 + 0.05 && a[1] < y1 - 0.05) pts.push({ p: v3(a[0], a[1], a[2]), r: a[3] });
+  pts.push(at(y1));
+  const B = newB();
+  tube(B, pts, T.sides, Q[T.q], col(T.c0), col(T.c1));
+  const wood = col(0xd9b98a);
+  for (const [pt, sgn] of [[pts[0], -1], [pts[pts.length - 1], 1]]) {
+    const n = v3(0, sgn, 0);
+    for (let k = 0; k < T.sides; k++) {
+      const a0 = (k / T.sides) * 6.2832, a1 = ((k + 1) / T.sides) * 6.2832;
+      const A = pt.p.clone(), Bp = pt.p.clone().add(v3(Math.cos(a0) * pt.r, 0, Math.sin(a0) * pt.r)), C = pt.p.clone().add(v3(Math.cos(a1) * pt.r, 0, Math.sin(a1) * pt.r));
+      _e1.subVectors(Bp, A); _e2.subVectors(C, A); _e1.cross(_e2);
+      const order = _e1.dot(n) < 0 ? [A, C, Bp] : [A, Bp, C];
+      for (const o of order) pushV(B, o, n, Q[T.q], 0.5, 0.5, wood);
+    }
+  }
+  const g = finish(B), cy = (y0 + y1) / 2;
+  g.translate(0, -cy, 0); g.rotateZ(-Math.PI / 2); g.computeBoundingSphere();
+  return { geo: g, len: y1 - y0, r: (pts[0].r + pts[pts.length - 1].r) / 2, cy };
+}
+const LOGS = TRUNK.map((T, t) => {
+  const top = T.pts[T.pts.length - 1][1] - 0.4, mid = top * 0.5;
+  return { full: trunkPiece(t, -0.1, top), lo: trunkPiece(t, -0.1, mid), hi: trunkPiece(t, mid, top) };
+});
+const stumpGeo = (() => {
+  const g = new THREE.CylinderGeometry(0.9, 1.05, 0.5, 7, 1); g.translate(0, 0.2, 0);
+  const a = col(0x4a3524), b = col(0xc9a877);
+  return paint(g, (c, x, y) => c.copy(y > 0.44 && Math.hypot(x) < 2 ? b : a));
+})();
+const logGeo = (() => {
+  const g = new THREE.CylinderGeometry(1, 1, 1, 8, 1); g.rotateZ(Math.PI / 2);
+  const a = col(0x513a27), b = col(0xcfae7c);
+  return paint(g, (c, x) => c.copy(Math.abs(x) > 0.499 ? b : a));
+})();
+const rockGeo = (() => {
+  let g = new THREE.IcosahedronGeometry(1, 1);
+  const pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const k = 0.78 + 0.44 * ((hash2(Math.round(x * 50), Math.round(y * 50) * 7 + Math.round(z * 50), 5) & 255) / 255);
+    pos.setXYZ(i, x * k, Math.max(y * k * 0.75, -0.25), z * k);
+  }
+  g.computeVertexNormals();
+  const a = col(0x5c6166), b = col(0x9aa0a3);
+  return paint(g, (c, x, y) => c.copy(a).lerp(b, smoothstep(-0.3, 0.8, y)));
+})();
+// ---- grass: textured tufts tinted to the ground colour, plus flower patches
+function makeGrassTex() {
+  const c = document.createElement('canvas'); c.width = 64; c.height = 32;
+  const g = c.getContext('2d'); const img = g.createImageData(64, 32); const d = img.data;
+  const r = mulberry32(606);
+  const put = (x, y, l) => {
+    x = Math.round(x); if (x < 0 || y < 0 || x >= 64 || y >= 32) return;
+    const i = (y * 64 + x) * 4, v = clamp(Math.round(l * 255), 0, 255);
+    d[i] = v; d[i + 1] = v; d[i + 2] = v; d[i + 3] = 255;
+  };
+  for (let k = 0; k < 13; k++) {                       // blades (left tile)
+    const bx = 3 + k * 2.1 + (r() - 0.5) * 2, hgt = 13 + r() * 18, lean = (r() - 0.5) * 9, tone = 0.86 + 0.14 * r();
+    for (let y = 0; y < hgt; y++) {
+      const t = y / hgt, x = bx + lean * t * t, hw = 1.5 * (1 - t) + 0.3;
+      for (let px = Math.ceil(x - hw); px <= x + hw; px++) if (px >= 1 && px <= 30) put(px, 31 - y, tone * (0.66 + 0.34 * t));
+    }
+  }
+  for (let k = 0; k < 4; k++) {                        // flowers (right tile)
+    const bx = 38 + k * 6 + r() * 2, hgt = 14 + r() * 13;
+    for (let y = 0; y < hgt; y++) put(bx + Math.sin(y * 0.3) * 0.6, 31 - y, 0.5);
+    const cy = 31 - Math.round(hgt), cx = Math.round(bx);
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (Math.abs(dx) + Math.abs(dy) <= 2) put(cx + dx, cy + dy, dx === 0 && dy === 0 ? 0.75 : 1);
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.magFilter = THREE.NearestFilter; t.minFilter = THREE.LinearFilter; t.generateMipmaps = false;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const grassTex = makeGrassTex();
+const grassMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: grassTex, alphaTest: 0.5, alphaToCoverage: true, side: THREE.DoubleSide });
+addWind(grassMat, 0.0, 0.6, 0.13, false, true);
+function tuftGeo(cards, w, h, u0, u1, lean) {
+  const pos = [], nor = [], uv = [], colr = [], idx = [];
+  for (let k = 0; k < cards; k++) {
+    const a = (k / cards) * Math.PI + 0.3, dx = Math.cos(a), dz = Math.sin(a);
+    const lx = -dz * lean * (k - (cards - 1) / 2), lz = dx * lean * (k - (cards - 1) / 2);
+    const b = pos.length / 3;
+    pos.push(-dx * w / 2, 0, -dz * w / 2, dx * w / 2, 0, dz * w / 2, dx * w * 0.58 + lx, h, dz * w * 0.58 + lz, -dx * w * 0.58 + lx, h, -dz * w * 0.58 + lz);
+    uv.push(u0, 0, u1, 0, u1, 1, u0, 1);
+    colr.push(0.82, 0.82, 0.82, 0.82, 0.82, 0.82, 1.32, 1.3, 1.0, 1.32, 1.3, 1.0);
+    for (let i = 0; i < 4; i++) nor.push(0, 1, 0);
+    idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(colr, 3));
+  g.setIndex(idx);
+  return g;
+}
+const grassGeo = tuftGeo(3, 0.8, 0.62, 0.01, 0.49, 0.14);
+const flowerGeo = tuftGeo(2, 0.5, 0.7, 0.52, 0.99, 0.0);
+const FLOWER_COLORS = [col(0xffffff), col(0xffd84a), col(0xc7a2ff), col(0xff9ec4), col(0x9fd3ff)];
+
+// terrain palette (linear)
+const PAL = {
+  mud: col(0x3c4a44), sand: col(0xd8c690), meadow: col(0x7fa64a), forest: col(0x4c7a3a),
+  rock: col(0x7c7f80), rockDark: col(0x5d6062), snow: col(0xf2f5f7), dirt: col(0x6b4f35),
+};
+
+// ============================================================ chunks
+const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion();
+const _p = new THREE.Vector3(), _s = new THREE.Vector3(), _c = new THREE.Color();
+const UP = new THREE.Vector3(0, 1, 0);
+const ZERO_M = new THREE.Matrix4().makeScale(0, 0, 0);
+const GRASS_PER_CHUNK = 4200;
+
+class Chunk {
+  constructor(cx, cz) {
+    this.cx = cx; this.cz = cz; this.key = ckey(cx, cz);
+    this.ox = cx * CS; this.oz = cz * CS;
+    this.base = new Float32Array(P * P);
+    this.h = new Float32Array(P * P);
+    for (let j = 0; j < P; j++) for (let i = 0; i < P; i++) {
+      this.base[j * P + i] = baseHeight(this.ox + i - 1, this.oz + j - 1);
+    }
+    this.forest = new Float32Array(N * N);
+    for (let j = 0; j < N; j += 2) for (let i = 0; i < N; i += 2) this.forest[j * N + i] = forestAt(this.ox + i, this.oz + j);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      if ((i & 1) || (j & 1)) {
+        const i0 = i & ~1, j0 = j & ~1, i1 = Math.min(i0 + 2, N - 1), j1 = Math.min(j0 + 2, N - 1);
+        const fx = (i - i0) / 2, fz = (j - j0) / 2;
+        const f = this.forest;
+        this.forest[j * N + i] = lerp(lerp(f[j0 * N + i0], f[j0 * N + i1], fx), lerp(f[j1 * N + i0], f[j1 * N + i1], fx), fz);
+      }
+    }
+    this.group = new THREE.Group();
+    const geo = new THREE.BufferGeometry();
+    const pos = new Float32Array(N * N * 3), uv = new Float32Array(N * N * 2);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const k = j * N + i;
+      pos[k * 3] = this.ox + i; pos[k * 3 + 2] = this.oz + j;
+      uv[k * 2] = (this.ox + i) / 5; uv[k * 2 + 1] = (this.oz + j) / 5;
+    }
+    const idx = new Uint16Array(CS * CS * 6);
+    let q = 0;
+    for (let j = 0; j < CS; j++) for (let i = 0; i < CS; i++) {
+      const a = j * N + i, b = a + 1, c = a + N, d = c + 1;
+      idx[q++] = a; idx[q++] = c; idx[q++] = b; idx[q++] = b; idx[q++] = c; idx[q++] = d;
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(N * N * 3), 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(N * N * 3), 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+    this.terrain = new THREE.Mesh(geo, terrainMat);
+    this.terrain.receiveShadow = true;
+    this.group.add(this.terrain);
+    this.populate();
+    this.refresh();
+    scene.add(this.group);
+  }
+  baseLocal(lx, lz) {
+    const i = clamp(Math.floor(lx), -1, N - 1), j = clamp(Math.floor(lz), -1, N - 1);
+    const fx = lx - i, fz = lz - j, b = this.base, k = (j + 1) * P + i + 1;
+    return lerp(lerp(b[k], b[k + 1], fx), lerp(b[k + P], b[k + P + 1], fx), fz);
+  }
+  heightLocal(lx, lz) {
+    const i = clamp(Math.floor(lx), -1, N - 1), j = clamp(Math.floor(lz), -1, N - 1);
+    const fx = lx - i, fz = lz - j, b = this.h, k = (j + 1) * P + i + 1;
+    return lerp(lerp(b[k], b[k + 1], fx), lerp(b[k + P], b[k + P + 1], fx), fz);
+  }
+  populate() {
+    const rng = mulberry32(hash2(this.cx, this.cz, SEED));
+    this.trees = []; this.rocks = [];
+    const cell = 3.1;
+    for (let gz = 0; gz + cell <= CS; gz += cell) for (let gx = 0; gx + cell <= CS; gx += cell) {
+      const lx = gx + rng() * cell, lz = gz + rng() * cell;
+      const r = rng(), r2 = rng(), r3 = rng();
+      const x = this.ox + lx, z = this.oz + lz;
+      const hb = this.baseLocal(lx, lz);
+      const sl = Math.hypot(this.baseLocal(lx + 1, lz) - this.baseLocal(lx - 1, lz), this.baseLocal(lx, lz + 1) - this.baseLocal(lx, lz - 1));
+      const f = forestAt(x, z);
+      const spawnClear = x * x + z * z < 49;
+      let d = 0.03 + 0.6 * smoothstep(0.0, 0.45, f);
+      d *= 1 - smoothstep(17, 24, hb);
+      if (hb < 1.3 || sl > 1.5 || spawnClear) d = 0;
+      if (r < d) {
+        const type = (f > 0.25 || hb > 12) ? (r2 < 0.85 ? PINE : BIRCH) : (r2 < 0.5 ? BIRCH : r2 < 0.85 ? OAK : PINE);
+        const id = this.key + '|t' + this.trees.length;
+        this.trees.push({ id, x, z, type, scale: 0.8 + r3 * 0.6, rot: r3 * 100, hp: TREE[type].hp, alive: !world.removed.has(id), shake: 0, sx: 0, sz: 0, chunk: this, slot: 0 });
+      } else if (!spawnClear) {
+        const rd = 0.014 + 0.09 * smoothstep(9, 22, hb) + (hb < 1.3 && hb > -1.2 ? 0.03 : 0);
+        if (r2 < rd) {
+          const id = this.key + '|r' + this.rocks.length;
+          this.rocks.push({ id, x, z, scale: 0.45 + r3 * 1.0, rot: r3 * 50, hp: 3, alive: !world.removed.has(id), chunk: this });
+        }
+      }
+    }
+    // instanced meshes: one per tree type, one for rocks, one for grass
+    this.treeMeshes = [];
+    for (let t = 0; t < 3; t++) {
+      const list = this.trees.filter((tr) => tr.type === t);
+      if (!list.length) { this.treeMeshes.push(null); continue; }
+      const mesh = new THREE.InstancedMesh(treeGeo[t], treeMat, list.length);
+      mesh.castShadow = true; mesh.receiveShadow = true; mesh.customDepthMaterial = treeDepthMat;
+      list.forEach((tr, i) => {
+        tr.slot = i;
+        const v = 0.86 + 0.28 * ((hash2(i, t, this.cx * 31 + this.cz) & 255) / 255);
+        mesh.setColorAt(i, _c.setRGB(v, v * (0.96 + 0.08 * tr.scale % 1), v * 0.95));
+      });
+      this.treeMeshes.push(mesh); this.group.add(mesh);
+    }
+    if (this.rocks.length) {
+      this.rockMesh = new THREE.InstancedMesh(rockGeo, solidMat, this.rocks.length);
+      this.rockMesh.castShadow = true; this.rockMesh.receiveShadow = true;
+      this.group.add(this.rockMesh);
+    }
+    // grass tufts, tinted to the ground they stand on
+    const grng = mulberry32(hash2(this.cz, this.cx, SEED ^ 0x9e3779b9));
+    const gs = [];
+    for (let i = 0; i < GRASS_PER_CHUNK; i++) {
+      const lx = grng() * CS, lz = grng() * CS, a = grng(), b = grng();
+      const hb = this.baseLocal(lx, lz);
+      if (hb < 1.25 || hb > 19) continue;
+      const sl = Math.hypot(this.baseLocal(lx + 0.5, lz) - this.baseLocal(lx - 0.5, lz), this.baseLocal(lx, lz + 0.5) - this.baseLocal(lx, lz - 0.5));
+      if (sl > 0.72) continue;
+      const f = this.forest[Math.round(lz) * N + Math.round(lx)];
+      if (f > 0.2 && a < 0.35) continue;
+      gs.push({ lx, lz, rot: a * 6.283, s: (0.75 + b * 0.75) * lerp(1.0, 0.8, smoothstep(0, 0.4, f)), sy: 0.8 + a * 0.6, f, hb });
+    }
+    this.grass = gs;
+    if (gs.length) {
+      this.grassMesh = new THREE.InstancedMesh(grassGeo, grassMat, gs.length);
+      this.grassMesh.receiveShadow = true;
+      gs.forEach((g, i) => {
+        const v = 0.92 + 0.26 * ((i * 7919) % 100) / 100;
+        _c.copy(PAL.meadow).lerp(PAL.forest, smoothstep(-0.1, 0.35, g.f)).lerp(PAL.sand, (1 - smoothstep(0.7, 1.5, g.hb)) * 0.7).multiplyScalar(v);
+        this.grassMesh.setColorAt(i, _c);
+      });
+      this.group.add(this.grassMesh);
+    }
+    // flower patches in open meadow
+    const fl = [];
+    for (let k = 0; k < 6; k++) {
+      const px = grng() * CS, pz = grng() * CS, ci = Math.floor(grng() * FLOWER_COLORS.length), n = 8 + Math.floor(grng() * 12);
+      for (let i = 0; i < n; i++) {
+        const an = grng() * 6.283, rr = Math.sqrt(grng()) * 3.2, sc = 0.7 + grng() * 0.6;
+        const lx = px + Math.cos(an) * rr, lz = pz + Math.sin(an) * rr;
+        if (lx < 0 || lz < 0 || lx >= CS || lz >= CS) continue;
+        const hb = this.baseLocal(lx, lz);
+        if (hb < 1.5 || hb > 15 || this.forest[Math.round(lz) * N + Math.round(lx)] > 0.12) continue;
+        fl.push({ lx, lz, rot: an, s: sc, sy: 1, ci });
+      }
+    }
+    this.flowers = fl;
+    if (fl.length) {
+      this.flowerMesh = new THREE.InstancedMesh(flowerGeo, grassMat, fl.length);
+      this.flowerMesh.receiveShadow = true;
+      fl.forEach((g, i) => this.flowerMesh.setColorAt(i, FLOWER_COLORS[g.ci]));
+      this.group.add(this.flowerMesh);
+    }
+    // creatures that live here, unless already defeated
+    if (Math.hypot(this.ox + CS / 2, this.oz + CS / 2) > 50) {
+      const n = (grng() < 0.5 ? 1 : 0) + (grng() < 0.18 ? 1 : 0);
+      for (let k = 0; k < n; k++) {
+        const lx = 4 + grng() * 24, lz = 4 + grng() * 24, kind = grng() < 0.4 ? 1 : 0;
+        const hb = this.baseLocal(lx, lz), id = this.key + '|e' + k;
+        if (hb > 1.6 && hb < 18 && !world.removed.has(id) && !nearCamp(this.ox + lx, this.oz + lz)) spawnEnemy(id, this.ox + lx, this.oz + lz, kind, this.key);
+      }
+    }
+    this.stumpMesh = null;
+  }
+  treeMatrix(tr, out) {
+    if (!tr.alive) return out.copy(ZERO_M);
+    _p.set(tr.x, this.heightLocal(tr.x - this.ox, tr.z - this.oz) - 0.08, tr.z);
+    _q.setFromAxisAngle(UP, tr.rot);
+    if (tr.shake > 0) {
+      const a = Math.sin(tr.shake * 42) * 0.07 * (tr.shake / 0.35);
+      _q2.setFromAxisAngle(_s.set(tr.sz, 0, -tr.sx), a); _q.premultiply(_q2);
+    }
+    _s.setScalar(tr.scale);
+    return out.compose(_p, _q, _s);
+  }
+  updateTree(tr) {
+    const mesh = this.treeMeshes[tr.type];
+    mesh.setMatrixAt(tr.slot, this.treeMatrix(tr, _m));
+    mesh.instanceMatrix.needsUpdate = true;
+  }
+  rebuildStumps() {
+    if (this.stumpMesh) { this.group.remove(this.stumpMesh); this.stumpMesh.dispose(); this.stumpMesh = null; }
+    const dead = this.trees.filter((t) => !t.alive);
+    if (!dead.length) return;
+    const mesh = new THREE.InstancedMesh(stumpGeo, solidMat, dead.length);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    dead.forEach((tr, i) => {
+      _p.set(tr.x, this.heightLocal(tr.x - this.ox, tr.z - this.oz) - 0.05, tr.z);
+      _q.setFromAxisAngle(UP, tr.rot);
+      const s = TREE[tr.type].r * tr.scale;
+      _s.set(s, tr.scale, s);
+      mesh.setMatrixAt(i, _m.compose(_p, _q, _s));
+    });
+    mesh.computeBoundingSphere();
+    this.stumpMesh = mesh; this.group.add(mesh);
+  }
+  // Recompute heights from base + edits, then vertex data and instance placement.
+  refresh() {
+    const h = this.h, base = this.base;
+    for (let j = 0; j < P; j++) for (let i = 0; i < P; i++) {
+      h[j * P + i] = base[j * P + i] + getDelta(this.ox + i - 1, this.oz + j - 1);
+    }
+    const geo = this.terrain.geometry;
+    const pos = geo.attributes.position.array, nor = geo.attributes.normal.array, colr = geo.attributes.color.array;
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const k = j * N + i, kk = (j + 1) * P + i + 1;
+      const hh = h[kk];
+      pos[k * 3 + 1] = hh;
+      let nx = h[kk - 1] - h[kk + 1], nz = h[kk - P] - h[kk + P], ny = 2;
+      const il = 1 / Math.hypot(nx, ny, nz); nx *= il; ny *= il; nz *= il;
+      nor[k * 3] = nx; nor[k * 3 + 1] = ny; nor[k * 3 + 2] = nz;
+      // colour by height, slope, forest density and edits
+      const slope = 1 - ny, f = this.forest[k];
+      const delta = hh - base[kk];
+      if (hh < -0.2) _c.copy(PAL.sand).lerp(PAL.mud, clamp((-0.2 - hh) / 3.5, 0, 1));
+      else {
+        _c.copy(PAL.meadow).lerp(PAL.forest, smoothstep(-0.1, 0.35, f));
+        _c.lerp(PAL.sand, 1 - smoothstep(0.7, 1.5, hh));
+        if (hh < 0.5) _c.multiplyScalar(lerp(0.68, 1, smoothstep(0.05, 0.5, hh)));
+        const rk = Math.max(smoothstep(0.15, 0.3, slope), smoothstep(19, 25, hh));
+        _c.lerp(slope > 0.3 ? PAL.rockDark : PAL.rock, rk);
+        _c.lerp(PAL.snow, smoothstep(29, 33, hh) * (1 - smoothstep(0.25, 0.45, slope)));
+      }
+      const dd = clamp(Math.abs(delta) * 1.6, 0, 1) * 0.85;
+      if (dd > 0) _c.lerp(PAL.dirt, dd);
+      const v = 0.9 + 0.2 * ((hash2(this.ox + i, this.oz + j, SEED) & 255) / 255);
+      colr[k * 3] = _c.r * v; colr[k * 3 + 1] = _c.g * v; colr[k * 3 + 2] = _c.b * v;
+    }
+    geo.attributes.position.needsUpdate = true;
+    geo.attributes.normal.needsUpdate = true;
+    geo.attributes.color.needsUpdate = true;
+    geo.computeBoundingSphere();
+    for (const tr of this.trees) this.treeMeshes[tr.type].setMatrixAt(tr.slot, this.treeMatrix(tr, _m));
+    for (const mesh of this.treeMeshes) if (mesh) { mesh.instanceMatrix.needsUpdate = true; mesh.computeBoundingSphere(); }
+    if (this.rockMesh) {
+      this.rocks.forEach((r, i) => {
+        if (!r.alive) { this.rockMesh.setMatrixAt(i, ZERO_M); return; }
+        _p.set(r.x, this.heightLocal(r.x - this.ox, r.z - this.oz) - 0.05, r.z);
+        _q.setFromAxisAngle(UP, r.rot); _s.set(r.scale, r.scale * (0.7 + (r.rot % 1) * 0.5), r.scale);
+        this.rockMesh.setMatrixAt(i, _m.compose(_p, _q, _s));
+      });
+      this.rockMesh.instanceMatrix.needsUpdate = true; this.rockMesh.computeBoundingSphere();
+    }
+    for (const [mesh, list] of [[this.grassMesh, this.grass], [this.flowerMesh, this.flowers]]) {
+      if (!mesh) continue;
+      list.forEach((g, i) => {
+        const hh = this.heightLocal(g.lx, g.lz);
+        if (Math.abs(hh - this.baseLocal(g.lx, g.lz)) > 0.25 || hh < 0.4) { mesh.setMatrixAt(i, ZERO_M); return; }
+        _p.set(this.ox + g.lx, hh - 0.04, this.oz + g.lz);
+        _q.setFromAxisAngle(UP, g.rot); _s.set(g.s, g.s * g.sy, g.s);
+        mesh.setMatrixAt(i, _m.compose(_p, _q, _s));
+      });
+      mesh.instanceMatrix.needsUpdate = true; mesh.computeBoundingSphere();
+    }
+    this.rebuildStumps();
+  }
+  dispose() {
+    scene.remove(this.group);
+    clearEnemies((e) => e.chunkKey === this.key);
+    this.terrain.geometry.dispose();
+    for (const mesh of this.treeMeshes) if (mesh) mesh.dispose();
+    if (this.rockMesh) this.rockMesh.dispose();
+    if (this.grassMesh) this.grassMesh.dispose();
+    if (this.flowerMesh) this.flowerMesh.dispose();
+    if (this.stumpMesh) this.stumpMesh.dispose();
+  }
+}
+
+function updateChunks(px, pz, budgetMs) {
+  const pcx = Math.floor(px / CS), pcz = Math.floor(pz / CS);
+  const want = [];
+  for (let dz = -LOAD_R; dz <= LOAD_R; dz++) for (let dx = -LOAD_R; dx <= LOAD_R; dx++) {
+    if (dx * dx + dz * dz > (LOAD_R + 0.5) * (LOAD_R + 0.5)) continue;
+    if (!world.chunks.has(ckey(pcx + dx, pcz + dz))) want.push([dx * dx + dz * dz, pcx + dx, pcz + dz]);
+  }
+  want.sort((a, b) => a[0] - b[0]);
+  const t0 = performance.now();
+  for (const w of want) {
+    world.chunks.set(ckey(w[1], w[2]), new Chunk(w[1], w[2])); depthState.dirty = true;
+    if (performance.now() - t0 > budgetMs) break;
+  }
+  for (const [k, c] of world.chunks) {
+    if (Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz)) > LOAD_R + 1) { c.dispose(); world.chunks.delete(k); }
+  }
+}
+function forNearby(x, z, r, fn) {
+  const c0x = Math.floor((x - r) / CS), c1x = Math.floor((x + r) / CS);
+  const c0z = Math.floor((z - r) / CS), c1z = Math.floor((z + r) / CS);
+  for (let cz = c0z; cz <= c1z; cz++) for (let cx = c0x; cx <= c1x; cx++) {
+    const c = world.chunks.get(ckey(cx, cz));
+    if (c) fn(c);
+  }
+}
+
+// ============================================================ particles
+const MAXP = 500;
+const partMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial(), MAXP);
+partMesh.frustumCulled = false; partMesh.count = 0; partMesh.castShadow = false;
+scene.add(partMesh);
+const parts = [];
+function burst(x, y, z, n, hex, spread, up, size, life) {
+  const c = col(hex);
+  for (let i = 0; i < n && parts.length < MAXP; i++) {
+    const a = Math.random() * 6.283, s = Math.random() * spread;
+    const v = 0.75 + Math.random() * 0.5;
+    parts.push({
+      x, y, z, vx: Math.cos(a) * s, vy: up * (0.4 + Math.random() * 0.8), vz: Math.sin(a) * s,
+      life: life * (0.6 + Math.random() * 0.6), age: 0, size: size * (0.6 + Math.random() * 0.8),
+      r: c.r * v, g: c.g * v, b: c.b * v, rot: Math.random() * 6,
+    });
+  }
+}
+function updateParticles(dt) {
+  let n = 0;
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i];
+    p.age += dt;
+    if (p.age > p.life) { parts[i] = parts[parts.length - 1]; parts.pop(); continue; }
+    p.vy -= 12 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+    const gh = Math.max(heightAt(p.x, p.z), SEA) + p.size * 0.5;
+    if (p.y < gh) { p.y = gh; p.vy *= -0.3; p.vx *= 0.5; p.vz *= 0.5; }
+  }
+  for (const p of parts) {
+    const k = p.size * clamp((p.life - p.age) / 0.25, 0, 1);
+    _q.setFromAxisAngle(UP, p.rot + p.age * 4); _p.set(p.x, p.y, p.z); _s.set(k, k, k);
+    partMesh.setMatrixAt(n, _m.compose(_p, _q, _s));
+    partMesh.setColorAt(n, _c.setRGB(p.r, p.g, p.b));
+    n++;
+  }
+  partMesh.count = n;
+  partMesh.instanceMatrix.needsUpdate = true;
+  if (partMesh.instanceColor) partMesh.instanceColor.needsUpdate = true;
+}
+
+// ============================================================ player
+const player = {
+  x: 0, z: 0, y: 0, face: 0, faceTarget: 0, walk: 0, speed: 0,
+  swing: null, roll: null, rollCd: 0, vy: 0, air: false, jumpHeld: false,
+  hp: 100, stamWait: 0, regenWait: 0, kvx: 0, kvz: 0, hurt: 0, dead: 0,
+  charging: null, guard: false, guardT: 0, guardDrop: 9, stun: 0, lightI: 0, lightIdle: 9, lUsed: false, holdT: 0, tap: 0, stance: 'bow', crouch: false, ready: null, twist: 0, twistV: 0, drive: 0, qKey: false, nock: 0, plantT: 0, flow: 0, flowT: 9, lastSide: 0, lastDriven: false, riposte: 0, nextSide: 1, qHeld: false, mvx: 0, mvz: 0,
+  atk: null, comboI: 0, comboT: 9, comboLock: 0, comboShow: 0, comboLabel: '', dash: null, dashCd: 0, shotCd: 0, aiming: false, draw: 0, charge: 0, shiftT: 0, jumps: 0, tool: 'axe', levelTarget: 0, stam: 100,
+};
+const pm = {};
+{
+  const mk = (w, h, d, hex) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color: hex }));
+    m.castShadow = true; return m;
+  };
+  pm.root = new THREE.Group(); pm.body = new THREE.Group(); pm.root.add(pm.body);
+  const torso = mk(0.46, 0.5, 0.26, 0x2f7d86); torso.position.y = 0.82;
+  const belt = mk(0.48, 0.08, 0.28, 0x5a3b22); belt.position.y = 0.6;
+  // the head is its own joint, so it can keep looking at the target while the body turns under it
+  pm.head = new THREE.Group(); pm.head.position.y = 1.26; pm.head.rotation.order = 'YXZ';
+  const head = mk(0.3, 0.3, 0.3, 0xe9b88f);
+  const hair = mk(0.33, 0.14, 0.33, 0x6b3f22); hair.position.set(0, 0.13, -0.01);
+  const eyeL = mk(0.05, 0.05, 0.02, 0x2a2420); eyeL.position.set(0.07, 0.02, 0.155);
+  const eyeR = mk(0.05, 0.05, 0.02, 0x2a2420); eyeR.position.set(-0.07, 0.02, 0.155);
+  pm.head.add(head, hair, eyeL, eyeR);
+  const scarf = mk(0.36, 0.1, 0.32, 0xc9482e); scarf.position.y = 1.09;
+  pm.legL = new THREE.Group(); pm.legR = new THREE.Group();
+  pm.legL.position.set(-0.12, 0.56, 0); pm.legR.position.set(0.12, 0.56, 0);
+  const l1 = mk(0.17, 0.56, 0.19, 0x3b3247); l1.position.y = -0.28; pm.legL.add(l1);
+  const l2 = mk(0.17, 0.56, 0.19, 0x3b3247); l2.position.y = -0.28; pm.legR.add(l2);
+  pm.armL = new THREE.Group(); pm.armR = new THREE.Group();
+  pm.armL.position.set(-0.31, 1.03, 0); pm.armR.position.set(0.31, 1.03, 0);
+  const a1 = mk(0.13, 0.5, 0.13, 0x2a6b73); a1.position.y = -0.25; pm.armL.add(a1);
+  const a2 = mk(0.13, 0.5, 0.13, 0x2a6b73); a2.position.y = -0.25; pm.armR.add(a2);
+  for (const arm of [pm.armL, pm.armR]) {
+    const grip = mk(0.05, 0.05, 0.14, 0x5a3b22); grip.position.set(0, -0.5, 0.02);
+    const blade = mk(0.035, 0.09, 0.5, 0xcfd6dc); blade.position.set(0, -0.5, 0.32);
+    arm.add(grip, blade);
+  }
+  pm.bow = new THREE.Group();
+  const limbG = new THREE.TorusGeometry(0.5, 0.024, 5, 14, Math.PI); limbG.rotateZ(Math.PI); limbG.rotateY(Math.PI / 2);
+  const limb = new THREE.Mesh(limbG, new THREE.MeshLambertMaterial({ color: 0x7a5230 })); limb.castShadow = true;
+  const string = mk(0.012, 0.012, 1.0, 0xe8e4d4);
+  pm.bow.add(limb, string); pm.bow.visible = false; pm.armL.add(pm.bow);
+  pm.body.add(torso, belt, pm.head, scarf, pm.legL, pm.legR, pm.armL, pm.armR);
+  scene.add(pm.root);
+}
+
+// ============================================================ dynamic objects: falling trees, logs, pickups
+function fellTree(tr, dx, dz) {
+  if (!tr.alive) return;
+  const c = tr.chunk, T = TREE[tr.type];
+  tr.alive = false; world.removed.add(tr.id);
+  c.updateTree(tr); c.rebuildStumps();
+  const mesh = new THREE.Mesh(treeGeo[tr.type], treeMat);
+  mesh.castShadow = true; mesh.customDepthMaterial = treeDepthMat;
+  const y = heightAt(tr.x, tr.z);
+  mesh.position.set(tr.x, y, tr.z); mesh.scale.setScalar(tr.scale);
+  scene.add(mesh);
+  const len = T.h * tr.scale;
+  const tipH = heightAt(tr.x + dx * len, tr.z + dz * len);
+  const maxA = clamp(Math.PI / 2 - Math.atan2(tipH - y, len), 1.15, 1.95);
+  world.fallers.push({ mesh, tr, dx, dz, a: 0.02, w: 0.25, maxA, len, y });
+  burst(tr.x, y + 0.4, tr.z, 10, 0xc9a877, 2.2, 3.5, 0.11, 0.8);
+}
+function updateFallers(dt) {
+  for (let i = world.fallers.length - 1; i >= 0; i--) {
+    const f = world.fallers[i];
+    f.w += (2.6 * Math.sin(f.a) + 0.15) * dt;
+    f.a += f.w * dt;
+    const landed = f.a >= f.maxA;
+    if (landed) f.a = f.maxA;
+    _q.setFromAxisAngle(_p.set(f.dz, 0, -f.dx), f.a);
+    _q2.setFromAxisAngle(UP, f.tr.rot);
+    f.mesh.quaternion.copy(_q).multiply(_q2);
+    if (!landed) continue;
+    const T = TREE[f.tr.type], tr = f.tr;
+    scene.remove(f.mesh);
+    world.fallers.splice(i, 1);
+    cam.shake = Math.min(cam.shake + 0.25, 0.5);
+    // knock down anything standing under the trunk
+    for (let s = 0.35; s <= 1.0; s += 0.16) {
+      const px = tr.x + f.dx * f.len * s, pz = tr.z + f.dz * f.len * s;
+      forNearby(px, pz, 2, (c) => {
+        for (const o of c.trees) {
+          if (o.alive && Math.hypot(o.x - px, o.z - pz) < 1.0 + TREE[o.type].r * o.scale) fellTree(o, f.dx, f.dz);
+        }
+      });
+      for (const e of enemies) if (e.state !== 'dead' && Math.hypot(e.x - px, e.z - pz) < 1.3) damageEnemy(e, 60, f.dx, f.dz, 4);
+      const leaf = tr.type === PINE ? 0x2f6b3f : tr.type === BIRCH ? 0x9dbd45 : 0x457f37;
+      if (s > 0.5) burst(px, heightAt(px, pz) + 0.6, pz, 16, leaf, 3.0, 3.6, 0.14, 1.2);
+    }
+    // the trunk stays where it fell, as one whole log
+    const Pc = LOGS[tr.type];
+    spawnLog(tr.x + f.dx * Pc.full.cy * tr.scale, tr.z + f.dz * Pc.full.cy * tr.scale, Math.atan2(-f.dz, f.dx), tr.type, 'full', Pc.full, tr.scale);
+  }
+}
+function spawnLog(x, z, yaw, type, stage, piece, scale) {
+  const mesh = new THREE.Mesh(piece.geo, treeMat);
+  mesh.castShadow = true; mesh.receiveShadow = true; mesh.customDepthMaterial = treeDepthMat;
+  mesh.scale.setScalar(scale);
+  scene.add(mesh);
+  const r = Math.max(piece.r * scale, 0.1);
+  const L = { mesh, x, z, yaw, type, stage, scale, len: piece.len * scale, r, v: 0, roll: 0, hp: 2, y: heightAt(x, z) + r };
+  world.logs.push(L);
+  return L;
+}
+const _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion(), _qc = new THREE.Quaternion();
+const XAXIS = new THREE.Vector3(1, 0, 0), ZAXIS = new THREE.Vector3(0, 0, 1);
+function updateLogs(dt) {
+  for (const L of world.logs) {
+    const ax = Math.cos(L.yaw), az = -Math.sin(L.yaw);       // log axis
+    const px = Math.sin(L.yaw), pz = Math.cos(L.yaw);        // roll direction
+    const gx = (heightAt(L.x + 0.6, L.z) - heightAt(L.x - 0.6, L.z)) / 1.2;
+    const gz = (heightAt(L.x, L.z + 0.6) - heightAt(L.x, L.z - 0.6)) / 1.2;
+    const ground = heightAt(L.x, L.z);
+    const floating = ground + L.r < SEA - 0.02;
+    const gp = gx * px + gz * pz;
+    if (floating) L.v *= Math.exp(-1.5 * dt);
+    else {
+      L.v += -9.8 * gp / Math.sqrt(1 + gx * gx + gz * gz) * 0.55 * dt;
+      L.v *= Math.exp(-0.9 * dt);
+      if (Math.abs(gp) < 0.14 && Math.abs(L.v) < 0.35) L.v = 0;
+    }
+    L.x += px * L.v * dt; L.z += pz * L.v * dt;
+    L.roll += (L.v / L.r) * dt;
+    const ty = floating ? waveHeight(L.x, L.z) - L.r * 0.3 : ground + L.r;
+    L.y = lerp(L.y, ty, 1 - Math.exp(-14 * dt));
+    L.mesh.position.set(L.x, L.y, L.z);
+    _qa.setFromAxisAngle(UP, L.yaw);
+    _qb.setFromAxisAngle(ZAXIS, floating ? 0 : Math.atan(gx * ax + gz * az));
+    _qc.setFromAxisAngle(XAXIS, L.roll);
+    L.mesh.quaternion.copy(_qa).multiply(_qb).multiply(_qc);
+  }
+}
+const woodGeo = new THREE.BoxGeometry(0.42, 0.13, 0.13), stoneGeo = new THREE.IcosahedronGeometry(0.15, 0);
+const woodMat = new THREE.MeshLambertMaterial({ color: 0xb98a55 }), stoneMat = new THREE.MeshLambertMaterial({ color: 0x9aa0a3, flatShading: true });
+function spawnPickup(kind, x, y, z) {
+  const mesh = new THREE.Mesh(kind === 'wood' ? woodGeo : stoneGeo, kind === 'wood' ? woodMat : stoneMat);
+  mesh.castShadow = true; mesh.rotation.y = Math.random() * 6;
+  scene.add(mesh);
+  const a = Math.random() * 6.283, s = 1 + Math.random() * 1.6;
+  world.pickups.push({ mesh, kind, x, y, z, vx: Math.cos(a) * s, vy: 3.5 + Math.random() * 2, vz: Math.sin(a) * s, age: 0 });
+}
+function updatePickups(dt) {
+  for (let i = world.pickups.length - 1; i >= 0; i--) {
+    const p = world.pickups[i];
+    p.age += dt;
+    const dx = player.x - p.x, dz = player.z - p.z, dy = player.y + 0.8 - p.y;
+    const d = Math.hypot(dx, dz);
+    if (p.age > 0.5 && d < 4.2) {
+      const pull = 22 / Math.max(d, 0.4);
+      p.vx += (dx / d) * pull * dt; p.vz += (dz / d) * pull * dt; p.vy += dy * 14 * dt;
+      p.vx *= Math.exp(-4 * dt); p.vz *= Math.exp(-4 * dt); p.vy *= Math.exp(-4 * dt);
+      if (d < 0.6) {
+        world[p.kind]++; hudDirty = true;
+        scene.remove(p.mesh); world.pickups.splice(i, 1); continue;
+      }
+    } else p.vy -= 14 * dt;
+    p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+    const gh = Math.max(heightAt(p.x, p.z), SEA - 0.05) + 0.1;
+    if (p.y < gh) { p.y = gh; p.vy = Math.abs(p.vy) * 0.25; p.vx *= 0.6; p.vz *= 0.6; }
+    p.mesh.position.set(p.x, p.y, p.z);
+    p.mesh.rotation.y += dt * 2;
+  }
+}
+
+// ============================================================ interaction: swings and terrain tools
+function arcHit(ox, oz, fx, fz, reach, cosA, x, z, r) {
+  const dx = x - ox, dz = z - oz, d = Math.hypot(dx, dz);
+  if (d > reach + r) return false;
+  return d < 0.9 + r || (dx * fx + dz * fz) / d > cosA;
+}
+// Damage everything in the world that a swing arc touches. Used by the player and by enemies.
+function arcWorldDamage(ox, oz, oy, inArc, seen) {
+  const fresh = (o) => { if (!seen) return true; if (seen.has(o)) return false; seen.add(o); return true; };
+  let hit = false;
+  forNearby(ox, oz, 4, (c) => {
+    for (const tr of c.trees) {
+      if (!tr.alive || !inArc(tr.x, tr.z, TREE[tr.type].r * tr.scale) || !fresh(tr)) continue;
+      hit = true; tr.hp--;
+      const d = Math.hypot(tr.x - ox, tr.z - oz) || 1;
+      tr.sx = (tr.x - ox) / d; tr.sz = (tr.z - oz) / d;
+      burst(tr.x - tr.sx * 0.3, oy + 1.0, tr.z - tr.sz * 0.3, 7, 0xd8b98a, 2.4, 3, 0.09, 0.7);
+      if (tr.hp <= 0) fellTree(tr, tr.sx, tr.sz);
+      else { if (tr.shake <= 0) world.shakes.push(tr); tr.shake = 0.35; }
+    }
+    c.rocks.forEach((r, i) => {
+      if (!r.alive || !inArc(r.x, r.z, r.scale * 0.8) || !fresh(r)) return;
+      hit = true; r.hp--;
+      const ry = heightAt(r.x, r.z) + r.scale * 0.4;
+      burst(r.x, ry, r.z, 8, 0x9aa0a3, 2.8, 3.5, 0.1, 0.7);
+      if (r.hp <= 0) {
+        r.alive = false; world.removed.add(r.id);
+        c.rockMesh.setMatrixAt(i, ZERO_M); c.rockMesh.instanceMatrix.needsUpdate = true;
+        burst(r.x, ry, r.z, 16, 0x7c7f80, 3.5, 4.5, 0.16, 1.0);
+        const n = 1 + Math.round(r.scale * 2);
+        for (let k = 0; k < n; k++) spawnPickup('stone', r.x, ry, r.z);
+      }
+    });
+  });
+  for (let i = world.logs.length - 1; i >= 0; i--) {
+    const L = world.logs[i];
+    const ax = Math.cos(L.yaw), az = -Math.sin(L.yaw);
+    const t = clamp((ox - L.x) * ax + (oz - L.z) * az, -L.len / 2, L.len / 2);
+    const qx = L.x + ax * t, qz = L.z + az * t;
+    if (!inArc(qx, qz, L.r) || !fresh(L)) continue;
+    hit = true; L.hp--;
+    burst(qx, L.y, qz, 7, 0xd8b98a, 2.4, 3, 0.09, 0.7);
+    if (L.hp > 0) { L.v += (((L.x - ox) * Math.sin(L.yaw) + (L.z - oz) * Math.cos(L.yaw)) > 0 ? 1 : -1) * 0.8; continue; }
+    scene.remove(L.mesh); world.logs.splice(i, 1);
+    if (L.stage === 'full') {            // the whole trunk splits into its lower and upper half
+      const Pc = LOGS[L.type];
+      for (const [piece, sg] of [[Pc.lo, -1], [Pc.hi, 1]]) {
+        const off = (piece.cy - Pc.full.cy) * L.scale;
+        const n = spawnLog(L.x + ax * off, L.z + az * off, L.yaw, L.type, 'half', piece, L.scale);
+        n.v = sg * 0.5; n.roll = L.roll; n.y = L.y; if (seen) seen.add(n);
+      }
+      burst(L.x, L.y + 0.2, L.z, 12, 0xd8b98a, 2.8, 3.5, 0.11, 0.9);
+    } else {
+      const n = 1 + Math.round(L.len * 1.2);
+      for (let k = 0; k < n; k++) spawnPickup('wood', L.x + ax * (Math.random() - 0.5) * L.len, L.y + 0.2, L.z + az * (Math.random() - 0.5) * L.len);
+    }
+  }
+  if (hit) sfx.thud();
+  return hit;
+}
+function applyBrush(x, z, mode, dt, target) {
+  const R = 2.6;
+  const x0 = Math.floor(x - R), x1 = Math.ceil(x + R), z0 = Math.floor(z - R), z1 = Math.ceil(z + R);
+  for (let gz = z0; gz <= z1; gz++) for (let gx = x0; gx <= x1; gx++) {
+    const d = Math.hypot(gx - x, gz - z);
+    if (d >= R) continue;
+    const w = (1 - (d / R) * (d / R)) ** 2;
+    const cur = getDelta(gx, gz);
+    let nd = cur;
+    if (mode === 'dig') nd = cur - 3.4 * w * dt;
+    else if (mode === 'raise') nd = cur + 3.4 * w * dt;
+    else nd = cur + (target - (baseHeight(gx, gz) + cur)) * Math.min(1, 6 * w * dt);
+    setDelta(gx, gz, clamp(nd, -10, 10));
+  }
+  for (let cz = Math.floor((z0 - 2) / CS); cz <= Math.floor((z1 + 2) / CS); cz++) {
+    for (let cx = Math.floor((x0 - 2) / CS); cx <= Math.floor((x1 + 2) / CS); cx++) {
+      const c = world.chunks.get(ckey(cx, cz));
+      if (c) c.refresh();
+    }
+  }
+  depthState.dirty = true;
+}
+
+// ============================================================ input
+const keys = {};
+const mouse = { x: 0, y: 0, left: false, right: false, inside: false, click: 0, swallow: false };
+const cam = { yaw: 0.6, pitch: 0.95, dist: 24, aimPitch: 0.2, aimK: 0, yawRate: 0, prevYaw: 0.6, tx: 0, ty: 0, tz: 0, shake: 0 };
+const cursor = { x: 0, y: 0, z: 0, valid: false };
+window.addEventListener('keydown', (e) => {
+  if (e.target && e.target.tagName === 'INPUT') return;
+  keys[e.code] = true;
+  if (e.code === 'Digit1') setTool('axe');
+  if (e.code === 'Digit2') setTool('dig');
+  if (e.code === 'Digit3') setTool('raise');
+  if (e.code === 'Digit4') setTool('level');
+  if (e.code === 'KeyG') setQuality(quality.level === 'high' ? 'low' : 'high');
+  if (e.code === 'KeyM') { const m = sfx.toggle(); player.comboLabel = m ? 'Sound off' : 'Sound on'; player.comboShow = 0.8; }
+  if (e.code === 'KeyR') setStance(player.stance === 'melee' ? 'bow' : 'melee');
+  if (e.code === 'KeyH') document.getElementById('help').classList.toggle('closed');
+  if (e.altKey || ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'AltLeft', 'AltRight'].includes(e.code)) e.preventDefault();
+});
+window.addEventListener('keyup', (e) => { keys[e.code] = false; if (e.code === 'AltLeft' || e.code === 'AltRight') e.preventDefault(); });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouse.left = mouse.right = false; });
+const locked = () => document.pointerLockElement === canvas;
+function lockUi() {
+  const b = el('lock');
+  b.hidden = locked();
+  b.textContent = juice.lockFailed
+    ? 'The browser did not let the game capture the mouse. Click the view to try again. Until then, push the mouse toward the left or right edge to turn.'
+    : 'Click the view to take control. Esc frees the mouse.';
+}
+function syncButtons(e) {
+  const left = !!(e.buttons & 1);
+  if (!left) mouse.swallow = false;
+  if (left && !mouse.left && !mouse.swallow) { mouse.click = 0.25; player.levelTarget = player.y; }
+  mouse.left = left && !mouse.swallow;
+  mouse.right = !!(e.buttons & 2);
+}
+canvas.addEventListener('pointerdown', (e) => {
+  canvas.focus(); sfx.init();
+  if (!locked()) {                                 // the first click only takes control of the camera; after a refusal, every click retries
+    if (e.button === 0 && !juice.lockFailed) mouse.swallow = true;
+    try {
+      const pr = canvas.requestPointerLock();
+      if (pr && pr.catch) pr.catch(() => { juice.lockFailed = true; lockUi(); });
+    } catch (err) { juice.lockFailed = true; lockUi(); }
+  }
+  syncButtons(e);
+});
+canvas.addEventListener('pointerup', syncButtons);
+canvas.addEventListener('pointercancel', () => { mouse.left = mouse.right = false; });
+canvas.addEventListener('pointerleave', () => { mouse.inside = false; });
+document.addEventListener('pointerlockchange', () => { if (locked()) juice.lockFailed = false; lockUi(); if (!locked()) { mouse.left = mouse.right = false; } });
+document.addEventListener('pointerlockerror', () => { juice.lockFailed = true; lockUi(); });
+canvas.addEventListener('pointermove', (e) => {
+  syncButtons(e);
+  const r = canvas.getBoundingClientRect();
+  mouse.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+  mouse.y = -(((e.clientY - r.top) / r.height) * 2 - 1);
+  mouse.inside = true;
+  const a = player.atk, rd = player.ready;
+  if (rd) rd.reach = clamp(rd.reach - e.movementY * 0.012, 0.9, 2.9);   // blade ready: turning aims it, pushing and pulling sets the reach
+  if (a && a.kind === 'tip') {                       // light sword in hand: the mouse moves the point of the blade
+    a.tu += e.movementX * 0.013; a.tv -= e.movementY * 0.013;
+    const tl = Math.hypot(a.tu, a.tv);
+    if (tl > 2.7) { a.tu *= 2.7 / tl; a.tv *= 2.7 / tl; }
+  } else if (a && a.kind === 'drag' && !a.released) { // heavy weapon: the mouse leads a weighted blade
+    a.tau -= e.movementX * 0.0055;
+  } else if (locked()) {                             // the mouse steers the camera, and the camera is the aim
+    const sens = cam.aimK > 0.5 ? 0.0019 : 0.0026;
+    cam.yaw -= e.movementX * sens;
+    if (cam.aimK > 0.5) cam.aimPitch = clamp(cam.aimPitch + e.movementY * 0.0016, -0.28, 0.9);
+    else if (!rd) cam.pitch = clamp(cam.pitch + e.movementY * 0.002, 0.5, 1.35);
+  }
+});
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+// Zoom is the stance. Scroll in for melee (close camera, right mouse guards), out for the bow (wide camera, right mouse draws).
+const STANCE_DIST = { melee: 13, bow: 26 };
+function setStance(st) {
+  if (player.stance === st) return;
+  player.stance = st; player.comboLabel = st === 'melee' ? 'Melee stance' : 'Bow stance'; player.comboShow = 0.9;
+  player.comboLock = Math.max(player.comboLock, 0.35); player.charging = null; player.draw = 0; player.nock = 0.35;   // changing weapons takes a moment
+}
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  if (Math.abs(e.deltaY) > 1) setStance(e.deltaY < 0 ? 'melee' : 'bow');
+}, { passive: false });
+
+const TOOLS = ['axe', 'dig', 'raise', 'level'];
+function setTool(t) {
+  player.tool = t;
+  for (const b of document.querySelectorAll('#tools button')) b.setAttribute('aria-pressed', b.dataset.tool === t ? 'true' : 'false');
+}
+for (const b of document.querySelectorAll('#tools button')) b.addEventListener('click', () => { setTool(b.dataset.tool); canvas.focus(); });
+
+// brush ring shown for the terrain tools
+const ring = new THREE.Mesh(
+  new THREE.RingGeometry(2.45, 2.6, 40),
+  new THREE.MeshBasicMaterial({ color: 0xfff2c4, transparent: true, opacity: 0.8, depthTest: false, fog: false })
+);
+ring.rotation.x = -Math.PI / 2; ring.renderOrder = 10; ring.visible = false;
+scene.add(ring);
+
+const _ray = new THREE.Raycaster(), _v2 = new THREE.Vector2();
+// Where attacks and tools point. Exploring: the ground just ahead. Bow drawn: whatever sits under the reticle.
+function updateAim() {
+  juice.onEnemy = false;
+  if (cam.aimK < 0.5) {
+    cursor.x = player.x - Math.sin(cam.yaw) * 4.5; cursor.z = player.z - Math.cos(cam.yaw) * 4.5;
+    cursor.y = heightAt(cursor.x, cursor.z); cursor.valid = true;
+    return;
+  }
+  const o = camera.position, d = camera.getWorldDirection(_dir);
+  let tHit = 95, t = 0, prev = 0;
+  for (let i = 0; i < 140 && t < 95; i++) {
+    const x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t;
+    const h = Math.max(heightAt(x, z), SEA);
+    if (y < h) {
+      let a = prev, b = t;
+      for (let k = 0; k < 6; k++) { const m = (a + b) / 2; if (o.y + d.y * m < Math.max(heightAt(o.x + d.x * m, o.z + d.z * m), SEA)) b = m; else a = m; }
+      tHit = b; break;
+    }
+    prev = t; t += Math.max(0.6, (y - h) * 0.45);
+  }
+  for (const e of enemies) {
+    if (e.state === 'dead') continue;
+    const cx = e.x - o.x, cy = e.y + 0.7 - o.y, cz = e.z - o.z;
+    const tc = cx * d.x + cy * d.y + cz * d.z;
+    if (tc > 0 && tc < tHit + 0.5 && cx * cx + cy * cy + cz * cz - tc * tc < 0.17) { tHit = Math.min(tHit, tc); juice.onEnemy = true; }
+  }
+  cursor.x = o.x + d.x * tHit; cursor.y = o.y + d.y * tHit; cursor.z = o.z + d.z * tHit; cursor.valid = true;
+}
+
+// ============================================================ water, motes, sky
+// ---- water: depth-tinted, foamy at the shore, waves shared between shader and game logic
+const WAVES = [[0.8, 0.6, 17, 0.11, 1.1], [-0.5, 0.86, 11, 0.07, 1.3], [0.95, -0.3, 7, 0.04, 1.6]];
+const RIPPLES = [[0.3, 0.95, 3.1, 0.018, 2.0], [-0.9, 0.4, 2.2, 0.012, 2.4], [0.6, -0.8, 1.4, 0.007, 2.9], [-0.2, -0.98, 0.9, 0.004, 3.3]];
+function waveHeight(x, z) {
+  let h = 0; const t = U.time.value;
+  for (const w of WAVES) h += w[3] * Math.sin((x * w[0] + z * w[1]) * (6.2832 / w[2]) + t * w[4]);
+  return SEA + h;
+}
+// Water depth around the player, baked from the terrain heights into a small texture.
+// This replaces a depth pre-pass: shore foam and depth colour cost one texture read.
+const DM = 256;
+const depthData = new Uint8Array(DM * DM);
+const depthTex = new THREE.DataTexture(depthData, DM, DM, THREE.RedFormat, THREE.UnsignedByteType);
+depthTex.magFilter = depthTex.minFilter = THREE.LinearFilter;
+const depthState = { ox: 1e9, oz: 1e9, dirty: true, wait: 0, origin: new THREE.Vector2() };
+function updateDepthMap(dt) {
+  depthState.wait -= dt;
+  const ox = Math.round(player.x / 16) * 16 - DM / 2, oz = Math.round(player.z / 16) * 16 - DM / 2;
+  if (ox !== depthState.ox || oz !== depthState.oz) depthState.dirty = true;
+  if (!depthState.dirty || depthState.wait > 0) return;
+  depthState.dirty = false; depthState.wait = 0.12; depthState.ox = ox; depthState.oz = oz;
+  depthData.fill(255);
+  for (const c of world.chunks.values()) {
+    const i0 = c.ox - ox, j0 = c.oz - oz;
+    if (i0 >= DM || j0 >= DM || i0 + CS <= 0 || j0 + CS <= 0) continue;
+    for (let lj = 0; lj < CS; lj++) {
+      const j = j0 + lj; if (j < 0 || j >= DM) continue;
+      for (let li = 0; li < CS; li++) {
+        const i = i0 + li; if (i < 0 || i >= DM) continue;
+        depthData[j * DM + i] = clamp(((SEA - c.h[(lj + 1) * P + li + 1]) + 1) / 9 * 255, 0, 255);
+      }
+    }
+  }
+  depthTex.needsUpdate = true;
+  depthState.origin.set(ox, oz);
+}
+// tileable water detail: RG = wavelet slope, B = ridged noise used for foam and caustics
+function makeWaterTex() {
+  const S = 256, data = new Uint8Array(S * S * 4), r = mulberry32(911);
+  const mk = (n, kmax, pw) => {
+    const w = [];
+    for (let i = 0; i < n; i++) {
+      let kx = 0, ky = 0;
+      while (kx === 0 && ky === 0) { kx = Math.round((r() * 2 - 1) * kmax); ky = Math.round((r() * 2 - 1) * kmax); }
+      w.push([kx, ky, r() * 6.2832, 1 / Math.pow(Math.hypot(kx, ky), pw)]);
+    }
+    return w;
+  };
+  const A = mk(22, 9, 1.1), Bw = mk(16, 7, 0.9);
+  const gx = new Float32Array(S * S), gy = new Float32Array(S * S), nn = new Float32Array(S * S);
+  let gmax = 0, sq = 0;
+  const tw = 6.2832 / S;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    let ax = 0, ay = 0, n = 0;
+    for (const w of A) { const c = w[3] * Math.cos((w[0] * x + w[1] * y) * tw + w[2]); ax += c * w[0]; ay += c * w[1]; }
+    for (const w of Bw) n += w[3] * Math.sin((w[0] * x + w[1] * y) * tw + w[2]);
+    const i = y * S + x; gx[i] = ax; gy[i] = ay; nn[i] = n;
+    gmax = Math.max(gmax, Math.abs(ax), Math.abs(ay)); sq += n * n;
+  }
+  const rms = Math.sqrt(sq / (S * S));
+  for (let i = 0; i < S * S; i++) {
+    data[i * 4] = clamp((gx[i] / gmax) * 127 + 128, 0, 255);
+    data[i * 4 + 1] = clamp((gy[i] / gmax) * 127 + 128, 0, 255);
+    data[i * 4 + 2] = clamp(1 - Math.abs(nn[i]) / (rms * 1.7), 0, 1) * 255;
+    data[i * 4 + 3] = 255;
+  }
+  const t = new THREE.DataTexture(data, S, S, THREE.RGBAFormat, THREE.UnsignedByteType);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true;
+  t.needsUpdate = true;
+  return t;
+}
+const glslWaves = (list, withHeight) => list.map((w) => {
+  const k = (6.2832 / w[2]).toFixed(4);
+  return `ph = dot(p, vec2(${w[0].toFixed(3)}, ${w[1].toFixed(3)})) * ${k} + uTime * ${w[4].toFixed(2)};` +
+    (withHeight ? ` h += ${w[3].toFixed(4)} * sin(ph);` : ` g += ${(w[3]).toFixed(4)} * ${k} * cos(ph) * vec2(${w[0].toFixed(3)}, ${w[1].toFixed(3)});`);
+}).join('\n');
+const waterUniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
+  uTime: { value: 0 }, uDepth: { value: null }, uTex: { value: null }, uDepthOrigin: { value: new THREE.Vector2() },
+  uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uSunCol: { value: new THREE.Color() }, uAmb: { value: new THREE.Color() },
+  uSky: { value: new THREE.Color() }, uZenith: { value: new THREE.Color() }, uShallow: { value: col(0x2fa79c) }, uDeep: { value: col(0x06283f) },
+}]);
+waterUniforms.uTime = U.time;
+waterUniforms.uDepth.value = depthTex;
+waterUniforms.uTex.value = makeWaterTex();
+waterUniforms.uDepthOrigin.value = depthState.origin;
+const water = (() => {
+  const g = new THREE.PlaneGeometry(288, 288, 180, 180); g.rotateX(-Math.PI / 2);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: waterUniforms, fog: true, transparent: true, depthWrite: false,
+    vertexShader: `
+      uniform float uTime; uniform sampler2D uDepth; uniform vec2 uDepthOrigin;
+      varying vec3 vWorld;
+      #include <fog_pars_vertex>
+      void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        float depth = texture2D(uDepth, (wp.xz - uDepthOrigin + 0.5) / ${DM}.0).r * 9.0 - 1.0;
+        vec2 p = wp.xz; float h = 0.0; float ph;
+        ${glslWaves(WAVES, true)}
+        wp.y += h * (0.2 + 0.8 * smoothstep(0.0, 2.5, depth));
+        vWorld = wp.xyz;
+        vec4 mvPosition = viewMatrix * wp;
+        gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader: `
+      uniform float uTime; uniform sampler2D uDepth; uniform sampler2D uTex; uniform vec2 uDepthOrigin;
+      uniform vec3 uSunDir, uSunCol, uAmb, uSky, uZenith, uShallow, uDeep;
+      varying vec3 vWorld;
+      #include <common>
+      #include <fog_pars_fragment>
+      void main() {
+        float depth = texture2D(uDepth, (vWorld.xz - uDepthOrigin + 0.5) / ${DM}.0).r * 9.0 - 1.0;
+        vec2 p = vWorld.xz; vec2 g = vec2(0.0); float ph;
+        ${glslWaves(WAVES, false)}
+        // three scrolling layers of wavelets, the classic layered-normal-map trick
+        vec2 d1 = texture2D(uTex, p * 0.035 + uTime * vec2(0.010, 0.006)).rg - 0.5;
+        vec2 d2 = texture2D(uTex, p * 0.083 + uTime * vec2(-0.017, 0.012)).rg - 0.5;
+        vec2 d3 = texture2D(uTex, p * 0.21 + uTime * vec2(0.025, -0.03)).rg - 0.5;
+        float calm = 0.45 + 0.55 * smoothstep(0.0, 2.0, depth);
+        g += (d1 * 0.6 + d2 * 0.42 + d3 * 0.24) * calm;
+        vec3 N = normalize(vec3(-g.x, 1.0, -g.y));
+        vec3 V = normalize(cameraPosition - vWorld);
+        vec3 R = reflect(-V, N); R.y = abs(R.y);
+        float fres = 0.07 + 0.93 * pow(1.0 - max(dot(N, V), 0.0), 4.0);
+        vec3 sky = mix(uSky, uZenith, pow(clamp(R.y, 0.0, 1.0), 0.7));
+        float sd = max(dot(R, uSunDir), 0.0);
+        vec3 sunR = uSunCol * (pow(sd, 900.0) * 60.0 + pow(sd, 60.0) * 0.9);
+        float absorb = 1.0 - exp(-max(depth, 0.0) * 0.8);
+        float ndl = max(dot(N, uSunDir), 0.0);
+        vec3 lightC = uSunCol * (0.35 + 0.65 * ndl) + uAmb;
+        vec3 body = mix(uShallow, uDeep, absorb) * lightC;
+        // caustics seen through the shallows
+        float ca = texture2D(uTex, p * 0.075 + uTime * vec2(0.02, 0.011) + g * 0.3).b * texture2D(uTex, p * 0.11 - uTime * vec2(0.014, 0.021)).b;
+        body += uSunCol * uShallow * pow(ca, 2.0) * 3.0 * (1.0 - absorb) * smoothstep(0.02, 0.5, depth);
+        vec3 color = mix(body, sky, fres) + sunR;
+        float alpha = max(mix(0.28, 0.985, absorb), fres);
+        // lacy shore foam that thickens toward the waterline, plus one drifting line further out
+        float fnz = texture2D(uTex, p * 0.14 + uTime * vec2(0.012, 0.02)).b * 0.6 + texture2D(uTex, p * 0.31 - uTime * vec2(0.02, 0.012)).b * 0.4;
+        float lap = 0.14 * sin(uTime * 0.8 + p.x * 0.09 + p.y * 0.06);
+        float shore = 1.0 - smoothstep(0.0, 0.6 + lap, depth);
+        float th = 1.0 - shore * 1.02;
+        float foam = smoothstep(th, th + 0.22, fnz) * smoothstep(0.0, 0.08, shore);
+        float d0 = 1.1 + 0.45 * sin(uTime * 0.45 + p.x * 0.05);
+        foam = max(foam, smoothstep(0.62, 0.9, fnz) * (1.0 - smoothstep(0.0, 0.4, abs(depth - d0))) * 0.65);
+        color = mix(color, lightC * 0.92, foam);
+        alpha = max(alpha, foam * 0.85) * smoothstep(-0.18, 0.03, depth);
+        gl_FragColor = vec4(color, clamp(alpha + dot(sunR, vec3(0.3)), 0.0, 1.0));
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }`,
+  });
+  const m = new THREE.Mesh(g, mat);
+  m.position.y = SEA; m.frustumCulled = false;
+  scene.add(m);
+  return m;
+})();
+const MOTES = 140;
+const motes = (() => {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MOTES * 3), 3));
+  const mat = new THREE.PointsMaterial({ color: 0xfff6c8, size: 0.16, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true });
+  const p = new THREE.Points(g, mat); p.frustumCulled = false;
+  scene.add(p);
+  const seeds = [];
+  const r = mulberry32(7);
+  for (let i = 0; i < MOTES; i++) seeds.push([r() * 70, 0.4 + r() * 3.2, r() * 70, r() * 6.283]);
+  p.userData.seeds = seeds;
+  return p;
+})();
+function updateMotes() {
+  const pos = motes.geometry.attributes.position.array, seeds = motes.userData.seeds, t = U.time.value;
+  for (let i = 0; i < MOTES; i++) {
+    const s = seeds[i];
+    const x = player.x + ((((s[0] + Math.sin(t * 0.3 + s[3]) * 2 - player.x) % 70) + 70) % 70) - 35;
+    const z = player.z + ((((s[2] + Math.cos(t * 0.23 + s[3]) * 2 - player.z) % 70) + 70) % 70) - 35;
+    pos[i * 3] = x; pos[i * 3 + 2] = z;
+    pos[i * 3 + 1] = Math.max(heightAt(x, z), SEA) + s[1] + Math.sin(t * 0.7 + s[3]) * 0.4;
+  }
+  motes.geometry.attributes.position.needsUpdate = true;
+}
+const SKY = {
+  day: { sun: col(0xfff1d6), si: 2.7, sky: col(0xbcd7ff), gnd: col(0x5a6b3c), hi: 0.95, fog: col(0xa9c6d8), zen: col(0x4d86c8) },
+  gold: { sun: col(0xffa25e), si: 3.3, sky: col(0xf3c0a6), gnd: col(0x6a5644), hi: 1.25, fog: col(0xe6a888), zen: col(0x6f74ad) },
+  night: { sun: col(0x8fa8ff), si: 1.15, sky: col(0x4a62a8), gnd: col(0x1c2434), hi: 1.0, fog: col(0x1b2742), zen: col(0x0b1228) },
+};
+const _fogC = new THREE.Color();
+function updateSky() {
+  const a = (world.time - 0.25) * Math.PI * 2;
+  const e = Math.sin(a);
+  const dayF = smoothstep(0.02, 0.4, e), nightF = 1 - smoothstep(-0.22, 0.06, e);
+  const goldF = clamp(1 - dayF - nightF, 0, 1);
+  const mix3 = (k) => SKY.day[k] * dayF + SKY.gold[k] * goldF + SKY.night[k] * nightF;
+  const mixC = (out, k) => out.setRGB(
+    SKY.day[k].r * dayF + SKY.gold[k].r * goldF + SKY.night[k].r * nightF,
+    SKY.day[k].g * dayF + SKY.gold[k].g * goldF + SKY.night[k].g * nightF,
+    SKY.day[k].b * dayF + SKY.gold[k].b * goldF + SKY.night[k].b * nightF);
+  mixC(sun.color, 'sun'); sun.intensity = mix3('si');
+  mixC(hemi.color, 'sky'); mixC(hemi.groundColor, 'gnd'); hemi.intensity = mix3('hi');
+  mixC(_fogC, 'fog'); scene.fog.color.copy(_fogC); scene.background.copy(_fogC);
+  // below the horizon the same light plays the moon, from the opposite side
+  const s = e >= -0.05 ? 1 : -1;
+  const el = Math.max(Math.abs(e), 0.36);
+  const tx = Math.round(player.x), tz = Math.round(player.z);
+  sun.target.position.set(tx, player.y, tz);
+  sun.position.set(tx + s * Math.cos(a) * 80, player.y + el * 95, tz + 42);
+  waterUniforms.uSunDir.value.subVectors(sun.position, sun.target.position).normalize();
+  waterUniforms.uSunCol.value.copy(sun.color).multiplyScalar(sun.intensity * 0.32);
+  waterUniforms.uAmb.value.copy(hemi.color).multiplyScalar(hemi.intensity * 0.3);
+  waterUniforms.uSky.value.copy(_fogC); mixC(waterUniforms.uZenith.value, 'zen');
+  motes.material.opacity = 0.22 + 0.7 * nightF + 0.25 * goldF;
+  motes.material.color.setHex(nightF > 0.5 ? 0xd9ff8a : 0xfff6c8);
+  motes.material.size = 0.13 + 0.09 * nightF;
+  if (bloom) bloom.strength = 0.28 + 0.3 * nightF + 0.12 * goldF;
+}
+
+// ============================================================ HUD
+let hudDirty = true;
+const el = (id) => document.getElementById(id);
+function clock() {
+  const m = Math.floor(world.time * 24 * 60);
+  return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60 - (m % 60) % 10).padStart(2, '0');
+}
+function setQuality(q) {
+  quality.level = q;
+  const hi = q === 'high';
+  renderer.shadowMap.enabled = hi; sun.castShadow = hi;
+  if (hi && !composer) buildComposer();
+  resize();
+  el('quality').textContent = hi ? 'High' : 'Low';
+}
+el('quality').addEventListener('click', () => { setQuality(quality.level === 'high' ? 'low' : 'high'); canvas.focus(); });
+el('newworld').addEventListener('click', () => { resetWorld((Math.random() * 1e6) | 0); canvas.focus(); });
+el('helpbtn').addEventListener('click', () => { el('help').classList.toggle('closed'); canvas.focus(); });
+
+function resetWorld(seed) {
+  SEED = seed >>> 0;
+  noise = makeSimplex(SEED);
+  clearEnemies();
+  for (const c of world.chunks.values()) c.dispose();
+  world.chunks.clear(); world.edits.clear(); world.removed.clear();
+  for (const f of world.fallers) scene.remove(f.mesh);
+  for (const L of world.logs) scene.remove(L.mesh);
+  for (const p of world.pickups) scene.remove(p.mesh);
+  world.fallers.length = world.logs.length = world.pickups.length = world.shakes.length = 0;
+  parts.length = 0;
+  world.wood = world.stone = world.kills = 0; depthState.dirty = true;
+  Object.assign(player, { hp: 100, stam: 100, dead: 0, kvx: 0, kvz: 0, atk: null, dash: null, roll: null, air: false, aiming: false, charging: null, guard: false, stun: 0, riposte: 0 });
+  for (const a of arrows) scene.remove(a.mesh);
+  arrows.length = 0;
+  player.x = 0; player.z = 0;
+  updateChunks(0, 0, 1e9);
+  player.y = heightAt(0, 0);
+  cam.tx = 0; cam.tz = 0; cam.ty = player.y;
+  spawnEnemy('start|e0', 12, 10, 0, 'start');
+  spawnEnemy('start|e1', -16, 13, 1, 'start');
+  clearHexes(); spawnAllies(); placeCamps();
+  setMsg('');
+  el('seed').textContent = String(SEED);
+  try { history.replaceState(null, '', '#seed-' + SEED); } catch (err) { /* hash not writable here */ }
+  hudDirty = true;
+}
+
+// ============================================================ combat
+// Melee works like the bow: hold to wind up, release to strike, and the camera aims it.
+// A swing is a real arc that sweeps over time, so the blade hits a target when it reaches it,
+// and turning the camera into the swing brings it round sooner. A tap is a quick straight thrust.
+// Enemy timing varies and they defend, so the fight is watching them, not keeping a beat.
+const say = (t) => { player.comboLabel = t; player.comboShow = 0.9; };
+function sweepTest(ox, oz, face, a0, a1, reach) {
+  const lo = Math.min(a0, a1), hi = Math.max(a0, a1);
+  return (x, z, r) => {
+    const dx = x - ox, dz = z - oz, d = Math.hypot(dx, dz);
+    if (d > reach + r) return false;
+    if (d < 0.5 + r) return true;
+    let th = Math.atan2(dx, dz) - face; th = Math.atan2(Math.sin(th), Math.cos(th));
+    const pad = Math.min(0.6, r / d + 0.08);
+    return th > lo - pad && th < hi + pad;
+  };
+}
+// One frame of the blade moving through the world: whatever the edge crosses this frame is hit, once per swing.
+function bladePass(a, test) {
+  const P = player, fx = Math.sin(P.face), fz = Math.cos(P.face);
+  if (arcWorldDamage(P.x, P.z, P.y, test, a.seen)) { a.hitAny = true; cam.shake = Math.min(cam.shake + 0.07, 0.5); }
+  const into = P.mvx * fx + P.mvz * fz;                       // stepping into the blow adds weight, backing away takes it off
+  const mom = into > 3 ? 1.25 : into < -1.5 ? 0.75 : 1;
+  let landed = false;
+  for (const e of enemies) {
+    if (e.state === 'dead' || a.seen.has(e) || !test(e.x, e.z, 0.45)) continue;
+    a.seen.add(e); a.hitAny = true;
+    const dx = e.x - P.x, dz = e.z - P.z, d = Math.hypot(dx, dz) || 1;
+    const back = Math.sin(e.face) * (dx / d) + Math.cos(e.face) * (dz / d) > 0.35;
+    let guarding = e.kind === 1 && !back && (e.state === 'chase' || e.state === 'idle' || (e.state === 'recover' && e.t > 0.3));
+    if (e.state === 'thrown') continue;
+    let aim = 1;
+    if (a.spot) {
+      const sx = a.spot.x - e.x, sz = a.spot.z - e.z, sl = Math.hypot(sx, sz);
+      aim = sl < 0.9 ? 1 : 0.6;                                  // off the mark is only a graze
+      if (guarding && sl < 0.9 && sl > 0.25 && (Math.sin(e.face) * sx + Math.cos(e.face) * sz) / sl < 0.15) guarding = false;   // aimed past the shield's edge
+    }
+    if (guarding && !a.heavy && (a.tq || 0) < 0.7) {          // a light blow glances off a raised shield, unless the whole body is behind it
+      burst(e.x - (dx / d) * 0.4, e.y + 1.0, e.z - (dz / d) * 0.4, 9, 0xffe9a8, 3.5, 3, 0.07, 0.4);
+      e.bar = 4; P.kvx -= (dx / d) * 2.5; P.kvz -= (dz / d) * 2.5; spendStam(4); sfx.clang();
+      continue;
+    }
+    landed = true;
+    const sneak = e.state === 'idle';                         // it never saw you coming
+    if (sneak) say('Sneak attack');
+    const turn = 1 + 0.7 * (a.tq || 0);
+    if ((a.tq || 0) > 0.5) { say('Turned into it'); burst(e.x, e.y + 1.0, e.z, 5, 0xffd45a, 3, 3, 0.08, 0.4); }
+    let dmg = a.dmg * turn * aim * (sneak ? 3 : 1) * mom * (back ? 1.6 : 1) * (e.state === 'stagger' ? 1.9 : 1) * (a.crit ? 2.2 : 1);
+    if (guarding) { dmg *= 0.5; e.state = 'stagger'; e.t = 0; e.stagT = 1.3; e.post = 0; say('Guard broken'); }
+    damageEnemy(e, dmg, dx / d, dz / d, (a.heavy ? 7 : 2.5) * turn, a.post * turn * (a.crit ? 2 : 1));
+    if (back || a.crit) burst(e.x, e.y + 1.0, e.z, 6, 0xffd45a, 3, 3, 0.08, 0.45);
+  }
+  if (landed) { a.landed = true; juice.hitStop = a.heavy ? 0.1 : a.crit ? 0.08 : 0.045; cam.shake = Math.min(cam.shake + (a.heavy ? 0.2 : 0.07), 0.5); }
+}
+function faceCamera() { player.face = player.faceTarget = cam.yaw + Math.PI; }
+function stepBlocked() {
+  const fx = Math.sin(player.face), fz = Math.cos(player.face);
+  for (const e of enemies) if (e.state !== 'dead' && arcHit(player.x, player.z, fx, fz, 1.5, 0.3, e.x, e.z, 0.3)) return true;
+  return false;
+}
+function takeRiposte() { const c = player.riposte > 0; if (c) say('Riposte'); player.riposte = 0; return c; }
+// ---- the light sword's point. Whatever the point's path crosses this frame is touched; its speed decides what that does.
+const tipBlade = new THREE.Mesh((() => { const g = new THREE.BoxGeometry(0.06, 0.06, 1); g.translate(0, 0, 0.5); return g; })(),
+  new THREE.MeshBasicMaterial({ color: 0xf4f7fa, transparent: true, opacity: 0.9, fog: false }));
+tipBlade.visible = false; scene.add(tipBlade);
+const tipTrail = new THREE.Line(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(14 * 3), 3)),
+  new THREE.LineBasicMaterial({ color: 0xfff3c9, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+tipTrail.visible = false; tipTrail.frustumCulled = false; scene.add(tipTrail);
+function drawTip(a) {
+  const P = player, y = P.y + 1.0;
+  tipBlade.visible = true; tipBlade.position.set(P.x, y, P.z); tipBlade.lookAt(a.wx, y, a.wz);
+  tipBlade.scale.z = Math.max(0.2, Math.hypot(a.wx - P.x, a.wz - P.z));
+  const fast = (a.speed || 0) >= 4;
+  tipBlade.material.color.setHex(fast ? 0xffe9a8 : 0xf4f7fa);
+  const pos = tipTrail.geometry.attributes.position.array;
+  for (let i = 0; i < 14; i++) { const h = a.hist[Math.min(i, a.hist.length - 1)]; pos[i * 3] = h[0]; pos[i * 3 + 1] = y; pos[i * 3 + 2] = h[1]; }
+  tipTrail.geometry.attributes.position.needsUpdate = true;
+  tipTrail.visible = fast; tipTrail.material.opacity = clamp((a.speed || 0) / 14, 0.2, 0.9);
+}
+function tipPass(a, x0, z0, x1, z1, vx, vz, speed) {
+  if (speed < 4) return;                                       // a slow point only touches; it takes speed to cut
+  const P = player, now = U.time.value;
+  const sx = x1 - x0, sz = z1 - z0, sl2 = sx * sx + sz * sz || 1e-6;
+  const near = (x, z) => { const t = clamp(((x - x0) * sx + (z - z0) * sz) / sl2, 0, 1); const cx = x0 + sx * t, cz = z0 + sz * t; return [Math.hypot(x - cx, z - cz), cx, cz]; };
+  const cool = { has: (o) => (a.last.get(o) || -9) > now - 0.3, add: (o) => a.last.set(o, now) };
+  if (arcWorldDamage(P.x, P.z, P.y, (x, z, r) => near(x, z)[0] < r + 0.12, cool)) { a.hitAny = true; cam.shake = Math.min(cam.shake + 0.05, 0.5); a.vu *= 0.3; a.vv *= 0.3; }
+  const f = clamp((speed - 4) / 14, 0, 1), ux = vx / speed, uz = vz / speed;
+  const into = P.mvx * ux + P.mvz * uz, mom = into > 3 ? 1.25 : into < -1.5 ? 0.75 : 1;
+  for (const e of enemies) {
+    if (e.state === 'dead' || e.state === 'thrown' || cool.has(e)) continue;
+    const q = near(e.x, e.z);
+    if (q[0] > 0.5) continue;
+    cool.add(e); a.hitAny = true;
+    const dx = e.x - P.x, dz = e.z - P.z, d = Math.hypot(dx, dz) || 1;
+    const thrust = (vx * dx + vz * dz) / (speed * d) > 0.75;    // driven straight at them: a thrust. Across them: a cut
+    // which side of the enemy the edge met: its front is where a shield is
+    const cx = q[1] - e.x, cz = q[2] - e.z, cl = Math.hypot(cx, cz);
+    const side = cl > 0.12 ? (Math.sin(e.face) * cx + Math.cos(e.face) * cz) / cl : -(Math.sin(e.face) * ux + Math.cos(e.face) * uz);
+    const guarding = e.kind === 1 && side > 0.2 && (e.state === 'chase' || e.state === 'idle');
+    if (guarding) {
+      burst(q[1], e.y + 1.0, q[2], 8, 0xffe9a8, 3.5, 3, 0.07, 0.4);
+      e.bar = 4; spendStam(3); a.vu *= -0.3; a.vv *= -0.3; if (Math.random() < 0.4) e.cd = 0;
+      continue;
+    }
+    const sneak = e.state === 'idle', back = side < -0.3;
+    if (sneak) say('Sneak attack');
+    let dmg = (thrust ? lerp(6, 17, f) : lerp(5, 13, f)) * mom * (sneak ? 3 : 1) * (back ? 1.6 : 1) * (e.state === 'stagger' ? 1.9 : 1) * (a.crit ? 2.2 : 1);
+    damageEnemy(e, dmg, ux, uz, thrust ? 3 : 1.5, thrust ? lerp(10, 22, f) : lerp(8, 14, f));
+    if (back || a.crit) burst(e.x, e.y + 1.0, e.z, 6, 0xffd45a, 3, 3, 0.08, 0.45);
+    a.crit = false; juice.hitStop = 0.03; cam.shake = Math.min(cam.shake + 0.06, 0.5);
+  }
+}
+// A committed cut, chosen by the stroke: right or left for a slash that way, forward for a thrust, back for an overhead chop.
+// Flow: a cut driven by the body leaves you wound up for one back the other way. Keep alternating and each one builds on the last.
+const FLOW_COL = [0xfff3c9, 0xffe08a, 0xffc04a, 0xff8a3a];
+function applyFlow(a) {
+  const P = player;
+  P.flow = P.lastDriven && a.side === -P.lastSide && P.flowT < 0.9 ? Math.min(3, P.flow + 1) : 0;
+  a.flow = P.flow;
+  if (a.flow) { a.dur *= 1 - 0.09 * a.flow; a.dmg *= 1 + 0.15 * a.flow; a.post *= 1 + 0.15 * a.flow; a.reach += 0.1 * a.flow; say('Flow ' + (a.flow + 1)); }
+}
+const aimKind = (reach) => (reach < 1.4 ? 'Chop' : reach > 2.4 ? 'Thrust' : 'Slash');
+function startAimed(r, c) {
+  const P = player; faceCamera();
+  const crit = takeRiposte(), blocked = stepBlocked(), kind = aimKind(r.reach);
+  const fx = Math.sin(P.face), fz = Math.cos(P.face);
+  const spot = { x: P.x + fx * r.reach, z: P.z + fz * r.reach };     // where the reticle was: the blow is meant for this spot
+  if (kind === 'Slash') {
+    const side = P.twist < -0.3 ? 1 : P.twist > 0.3 ? -1 : P.drive ? P.drive : P.nextSide; P.nextSide = -side;   // a coiled body unwinds; otherwise the cut goes the way you drive
+    P.atk = { kind: 'swing', cut: true, spot, side, c, t: 0, dur: lerp(0.5, 0.6, c), s0: 0.4, s1: 0.68, done: false, seen: new Set(), dmg: lerp(14, 26, c), post: lerp(20, 50, c), heavy: c >= 0.5, crit, reach: r.reach + 0.6, half: 1.0, ang: -side, lunge: lerp(3, 6, c), blocked, hitAny: false };
+    applyFlow(P.atk);
+  } else if (kind === 'Thrust') {
+    P.atk = { kind: 'thrust', cut: true, spot, c, t: 0, dur: 0.46, hitK: 0.5, done: false, seen: new Set(), dmg: lerp(16, 26, c), post: lerp(20, 38, c), heavy: false, crit, reach: r.reach + 0.6, half: 0.22, lunge: 9, blocked, hitAny: false };
+  } else {
+    P.atk = { kind: 'thrust', over: true, cut: true, spot, c, t: 0, dur: 0.6, hitK: 0.54, done: false, seen: new Set(), dmg: lerp(20, 34, c), post: lerp(40, 75, c), heavy: true, crit, reach: r.reach + 0.9, half: 0.5, lunge: 3, blocked, hitAny: false };
+  }
+  spendStam(lerp(9, 15, c));
+}
+// ground reticle for an aimed blow
+const strikeMark = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.38, 28), new THREE.MeshBasicMaterial({ color: 0xf1ead6, transparent: true, opacity: 0.9, depthTest: false, fog: false, side: THREE.DoubleSide }));
+strikeMark.rotation.x = -Math.PI / 2; strikeMark.renderOrder = 12; strikeMark.visible = false; scene.add(strikeMark);
+function drawStrikeMark() {
+  const P = player, r = P.ready;
+  strikeMark.visible = !!r && !P.atk;
+  if (!strikeMark.visible) return;
+  const x = P.x - Math.sin(cam.yaw) * r.reach, z = P.z - Math.cos(cam.yaw) * r.reach;
+  strikeMark.position.set(x, Math.max(heightAt(x, z), SEA) + 0.2, z);
+  let on = false;
+  for (const e of enemies) if (e.state !== 'dead' && Math.hypot(e.x - x, e.z - z) < 0.9) on = true;
+  const c = clamp((r.t - 0.15) / 0.8, 0, 1);
+  strikeMark.scale.setScalar(lerp(1.7, 1, c));
+  strikeMark.material.color.setHex(c >= 1 ? 0xe2b65a : on ? 0xe0765f : 0xf1ead6);
+  P.comboLabel = aimKind(r.reach); P.comboShow = 0.15;
+}
+// Left click: the strike hand. Quick cuts and a thrust in turn, or a short jab when thrown from behind the guard.
+function startLight(fromGuard) {
+  const P = player; faceCamera();
+  if (P.lightIdle > 0.7) P.lightI = 0;
+  P.lightIdle = 0;
+  const crit = takeRiposte(), blocked = stepBlocked();
+  if (fromGuard || crit) {
+    P.atk = { kind: 'thrust', jab: true, t: 0, dur: 0.22, done: false, seen: new Set(), dmg: crit ? 9 : 6, post: 8, heavy: false, crit, reach: 2.3, half: 0.35, lunge: 3, blocked, hitAny: false };
+  } else {
+    const v = P.lightI % 3; P.lightI++;
+    if (v === 2) {
+      const run = P.speed > 7;
+      P.atk = { kind: 'thrust', t: 0, dur: 0.3, done: false, seen: new Set(), dmg: 9 * (run ? 1.4 : 1), post: 10, heavy: false, crit, reach: 2.6, half: 0.3, lunge: run ? 14 : 9, blocked, hitAny: false };
+    } else {
+      const side = P.twist < -0.3 ? 1 : P.twist > 0.3 ? -1 : P.drive ? P.drive : v === 0 ? 1 : -1;
+      P.atk = { kind: 'swing', side, c: 0, t: 0, dur: 0.26, done: false, seen: new Set(), dmg: 7, post: 8, heavy: false, crit, reach: 2.1, half: 1.0, ang: -side, lunge: 4, blocked, hitAny: false };
+      applyFlow(P.atk);
+    }
+  }
+  spendStam(5); sfx.whoosh(0);
+}
+// Left mouse held: the heavy strike. Winds up while held, swings a real arc on release.
+function startSwing(c) {
+  const P = player; faceCamera();
+  const side = Math.abs(cam.yawRate) > 1.2 ? Math.sign(cam.yawRate) : P.nextSide;    // swing the way you are turning
+  const half = lerp(1.2, 1.6, c);
+  P.atk = { kind: 'swing', side, c, t: 0, dur: lerp(0.4, 0.5, c), done: false, seen: new Set(), dmg: lerp(14, 30, c), post: lerp(25, 65, c), heavy: c >= 0.45, big: true, crit: takeRiposte(), reach: lerp(2.3, 2.6, c), half, ang: -side * half, lunge: lerp(5, 8, c), blocked: stepBlocked(), hitAny: false };
+  spendStam(lerp(9, 15, c));
+}
+// Q: the off hand. A shove against someone balanced, a throw against someone who is not.
+function grabHit() {
+  const P = player, fx = Math.sin(P.face), fz = Math.cos(P.face);
+  let best = null, bd = 9;
+  for (const e of enemies) {
+    if (e.state === 'dead' || e.state === 'thrown' || !arcHit(P.x, P.z, fx, fz, 1.9, Math.cos(0.8), e.x, e.z, 0.45)) continue;
+    const d = Math.hypot(e.x - P.x, e.z - P.z);
+    if (d < bd) { bd = d; best = e; }
+  }
+  if (!best) return;
+  const e = best;
+  const back = Math.sin(e.face) * fx + Math.cos(e.face) * fz > 0.35;
+  const offBalance = e.kind === 3 ? false : e.state === 'stagger' || e.state === 'recover' || e.post >= e.maxPost * 0.5 || back || P.riposte > 0;
+  cam.shake = Math.min(cam.shake + 0.12, 0.5); juice.hitStop = 0.05;
+  if (offBalance) {
+    const ml = Math.hypot(P.mvx, P.mvz);
+    let tx = ml > 1 ? P.mvx / ml : fx, tz = ml > 1 ? P.mvz / ml : fz, tv = 11;   // thrown the way you are moving, or straight ahead
+    const spin = clamp(Math.abs(P.twistV) / 8, 0, 1);
+    if (Math.abs(P.twistV) > 3) { const sg = Math.sign(P.twistV); tx = fz * sg; tz = -fx * sg; tv = 11 + 5 * spin; }   // turning as you grab: a hip throw, round and out to that side
+    P.riposte = 0; e.state = 'thrown'; e.t = 0; e.tvx = tx * tv; e.tvz = tz * tv; e.post = 0; e.chain = false; e.bar = 5; e.struck = new Set();
+    say(Math.abs(P.twistV) > 3 ? 'Hip throw' : 'Throw');
+  } else {
+    if (e.state === 'windup' && e.move === MOVES.jab) { e.state = 'recover'; e.t = 0; e.recT = 0.7; e.chain = false; }   // a shove stuffs a jab
+    damageEnemy(e, 2, fx, fz, 7, 28);
+    burst(P.x + fx, P.y + 1.0, P.z + fz, 6, 0xe8e4d4, 2.5, 2, 0.09, 0.4);
+  }
+}
+
+const juice = { hitStop: 0, onEnemy: false, lockFailed: false };
+const enemies = [];
+function spendStam(n) { player.stam = Math.max(0, player.stam - n); player.stamWait = 0.7; }
+function pushOut(o, rad) {
+  forNearby(o.x, o.z, 2.5, (c) => {
+    for (const tr of c.trees) {
+      if (!tr.alive) continue;
+      const r = TREE[tr.type].r * tr.scale + rad, dx = o.x - tr.x, dz = o.z - tr.z, d = Math.hypot(dx, dz);
+      if (d < r && d > 1e-4) { o.x = tr.x + (dx / d) * r; o.z = tr.z + (dz / d) * r; }
+    }
+    for (const rk of c.rocks) {
+      if (!rk.alive || rk.scale < 0.7) continue;
+      const r = rk.scale * 0.75 + rad - 0.08, dx = o.x - rk.x, dz = o.z - rk.z, d = Math.hypot(dx, dz);
+      if (d < r && d > 1e-4) { o.x = rk.x + (dx / d) * r; o.z = rk.z + (dz / d) * r; }
+    }
+  });
+}
+const trails = { t: 0, cur: null };
+{
+  const mk = (half) => {
+    const g = new THREE.RingGeometry(0.8, 2.3, 28, 1, -Math.PI / 2 - half, half * 2);
+    g.rotateX(-Math.PI / 2);
+    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xfff3c9, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
+    m.position.y = 0.95; m.visible = false; pm.root.add(m);
+    return m;
+  };
+  trails.stab = mk(0.35); trails.blade = mk(0.2); trails.peak = 0.5; trails.arcs = [mk(1.4), mk(1.4)]; trails.arcI = 0;
+  trails.ghost = [0, 1, 2, 3].map(() => { const gm = mk(0.2); gm.scale.setScalar(2.5 / 2.3); return gm; });
+}
+function showTrail(kind, perfect) {
+  if (trails.cur) trails.cur.visible = false;
+  trails.cur = trails[kind]; trails.cur.visible = true; trails.t = 0.14;
+  trails.cur.material.color.setHex(perfect ? 0xffd45a : 0xfff3c9);
+  trails.peak = perfect ? 0.85 : 0.5;
+}
+// ---- arrows
+const arrows = [];
+const arrowGeo = new THREE.BoxGeometry(0.045, 0.045, 0.8);
+const arrowMat = new THREE.MeshLambertMaterial({ color: 0xe8dcc0, emissive: 0x4a3a1c });
+const streakGeo = new THREE.BoxGeometry(0.03, 0.03, 2.0); streakGeo.translate(0, 0, -1.3);
+const streakMat = new THREE.MeshBasicMaterial({ color: 0xfff3c9, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false });
+const _dir = new THREE.Vector3();
+function fireArrow(yawOff, power, steady) {
+  const rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw), fwx = -Math.sin(cam.yaw), fwz = -Math.cos(cam.yaw);
+  const ox = player.x + rx * 0.22 + fwx * 0.4, oy = player.y + 1.25, oz = player.z + rz * 0.22 + fwz * 0.4;
+  _dir.set(cursor.x - ox, cursor.y - oy, cursor.z - oz).normalize();
+  if (!steady) yawOff += (Math.random() - 0.5) * 0.07 * clamp(player.speed / 2, 0.3, 1);   // loosed on the move, it wanders
+  if (yawOff) _dir.applyAxisAngle(UP, yawOff);
+  const sp = lerp(16, 66, power) * (steady ? 1.08 : 1);
+  const mesh = new THREE.Mesh(arrowGeo, arrowMat);
+  const streak = new THREE.Mesh(streakGeo, streakMat); mesh.add(streak);
+  mesh.castShadow = true; scene.add(mesh);
+  sfx.twang();
+  arrows.push({ mesh, streak, x: ox, y: oy, z: oz, vx: _dir.x * sp, vy: _dir.y * sp, vz: _dir.z * sp, dmg: lerp(4, 24, power) * (steady ? 1.2 : 1), power, life: 4, stuck: 0 });
+}
+function arrowHitsEnemy(a, e) {
+  const sp = Math.hypot(a.vx, a.vz) || 1, adx = a.vx / sp, adz = a.vz / sp;
+  const head = a.y > e.y + 0.92 * (e.kind === 3 ? 1.6 : 1);
+  const front = Math.sin(e.face) * -adx + Math.cos(e.face) * -adz;       // 1 means the arrow meets the enemy head-on
+  const guarding = e.kind === 1 && (e.state === 'chase' || e.state === 'idle' || (e.state === 'recover' && e.t > 0.3)) && front > 0.35;
+  if (guarding && !head) {                                                // a shield stops body shots from the front
+    burst(a.x, a.y, a.z, 8, 0xffe9a8, 3, 3, 0.07, 0.4); e.bar = 4; sfx.clang();
+    if (e.state === 'idle') { e.state = 'chase'; e.t = 0; }
+    return;
+  }
+  const sneak = e.state === 'idle' && !a.ally;
+  if (sneak) say('Sneak attack');
+  let dmg = a.dmg * (sneak ? 2 : 1) * (head ? 1.8 : 1) * (front < -0.3 ? 1.4 : 1);
+  if (head) { burst(a.x, a.y, a.z, 10, 0xffd45a, 3.5, 3, 0.08, 0.5); if (!a.ally) juice.hitStop = 0.05; }
+  damageEnemy(e, dmg, adx, adz, 2 + a.power * 4);
+}
+function updateArrows(dt) {
+  for (let i = arrows.length - 1; i >= 0; i--) {
+    const a = arrows[i];
+    if (a.stuck > 0) { a.stuck -= dt; if (a.stuck <= 0) { scene.remove(a.mesh); arrows.splice(i, 1); } continue; }
+    a.life -= dt;
+    let gone = a.life <= 0, stick = false;
+    for (let s = 0; s < 3 && !gone && !stick; s++) {
+      const h = dt / 3;
+      a.vy -= 9 * h; a.x += a.vx * h; a.y += a.vy * h; a.z += a.vz * h;
+      const gh = heightAt(a.x, a.z);
+      if (a.y < gh) { a.y = gh + 0.05; stick = true; burst(a.x, a.y, a.z, 4, 0x6b4f35, 1.5, 2, 0.08, 0.4); break; }
+      if (a.y < SEA && gh < SEA) { burst(a.x, SEA, a.z, 8, 0xd8f0ff, 1.8, 3, 0.09, 0.5); gone = true; break; }
+      if (a.hostile) {
+        for (const t of targets()) {
+          if (isDown(t)) continue;
+          const dx = a.x - t.x, dz = a.z - t.z;
+          if (dx * dx + dz * dz < 0.2 && a.y > t.y && a.y < t.y + 1.5) {
+            const hs = Math.hypot(a.vx, a.vz) || 1;
+            if (t === player) hitPlayer(a.src, a.vx / hs, a.vz / hs, { dmg: a.dmg, parry: true, arrow: true }); else hitAlly(t, a.dmg, a.vx / hs, a.vz / hs, true, null);
+            gone = true; break;
+          }
+        }
+      } else for (const e of enemies) {
+        if (e.state === 'dead') continue;
+        const dx = a.x - e.x, dz = a.z - e.z, big = e.kind === 3 ? 1.6 : 1;
+        if (dx * dx + dz * dz < 0.3 * big * big && a.y > e.y && a.y < e.y + 1.4 * big) { arrowHitsEnemy(a, e); gone = true; break; }
+      }
+      if (gone) break;
+      forNearby(a.x, a.z, 1, (c) => {
+        for (const tr of c.trees) {
+          if (!tr.alive || stick) continue;
+          const r = TREE[tr.type].r * tr.scale + 0.04;
+          if ((a.x - tr.x) ** 2 + (a.z - tr.z) ** 2 < r * r && a.y < gh + TREE[tr.type].h * tr.scale * 0.85) stick = true;
+        }
+      });
+    }
+    if (gone) { scene.remove(a.mesh); arrows.splice(i, 1); continue; }
+    a.mesh.position.set(a.x, a.y, a.z);
+    a.mesh.lookAt(a.x + a.vx, a.y + a.vy, a.z + a.vz);
+    if (stick) { a.stuck = 6; a.streak.visible = false; }
+  }
+}
+function makeEnemy(kind) {
+  const skin = new THREE.MeshLambertMaterial({ color: [0x7aa052, 0x55804f, 0x9aa24e, 0x4a6648, 0x6f8f8a, 0x5d8a4a, 0x8a7ab0][kind] });
+  const cloth = new THREE.MeshLambertMaterial({ color: [0x4a3b2c, 0x3d3a4a, 0x6a2f2a, 0x2a2622, 0x1f1d2b, 0x5a4a2a, 0x4b2a6a][kind] });
+  const woodM = new THREE.MeshLambertMaterial({ color: 0x6b4a2a });
+  const box = (w, h, d, m) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.castShadow = true; return o; };
+  const root = new THREE.Group(), body = new THREE.Group(); root.add(body);
+  const torso = box(0.52, 0.46, 0.32, cloth); torso.position.set(0, 0.7, 0.03); torso.rotation.x = 0.25;
+  const head = box(0.36, 0.3, 0.34, skin); head.position.set(0, 1.07, 0.12);
+  const earL = box(0.16, 0.08, 0.05, skin); earL.position.set(0.25, 1.12, 0.1);
+  const earR = box(0.16, 0.08, 0.05, skin); earR.position.set(-0.25, 1.12, 0.1);
+  const legL = new THREE.Group(), legR = new THREE.Group();
+  legL.position.set(-0.13, 0.48, 0); legR.position.set(0.13, 0.48, 0);
+  const l1 = box(0.17, 0.48, 0.19, skin); l1.position.y = -0.24; legL.add(l1);
+  const l2 = box(0.17, 0.48, 0.19, skin); l2.position.y = -0.24; legR.add(l2);
+  const armL = new THREE.Group(), armR = new THREE.Group();
+  armL.position.set(0.33, 0.88, 0.05); armR.position.set(-0.33, 0.88, 0.05);
+  const a1 = box(0.13, 0.5, 0.13, skin); a1.position.y = -0.25; armL.add(a1);
+  const a2 = box(0.13, 0.5, 0.13, skin); a2.position.y = -0.25; armR.add(a2);
+  const handle = box(0.07, 0.07, 0.7, woodM); handle.position.set(0, -0.48, 0.25);
+  const clubHead = box(0.18, 0.18, 0.34, woodM); clubHead.position.set(0, -0.48, 0.66);
+  armR.add(handle, clubHead);
+  body.add(torso, head, earL, earR, legL, legR, armL, armR);
+  if (kind === 2) { const bow = box(0.04, 0.9, 0.04, woodM); bow.position.set(0, -0.5, 0.1); armL.add(bow); handle.visible = clubHead.visible = false; }
+  if (kind === 4) { handle.scale.z = 0.5; handle.position.z = 0.12; clubHead.visible = false; const k1 = box(0.04, 0.06, 0.5, new THREE.MeshLambertMaterial({ color: 0xc9d2d8 })); k1.position.set(0, -0.48, 0.5); armR.add(k1); const k2 = k1.clone(); armL.add(k2); }
+  if (kind === 5) { handle.scale.z = 4; handle.position.z = 0.9; clubHead.visible = false; const tip = box(0.09, 0.05, 0.4, new THREE.MeshLambertMaterial({ color: 0xc9d2d8 })); tip.position.set(0, -0.48, 2.45); armR.add(tip); }
+  if (kind === 6) { handle.visible = clubHead.visible = false; const staff = box(0.06, 1.5, 0.06, woodM); staff.position.set(0, -0.2, 0.15); const orb = box(0.2, 0.2, 0.2, new THREE.MeshBasicMaterial({ color: 0xc070ff })); orb.position.set(0, 0.62, 0.15); armR.add(staff, orb); const hood = box(0.42, 0.2, 0.4, cloth); hood.position.set(0, 1.26, 0.1); body.add(hood); }
+  const base = kind === 3 ? 1.6 : kind === 4 ? 0.88 : 1;
+  root.scale.setScalar(base);
+  let shield = null;
+  if (kind === 1) {
+    shield = new THREE.Group();
+    const plank = box(0.07, 0.66, 0.54, new THREE.MeshLambertMaterial({ color: 0x8a6b3f }));
+    const boss = box(0.1, 0.2, 0.2, new THREE.MeshLambertMaterial({ color: 0xb9c2c9 }));
+    shield.add(plank, boss); body.add(shield);
+  }
+  const bar = new THREE.Group();
+  const bg = new THREE.Mesh(new THREE.PlaneGeometry(0.92, 0.1), new THREE.MeshBasicMaterial({ color: 0x14181a, depthTest: false, fog: false, transparent: true }));
+  const fg = new THREE.Mesh(new THREE.PlaneGeometry(0.88, 0.06), new THREE.MeshBasicMaterial({ color: 0xd9503c, depthTest: false, fog: false, transparent: true }));
+  const pg = new THREE.Mesh(new THREE.PlaneGeometry(0.88, 0.035), new THREE.MeshBasicMaterial({ color: 0xe2b65a, depthTest: false, fog: false, transparent: true }));
+  bg.renderOrder = 20; fg.renderOrder = 21; fg.position.z = 0.001; pg.renderOrder = 21; pg.position.set(0, -0.085, 0.001);
+  bar.add(bg, fg, pg); bar.position.y = 1.75; root.add(bar);
+  scene.add(root);
+  return { root, body, legL, legR, armL, armR, shield, bar, fg, pg, skin, base };
+}
+// What an enemy can throw. Yellow glow can be parried. Red cannot, and has to be dodged or outspaced.
+const MOVES = {
+  jab: { wind: 0.5, hold: [0, 0], dmg: 9, reach: 2.2, arc: 0.45, parry: true, rec: 0.7 },
+  swing: { wind: 0.85, hold: [0, 0], dmg: 13, reach: 2.4, arc: 0.7, parry: true, rec: 1.0 },
+  delay: { wind: 0.7, hold: [0.3, 0.7], dmg: 14, reach: 2.4, arc: 0.7, parry: true, rec: 1.0 },
+  slam: { wind: 1.25, hold: [0, 0], dmg: 24, reach: 2.8, arc: 0.6, parry: false, rec: 1.8 },
+  sweep: { wind: 1.0, hold: [0, 0.25], dmg: 18, reach: 3.0, arc: 1.9, parry: true, rec: 1.3 },
+  stab: { wind: 0.45, hold: [0, 0], dmg: 9, reach: 2.1, arc: 0.45, parry: true, rec: 0.6 },
+  thrust: { wind: 0.95, hold: [0, 0.2], dmg: 16, reach: 4.4, arc: 0.2, parry: true, rec: 1.3 },
+  hex: { wind: 1.3, hold: [0, 0], dmg: 0, reach: 0, arc: 0, parry: false, rec: 1.2, ranged: true, cast: 'hex' },
+  rally: { wind: 1.1, hold: [0, 0], dmg: 0, reach: 0, arc: 0, parry: true, rec: 1.2, ranged: true, cast: 'rally' },
+  shot: { wind: 1.3, hold: [0, 0.35], dmg: 9, reach: 0, arc: 0, parry: true, rec: 0.9, ranged: true },
+};
+// 0 grunt, 1 shield-bearer, 2 archer, 3 brute, 4 skirmisher, 5 spear, 6 shaman
+const MOVESET = [['jab', 'swing', 'swing', 'delay'], ['swing', 'delay', 'slam', 'jab'], ['shot'], ['slam', 'sweep', 'swing', 'sweep'], ['stab'], ['thrust'], ['hex']];
+const KIND = [{ hp: 60, post: 100, sp: 3.6 }, { hp: 95, post: 140, sp: 3.0 }, { hp: 44, post: 60, sp: 3.2 }, { hp: 290, post: 250, sp: 2.6 }, { hp: 42, post: 60, sp: 4.7 }, { hp: 74, post: 120, sp: 3.1 }, { hp: 54, post: 60, sp: 2.9 }];
+const targets = () => [player, ...allies];
+const isDown = (t) => (t === player ? player.dead > 0 : t.state === 'down');
+function pickTarget(e) {
+  let best = null, bs = 1e9;
+  for (const t of targets()) {
+    if (isDown(t)) continue;
+    const sc = Math.hypot(t.x - e.x, t.z - e.z) - (t.taunt > 0 && e.kind !== 3 ? 6 : 0) - (t === player ? (e.kind === 3 ? 9 : 4.5) : 0) - (e.kind === 2 && t.kind === 1 && t !== player ? 4 : 0) - (e.kind === 4 && t.kind === 1 && t !== player ? 3 : 0);   // archers duel the party's archer
+    if (sc < bs) { bs = sc; best = t; }
+  }
+  return best;
+}
+function spawnEnemy(id, x, z, kind, chunkKey, camp = null) {
+  const m = makeEnemy(kind), K = KIND[kind];
+  const e = {
+    id, x, z, y: heightAt(x, z), hx: x, hz: z, tx: x, tz: z, kind, chunkKey, camp, m,
+    face: Math.random() * 6.28, hp: K.hp, maxHp: K.hp, post: 0, maxPost: K.post, postWait: 0,
+    state: 'idle', t: 0, cd: 0, wanderT: 1, stagT: 1, recT: 0.8, windT: 0.7, move: MOVES.swing, chain: false,
+    kvx: 0, kvz: 0, flash: 0, bar: 0, walk: 0, hits: 0, hitT: 0, strafe: Math.random() < 0.5 ? 1 : -1, tgt: null, pick: 0,
+  };
+  enemies.push(e);
+  return e;
+}
+function startMove(e, name) {
+  const mv = MOVES[name];
+  e.move = mv; e.state = 'windup'; e.t = 0;
+  e.windT = mv.wind + lerp(mv.hold[0], mv.hold[1], Math.random());
+}
+// one of a camp spots you and the whole camp turns out
+function alertCamp(e) {
+  if (e.camp === null) return;
+  for (const o of enemies) if (o.camp === e.camp && o.state === 'idle') { o.state = 'chase'; o.t = 0; o.bar = 3; o.cd = 0.4 + Math.random() * 1.4; }
+}
+function damageEnemy(e, dmg, kx, kz, knock, post = 0) {
+  if (e.state === 'dead') return;
+  sfx.hit();
+  e.hp -= dmg; e.flash = 0.18; e.bar = 5;
+  const heavyBody = e.kind === 3 ? 0.3 : e.state === 'windup' ? 0.3 : 1;   // a creature mid-swing is braced: you cannot shove it out of its blow with taps
+  e.kvx += kx * knock * heavyBody; e.kvz += kz * knock * heavyBody;
+  burst(e.x, e.y + 0.9, e.z, 8, 0xd8d2b0, 2.6, 3, 0.09, 0.5);
+  if (e.state === 'idle') { e.state = 'chase'; e.t = 0; alertCamp(e); }
+  if (e.hp <= 0) {
+    e.state = 'dead'; e.t = 0; world.removed.add(e.id); world.kills++; hudDirty = true;
+    burst(e.x, e.y + 0.8, e.z, 18, e.kind ? 0x55804f : 0x7aa052, 3, 4, 0.13, 0.9);
+    campCheck(e);
+    return;
+  }
+  if (e.state !== 'stagger') {
+    e.post += post; e.postWait = 1.5;
+    if (e.post >= e.maxPost) {                       // posture broken: wide open for a moment
+      e.post = 0; e.state = 'stagger'; e.t = 0; e.stagT = 1.9; say('Staggered');
+      burst(e.x, e.y + 1.2, e.z, 12, 0xffd45a, 3.5, 4, 0.09, 0.6);
+      return;
+    }
+  }
+  // a grunt that eats two quick hits hops back out of the third and comes straight back in
+  e.hits = e.hitT > 0 ? e.hits + 1 : 1; e.hitT = 1.2;
+  if (e.kind === 0 && e.hits >= 2 && (e.state === 'chase' || e.state === 'recover') && Math.random() < 0.7) {
+    e.hits = 0; e.state = 'hop'; e.t = 0;
+    const from = e.tgt || player, dx = e.x - from.x, dz = e.z - from.z, d = Math.hypot(dx, dz) || 1;
+    e.kvx = (dx / d) * 11; e.kvz = (dz / d) * 11;
+  }
+}
+function hitPlayer(e, fx, fz, mv) {
+  const P = player;
+  if (P.dead > 0 || P.roll || P.dash) return;                        // a roll or a dash goes straight through the blow
+  const front = Math.sin(P.face) * -fx + Math.cos(P.face) * -fz > 0.1;
+  let dmg = mv.dmg;
+  if (P.guard && front) {
+    if (mv.parry && P.guardT <= 0.2) {                               // guard raised just in time: parry
+      burst(P.x + fx * -0.6, P.y + 1.1, P.z + fz * -0.6, 18, 0xfff0b0, 4.5, 4, 0.08, 0.5);
+      cam.shake = Math.min(cam.shake + 0.2, 0.5); juice.hitStop = 0.08; sfx.parry();
+      P.riposte = 1.4; say('Parry');
+      if (mv.arrow) { say('Deflected'); P.riposte = 0; return; }
+      e.bar = 5; e.chain = false; e.post += 45; e.postWait = 1.5;
+      if (e.post >= e.maxPost) { e.post = 0; e.state = 'stagger'; e.t = 0; e.stagT = 1.9; say('Parry, staggered'); }
+      else { e.state = 'recover'; e.t = 0; e.recT = 1.15; }
+      return;
+    }
+    if (mv.parry) {                                                  // a held guard soaks the blow with stamina
+      spendStam(mv.dmg * 1.1); sfx.clang();
+      burst(P.x - fx * 0.5, P.y + 1.0, P.z - fz * 0.5, 7, 0xffe9a8, 3, 3, 0.07, 0.4);
+      P.kvx += fx * 3; P.kvz += fz * 3; cam.shake = Math.min(cam.shake + 0.1, 0.5);
+      if (P.stam <= 0) { P.stun = 1.0; P.guard = false; P.atk = null; say('Guard broken'); }
+      return;
+    }
+    dmg *= 0.7;                                                      // a red attack smashes through
+  }
+  if (!front && !mv.arrow) { dmg *= 1.3; say('Struck from behind'); }
+  P.hp -= dmg; sfx.hurt(); P.flow = 0; P.lastDriven = false;
+  P.hurt = 0.4; P.regenWait = 10; P.atk = null; P.charging = null; P.ready = null; P.riposte = 0;
+  P.kvx += fx * 6; P.kvz += fz * 6;
+  cam.shake = Math.min(cam.shake + 0.35, 0.5);
+  burst(P.x, P.y + 1.0, P.z, 8, 0xc9482e, 2.5, 3, 0.08, 0.5);
+  if (P.hp <= 0) { P.hp = 0; P.dead = 2.6; P.dash = P.roll = null; P.aiming = false; setMsg('You fell. Waking at camp.'); }
+}
+function enemyStrike(e) {
+  const fx = Math.sin(e.face), fz = Math.cos(e.face), mv = e.move, big = e.kind === 3 ? 1.25 : 1;
+  arcWorldDamage(e.x, e.z, e.y, (x, z, r) => arcHit(e.x, e.z, fx, fz, mv.reach * big - 0.3, Math.cos(mv.arc * 0.8), x, z, r));
+  for (const t of targets()) {
+    if (isDown(t) || !arcHit(e.x, e.z, fx, fz, mv.reach * big, Math.cos(mv.arc), t.x, t.z, 0.3)) continue;
+    if (t === player) hitPlayer(e, fx, fz, mv); else hitAlly(t, mv.dmg, fx, fz, mv.parry, e);
+  }
+}
+const hostileMat = new THREE.MeshLambertMaterial({ color: 0x4a2a22, emissive: 0x2a0d08 });
+function enemyShoot(e, T) {
+  const lead = Math.min(Math.hypot(T.x - e.x, T.z - e.z) / 30, 0.6);
+  const tx = T.x + (T.mvx || 0) * lead, tz = T.z + (T.mvz || 0) * lead;
+  const ox = e.x + Math.sin(e.face) * 0.5, oy = e.y + 1.1, oz = e.z + Math.cos(e.face) * 0.5;
+  const dx = tx - ox, dz = tz - oz, d = Math.hypot(dx, dz) || 1, sp = 30, time = d / sp;
+  const mesh = new THREE.Mesh(arrowGeo, hostileMat); mesh.castShadow = true; scene.add(mesh);
+  const streak = new THREE.Mesh(streakGeo, streakMat); mesh.add(streak);
+  sfx.twang();
+  arrows.push({ mesh, streak, x: ox, y: oy, z: oz, vx: (dx / d) * sp, vy: (T.y + 0.9 - oy) / time + 0.5 * 9 * time, vz: (dz / d) * sp, dmg: e.move.dmg, power: 0.5, life: 4, stuck: 0, hostile: true, src: e });
+}
+// Whether an idle enemy notices the party: sight in front, hearing all round, both shorter for a crouched player and at night.
+function notices(e) {
+  const night = Math.sin((world.time - 0.25) * Math.PI * 2) < -0.05 ? 0.7 : 1;
+  for (const t of targets()) {
+    if (isDown(t)) continue;
+    const dx = t.x - e.x, dz = t.z - e.z, d = Math.hypot(dx, dz) || 1e-3;
+    const front = (Math.sin(e.face) * dx + Math.cos(e.face) * dz) / d > 0.2;
+    let r = front ? 15 : 9;
+    if (player.crouch) r = front ? 7 : 1.2;                    // the party creeps when you do
+    else if (t === player && player.speed > 7) r = 17;
+    if (d < r * night) return true;
+  }
+  return false;
+}
+function updateEnemies(dt) {
+  // attack tokens: only so many melee blows may be wound up at one target at once, so the fight stays readable
+  const onTgt = new Map(); let awake = 0;
+  for (const o of enemies) {
+    if (o.state !== 'idle' && o.state !== 'dead') awake++;
+    if (o.state === 'windup' && !o.move.ranged && o.tgt) onTgt.set(o.tgt, (onTgt.get(o.tgt) || 0) + 1);
+  }
+  world.time2 = (world.time2 || 0) + dt;
+  const lines = new Map();
+  for (const o of enemies) if (o.kind === 1 && o.camp !== null && o.tgt && (o.state === 'chase' || o.state === 'windup' || o.state === 'recover')) { if (!lines.has(o.camp)) lines.set(o.camp, { list: [] }); lines.get(o.camp).list.push(o); }
+  for (const L of lines.values()) {
+    const n = L.list.length, T = L.list[0].tgt; let cx = 0, cz = 0;
+    for (const o of L.list) { cx += o.x / n; cz += o.z / n; }
+    const qx = T.x - cx, qz = T.z - cz, q = Math.hypot(qx, qz) || 1;
+    Object.assign(L, { n, cx, cz, d: q, ux: qx / q, uz: qz / q, rx: qz / q, rz: -qx / q });
+    L.list.sort((a, b) => ((a.x - cx) * L.rx + (a.z - cz) * L.rz) - ((b.x - cx) * L.rx + (b.z - cz) * L.rz)).forEach((o, k) => { o.slot = (k - (n - 1) / 2) * 1.55; });
+  }
+  const cap = (t) => (t === player ? (world.time2 - (world.lastBlow || -9) < 0.9 ? 0 : awake >= 6 ? 2 : 1) : 2);
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const e = enemies[i], m = e.m, K = KIND[e.kind];
+    if (Math.hypot(player.x - e.x, player.z - e.z) > 95 && e.state !== 'dead') { m.root.visible = false; continue; }
+    m.root.visible = true;
+    e.rage = Math.max(0, (e.rage || 0) - dt);
+    e.t += dt; e.cd -= dt * (e.rage > 0 ? 1.3 : 1); e.hitT -= dt; e.postWait -= dt; e.pick -= dt;
+    e.flash = Math.max(0, e.flash - dt); e.bar = Math.max(0, e.bar - dt);
+    if (e.postWait <= 0) e.post = Math.max(0, e.post - 16 * dt);
+    if (e.state === 'dead') {
+      const k = Math.min(1, e.t / 0.45);
+      m.body.rotation.x = -k * 1.5; m.body.position.y = k * 0.12; m.bar.visible = false;
+      if (e.t > 2.4) { scene.remove(m.root); enemies.splice(i, 1); }
+      else if (e.t > 1.8) m.root.scale.setScalar(Math.max(0.01, 1 - (e.t - 1.8) / 0.6) * m.base);
+      continue;
+    }
+    if (e.pick <= 0 || !e.tgt || isDown(e.tgt)) { e.tgt = pickTarget(e); e.pick = 0.7; }
+    const T = e.tgt || player;
+    const dx = T.x - e.x, dz = T.z - e.z, d = Math.hypot(dx, dz) || 1e-3;
+    let mvx = 0, mvz = 0, turnTo = null, glow = 0;
+    if (e.state === 'idle') {
+      if (e.t > e.wanderT) { e.t = 0; e.wanderT = 2 + Math.random() * 3; const a = Math.random() * 6.283, wr = e.camp === null ? 5 : 1.2; e.tx = e.hx + Math.cos(a) * wr; e.tz = e.hz + Math.sin(a) * wr; }
+      const wx = e.tx - e.x, wz = e.tz - e.z, wd = Math.hypot(wx, wz);
+      if (wd > 0.6) { mvx = (wx / wd) * 1.1; mvz = (wz / wd) * 1.1; turnTo = Math.atan2(wx, wz); }
+      else if (e.camp !== null) turnTo = e.homeFace;
+      if (notices(e)) { e.state = 'chase'; e.t = 0; e.bar = 3; e.cd = 0.3 + Math.random() * 0.8; alertCamp(e); }
+    } else if (e.state === 'chase') {
+      turnTo = Math.atan2(dx, dz);
+      const ux = dx / d, uz = dz / d, sp = K.sp * (e.rage > 0 ? 1.2 : 1) * (d > 9 ? 1.25 : 1);
+      const line = e.camp !== null ? lines.get(e.camp) : null;
+      const ready = e.cd <= 0, free = (onTgt.get(T) || 0) < cap(T);
+      const commit = (name) => { if (T === player) world.lastBlow = world.time2; startMove(e, name); onTgt.set(T, (onTgt.get(T) || 0) + 1); };
+      const goTo = (px, pz, v) => { const qx = px - e.x, qz = pz - e.z, q = Math.hypot(qx, qz); if (q > 0.4) { const k = Math.min(v, q * 2.5) / q; mvx = qx * k; mvz = qz * k; } };
+      if (!e.tgt || d > 48) { e.state = 'idle'; e.t = 0; }
+      else if (e.kind === 2 || e.kind === 6) {          // archers and shamans: behind the line if there is one, otherwise at arm's length
+        if (line && d > 6) { const lat = clamp((e.x - line.cx) * line.rx + (e.z - line.cz) * line.rz, -4, 4), back = e.kind === 6 ? 8.5 : 6.5; goTo(line.cx + line.rx * lat - line.ux * back, line.cz + line.rz * lat - line.uz * back, sp); }
+        else if (d < 7) { mvx = -ux * sp; mvz = -uz * sp; }
+        else if (d > 18) { mvx = ux * sp; mvz = uz * sp; }
+        else { if (Math.random() < dt * 0.3) e.strafe = -e.strafe; mvx = -uz * e.strafe * 1.2; mvz = ux * e.strafe * 1.2; }
+        if (ready && d < 24 && d > 3.5) { if (e.kind === 2) startMove(e, 'shot'); else { e.casts = (e.casts || 0) + 1; startMove(e, e.casts % 3 === 0 ? 'rally' : 'hex'); } }
+      } else if (e.kind === 1 && line && line.n > 1) {  // shield-bearers advance abreast, shields toward the target
+        const lat = (e.x - line.cx) * line.rx + (e.z - line.cz) * line.rz, fwd = (e.x - line.cx) * line.ux + (e.z - line.cz) * line.uz;
+        const adv = line.d > 2.2 ? 2.6 : 0, a = clamp(adv - fwd * 1.5, -sp, sp), b = clamp((e.slot - lat) * 2.2, -2.5, 2.5);
+        mvx = line.ux * a + line.rx * b; mvz = line.uz * a + line.rz * b;
+        if (ready && free && d < 2.5) commit(MOVESET[1][Math.floor(Math.random() * 4)]);
+      } else if (e.kind === 5) {                        // spears: second rank, thrusting past the shields
+        if (line) { const lat = clamp((e.x - line.cx) * line.rx + (e.z - line.cz) * line.rz, -line.n, line.n); goTo(line.cx + line.rx * lat - line.ux * 1.7, line.cz + line.rz * lat - line.uz * 1.7, sp); }
+        else if (d > 3.7) { mvx = ux * sp; mvz = uz * sp; }
+        else if (d < 2.7) { mvx = -ux * 1.6; mvz = -uz * 1.6; }
+        if (ready && free && d < 4.4 && d > 1.4) commit(Math.random() < 0.75 ? 'thrust' : 'sweep');
+      } else if (e.kind === 4 || e.flank) {             // flankers: work round to the target's back, dart in, get out
+        const th = Math.atan2(-dx, -dz), rear = (T.face || 0) + Math.PI;
+        let del = rear - th; del = Math.atan2(Math.sin(del), Math.cos(del));
+        const behind = Math.abs(del) < 0.6;
+        if (ready && (behind || e.cd < -3) && (free || (cap(T) > 0 && (onTgt.get(T) || 0) < cap(T) + 1))) {
+          if (d > 1.9) { mvx = ux * sp * 1.25; mvz = uz * sp * 1.25; } else commit(e.kind === 4 ? 'stab' : 'jab');
+        } else {
+          const R = 5.5, s = behind ? 0 : Math.sign(del) || e.strafe;
+          mvx = Math.cos(th) * s * sp + ux * (d - R) * 1.6; mvz = -Math.sin(th) * s * sp + uz * (d - R) * 1.6;
+        }
+      } else if (ready && free) {                       // its turn: close in and commit to a move
+        const stop = e.kind === 3 ? 2.4 : 2.0;
+        if (d > stop) { mvx = ux * sp; mvz = uz * sp; }
+        if (d < stop + 0.3) commit(MOVESET[e.kind][Math.floor(Math.random() * MOVESET[e.kind].length)]);
+      } else if (d > 6) { mvx = ux * sp; mvz = uz * sp; }
+      else {                                            // waiting: hold a ring around the target and spread away from the others on it
+        let nb = null, nd = 3.2;
+        for (const o of enemies) { if (o === e || o.state === 'dead' || o.tgt !== T) continue; const q = Math.hypot(o.x - e.x, o.z - e.z); if (q < nd) { nd = q; nb = o; } }
+        let s = 0.35 * e.strafe;
+        if (nb) { e.strafe = (-uz * (e.x - nb.x) + ux * (e.z - nb.z)) > 0 ? 1 : -1; s = 1.7 * e.strafe; }
+        const ring = (d - 3.5) * 1.2;
+        mvx = ux * ring + -uz * s; mvz = uz * ring + ux * s;
+      }
+    } else if (e.state === 'windup') {
+      if (e.t < e.windT - (e.move.ranged ? 0.15 : 0.3)) {                    // tracking stops before the blow, so a late sidestep or roll works
+        turnTo = Math.atan2(dx, dz);
+        if (!e.move.ranged && d > 1.6) { mvx = (dx / d) * K.sp * 0.6; mvz = (dz / d) * K.sp * 0.6; }   // it steps into the swing: backing straight off is not an answer
+      }
+      else if (!e.move.ranged && d > 1.5) { mvx = Math.sin(e.face) * 5; mvz = Math.cos(e.face) * 5; }   // the committed lunge, straight along its facing
+      glow = Math.min(1, e.t / e.move.wind);
+      if (e.t > e.move.wind) glow = 0.75 + 0.25 * Math.sin(e.t * 26);         // held back: a delayed swing
+      if (e.windT - e.t < 0.1) glow = 1.6;
+      if (e.t >= e.windT) {
+        const mv = e.move; e.chain = mv === MOVES.swing && Math.random() < 0.35;
+        if (mv.cast === 'hex') castHex(e, T); else if (mv.cast === 'rally') rally(e); else if (mv.ranged) enemyShoot(e, T); else enemyStrike(e);
+        if (e.state === 'windup') { e.state = 'recover'; e.t = 0; e.recT = e.chain ? 0.28 : mv.rec; }
+      }
+    } else if (e.state === 'recover') {
+      if (e.t >= e.recT) {
+        if (e.chain && d < 3.2) { e.chain = false; startMove(e, 'jab'); }
+        else if (e.kind === 4) { e.state = 'hop'; e.t = 0; e.kvx = -(dx / d) * 10; e.kvz = -(dz / d) * 10; e.cd = 2.4 + Math.random() * 1.6; }   // in and out
+        else { e.chain = false; e.state = 'chase'; e.t = 0; e.cd = e.kind === 3 ? 1.1 + Math.random() * 1.0 : (e.kind === 2 ? 1.8 : e.kind === 6 ? 2.6 : 1.4) + Math.random() * 1.6; }
+      }
+    } else if (e.state === 'stagger') {
+      if (e.t >= e.stagT) { e.state = 'chase'; e.t = 0; e.cd = 0.5; }
+    } else if (e.state === 'thrown') {                      // flung by the player: it hits whatever is in the way
+      const tl = Math.hypot(e.tvx, e.tvz) || 1, ux = e.tvx / tl, uz = e.tvz / tl;
+      e.x += e.tvx * dt; e.z += e.tvz * dt;
+      for (const o of enemies) {
+        if (o === e || o.state === 'dead' || o.state === 'thrown' || e.struck.has(o) || Math.hypot(o.x - e.x, o.z - e.z) > (o.kind === 3 ? 1.5 : 1.05)) continue;
+        e.struck.add(o);
+        damageEnemy(o, 8, ux, uz, 5, 40);
+        if (o.state !== 'dead' && o.state !== 'stagger') { o.state = 'stagger'; o.t = 0; o.stagT = 1.2; }
+        damageEnemy(e, 6, 0, 0, 0); e.tvx *= 0.35; e.tvz *= 0.35; juice.hitStop = 0.05;
+      }
+      forNearby(e.x, e.z, 1.5, (c) => {
+        for (const tr of c.trees) {
+          if (!tr.alive || e.struck.has(tr) || Math.hypot(tr.x - e.x, tr.z - e.z) > TREE[tr.type].r * tr.scale + 0.5) continue;
+          e.struck.add(tr);
+          damageEnemy(e, 14, 0, 0, 0); e.tvx *= 0.1; e.tvz *= 0.1;
+          tr.sx = ux; tr.sz = uz; if (tr.shake <= 0) world.shakes.push(tr); tr.shake = 0.35;
+          burst(e.x, e.y + 0.8, e.z, 10, 0xd8b98a, 3, 3, 0.1, 0.6); cam.shake = Math.min(cam.shake + 0.15, 0.5);
+        }
+      });
+      if (e.state === 'thrown' && e.t >= 0.55) {
+        damageEnemy(e, 10, 0, 0, 0);
+        burst(e.x, e.y + 0.2, e.z, 10, 0xd8d2b0, 3, 2, 0.1, 0.5);
+        if (e.state !== 'dead') { e.state = 'stagger'; e.t = 0; e.stagT = 1.5; }
+      }
+    } else if (e.state === 'hop') {
+      turnTo = Math.atan2(dx, dz);
+      if (e.t >= 0.32) { e.state = 'chase'; e.t = 0; if (e.kind !== 4) e.cd = 0.2; }
+    }
+    if (turnTo !== null) { let df = turnTo - e.face; df = Math.atan2(Math.sin(df), Math.cos(df)); e.face += clamp(df, -7 * dt, 7 * dt); }
+    if (e.frozen || ((mvx || mvz) && heightAt(e.x + mvx * 0.4, e.z + mvz * 0.4) < -0.45)) { mvx = 0; mvz = 0; }
+    e.x += (mvx + e.kvx) * dt; e.z += (mvz + e.kvz) * dt;
+    e.kvx *= Math.exp(-6 * dt); e.kvz *= Math.exp(-6 * dt);
+    for (const o of enemies) {
+      if (o === e || o.state === 'dead' || o.state === 'thrown' || e.state === 'thrown') continue;
+      const sx = e.x - o.x, sz = e.z - o.z, sd = Math.hypot(sx, sz), need = 0.95 * (e.kind === 3 || o.kind === 3 ? 1.4 : 1);
+      if (sd < need && sd > 1e-4) { e.x += (sx / sd) * (need - sd) * 0.5; e.z += (sz / sd) * (need - sd) * 0.5; }
+    }
+    for (const t of targets()) {                            // bodies do not overlap
+      if (isDown(t) || (t === player && player.dash)) continue;
+      const sx = e.x - t.x, sz = e.z - t.z, sd = Math.hypot(sx, sz);
+      if (sd < 0.8 && sd > 1e-4) { e.x += (sx / sd) * (0.8 - sd); e.z += (sz / sd) * (0.8 - sd); }
+    }
+    pushOut(e, 0.3);
+    e.y = lerp(e.y, Math.max(heightAt(e.x, e.z), -0.6), 1 - Math.exp(-16 * dt));
+    const sp = Math.hypot(mvx, mvz);
+    e.walk += sp * dt * 2.4;
+    // pose
+    m.root.position.set(e.x, e.y + (e.state === 'hop' ? Math.sin(Math.min(e.t / 0.32, 1) * Math.PI) * 0.5 : e.state === 'thrown' ? Math.sin(Math.min(e.t / 0.55, 1) * Math.PI) * 1.1 : 0), e.z); m.root.rotation.y = e.face;
+    const stride = Math.sin(e.walk) * clamp(sp / 3, 0, 1) * 0.8;
+    m.legL.rotation.x = stride; m.legR.rotation.x = -stride; m.armL.rotation.x = -stride * 0.6;
+    m.body.rotation.x = 0; m.body.rotation.z = 0; m.body.position.y = 0;
+    let arm = stride * 0.6;
+    if (e.state === 'windup') {
+      if (e.move.ranged) { arm = -1.5 * smoothstep(0, 0.3, e.t); m.armL.rotation.x = -1.5 * smoothstep(0, 0.3, e.t); }
+      else { arm = lerp(0, -2.9, smoothstep(0, e.move.wind * 0.75, e.t)); m.body.rotation.x = -0.15 * smoothstep(0, e.move.wind, e.t); }
+    }
+    else if (e.state === 'recover' && !e.move.ranged) { arm = lerp(-2.9, -0.3, smoothstep(0, 0.12, e.t)); if (e.t > 0.3) arm = lerp(-0.3, 0, smoothstep(0.3, e.recT, e.t)); m.body.rotation.x = e.t < 0.3 ? 0.25 : 0; }
+    else if (e.state === 'stagger') { m.body.rotation.z = Math.sin(e.t * 9) * 0.22; m.body.rotation.x = -0.25; arm = 0.6; }
+    else if (e.state === 'thrown') { m.body.rotation.x = e.t * 12; arm = -1.5; }
+    m.armR.rotation.x = arm;
+    const fl = (e.flash > 0 ? 1 : 0) + (e.rage > 0 ? 0.28 + 0.1 * Math.sin(e.t * 12) : 0);
+    if (e.move.parry) m.skin.emissive.setRGB(fl + glow * 1.0, (e.flash > 0 ? 1 : 0) + glow * 0.7, (e.flash > 0 ? 1 : 0) + glow * 0.05);
+    else m.skin.emissive.setRGB(fl + glow * 1.2, (e.flash > 0 ? 1 : 0) + glow * 0.05, (e.flash > 0 ? 1 : 0) + glow * 0.03);
+    if (m.shield) {       // held in front, unless the creature is committed to a swing or reeling
+      const down = e.state === 'windup' || (e.state === 'recover' && e.t <= 0.3) || e.state === 'stagger';
+      const gp = down ? [0.44, 0.55, -0.05, 0] : [0.05, 0.8, 0.44, Math.PI / 2];
+      const k = 1 - Math.exp(-12 * dt);
+      m.shield.position.x = lerp(m.shield.position.x, gp[0], k); m.shield.position.y = lerp(m.shield.position.y, gp[1], k);
+      m.shield.position.z = lerp(m.shield.position.z, gp[2], k); m.shield.rotation.y = lerp(m.shield.rotation.y, gp[3], k);
+    }
+    m.bar.visible = e.bar > 0;
+    if (m.bar.visible) {
+      m.bar.quaternion.setFromAxisAngle(UP, -e.face).multiply(camera.quaternion);
+      const f = clamp(e.hp / e.maxHp, 0, 1);
+      m.fg.scale.x = Math.max(f, 0.001); m.fg.position.x = -0.44 * (1 - f);
+      const pf = e.state === 'stagger' ? 1 : clamp(e.post / e.maxPost, 0, 1);
+      m.pg.scale.x = Math.max(pf, 0.001); m.pg.position.x = -0.44 * (1 - pf);
+    }
+  }
+}
+function clearEnemies(pred) {
+  for (let i = enemies.length - 1; i >= 0; i--) if (!pred || pred(enemies[i])) { scene.remove(enemies[i].m.root); enemies.splice(i, 1); }
+}
+function setMsg(t) { const b = el('msg'); b.textContent = t; b.hidden = !t; }
+function respawn() {
+  player.x = 0; player.z = 0; player.y = heightAt(0, 0); player.hp = 100; player.stam = 100; player.kvx = player.kvz = 0;
+  Object.assign(player, { air: false, vy: 0, jumps: 0, plunged: false, atk: null, charging: null, guard: false, stun: 0, crouch: false });
+  cam.tx = 0; cam.tz = 0;
+  for (const e of enemies) if (e.state !== 'dead') { e.state = 'idle'; e.t = 0; e.x = e.hx; e.z = e.hz; e.hp = e.maxHp; e.post = 0; e.tgt = null; }
+  clearHexes(); (world.camps || []).forEach((c, ci) => manCamp(ci));       // a camp you did not finish is back at full strength
+  allies.forEach((al, i) => { al.x = i ? 2.2 : -2.2; al.z = -2.5; al.hp = al.maxHp; al.state = 'follow'; al.kvx = al.kvz = 0; });
+  setMsg('');
+}
+
+// A shaman's hex: a marked circle on the ground that erupts a moment later. Nothing blocks it; you have to leave.
+const hexes = [];
+const hexRingGeo = new THREE.RingGeometry(0.9, 1, 36).rotateX(-Math.PI / 2), hexFillGeo = new THREE.CircleGeometry(1, 36).rotateX(-Math.PI / 2);
+function castHex(e, T) {
+  const lead = T === player ? 0.5 : 0, x = T.x + (T.mvx || 0) * lead, z = T.z + (T.mvz || 0) * lead, r = 2.5;
+  const mk = (geo, op) => new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xff3a2a, transparent: true, opacity: op, depthTest: false, depthWrite: false, fog: false }));
+  const g = new THREE.Group(), ring = mk(hexRingGeo, 0.9), fill = mk(hexFillGeo, 0.28);
+  ring.scale.setScalar(r); fill.scale.setScalar(0.01); ring.renderOrder = fill.renderOrder = 15; g.add(ring, fill);
+  g.position.set(x, heightAt(x, z) + 0.2, z); scene.add(g);
+  hexes.push({ x, z, r, t: 0, T: 1.6, g, fill, src: e });
+  burst(e.x, e.y + 1.9, e.z, 10, 0xc070ff, 2.5, 3, 0.09, 0.6);
+}
+function rally(e) {
+  let best = null, bs = 2;
+  for (const o of enemies) { if (o === e || o.state === 'dead' || o.kind === 6 || Math.hypot(o.x - e.x, o.z - e.z) > 16) continue; const sc = o.hp / o.maxHp - (o.rage > 0 ? -1 : 0); if (sc < bs) { bs = sc; best = o; } }
+  if (!best) return;
+  best.hp = Math.min(best.maxHp, best.hp + 25); best.rage = 7; best.bar = 4; best.cd = Math.min(best.cd, 0.3);
+  burst(best.x, best.y + 1.3, best.z, 16, 0xc070ff, 3, 4, 0.1, 0.8); burst(e.x, e.y + 1.9, e.z, 8, 0xc070ff, 2.5, 3, 0.09, 0.6);
+}
+function clearHexes() { for (const h of hexes) scene.remove(h.g); hexes.length = 0; }
+function updateHexes(dt) {
+  for (let i = hexes.length - 1; i >= 0; i--) {
+    const h = hexes[i]; h.t += dt;
+    h.fill.scale.setScalar(Math.max(0.01, h.r * Math.min(1, h.t / h.T)));
+    if (h.t < h.T) continue;
+    burst(h.x, h.g.position.y + 0.3, h.z, 26, 0xff5a3a, 5, 7, 0.14, 0.8); sfx.thud(); cam.shake = Math.min(cam.shake + 0.2, 0.5);
+    for (const t of targets()) {
+      const qx = t.x - h.x, qz = t.z - h.z, q = Math.hypot(qx, qz);
+      if (isDown(t) || q > h.r) continue;
+      const fx = q > 0.05 ? qx / q : 0, fz = q > 0.05 ? qz / q : 1;
+      if (t === player) hitPlayer(h.src, fx, fz, { dmg: 20, parry: false }); else hitAlly(t, 12, fx, fz, false, null);
+    }
+    scene.remove(h.g); hexes.splice(i, 1);
+  }
+}
+// ============================================================ allies
+// Two companions. The guardian closes in, soaks blows on a shield and pulls enemies onto himself.
+// The archer hangs back and shoots. They follow when nothing is happening and creep when you creep.
+const allies = [];
+function makeAlly(kind) {
+  const tunic = new THREE.MeshLambertMaterial({ color: kind ? 0x4f7d3a : 0x9a3d36 });
+  const skin = new THREE.MeshLambertMaterial({ color: 0xd9a57c }), dark = new THREE.MeshLambertMaterial({ color: 0x3b3247 });
+  const steel = new THREE.MeshLambertMaterial({ color: 0xc4ccd2 }), wood = new THREE.MeshLambertMaterial({ color: 0x7a5230 });
+  const box = (w, h, d, m) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.castShadow = true; return o; };
+  const root = new THREE.Group(), body = new THREE.Group(); root.add(body);
+  const torso = box(0.48, 0.5, 0.27, tunic); torso.position.y = 0.82;
+  const head = box(0.3, 0.3, 0.3, skin); head.position.y = 1.26;
+  const cap = box(0.34, 0.13, 0.34, kind ? tunic : steel); cap.position.set(0, 1.4, 0);
+  const legL = new THREE.Group(), legR = new THREE.Group(); legL.position.set(-0.12, 0.56, 0); legR.position.set(0.12, 0.56, 0);
+  const l1 = box(0.17, 0.56, 0.19, dark); l1.position.y = -0.28; legL.add(l1);
+  const l2 = box(0.17, 0.56, 0.19, dark); l2.position.y = -0.28; legR.add(l2);
+  const armL = new THREE.Group(), armR = new THREE.Group(); armL.position.set(-0.32, 1.03, 0); armR.position.set(0.32, 1.03, 0);
+  const a1 = box(0.13, 0.5, 0.13, tunic); a1.position.y = -0.25; armL.add(a1);
+  const a2 = box(0.13, 0.5, 0.13, tunic); a2.position.y = -0.25; armR.add(a2);
+  if (kind === 0) {
+    const blade = box(0.05, 0.1, 0.85, steel); blade.position.set(0, -0.5, 0.45); armR.add(blade);
+    const shield = box(0.08, 0.7, 0.55, wood); shield.position.set(-0.1, -0.35, 0.12); armL.add(shield);
+  } else {
+    const bow = box(0.04, 0.95, 0.04, wood); bow.position.set(0, -0.5, 0.08); armL.add(bow);
+  }
+  body.add(torso, head, cap, legL, legR, armL, armR);
+  const bar = new THREE.Group();
+  const bg = new THREE.Mesh(new THREE.PlaneGeometry(0.92, 0.1), new THREE.MeshBasicMaterial({ color: 0x14181a, depthTest: false, fog: false, transparent: true }));
+  const fg = new THREE.Mesh(new THREE.PlaneGeometry(0.88, 0.06), new THREE.MeshBasicMaterial({ color: 0x6fbf73, depthTest: false, fog: false, transparent: true }));
+  bg.renderOrder = 20; fg.renderOrder = 21; fg.position.z = 0.001; bar.add(bg, fg); bar.position.y = 1.75; root.add(bar);
+  scene.add(root);
+  return { root, body, legL, legR, armL, armR, bar, fg, tunic };
+}
+function spawnAllies() {
+  for (const al of allies) scene.remove(al.m.root);
+  allies.length = 0;
+  [['Guardian', 0, 190, -2.2], ['Archer', 1, 85, 2.2]].forEach(([name, kind, hp, ox]) => {
+    allies.push({ name, kind, x: ox, z: -2.5, y: heightAt(ox, -2.5), face: 0, hp, maxHp: hp, state: 'follow', t: 0, cd: 1, downT: 0, flash: 0, taunt: 0, tauntCd: 3, atk: null, draw: 0, kvx: 0, kvz: 0, walk: 0, mvx: 0, mvz: 0, still: 9, go: 0, think: 0, react: 0.4, mode: 'rest', rx: ox, rz: -2.5, look: 'player', side: 0, lead: 0, kind1: 0, m: makeAlly(kind) });
+  });
+}
+function hitAlly(al, dmg, fx, fz, parryable, e) {
+  if (al.state === 'down') return;
+  const front = Math.sin(al.face) * -fx + Math.cos(al.face) * -fz > 0.1;
+  if (al.kind === 0 && parryable && front && Math.random() < 0.45) {      // caught on the shield
+    sfx.clang(); burst(al.x - fx * 0.5, al.y + 1.0, al.z - fz * 0.5, 7, 0xffe9a8, 3, 3, 0.07, 0.4);
+    al.kvx += fx * 2; al.kvz += fz * 2;
+    if (e && !e.move.ranged) { e.post = Math.min(e.maxPost * 0.9, e.post + 25); e.postWait = 1.5; }
+    return;
+  }
+  al.hp -= dmg; al.flash = 0.15; al.kvx += fx * 5; al.kvz += fz * 5;
+  burst(al.x, al.y + 1.0, al.z, 6, 0xc9482e, 2.5, 3, 0.08, 0.5);
+  if (al.hp <= 0) { al.hp = 0; al.state = 'down'; al.downT = 0; al.atk = null; al.draw = 0; say(al.name + ' is down'); }
+}
+function allyShoot(al, foe) {
+  const ox = al.x + Math.sin(al.face) * 0.5, oy = al.y + 1.25, oz = al.z + Math.cos(al.face) * 0.5;
+  const dx = foe.x - ox, dz = foe.z - oz, d = Math.hypot(dx, dz) || 1, sp = 50, time = d / sp;
+  const mesh = new THREE.Mesh(arrowGeo, arrowMat); mesh.castShadow = true; scene.add(mesh);
+  const streak = new THREE.Mesh(streakGeo, streakMat); mesh.add(streak);
+  arrows.push({ mesh, streak, x: ox, y: oy, z: oz, vx: (dx / d) * sp, vy: (foe.y + 0.8 - oy) / time + 0.5 * 9 * time, vz: (dz / d) * sp, dmg: 6, power: 0.5, life: 4, stuck: 0, ally: true });
+}
+function updateAllies(dt) {
+  const inFight = enemies.some((e) => e.state !== 'idle' && e.state !== 'dead' && Math.hypot(e.x - player.x, e.z - player.z) < 34);
+  allies.forEach((al, i) => {
+    const m = al.m;
+    al.t += dt; al.cd -= dt; al.taunt -= dt; al.tauntCd -= dt; al.flash = Math.max(0, al.flash - dt);
+    let mvx = 0, mvz = 0, turnTo = null, armR = null, armL = null;
+    if (al.state === 'down') {
+      al.downT += dt;
+      if ((!inFight && al.downT > 3) || (al.downT > 12 && !enemies.some((e) => e.state !== 'dead' && e.state !== 'idle' && Math.hypot(e.x - al.x, e.z - al.z) < 12))) { al.state = 'follow'; al.hp = al.maxHp * 0.5; say(al.name + ' is back up'); }
+    } else {
+      if (!inFight) al.hp = Math.min(al.maxHp, al.hp + 5 * dt);
+      let foe = null, fd = 1e9;
+      for (const e of enemies) {
+        if (e.state === 'dead' || e.state === 'thrown') continue;
+        const de = Math.hypot(e.x - al.x, e.z - al.z);
+        const fair = (e.state !== 'idle' && Math.hypot(e.x - player.x, e.z - player.z) < 28) || (!player.crouch && e.state !== 'idle' && de < 8);
+        if (!fair) continue;
+        const sc = de - (al.kind === 0 && e.tgt === player ? 3 : 0) - (al.kind === 1 && (e.kind === 2 || e.kind === 6) ? 5 : 0) - (al.kind === 0 && e.kind === 4 ? 2 : 0) + (al.kind === 0 ? Math.max(0, Math.hypot(e.x - player.x, e.z - player.z) - 9) * 2 : 0);   // the guardian peels for you and stays close, the archer hunts their back rank
+        if (sc < fd) { fd = sc; foe = e; }
+      }
+      if (foe) {
+        const dx = foe.x - al.x, dz = foe.z - al.z, d = Math.hypot(dx, dz) || 1, ux = dx / d, uz = dz / d;
+        turnTo = Math.atan2(dx, dz);
+        if (al.kind === 0) {
+          const reach = foe.kind === 3 ? 2.5 : 1.9;
+          if (al.atk) {
+            const a = al.atk; a.t += dt;
+            armR = a.t < 0.4 ? lerp(0, -2.8, smoothstep(0, 0.4, a.t)) : lerp(-2.8, 0, smoothstep(0.4, 0.75, a.t));
+            if (!a.done && a.t >= 0.42) { a.done = true; sfx.whoosh(0.3); if (d < reach + 0.8) {
+              const shut = foe.kind === 1 && (foe.state === 'chase' || (foe.state === 'recover' && foe.t > 0.3)) && Math.sin(foe.face) * -ux + Math.cos(foe.face) * -uz > 0.3;
+              if (shut) { sfx.clang(); foe.post = Math.min(foe.maxPost * 0.9, foe.post + 12); foe.postWait = 1.5; foe.bar = 3; } else damageEnemy(foe, 6, ux, uz, 2.5, 18);
+            } }
+            if (a.t >= 0.8) al.atk = null;
+          } else if (d > reach) { mvx = ux * 5.2; mvz = uz * 5.2; }
+          else if (al.cd <= 0) { al.atk = { t: 0, done: false }; al.cd = 1.3 + Math.random() * 0.7; }
+          armL = -1.1;
+          if (al.tauntCd <= 0 && d < 5) {                // a shout that pulls nearby enemies onto the shield
+            al.tauntCd = 12; al.taunt = 3; burst(al.x, al.y + 1.6, al.z, 12, 0xffd45a, 3, 3, 0.09, 0.6);
+            enemies.filter((e) => e.state === 'chase' && e.kind !== 2 && Math.hypot(e.x - al.x, e.z - al.z) < 9)
+              .sort((a, b) => Math.hypot(a.x - al.x, a.z - al.z) - Math.hypot(b.x - al.x, b.z - al.z)).slice(0, 2).forEach((e) => { e.tgt = al; e.pick = 3; });
+          }
+        } else {
+          if (d < 6.5) { mvx = -ux * 5; mvz = -uz * 5; }
+          else if (d > 16) { mvx = ux * 5; mvz = uz * 5; }
+          if (al.draw > 0) {
+            al.draw += dt; armL = -1.5; armR = -1.5;
+            if (al.draw >= 0.85) { allyShoot(al, foe); al.draw = 0; al.cd = 1.2 + Math.random() * 0.7; }
+          } else if (al.cd <= 0 && d < 22 && d > 3.5 && !mvx) al.draw = 0.01;
+        }
+      } else {                                           // nothing to fight: travel with the player like a person would, not on a leash
+        al.atk = null; al.draw = 0;
+        const moving = player.speed > 1.5;
+        al.still = moving ? 0 : al.still + dt; al.go = moving ? al.go + dt : 0; al.think -= dt;
+        // anything hostile and unaware nearby? then stay behind whoever is leading
+        let threat = null, td = 34;
+        for (const e of enemies) { if (e.state !== 'idle') continue; const q = Math.hypot(e.x - player.x, e.z - player.z); if (q < td) { td = q; threat = e; } }
+        const ms = Math.hypot(player.mvx || 0, player.mvz || 0);
+        if (ms > 1) { al.hx = player.mvx / ms; al.hz = player.mvz / ms; }
+        const hx = al.hx || 0, hz = al.hz || 1;
+        if (al.think <= 0 || (moving && al.mode !== 'walk') || (!moving && al.still > 1.2 && al.mode === 'walk') || (!!threat !== (al.mode === 'wary'))) {
+          al.think = 2.5 + Math.random() * 4;
+          if (threat) { al.mode = 'wary'; al.side = (i ? 1 : -1) * (1.6 + Math.random() * 1.5); al.lead = -(2.2 + Math.random() * 1.6); }
+          else if (moving) { al.mode = 'walk'; al.side = (i ? 1 : -1) * (al.kind ? 3 + Math.random() * 3 : 1.8 + Math.random() * 1.6) * (Math.random() < 0.15 ? -1 : 1); al.lead = al.kind ? 3 + Math.random() * 5 : -0.5 + Math.random() * 3; }   // the archer ranges ahead, the guardian walks beside you
+          else {                                           // you stopped: drift somewhere nearby and find something to look at
+            al.mode = 'rest'; const a = Math.random() * 6.283, r = 2.6 + Math.random() * 4;
+            al.rx = player.x + Math.sin(a) * r; al.rz = player.z + Math.cos(a) * r;
+            if (heightAt(al.rx, al.rz) < 0.2) { al.rx = player.x; al.rz = player.z + 2.5; }
+            const pick = Math.random(), camp = (world.camps || []).find((c) => c && !c.cleared);
+            al.look = pick < 0.35 ? 'player' : pick < 0.6 && camp ? Math.atan2(camp.x - al.rx, camp.z - al.rz) : Math.random() * 6.283;
+          }
+        }
+        let gx, gz;
+        if (al.mode === 'wary') { const q = Math.hypot(threat.x - player.x, threat.z - player.z) || 1, ax = (threat.x - player.x) / q, az = (threat.z - player.z) / q; gx = player.x + ax * al.lead + az * al.side; gz = player.z + az * al.lead - ax * al.side; }
+        else if (al.mode === 'walk') { gx = player.x + hx * al.lead + hz * al.side; gz = player.z + hz * al.lead - hx * al.side; }
+        else { gx = al.rx; gz = al.rz; }
+        const dx = gx - al.x, dz = gz - al.z, d = Math.hypot(dx, dz), far = Math.hypot(player.x - al.x, player.z - al.z);
+        if (far > 55) { al.x = player.x - hx * 3; al.z = player.z - hz * 3; al.y = heightAt(al.x, al.z); }
+        else if (al.mode === 'walk' && al.go < al.react && far < 7) { turnTo = Math.atan2(player.x - al.x, player.z - al.z); }   // a beat before setting off
+        else if (d > (al.mode === 'rest' ? 0.7 : 1.3)) {
+          const top = far > 13 ? 9 : al.mode === 'rest' ? 2.2 : player.crouch ? 2.6 : Math.max(3.2, Math.min(player.speed * (d > 3 ? 1.35 : 1.05), 9.5));
+          const sp = Math.min(top, d * 1.8 + 0.8);
+          let vx = dx / d, vz = dz / d;
+          forNearby(al.x, al.z, 2.4, (c) => {            // walk round trees rather than into them
+            for (const tr of c.trees) {
+              if (!tr.alive) continue;
+              const qx = tr.x - al.x, qz = tr.z - al.z, q = Math.hypot(qx, qz), ahead = (qx * vx + qz * vz) / (q || 1);
+              if (q < 2.2 && ahead > 0.4) { const s = qx * vz - qz * vx > 0 ? -1 : 1, w = (2.2 - q) * 0.9, px = vz, pz = -vx; vx += px * s * w; vz += pz * s * w; }
+            }
+          });
+          const vl = Math.hypot(vx, vz) || 1;
+          mvx = (vx / vl) * sp; mvz = (vz / vl) * sp; turnTo = Math.atan2(mvx, mvz);
+        } else if (al.mode === 'rest') turnTo = al.look === 'player' ? Math.atan2(player.x - al.x, player.z - al.z) : al.look;
+        else if (al.mode === 'wary') turnTo = Math.atan2(threat.x - al.x, threat.z - al.z);
+        if (!moving) al.react = 0.25 + Math.random() * 0.5;
+      }
+    }
+    if (turnTo !== null) { let df = turnTo - al.face; df = Math.atan2(Math.sin(df), Math.cos(df)); al.face += clamp(df, -9 * dt, 9 * dt); }
+    if ((mvx || mvz) && heightAt(al.x + mvx * 0.3, al.z + mvz * 0.3) < -0.6) { mvx = 0; mvz = 0; }
+    al.mvx = mvx; al.mvz = mvz;
+    al.x += (mvx + al.kvx) * dt; al.z += (mvz + al.kvz) * dt;
+    al.kvx *= Math.exp(-7 * dt); al.kvz *= Math.exp(-7 * dt);
+    for (const o of [player, ...allies]) {
+      if (o === al) continue;
+      const sx = al.x - o.x, sz = al.z - o.z, sd = Math.hypot(sx, sz);
+      if (sd < 0.85 && sd > 1e-4) { al.x += (sx / sd) * (0.85 - sd); al.z += (sz / sd) * (0.85 - sd); }
+    }
+    pushOut(al, 0.28);
+    al.y = lerp(al.y, Math.max(heightAt(al.x, al.z), -0.9), 1 - Math.exp(-16 * dt));
+    const sp = Math.hypot(mvx, mvz);
+    al.walk += sp * dt * 1.9;
+    m.root.position.set(al.x, al.y, al.z); m.root.rotation.y = al.face;
+    const stride = Math.sin(al.walk) * clamp(sp / 5, 0, 1) * 0.8, down = al.state === 'down';
+    m.legL.rotation.x = stride; m.legR.rotation.x = -stride;
+    m.armL.rotation.x = armL !== null ? armL : -stride * 0.8; m.armR.rotation.x = armR !== null ? armR : stride * 0.8;
+    const lie = down ? Math.min(1, al.downT / 0.4) : 0;
+    m.body.rotation.x = -lie * 1.5; m.body.position.y = lie * 0.1 - (player.crouch && !down && !sp ? 0.2 : 0);
+    m.tunic.emissive.setRGB(al.flash > 0 ? 0.8 : 0, al.flash > 0 ? 0.2 : 0, al.flash > 0 ? 0.2 : 0);
+    m.bar.visible = !down && al.hp < al.maxHp - 1;
+    if (m.bar.visible) { m.bar.quaternion.setFromAxisAngle(UP, -al.face).multiply(camera.quaternion); const f = al.hp / al.maxHp; m.fg.scale.x = Math.max(f, 0.001); m.fg.position.x = -0.44 * (1 - f); }
+  });
+}
+// ============================================================ camps: set-piece fights placed around the start
+const CAMPS = [
+  { name: 'The shield wall', ang: 0.5, units: [[1, 0, 0], [1, 1.6, 0], [1, -1.6, 0], [5, 0.9, -1.8], [5, -0.9, -1.8], [2, 0, -7], [4, 7, -1], [4, -7, -1]] },
+  { name: 'The ambush', ang: 2.1, units: [[0, 0, 0], [0, 2.2, 0.6], [0, -2.2, 0.6], [4, 11, 7], [4, -11, 7], [4, 13, 3, 1], [0, -9, 2, 1], [2, 0, -8]] },
+  { name: 'The brute', ang: 3.7, units: [[3, 0, 0], [0, 3, 1.5, 1], [0, -3, 1.5, 1], [6, 0, -8], [2, 3, -7]] },
+  { name: 'The hexers', ang: 5.2, units: [[1, 0.8, 0], [1, -0.8, 0], [5, 0, -1.8], [6, 2.5, -7], [6, -2.5, -7], [4, 6, 0], [4, -6, 0]] },
+];
+function placeCamps() {
+  for (const c of world.camps || []) if (c && c.beacon) scene.remove(c.beacon);
+  world.camps = [];
+  CAMPS.forEach((C, ci) => {
+    let spot = null;
+    // nearest reasonably flat, dry ground in this camp's third of the compass; steeper ground is accepted the further out the search goes
+    for (let pass = 0; pass < 3 && !spot; pass++) for (let r = 58; r < 150 && !spot; r += 5) for (const da of [0, 0.2, -0.2, 0.4, -0.4, 0.6, -0.6, 0.8, -0.8, 1.0, -1.0]) {
+      const x = Math.cos(C.ang + da) * r, z = Math.sin(C.ang + da) * r, h = baseHeight(x, z);
+      const flat = Math.max(Math.abs(baseHeight(x + 5, z) - h), Math.abs(baseHeight(x - 5, z) - h), Math.abs(baseHeight(x, z + 5) - h), Math.abs(baseHeight(x, z - 5) - h));
+      if (h > 1.8 && h < 16 + pass * 6 && flat < 1.6 + pass * 1.5) { spot = [x, z, h]; break; }
+    }
+    if (!spot) return;
+    const [x, z, h] = spot, l = Math.hypot(x, z), fx = -x / l, fz = -z / l, rx = -fz, rz = fx;     // the camp faces the start
+    const beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 46, 6), new THREE.MeshBasicMaterial({ color: 0xffb060, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false }));
+    beacon.position.set(x, h + 23, z); scene.add(beacon);
+    const camp = { name: C.name, x, z, cleared: false, beacon };
+    world.camps[ci] = camp;
+    clearEnemies((e) => e.camp === null && Math.hypot(e.x - x, e.z - z) < 42);
+    manCamp(ci);
+  });
+}
+function manCamp(ci) {
+  const camp = world.camps[ci], C = CAMPS[ci];
+  if (!camp || camp.cleared) return;
+  clearEnemies((e) => e.camp === ci);
+  const l = Math.hypot(camp.x, camp.z), fx = -camp.x / l, fz = -camp.z / l, rx = -fz, rz = fx;
+  C.units.forEach(([kind, lat, fwd, flank], k) => {
+    const e = spawnEnemy('camp' + ci + '|e' + k, camp.x + rx * lat + fx * fwd, camp.z + rz * lat + fz * fwd, kind, 'camp', ci);
+    e.face = e.homeFace = Math.atan2(fx, fz); e.flank = !!flank;
+  });
+}
+const nearCamp = (x, z) => (world.camps || []).some((c) => c && Math.hypot(c.x - x, c.z - z) < 42);
+function campCheck(e) {
+  if (e.camp === null) return;
+  const camp = world.camps[e.camp];
+  if (!camp || camp.cleared || enemies.some((o) => o !== e && o.camp === e.camp && o.state !== 'dead')) return;
+  camp.cleared = true; scene.remove(camp.beacon); camp.beacon = null;
+  player.hp = Math.min(100, player.hp + 25); say(camp.name + ' cleared'); player.comboShow = 2.5; hudDirty = true;
+}
+// ============================================================ main loop
+function updatePlayer(dt) {
+  const P = player;
+  P.hurt = Math.max(0, P.hurt - dt);
+  if (P.dead > 0) {
+    P.dead -= dt;
+    const k = clamp((2.6 - P.dead) / 0.5, 0, 1);
+    pm.body.rotation.set(-k * 1.5, 0, 0); pm.body.position.y = k * 0.1;
+    P.y = lerp(P.y, heightAt(P.x, P.z), 1 - Math.exp(-18 * dt));
+    pm.root.position.set(P.x, P.y, P.z);
+    ring.visible = false; pm.bow.visible = false;
+    if (P.dead <= 0) respawn();
+    return;
+  }
+  // the camera is the aim: forward is wherever it looks
+  const fwx = -Math.sin(cam.yaw), fwz = -Math.cos(cam.yaw);
+  const rxw = Math.cos(cam.yaw), rzw = -Math.sin(cam.yaw);
+  const yawF = Math.atan2(fwx, fwz);
+  let ix = 0, iz = 0;
+  if (keys.KeyW || keys.ArrowUp) iz += 1;
+  if (keys.KeyS || keys.ArrowDown) iz -= 1;
+  if (keys.KeyD || keys.ArrowRight) ix += 1;
+  if (keys.KeyA || keys.ArrowLeft) ix -= 1;
+  let mx = fwx * iz + rxw * ix, mz = fwz * iz + rzw * ix;
+  const ml = Math.hypot(mx, mz);
+  if (ml > 0) { mx /= ml; mz /= ml; }
+  const swimming = heightAt(P.x, P.z) < -0.75;
+  const alt = !!(keys.AltLeft || keys.AltRight);
+  const armed = P.tool === 'axe';
+  P.stamWait -= dt; P.regenWait -= dt; P.rollCd -= dt; P.dashCd -= dt; P.shotCd -= dt; P.comboLock -= dt; P.comboShow -= dt; P.riposte -= dt; P.stun -= dt; P.lightIdle += dt; P.guardDrop += dt; P.tap -= dt; P.flowT += dt;
+  if (P.stamWait <= 0) P.stam = Math.min(100, P.stam + 30 * dt);
+  if (P.regenWait <= 0) P.hp = Math.min(100, P.hp + 1 * dt);
+  // Shift sprints. Shift + Space rolls. Space alone jumps. Q and E twist the body. F is the off hand.
+  const cDown = !!(keys.ShiftLeft || keys.ShiftRight), eDown = false;
+  const wantRoll = cDown && !!keys.Space && !P.jumpHeld;
+  P.crouch = !!keys.KeyC;                                // crouch is held, not toggled
+  const wantQ = !!keys.KeyF && !P.qHeld;
+  P.qHeld = !!keys.KeyF;
+  // The torso twists left on Q and right on E, and springs back when let go. How fast it is turning is the power behind a cut or a throw.
+  const looseEdge = !keys.KeyQ && P.qKey; P.qKey = !!keys.KeyQ;         // with the bow up, holding Q pulls the string and letting go looses
+  const drive = P.aiming ? 0 : (keys.KeyQ ? 1 : 0) - (keys.KeyE ? 1 : 0);
+  P.twistV += ((drive * 1.2 - P.twist) * (drive ? 70 : 34) - P.twistV * (drive ? 7 : 9)) * dt;
+  P.twist = clamp(P.twist + P.twistV * dt, -1.5, 1.5); P.drive = drive;
+  const busy = () => !!(P.roll || P.dash || P.stun > 0);
+  if (keys.Space && !P.jumpHeld && !cDown && !busy() && !swimming && P.stam > 4) {
+    if (!P.air) { P.air = true; P.vy = 7.4; P.jumps = 1; spendStam(8); }
+    else if (P.jumps < 2 && !(P.atk && P.atk.kind === 'plunge')) { P.vy = 6.8; P.jumps = 2; spendStam(8); burst(P.x, P.y, P.z, 8, 0xe8e4d4, 2, 1, 0.1, 0.4); }
+  }
+  P.jumpHeld = !!keys.Space;
+  if (wantRoll && !busy() && P.rollCd <= 0 && !swimming && !P.air && P.stam >= 8) {
+    const dx = ml > 0 ? mx : Math.sin(P.face), dz = ml > 0 ? mz : Math.cos(P.face);
+    P.roll = { t: 0, dx, dz }; P.rollCd = 0.7; P.atk = null; P.charging = null; P.ready = null; spendStam(20);
+    P.faceTarget = Math.atan2(dx, dz);
+  }
+  // bow: hold right mouse to draw. It takes both hands, so there is no guard while it is up
+  const wasAiming = P.aiming;
+  P.aiming = mouse.right && P.stance === 'bow' && armed && !busy() && !swimming;
+  if (P.aiming && !wasAiming) { P.draw = 0; P.atk = null; P.charging = null; cam.aimPitch = 0.2; }
+  P.nock -= dt;
+  if (P.aiming && keys.KeyQ && P.nock <= 0) {            // the string only comes back while Q is held
+    P.draw = Math.max(P.draw, 0) + dt;
+    if (P.draw >= 0.85) { P.stam = Math.max(0, P.stam - 5 * dt); P.stamWait = 0.4; if (P.stam <= 0) P.draw = 0.2; }
+  } else if (!looseEdge) P.draw = 0;
+  const charge = P.aiming ? clamp(P.draw / 0.85, 0, 1) : 0;
+  P.charge = charge;
+  // movement
+  let sp = 0, vx = 0, vz = 0;
+  if (P.dash) {
+    const d = P.dash; d.t += dt; sp = 30; vx = d.dx * 30; vz = d.dz * 30;
+    for (const e of enemies) {
+      if (e.state === 'dead' || d.hit.has(e) || Math.hypot(e.x - P.x, e.z - P.z) > 1.25) continue;
+      d.hit.add(e);
+      const back = Math.sin(e.face) * d.dx + Math.cos(e.face) * d.dz > 0.35;
+      const guarded = e.kind === 1 && !back && (e.state === 'chase' || e.state === 'idle');
+      damageEnemy(e, 14 * (back ? 1.6 : 1) * (guarded ? 0.5 : 1), d.dx, d.dz, 1, 15);
+      juice.hitStop = 0.04;
+    }
+    if (Math.random() < dt * 60) burst(P.x, P.y + 0.9, P.z, 2, 0xfff3c9, 0.6, 0.6, 0.12, 0.25);
+    if (d.t >= 0.2) P.dash = null;
+  } else if (P.roll) {
+    const r = P.roll; r.t += dt;
+    sp = 11 * (1 - r.t / 0.42 * 0.5); vx = r.dx * sp; vz = r.dz * sp;
+    if (r.t >= 0.42) P.roll = null;
+  } else {
+    P.mvx = 0; P.mvz = 0;
+    if (ml > 0) {
+      const sprint = cDown && P.stam > 0 && !P.aiming && !swimming && !P.atk && !P.charging && !P.guard;
+      if (sprint) { P.stam = Math.max(0, P.stam - 11 * dt); P.stamWait = 0.4; }
+      if (sprint) P.crouch = false;
+      sp = swimming ? 2.6 : sprint ? 8.2 : P.crouch ? 2.7 : 5.4;
+      if (P.aiming) sp *= keys.KeyQ ? 0.25 : 0.55;       // with the string pulled you can only shuffle
+      if (P.charging) sp *= 0.6;
+      if (P.atk) sp *= P.atk.kind === 'drag' || P.atk.kind === 'tip' ? 0.65 : 0.4;
+      if (P.guard) sp *= 0.55;
+      if (P.ready && !P.atk) sp *= 0.8;
+      if (P.stun > 0) sp *= 0.3;
+      vx = mx * sp; vz = mz * sp; P.mvx = vx; P.mvz = vz;
+      if (!P.atk && !P.aiming && !P.charging && !P.guard) P.faceTarget = Math.atan2(mx, mz);
+    }
+    const a = P.atk;
+    if (a && a.lunge && !a.blocked) {                    // each strike steps into the target
+      const k = a.t / a.dur;
+      if (k < 0.5) { const l = a.lunge * (1 - k * 2); vx += Math.sin(P.face) * l; vz += Math.cos(P.face) * l; }
+    }
+  }
+  if (sp > 0 && !busy()) {
+    const ahead = heightAt(P.x + (vx / sp) * 0.6, P.z + (vz / sp) * 0.6) - heightAt(P.x, P.z);
+    if (ahead > 0.25) { const k = clamp(1 - (ahead - 0.25) * 1.3, 0.25, 1); vx *= k; vz *= k; sp *= k; }
+  }
+  P.x += (vx + P.kvx) * dt; P.z += (vz + P.kvz) * dt;
+  P.kvx *= Math.exp(-7 * dt); P.kvz *= Math.exp(-7 * dt);
+  pushOut(P, 0.28);
+  const gh = heightAt(P.x, P.z);
+  const ty = Math.max(gh, waveHeight(P.x, P.z) - 0.95);
+  if (P.air) {
+    P.vy -= 21 * dt; P.y += P.vy * dt;
+    if (P.y <= ty) { P.y = ty; if (P.vy <= 0) { P.air = false; P.vy = 0; P.jumps = 0; P.plunged = false; } }   // rising through a slope is not a landing
+  } else P.y = lerp(P.y, ty, 1 - Math.exp(-18 * dt));
+  if (P.air || P.roll || P.dash || swimming) P.crouch = false;   // no crouching in the air, mid-roll or in water
+  P.plantT = P.aiming && sp < 0.5 && !P.air ? P.plantT + dt : 0;   // how long the feet have been planted with the bow up
+  P.speed = sp;
+  P.walk += sp * dt * 1.9;
+
+  // terrain tools work on the spot just ahead
+  ring.visible = false; P.digging = false;
+  if (!armed && cursor.valid) {
+    ring.visible = true;
+    ring.position.set(cursor.x, cursor.y + 0.25, cursor.z);
+    ring.material.opacity = 0.85;
+    if (mouse.left && !busy()) {
+      P.faceTarget = yawF;
+      applyBrush(cursor.x, cursor.z, P.tool, dt, P.levelTarget);
+      if (Math.random() < dt * 22) burst(cursor.x + (Math.random() - 0.5) * 3, cursor.y + 0.2, cursor.z + (Math.random() - 0.5) * 3, 2, 0x6b4f35, 1.6, 3, 0.11, 0.6);
+      P.digging = true;
+    }
+  }
+  // ---- guard: held on E. The instant it comes up is the parry.
+  const guardOk = armed && !busy() && !swimming && !P.aiming && !P.charging && !P.air && (!P.atk || P.atk.jab) && P.stam > 0;
+  const wasGuard = P.guard;
+  P.guard = (eDown || (mouse.right && P.stance === 'melee')) && guardOk;
+  if (P.guard && !wasGuard) { P.guardT = P.guardDrop < 0.35 ? 0.25 : 0; }      // flicking it up and down earns no fresh parry
+  else if (P.guard) P.guardT += dt;
+  if (!P.guard && wasGuard) P.guardDrop = 0;
+  if (P.guard) { P.faceTarget = yawF; P.stamWait = Math.max(P.stamWait, 0.25); }
+  // ---- weapons
+  const canAct = armed && !busy() && !swimming;
+  if (canAct && P.aiming) {
+    P.faceTarget = yawF; P.charging = null; P.tap = 0; P.holdT = 0; mouse.click = 0;
+    if (looseEdge && charge >= 0.1) {
+      if (alt) {
+        if (P.shotCd <= 0 && P.stam >= 10) { for (const o of [-0.075, 0, 0.075]) fireArrow(o, charge, P.plantT > 0.3); P.shotCd = 3; spendStam(14); P.nock = 0.25; }
+      } else if (P.stam >= 3) { const steady = P.plantT > 0.3; fireArrow(0, charge, steady); if (steady) say('Steady'); spendStam(5); P.nock = 0.2; }
+      P.draw = 0;
+    }
+  } else if (canAct) {
+    // left mouse: a short press is a quick strike, a longer one winds up the heavy
+    if (P.air && P.jumps > 0 && mouse.click > 0) { P.tap = 0.3; mouse.click = 0; P.lUsed = true; }      // in the air a press acts at once
+    if (mouse.left) P.holdT += dt;
+    else { if ((P.holdT > 0 && P.holdT < 0.15) || (P.holdT === 0 && mouse.click > 0)) P.tap = 0.3; P.holdT = 0; mouse.click = 0; P.lUsed = false; }
+    const free = !P.atk && P.comboLock <= 0;
+    if (wantQ && free && !P.charging && P.stam >= 8) {
+      faceCamera(); P.atk = { kind: 'grab', t: 0, dur: 0.34, done: false }; spendStam(10);
+    } else if (P.air && P.jumps > 0 && P.tap > 0 && !P.plunged && P.y - gh > 1.0 && free && !P.charging && P.stam >= 8) {
+      // down attack: hang for a beat, then drive the blade straight down
+      faceCamera(); P.atk = { kind: 'plunge', t: 0, dur: 9, dive: false, seen: new Set(), dmg: 12, post: 22, heavy: false, crit: false, hitAny: false, landed: false };
+      P.vy = Math.max(P.vy, 1.5); P.plunged = true; spendStam(14); P.tap = 0;
+    } else if (P.air && P.tap > 0) {
+      P.tap = 0;                                         // no ground attacks while airborne
+    } else if (alt && P.tap > 0 && free) {
+      if (P.dashCd <= 0 && P.stam >= 12) { P.dash = { t: 0, dx: fwx, dz: fwz, hit: new Set() }; P.dashCd = 2.5; spendStam(22); P.charging = null; faceCamera(); }
+      P.tap = 0;
+    } else if (mouse.left && P.holdT >= 0.15 && free && !P.ready && !P.lUsed && P.stam > 6) {
+      // blade ready. From here a short, sharp stroke of the mouse picks a cut and the character throws it.
+      P.ready = { t: 0, reach: 1.9, full: false };
+    } else if (free && !P.charging && P.tap > 0 && P.stam > 3) {
+      startLight(P.guard); P.tap = 0;
+    }
+    if (P.ready) {                                           // like the bow: aim, hold for power, let go
+      const r = P.ready; r.t += dt; P.faceTarget = yawF;
+      if (r.t > 0.95 && !r.full) { r.full = true; burst(P.x, P.y + 1.2, P.z, 8, 0xffd45a, 2, 2, 0.07, 0.4); }
+      if (!mouse.left) {
+        if (!P.atk && P.comboLock <= 0 && P.stam > 6) startAimed(r, clamp((r.t - 0.15) / 0.8, 0, 1));
+        P.ready = null;
+      }
+    }
+    if (P.charging) {
+      const c = P.charging; c.t += dt; P.faceTarget = yawF;
+      if (c.t >= 0.9 && !c.full) { c.full = true; burst(P.x, P.y + 1.1, P.z, 8, 0xffd45a, 2, 2, 0.07, 0.4); }
+      if (!mouse.left || c.t > 1.8) { P.charging = null; P.lUsed = mouse.left; startSwing(clamp((c.t - 0.15) / 0.75, 0, 1)); }
+    }
+  } else { P.charging = null; P.ready = null; }
+  if (P.aiming) P.ready = null;
+  if (P.atk) {
+    const a = P.atk; a.t += dt;
+    if (a.kind === 'swing') {                             // rotation is the engine of a cut: turn with it and it whips, turn against it and it drags
+      const rot = clamp((P.twistV * a.side) / 8, -0.5, 1);
+      a.t += dt * 0.6 * rot; a.tq = Math.max(0, rot); a.tqPeak = Math.max(a.tqPeak || 0, a.tq);
+    }
+    const k = a.t / a.dur;
+    if (a.kind === 'thrust') {
+      if (!a.done && k >= (a.hitK || 0.4)) { a.done = true; sfx.whoosh(a.cut ? 0.8 : 0); const fx = Math.sin(P.face), fz = Math.cos(P.face); bladePass(a, (x, z, r) => arcHit(P.x, P.z, fx, fz, a.reach, Math.cos(a.half), x, z, r)); showTrail('stab', a.crit); }
+    } else if (a.kind === 'swing') {
+      P.faceTarget = yawF;                               // the arc follows the camera while it travels
+      const s0 = a.s0 || 0.22, s1 = a.s1 || 0.62;
+      if (k >= s0 && !a.done) {
+        if ((a.cut || a.flow) && !a.arcShown) {
+          a.arcShown = true; sfx.whoosh(0.5 + a.c * 0.5 + 0.2 * (a.flow || 0));
+          const fl = a.flow || 0, m = trails.arcs[trails.arcI ^= 1];
+          m.visible = true; m.userData.dur = m.userData.t = 0.24 + 0.12 * fl; m.userData.peak = 0.42 + 0.14 * fl;
+          m.scale.setScalar((a.reach / 2.3) * (1 + 0.06 * fl)); m.rotation.y = P.face - pm.root.rotation.y;
+          m.material.color.setHex(fl ? FLOW_COL[fl] : (a.heavy || a.crit) ? 0xffd45a : 0xfff3c9);
+          if (fl >= 2) { const fx = Math.sin(P.face), fz = Math.cos(P.face); for (let q = -1; q <= 1; q++) burst(P.x + (fx * Math.cos(q * 0.7) - fz * Math.sin(q * 0.7)) * 2, P.y + 1.0, P.z + (fz * Math.cos(q * 0.7) + fx * Math.sin(q * 0.7)) * 2, 3, FLOW_COL[fl], 2.5, 2, 0.08, 0.35); }
+        }
+        const s = clamp((k - s0) / (s1 - s0), 0, 1), ang = a.side * lerp(-a.half, a.half, s);
+        bladePass(a, sweepTest(P.x, P.z, P.face, a.ang, ang, a.reach));
+        a.ang = ang; if (s >= 1) a.done = true;
+        trails.blade.rotation.y = ang; trails.blade.scale.setScalar(a.reach / 2.3);
+        if (trails.cur && trails.cur !== trails.blade) trails.cur.visible = false;
+        trails.cur = trails.blade; trails.blade.visible = true; trails.t = 0.14; trails.peak = a.big ? 0.9 : 0.55;
+        trails.blade.material.color.setHex(a.crit || a.heavy ? 0xffd45a : 0xfff3c9);
+      }
+    } else if (a.kind === 'tip') {
+      // the point chases the mouse on a stiff, light spring, in the camera's frame
+      a.vu += ((a.tu - a.u) * 260 - a.vu * 28) * dt; a.vv += ((a.tv - a.v) * 260 - a.vv * 28) * dt;
+      a.u += a.vu * dt; a.v += a.vv * dt;
+      const rx = Math.cos(a.yaw), rz = -Math.sin(a.yaw), fx = -Math.sin(a.yaw), fz = -Math.cos(a.yaw);
+      const wx = P.x + rx * a.u + fx * a.v, wz = P.z + rz * a.u + fz * a.v;
+      if (a.wx !== null && dt > 0) {
+        const vx = (wx - a.wx) / dt, vz = (wz - a.wz) / dt, speed = Math.hypot(vx, vz);
+        tipPass(a, a.wx, a.wz, wx, wz, vx, vz, speed);
+        P.stam = Math.max(0, P.stam - (0.8 + speed * 1.0) * dt); P.stamWait = 0.5;
+        a.speed = speed;
+      }
+      a.wx = wx; a.wz = wz;
+      P.face = P.faceTarget = Math.atan2(wx - P.x, wz - P.z);
+      a.hist.unshift([wx, wz]); if (a.hist.length > 14) a.hist.pop();
+      drawTip(a);
+      if (!mouse.left || P.stam <= 0) { P.atk = null; P.comboLock = 0.1; P.lUsed = mouse.left; }
+    } else if (a.kind === 'drag') {
+      if (!mouse.left) a.released = true;
+      if (a.released) { a.relT += dt; a.tau = a.phi + clamp(a.om * 0.12, -0.6, 0.6); }   // let go: it follows through
+      const diff = clamp(a.tau - a.phi, -2.6, 2.6); a.tau = a.phi + diff;
+      a.om = clamp(a.om + (42 * diff - 6.5 * a.om) * dt, -11, 11);                       // pulled toward the lead, damped, with a top speed
+      const prev = a.phi; a.phi += a.om * dt;
+      const speed = Math.abs(a.om);
+      P.stam = Math.max(0, P.stam - (1.5 + speed * 1.5) * dt); P.stamWait = 0.5;
+      if (speed < 1.5 || Math.sign(a.om) !== a.dir) { a.seen.clear(); a.dir = Math.sign(a.om); }   // a new pass can hit the same target again
+      if (speed >= 2.5) {                               // too slow and the edge just pushes; faster cuts deeper
+        const f = (speed - 2.5) / 8.5;
+        a.dmg = lerp(6, 34, f); a.post = lerp(8, 70, f); a.heavy = speed >= 7; a.landed = false;
+        const n0 = a.seen.size;
+        bladePass(a, sweepTest(P.x, P.z, prev, 0, a.phi - prev, 2.5));
+        if (a.seen.size > n0) { a.om *= a.landed ? 0.55 : -0.25; if (a.landed) a.crit = false; }   // flesh slows it, wood and shields stop it
+      }
+      P.face = P.faceTarget = a.phi;
+      a.hist.unshift(a.phi); if (a.hist.length > 5) a.hist.pop();
+      const glow = clamp(speed / 7, 0, 1);
+      if (trails.cur && trails.cur !== trails.blade) trails.cur.visible = false;
+      trails.cur = trails.blade; trails.blade.visible = true; trails.blade.rotation.y = 0; trails.blade.scale.setScalar(2.5 / 2.3);
+      trails.t = 0.14; trails.peak = 0.3 + 0.6 * glow; trails.blade.material.color.setHex(speed >= 7 ? 0xffd45a : 0xfff3c9);
+      trails.ghost.forEach((gm, gi) => {
+        const h = a.hist[gi + 1];
+        gm.visible = h !== undefined && speed > 1.5;
+        if (gm.visible) { gm.rotation.y = h - a.phi; gm.material.opacity = (0.34 - gi * 0.08) * glow; gm.material.color.setHex(speed >= 7 ? 0xffd45a : 0xfff3c9); }
+      });
+      if ((a.released && (a.relT > 0.28 || speed < 1.2)) || P.stam <= 0) {
+        P.atk = null; P.comboLock = 0.18; P.lUsed = mouse.left;
+        for (const gm of trails.ghost) gm.visible = false;
+      }
+    } else if (a.kind === 'grab') {
+      if (!a.done && k >= 0.4) { a.done = true; grabHit(); }
+    } else if (a.kind === 'plunge') {
+      if (!a.dive && a.t >= 0.12) { a.dive = true; P.vy = -21; }
+      if (a.dive && P.air) {                             // coming down on someone: hit them and bounce off
+        bladePass(a, (x, z, r) => Math.hypot(x - P.x, z - P.z) < 0.55 + r && P.y < heightAt(x, z) + 1.7);
+        if (a.landed) {
+          P.vy = 7.0; P.jumps = 2; P.atk = null; P.comboLock = 0.2;   // the bounce gets you clear, it does not set up another dive
+          burst(P.x, P.y, P.z, 10, 0xffd45a, 3, 2, 0.09, 0.4);
+        }
+      } else if (!P.air) {                               // hit the ground: a small shockwave
+        a.dmg = 5; a.post = 12;
+        bladePass(a, (x, z, r) => Math.hypot(x - P.x, z - P.z) < 1.5 + r);
+        burst(P.x, P.y + 0.2, P.z, 16, 0xd8d2b0, 4, 2.5, 0.12, 0.6); cam.shake = Math.min(cam.shake + 0.22, 0.5);
+        P.atk = null; P.comboLock = 0.45;
+      }
+    }
+    if (P.atk && a.kind !== 'plunge' && a.kind !== 'drag' && a.kind !== 'tip' && k >= 1) {
+      P.atk = null;
+      P.lastDriven = a.kind === 'swing' && (a.tqPeak || 0) > 0.5; P.flowT = 0;
+      if (a.kind === 'swing') { P.lastSide = a.side; if (P.lastDriven) { P.twist = a.side * 1.0; P.twistV = 0; } }
+      else P.flow = 0;
+      if (a.kind === 'swing' && a.big) { P.nextSide = -a.side; P.comboLock = !a.hitAny ? 0.32 : 0.04; }   // a big miss leaves you off balance
+      else if (a.cut) P.comboLock = P.lastDriven ? 0.1 : a.hitAny ? 0.3 : 0.42;
+      else P.comboLock = a.cut ? 0.3 : 0.04;
+    }
+  }
+  mouse.click = Math.max(0, mouse.click - dt);
+  let df = P.faceTarget - P.face;
+  df = Math.atan2(Math.sin(df), Math.cos(df));
+  P.face += df * (1 - Math.exp(-(P.aiming || (P.atk && P.atk.kind === 'swing') ? 30 : 16) * dt));
+
+  // pose
+  pm.root.position.set(P.x, P.y, P.z);
+  pm.root.rotation.y = P.face;
+  const stride = Math.sin(P.walk) * clamp(sp / 5, 0, 1) * 0.8;
+  let legL = P.air ? 0.7 : stride, legR = P.air ? -0.4 : -stride;
+  let armL = -stride * 0.8, armR = stride * 0.8, twist = 0, lean = 0, pullR = 0, armZ = 0;
+  pm.body.position.y = swimming ? -0.1 : Math.abs(Math.sin(P.walk)) * 0.05 * clamp(sp / 5, 0, 1);
+  pm.body.scale.setScalar(1);
+  if (P.roll) {
+    const k = P.roll.t / 0.42;
+    lean = k * Math.PI * 2;
+    pm.body.position.y = 0.55 - 0.55 * Math.cos(k * Math.PI * 2) * 0.6;
+    pm.body.scale.setScalar(0.85);
+  } else if (P.dash) { lean = 0.5; armL = armR = -1.4; }
+  else if (P.atk) {
+    const a = P.atk, k = a.t / a.dur;
+    if (a.over) { armL = armR = k < 0.45 ? lerp(0, -2.9, smoothstep(0, 0.45, k)) : k < 0.58 ? lerp(-2.9, -0.4, (k - 0.45) / 0.13) : lerp(-0.4, 0, smoothstep(0.58, 1, k)); lean = k > 0.45 && k < 0.85 ? 0.28 : -0.12; }
+    else if (a.kind === 'thrust' && a.cut) { const hk = a.hitK; const th = k < hk ? -0.35 * smoothstep(0, hk * 0.8, k) : Math.sin(clamp((k - hk) / (1 - hk), 0, 1) * Math.PI * 0.5 + Math.PI * 0.5) ; armR = armL = k < hk ? 0.5 * smoothstep(0, hk * 0.8, k) : -1.5 * th; lean = k < hk ? -0.15 : 0.3 * th; }
+    else if (a.kind === 'thrust') { const th = Math.sin(clamp(k, 0, 1) * Math.PI); armR = -1.5 * th; armL = a.jab ? -1.3 : -1.5 * th; lean = (a.jab ? 0.12 : 0.3) * th; if (a.jab) twist = 0.35 - 0.5 * th; }
+    else if (a.kind === 'swing') { const s0 = a.s0 || 0.22; armL = armR = -1.5; twist = k < s0 ? -a.side * a.half * 0.45 * smoothstep(0, s0 * 0.8, k) : a.ang * 0.45; armZ = k < s0 ? -a.side * 0.7 * smoothstep(0, s0 * 0.8, k) : (a.ang / a.half) * 0.7; lean = k < s0 ? -0.1 : 0.14; }
+    else if (a.kind === 'grab') { armL = -1.5; twist = lerp(0.9, -0.9, smoothstep(0.2, 0.7, k)); lean = 0.15; }
+    else if (a.kind === 'drag') { armL = armR = -1.5; lean = 0.12; twist = clamp(-a.om * 0.04, -0.4, 0.4); }
+    else if (a.kind === 'tip') { armR = -1.5; armL = -0.5; lean = 0.1; twist = -0.25; }
+    else { armL = armR = a.dive ? 0.15 : -2.8; lean = 0; legL = 1.0; legR = 0.9; }
+  } else if (P.charging) {                                // coiled toward the side the swing will start from
+    const k = Math.min(1, P.charging.t / 0.5);
+    armL = armR = -1.5 * k; twist = -P.nextSide * 1.15 * k; lean = -0.1 * k;
+  } else if (P.stun > 0) { twist = Math.sin(P.stun * 11) * 0.3; lean = -0.25; armL = armR = 0.5; }
+  else if (P.ready) {                                    // the wind-up shows which blow is coming and how much is behind it
+    const r = P.ready, up = Math.min(1, r.t / 0.18), c = clamp((r.t - 0.15) / 0.8, 0, 1), kind = aimKind(r.reach);
+    const shake = c >= 1 ? Math.sin(U.time.value * 42) * 0.035 : 0;       // trembling at full power
+    legL = 0.3 * up; legR = -0.3 * up;
+    if (kind === 'Chop') { armL = armR = -(1.7 + 1.15 * c) * up + shake; lean = -(0.08 + 0.24 * c) * up; }                 // blades lifted overhead, leaning back
+    else if (kind === 'Thrust') { armR = (0.25 + 0.75 * c) * up + shake; armL = -1.4 * up; lean = (0.1 + 0.22 * c) * up; twist = -(0.25 + 0.2 * c) * up; }   // one arm drawn back, the other pointing at the mark
+    else {                                               // blades carried out to the side the slash will start from. The body itself only turns on Q and E
+      const side = P.twist < -0.3 ? 1 : P.twist > 0.3 ? -1 : P.drive ? P.drive : P.nextSide;
+      armL = armR = -(1.15 + 0.2 * c) * up; armZ = -side * (0.55 + 0.45 * c) * up + shake; lean = -0.06 * up;
+    }
+  }
+  else if (P.guard) { armL = -1.3; armR = -0.5; twist = 0.35; lean = -0.05; }
+  else if (P.aiming) { armL = -1.55; armR = -1.5; twist = 0.45; pullR = charge; }
+  else if (P.digging) armR = -1.2 + Math.sin(U.time.value * 14) * 0.5;
+  if (P.crouch) { pm.body.position.y -= 0.28; lean += 0.4; legL += 0.5; legR -= 0.5; }
+  pm.legL.rotation.x = legL; pm.legR.rotation.x = legR;
+  pm.armL.rotation.x = armL; pm.armR.rotation.x = armR; pm.armL.rotation.z = armZ; pm.armR.rotation.z = armZ;
+  pm.armR.position.z = -0.22 * pullR;
+  const spinning = P.roll || P.dead > 0;
+  const bodyYaw = spinning ? twist : clamp(twist + P.twist * 0.85, -1.5, 1.5);
+  pm.body.rotation.set(lean, bodyYaw, 0);
+  // eyes on the target: the head cancels the body's turn exactly and stays level through a lean
+  pm.head.rotation.set(spinning ? 0 : -clamp(lean, -0.5, 0.5) * 0.8, spinning ? 0 : -bodyYaw, 0);
+  pm.bow.visible = P.aiming;
+  drawStrikeMark();
+  for (const m of trails.arcs) if (m.visible) { m.userData.t -= dt; m.material.opacity = clamp(m.userData.t / m.userData.dur, 0, 1) * m.userData.peak; if (m.userData.t <= 0) m.visible = false; }
+  if (!(P.atk && P.atk.kind === 'drag')) for (const gm of trails.ghost) gm.visible = false;
+  if (!(P.atk && P.atk.kind === 'tip')) { tipBlade.visible = false; tipTrail.visible = false; }
+  if (trails.cur) {
+    trails.t -= dt;
+    trails.cur.material.opacity = clamp(trails.t / 0.14, 0, 1) * trails.peak;
+    if (trails.t <= 0) { trails.cur.visible = false; trails.cur = null; }
+  }
+}
+function updateShakes(dt) {
+  for (let i = world.shakes.length - 1; i >= 0; i--) {
+    const tr = world.shakes[i];
+    tr.shake -= dt;
+    if (tr.shake <= 0) { tr.shake = 0; world.shakes.splice(i, 1); }
+    if (tr.alive && world.chunks.get(tr.chunk.key) === tr.chunk) tr.chunk.updateTree(tr);
+  }
+}
+const _proj = new THREE.Vector3();
+function updateCamera(dt) {
+  const k = cam.aimK = lerp(cam.aimK, player.aiming ? 1 : 0, 1 - Math.exp(-11 * dt));
+  cam.dist = lerp(cam.dist, STANCE_DIST[player.stance], 1 - Math.exp(-7 * dt));
+  const follow = 1 - Math.exp(-lerp(9, 24, k) * dt);
+  cam.tx = lerp(cam.tx, player.x, follow); cam.tz = lerp(cam.tz, player.z, follow);
+  cam.ty = lerp(cam.ty, player.y + 1.0, 1 - Math.exp(-lerp(5, 18, k) * dt));
+  cam.shake = Math.max(0, cam.shake - dt * 1.6);
+  const sh = cam.shake * cam.shake * 0.8 * (1 - 0.6 * k);
+  // exploring: high above. Bow drawn: down behind the right shoulder.
+  // The view stays high and tactical. Only drawing the bow brings it down behind the shoulder.
+  const low = 0, near = k;
+  const dist = lerp(lerp(cam.dist, 4.8, low), 4.4, k), pitch = lerp(cam.pitch, cam.aimPitch, k);
+  const rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw);
+  const tx = cam.tx + rx * 0.8 * near, ty = cam.ty + 0.75 * near, tz = cam.tz + rz * 0.8 * near;
+  const cp = Math.cos(pitch), spn = Math.sin(pitch);
+  camera.position.set(
+    tx + Math.sin(cam.yaw) * cp * dist + (Math.random() - 0.5) * sh,
+    ty + spn * dist + (Math.random() - 0.5) * sh,
+    tz + Math.cos(cam.yaw) * cp * dist);
+  const floor = Math.max(heightAt(camera.position.x, camera.position.z), SEA) + lerp(1.5, 0.95, near);
+  if (camera.position.y < floor) camera.position.y = floor;
+  camera.lookAt(tx, ty, tz);
+  const fov = lerp(40, 52, near);
+  if (Math.abs(camera.fov - fov) > 0.05) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  camera.updateMatrixWorld();
+  scene.fog.near = lerp(cam.dist + 16, 28, near); scene.fog.far = lerp(cam.dist + 96, 122, near);
+  // screen position of the player, for the see-through fade on trees
+  const size = renderer.getDrawingBufferSize(_v2);
+  _proj.set(player.x, player.y + 0.9, player.z).project(camera);
+  U.playerPx.value.set((_proj.x * 0.5 + 0.5) * size.x, (_proj.y * 0.5 + 0.5) * size.y);
+  _proj.set(player.x, player.y + 0.9, player.z).applyMatrix4(camera.matrixWorldInverse);
+  U.playerDepth.value = -_proj.z;
+  U.fadeR.value = Math.min(size.y * 0.1 * (31 / dist), size.y * 0.24);
+  water.position.x = Math.round(player.x / 8) * 8; water.position.z = Math.round(player.z / 8) * 8;
+}
+
+const hudState = { stance: '', hp: -1, st: -1, mode: '', hurt: -1, armed: null, k1: '', k2: '', ret: null, retScale: -1, retCls: '', combo: '' };
+function updateHud() {
+  const P = player, hs = hudState;
+  const hp = Math.round(P.hp), st = Math.round(P.stam);
+  if (hp !== hs.hp) { el('hpbar').style.width = hp + '%'; hs.hp = hp; }
+  if (st !== hs.st) { el('stbar').style.width = st + '%'; hs.st = st; }
+  const mode = P.aiming ? 'B' : (P.ready || (P.atk && P.atk.cut)) ? 'S' : (P.atk && P.atk.kind === 'grab') ? 'K' : P.atk ? 'T' : P.guard ? 'B' : '';
+  if (mode !== hs.mode) {
+    for (const c of document.querySelectorAll('#stance [data-w]')) c.setAttribute('aria-current', c.dataset.w === mode ? 'true' : 'false');
+    hs.mode = mode;
+  }
+  if (P.stance !== hs.stance) {
+    el('rchip').textContent = P.stance === 'melee' ? 'Hold right: guard' : 'Hold right: bow';
+    hs.stance = P.stance; hs.mode = null; hs.crouch = null;
+  }
+  if (P.crouch !== hs.crouch) { el('stancename').textContent = (P.stance === 'melee' ? 'Melee stance' : 'Bow stance') + (P.crouch ? ', crouched' : ''); hs.crouch = P.crouch; }
+  allies.forEach((al, i) => { const v = al.state === 'down' ? -1 : Math.round((al.hp / al.maxHp) * 100); if (v !== hs['al' + i]) { el('al' + i).style.width = Math.max(0, v) + '%'; el('aln' + i).textContent = al.name + (v < 0 ? ' (down)' : ''); hs['al' + i] = v; } });
+  const k1 = P.dashCd > 0 ? 'Alt: dash strike ' + P.dashCd.toFixed(1) : 'Alt: dash strike';
+  const k2 = P.shotCd > 0 ? 'Alt: triple shot ' + P.shotCd.toFixed(1) : 'Alt: triple shot';
+  if (k1 !== hs.k1) { const c = el('k1'); c.textContent = k1; c.classList.toggle('cool', P.dashCd > 0); hs.k1 = k1; }
+  if (k2 !== hs.k2) { const c = el('k2'); c.textContent = k2; c.classList.toggle('cool', P.shotCd > 0); hs.k2 = k2; }
+  const armed = P.tool === 'axe';
+  if (armed !== hs.armed) { el('stance').hidden = !armed; hs.armed = armed; }
+  const h = Math.round(Math.min(1, P.hurt * 2.2) * 20) / 20;
+  if (h !== hs.hurt) { el('hurt').style.opacity = String(h); hs.hurt = h; }
+  const show = cam.aimK > 0.35;
+  if (show !== hs.ret) { el('reticle').hidden = !show; hs.ret = show; }
+  if (show) {
+    const sc = Math.round(lerp(2.6, 1, P.charge) * 20) / 20, cls = (P.charge >= 1 ? 'full ' : '') + (juice.onEnemy ? 'on' : '');
+    if (sc !== hs.retScale) { el('reticle').style.transform = 'translate(-50%, -50%) scale(' + sc + ')'; hs.retScale = sc; }
+    if (cls !== hs.retCls) { el('reticle').className = cls; hs.retCls = cls; }
+  }
+  const combo = P.comboShow > 0 ? P.comboLabel : '';
+  if (combo !== hs.combo) { el('combo').textContent = combo; hs.combo = combo; }
+}
+let last = performance.now(), fpsAcc = 0, fpsN = 0, fps = 60, slowFor = 0, autoDropped = false;
+function step(dt) {
+  U.time.value += dt;
+  if (dt > 0) { const dy = Math.atan2(Math.sin(cam.yaw - cam.prevYaw), Math.cos(cam.yaw - cam.prevYaw)); cam.yawRate = lerp(cam.yawRate, dy / dt, 0.3); cam.prevYaw = cam.yaw; }
+  if (juice.lockFailed && !locked() && mouse.inside) {     // no pointer capture: steer by pushing toward the screen edge
+    const ax = Math.abs(mouse.x);
+    if (ax > 0.18) cam.yaw -= Math.sign(mouse.x) * ((ax - 0.18) / 0.82) * 2.8 * dt;
+    cam.aimPitch = clamp(0.25 - mouse.y * 0.5, -0.28, 0.9);
+  }
+  world.time = (world.time + dt / (keys.KeyT ? 8 : 600)) % 1;
+  updateChunks(player.x, player.z, 5);
+  updatePlayer(dt);
+  updateEnemies(dt);
+  updateAllies(dt);
+  updateHexes(dt);
+  updateShakes(dt);
+  updateFallers(dt);
+  updateLogs(dt);
+  updatePickups(dt);
+  updateParticles(dt);
+  updateCamera(dt);
+  updateDepthMap(dt);
+  updateAim();
+  updateArrows(dt);
+  updateMotes();
+  updateSky();
+  // grass only near the player
+  const gr = quality.level === 'high' ? 84 : 52;
+  for (const c of world.chunks.values()) {
+    const near = Math.hypot(c.ox + CS / 2 - player.x, c.oz + CS / 2 - player.z) < gr;
+    if (c.grassMesh) { c.grassMesh.visible = near; c.grassMesh.count = quality.level === 'high' ? c.grass.length : Math.ceil(c.grass.length * 0.45); }
+    if (c.flowerMesh) c.flowerMesh.visible = near;
+  }
+}
+// Host for the separate effects file (fx.js), which is published alongside the game and adds a pass to the composer on High.
+const fxHooks = [];
+window.__fxHost = { jp: THREE, yi: renderer, oe: scene, hn: camera, en: sun, Se: heightAt, jn: SEA, ar: quality, dt: cam, get Nt() { return world; }, get nt() { return player; }, get ji() { return composer; }, get Ts() { return SEED; }, hook(f) { fxHooks.push(f); } };
+function render() {
+  for (const f of fxHooks) f();
+  if (quality.level === 'high' && composer) composer.render();
+  else renderer.render(scene, camera);
+}
+function frame(now) {
+  const raw = (now - last) / 1000; last = now;
+  let dt = clamp(raw, 0, 0.05);     // the first frame's timestamp can precede start-up, so never step backwards
+  if (juice.hitStop > 0) { juice.hitStop -= raw; dt *= 0.06; }   // a few frames of freeze when a hit lands
+  step(dt);
+  render();
+  updateHud();
+  fpsAcc += raw; fpsN++;
+  if (fpsAcc >= 0.5) {
+    fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0;
+    el('fps').textContent = String(Math.round(fps));
+    el('clock').textContent = clock();
+    slowFor = fps < 27 ? slowFor + 0.5 : 0;
+    if (slowFor >= 3 && quality.level === 'high' && !autoDropped) { autoDropped = true; setQuality('low'); }
+    hudDirty = true;
+  }
+  if (hudDirty) {
+    el('wood').textContent = String(world.wood);
+    el('stone').textContent = String(world.stone);
+    el('kills').textContent = String(world.kills);
+    el('camps').textContent = (world.camps || []).filter((c) => c && c.cleared).length + '/' + (world.camps || []).filter((c) => c).length;
+    hudDirty = false;
+  }
+  requestAnimationFrame(frame);
+}
+
+window.addEventListener('error', (e) => {
+  const b = el('err'); b.textContent = 'Something went wrong: ' + e.message; b.hidden = false;
+});
+resize();
+buildComposer();
+resize();
+resetWorld(SEED);
+setTool('axe');
+lockUi();
+window.__game = { hexes, allies, CAMPS, KIND, pm, sfx, enemies, spawnEnemy, arrows, fireArrow, MOVES, startMove, juice, updateHud, waveHeight, depthState, lockQuality: () => { autoDropped = true; }, world, player, cam, keys, mouse, cursor, step, render, heightAt, fellTree, applyBrush, setQuality, renderer, THREE };
+requestAnimationFrame(frame);
