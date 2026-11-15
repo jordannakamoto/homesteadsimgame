@@ -201,21 +201,21 @@ export function analyseBeam(L, xs, dist, pts, EI = 1) {
   const R = new Array(n).fill(0); let vl = -wl;
   for (let i = 0; i < n - 1; i++) { const l = xs[i + 1] - xs[i], vr = RL[i] + (l > 0 ? (Ms[i + 1] - Ms[i]) / l : 0); R[i] = vr - vl; vl = vr - W[i]; }
   R[n - 1] = wr - vl;
-  // walk the member for the greatest shear and moment
-  const bp = [0, L]; for (const x of xs) bp.push(x); for (const d of dist) bp.push(d[0], d[1]); for (const p of pts) bp.push(p[0]);
-  bp.sort((a, b) => a - b);
-  let V = 0, M = 0, Vmax = 0, Mmax = 0, last = -1;
-  for (let k = 0; k < bp.length; k++) {
-    const x = bp[k]; if (x === last || x < 0 || x > L) continue; last = x;
-    Vmax = Math.max(Vmax, Math.abs(V));
-    for (const p of pts) if (p[0] === x) V -= p[1];
-    for (let i = 0; i < n; i++) if (xs[i] === x) V += R[i];
-    Vmax = Math.max(Vmax, Math.abs(V)); Mmax = Math.max(Mmax, Math.abs(M));
-    let nx = L; for (let j = k + 1; j < bp.length; j++) if (bp[j] > x) { nx = Math.min(bp[j], L); break; }
-    const s = nx - x; if (s <= 0) continue;
-    let w = 0; for (const d of dist) if (d[0] <= x && d[1] >= nx) w += d[2];
-    if (w > 0 && V > 0 && V / w < s) Mmax = Math.max(Mmax, Math.abs(M + V * V / (2 * w)));
-    M += V * s - w * s * s / 2; V -= w * s;
+  // walk the member for the greatest shear and moment: events are load edges, point loads and supports
+  const ev = [];
+  for (let k = 0; k < dist.length; k++) { const d = dist[k]; if (d[1] > d[0]) { ev.push([Math.max(0, d[0]), 0, d[2]]); ev.push([Math.min(L, d[1]), 0, -d[2]]); } }
+  for (let k = 0; k < pts.length; k++) ev.push([pts[k][0], -pts[k][1], 0]);
+  for (let i = 0; i < n; i++) ev.push([xs[i], R[i], 0]);
+  ev.sort((a, b) => a[0] - b[0]);
+  let V = 0, M = 0, Vmax = 0, Mmax = 0, w = 0, x = 0;
+  for (let k = 0; k <= ev.length; k++) {
+    const nx = k < ev.length ? ev[k][0] : L, sg = nx - x;
+    if (sg > 0) {
+      if (w > 0 && V > 0 && V / w < sg) { const m = Math.abs(M + V * V / (2 * w)); if (m > Mmax) Mmax = m; }
+      M += V * sg - w * sg * sg / 2; V -= w * sg; x = nx;
+      if (Math.abs(V) > Vmax) Vmax = Math.abs(V); if (Math.abs(M) > Mmax) Mmax = Math.abs(M);
+    }
+    if (k < ev.length) { V += ev[k][1]; w += ev[k][2]; if (Math.abs(V) > Vmax) Vmax = Math.abs(V); }
   }
   // deflection: mid-span of each span, and the tip of each overhang
   let dM = 0, dr = 0, span = 0, over = 0;
@@ -262,9 +262,11 @@ function spanCheck(dv, b, d, eff, rep, limit, cosT = 1) {
   if (R[0] > 0 || R[1] > 0) { combo(0, 1, cdR); if (M[1] > 0) combo(0.75, 0.75, cdR); }
   const dfl = (r[0] + Math.max(r[1], R[2], 0.75 * (r[1] + R[2]))) / cosT, ud = dfl * limit;
   if (!(dv.Fb > 0)) return { u: UMAX, governs: 'bending', demand: 0, capacity: 0, unit: 'MPa', ub: UMAX, uv: 0, ud: 0 };
-  if (ub >= uv && ub >= ud) return { u: ub, governs: 'bending', demand: mb / S / 1e6, capacity: dv.Fb * kf * cb / 1e6, unit: 'MPa', ub, uv, ud };
-  if (uv >= ud) return { u: uv, governs: 'shear', demand: 1.5 * vb / A / 1e6, capacity: dv.Fv * cv / 1e6, unit: 'MPa', ub, uv, ud };
-  return { u: ud, governs: 'deflection', demand: dfl, capacity: 1 / limit, unit: 'span', ub, uv, ud };
+  const bend = { u: ub, governs: 'bending', demand: mb / S / 1e6, capacity: dv.Fb * kf * cb / 1e6, unit: 'MPa', ub, uv, ud };
+  const shear = { u: uv, governs: 'shear', demand: 1.5 * vb / A / 1e6, capacity: dv.Fv * cv / 1e6, unit: 'MPa', ub, uv, ud };
+  const st = ub >= uv ? bend : shear;                            // strength: what could break it
+  if (st.u >= ud) return { ...st, st };
+  return { u: ud, governs: 'deflection', demand: dfl, capacity: 1 / limit, unit: 'span', ub, uv, ud, st };
 }
 // A row of equal joists or rafters under uniform load on one simple span: the span-table case.
 // deflectionLoad 'total' (the solver's rule) or 'live' (the building-code span tables' rule).
@@ -464,7 +466,14 @@ export function solveStructure(pieces, env) {
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity; for (const q of P) { if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x; if (q.z < z0) z0 = q.z; if (q.z > z1) z1 = q.z; }
     return [x0 - 0.4, z0 - 0.4, x1 + 0.4, z1 + 0.4];
   }
+  const baseY = new Map(), roofN = new Map();
+  for (const e of els) { const y = baseY.get(e.group); if (y === undefined || e.y0 < y) baseY.set(e.group, e.y0); if (e.cls === 'roof' && e.p.roof != null) roofN.set(e.p.roof, (roofN.get(e.p.roof) || 0) + 1); }
   const hit = (a, b) => a.bb[0] <= b.bb[2] && b.bb[0] <= a.bb[2] && a.bb[1] <= b.bb[3] && b.bb[1] <= a.bb[3];
+  // a coarse grid so each piece is only compared with its neighbours
+  const CELL = 8, grid = new Map(); let stamp = 0;
+  const cellsOf = (e, fn) => { const x0 = Math.floor(e.bb[0] / CELL), x1 = Math.floor(e.bb[2] / CELL), z0 = Math.floor(e.bb[1] / CELL), z1 = Math.floor(e.bb[3] / CELL); for (let x = x0; x <= x1 && x - x0 < 64; x++) for (let z = z0; z <= z1 && z - z0 < 64; z++) fn(x * 65536 + z); };
+  for (const e of els) if (e.cls === 'wall' || e.cls === 'beam' || e.cls === 'post') cellsOf(e, (k) => { const c = grid.get(k); if (c) c.push(e); else grid.set(k, [e]); });
+  const nearOf = (e, cls2) => { const out = []; stamp++; cellsOf(e, (k) => { const c = grid.get(k); if (c) for (const o of c) if (o.stamp !== stamp) { o.stamp = stamp; if ((cls2 ? o.cls === 'post' : o.cls !== 'post') && o !== e && hit(e, o)) out.push(o); } }); return out.sort((a, b) => a.i - b.i); };
   const lines = els.filter((e) => e.cls === 'wall' || e.cls === 'beam'), posts = els.filter((e) => e.cls === 'post'), grounds = els.filter((e) => e.cls === 'ground'), floors = els.filter((e) => e.cls === 'floor');
   const groundUnder = (x, z, y) => grounds.find((g) => Math.abs(g.y1 - y) <= TOLY && g.P && nearPoly(g.P, x, z, 0.3));
   for (const f of floors) f.gnd = grounds.find((g) => g.p.floor === f.id) || (f.P ? grounds.find((g) => hit(g, f) && Math.abs(g.y1 - f.y0) <= TOLY && g.P && nearPoly(g.P, (f.bb[0] + f.bb[2]) / 2, (f.bb[1] + f.bb[3]) / 2, 0.3)) : null);
@@ -483,7 +492,7 @@ export function solveStructure(pieces, env) {
     if (e.cls === 'wall') {
       if (e.ground) continue;
       let covered = 0; const mx = (e.ax + e.bx) / 2, mz = (e.az + e.bz) / 2;
-      for (const c of lines) { if (c === e || !hit(e, c) || c.y1 < e.y0 - 0.5 || c.y1 > e.y0 + 0.15 || c.y0 > e.y0 - 0.1) continue; const o = along(e, c); if (o) { e.sup.push({ el: c, w: o[1] - o[0], t: ((c.ax - e.ax) * e.ux + (c.az - e.az) * e.uz) }); covered += o[1] - o[0]; } }
+      for (const c of nearOf(e)) { if (c.y1 < e.y0 - 0.5 || c.y1 > e.y0 + 0.15 || c.y0 > e.y0 - 0.1) continue; const o = along(e, c); if (o) { e.sup.push({ el: c, w: o[1] - o[0], t: ((c.ax - e.ax) * e.ux + (c.az - e.az) * e.uz) }); covered += o[1] - o[0]; } }
       const rest = Math.max(0, e.len - covered);
       if (rest > 0.05 || !e.sup.length) {
         const g = groundUnder(mx, mz, e.y0), f = g ? null : floorAt(mx, mz, e.y0);
@@ -492,9 +501,8 @@ export function solveStructure(pieces, env) {
       if (!e.sup.length && p0(e) !== 'gable' && onGroundOk(e)) e.ground = true;
     } else if (e.cls === 'beam') {
       const pts = [];
-      for (const c of posts) { if (!hit(e, c) || c.y1 < e.y0 - TOLY || c.y0 > e.y0 - 0.25 || c.y1 > e.y1 + 0.6) continue; if (segDist(e.ax, e.az, e.bx, e.bz, c.ax, c.az) <= c.t / 2 + e.b / 2 + 0.12) pts.push({ el: c, t: Math.max(0, Math.min(e.len, (c.ax - e.ax) * e.ux + (c.az - e.az) * e.uz)), w: c.t }); }
-      for (const c of lines) {
-        if (c === e || !hit(e, c)) continue;
+      for (const c of nearOf(e, true)) { if (c.y1 < e.y0 - TOLY || c.y0 > e.y0 - 0.25 || c.y1 > e.y1 + 0.6) continue; if (segDist(e.ax, e.az, e.bx, e.bz, c.ax, c.az) <= c.t / 2 + e.b / 2 + 0.12) pts.push({ el: c, t: Math.max(0, Math.min(e.len, (c.ax - e.ax) * e.ux + (c.az - e.az) * e.uz)), w: c.t }); }
+      for (const c of nearOf(e)) {
         const under = c.cls === 'beam' ? c.y1 >= e.y0 - TOLY && c.y1 <= e.y0 + 0.12 : p0(c) === 'gable' ? e.y0 >= c.y0 - 0.1 && e.y0 <= c.y1 + TOLY : Math.abs(c.y1 - e.y0) <= TOLY || (c.y1 > e.y0 && c.y0 < e.y0 - 0.5);
         if (!under || c.y0 > e.y0 - 0.04) continue;
         const o = along(e, c), x = o ? null : cross(e.ax, e.az, e.ux, e.uz, e.len, c, 0.15);
@@ -506,16 +514,16 @@ export function solveStructure(pieces, env) {
     } else if (e.cls === 'post') {
       if (e.ground) continue;
       const lo = e.y0 - TOLY, hi = e.y0 + 0.15;
-      const c = posts.find((q) => q !== e && q.y1 >= lo && q.y1 <= hi && Math.hypot(q.ax - e.ax, q.az - e.az) <= 0.25);
-      const b = c ? null : lines.find((q) => q.y1 >= lo && q.y1 <= hi && hit(e, q) && segDist(q.ax, q.az, q.bx, q.bz, e.ax, e.az) <= 0.25);
+      const c = nearOf(e, true).find((q) => q.y1 >= lo && q.y1 <= hi && Math.hypot(q.ax - e.ax, q.az - e.az) <= 0.25);
+      const b = c ? null : nearOf(e).find((q) => q.y1 >= lo && q.y1 <= hi && segDist(q.ax, q.az, q.bx, q.bz, e.ax, e.az) <= 0.25);
       if (c) e.sup.push({ el: c }); else if (b) e.sup.push({ el: b, t: (e.ax - b.ax) * b.ux + (e.az - b.az) * b.uz });
       else { const g = groundUnder(e.ax, e.az, e.y0), f = g ? null : floorAt(e.ax, e.az, e.y0); if (g) e.sup.push({ el: g }); else if (f && f.gnd) e.sup.push({ el: f.gnd }); else if (f) e.sup.push({ el: f }); else if (onGroundOk(e)) e.ground = true; }
     } else if (e.cls === 'floor') {
       if (e.gnd) { e.sup.push({ el: e.gnd }); continue; }
-      for (const c of lines) if (hit(e, c) && c.y0 < e.y0 - 0.1 && (c.cls === 'beam' ? c.y1 >= e.y0 - 0.35 && c.y1 <= e.y0 + 0.15 : c.y1 >= e.y0 - 0.35)) e.sup.push({ el: c });
+      for (const c of nearOf(e)) if (c.y0 < e.y0 - 0.1 && (c.cls === 'beam' ? c.y1 >= e.y0 - 0.35 && c.y1 <= e.y0 + 0.15 : c.y1 >= e.y0 - 0.35)) e.sup.push({ el: c });
       if (!e.sup.length && onGroundOk(e) && !e.explicit) e.ground = true;
     } else if (e.cls === 'roof') {
-      for (const c of lines) if (hit(e, c) && c.y1 >= e.eaveY - 0.6 && c.y0 <= e.y1 + 0.3) e.sup.push({ el: c });
+      for (const c of nearOf(e)) if (c.y1 >= e.eaveY - 0.6 && c.y0 <= e.y1 + 0.3) e.sup.push({ el: c });
     } else if (e.cls === 'stair') {
       const f = floorAt(e.ax, e.az, e.y0) || groundUnder(e.ax, e.az, e.y0); if (f) e.sup.push({ el: f.gnd || f }); else e.ground = true;
     }
@@ -563,12 +571,14 @@ export function solveStructure(pieces, env) {
     // strips: [{ ox, oz, dx, dz, len, w (width carried), wc (width to check), b, d, mat, id?, pts? }]; q: [D, L, Lr, S] Pa on plan
     let worst = null, wan = null, ws = null, noSup = 0, oneSup = 0, conn = 0, thrust = false, sumA = 0; const sup = new Set();
     for (const s of strips) sumA += s.len * s.w;
-    const fa = sumA > 0 ? e.planA / sumA : 0;
+    const fa = sumA > 0 ? e.planA / sumA : 0, cl = []; for (const c of e.sup) if (c.el.stable) cl.push(c.el);
+    let unit = null, uLen = -1, uXs = null, uEI = 0, lastChk = null, lastUnit = null, lastW = 0, lastD = 0;
+    const sameXs = (a, b) => { if (!b || a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (Math.abs(a[i] - b[i]) > 1e-9) return false; return true; };
     for (const s of strips) {
       const xs = [], who = [], load = [q[0] * s.w * s.len * fa, q[1] * s.w * s.len * fa, q[2] * s.w * s.len * fa, q[3] * s.w * s.len * fa];
       if (s.own) load[0] += s.own;
       const cand = [];
-      for (const c of e.sup) { const el = c.el; if (!el.stable) continue; const x = cross(s.ox, s.oz, s.dx, s.dz, s.len, el); if (x && okSup(el, x[0], s)) cand.push([x[0], el, x[1]]); }
+      for (const el of cl) { const x = cross(s.ox, s.oz, s.dx, s.dz, s.len, el); if (x && okSup(el, x[0], s)) cand.push([x[0], el, x[1]]); }
       cand.sort((a, b) => a[0] - b[0]);
       for (const c of cand) if (!xs.length || c[0] - xs[xs.length - 1] > 0.08) { xs.push(c[0]); who.push(c); }
       let virt = false;
@@ -577,17 +587,20 @@ export function solveStructure(pieces, env) {
       if (!xs.length || (xs.length === 1 && virt)) { noSup++; lost(load); for (const pt of extra) lost(pt.v); continue; }
       if (xs.length === 1) { oneSup++; const v = load.slice(); for (const pt of extra) add(v, pt.v); send(who[0][1], v, { t: who[0][2] }, false, e.id); sup.add(who[0][1].id); continue; }
       const dv = designValues(s.mat), EI = dv && dv.E > 0 ? dv.E * s.b * s.d * s.d * s.d / 12 : 0;
-      const unit = analyseBeam(s.len, xs, [[0, s.len, 1]], [], EI || 1), eff = { M: [0, 0, 0, 0], V: [0, 0, 0, 0], dr: [0, 0, 0, 0] }, R = xs.map(() => [0, 0, 0, 0]);
+      if (!(Math.abs(s.len - uLen) < 1e-9 && uEI === EI && sameXs(xs, uXs))) { unit = analyseBeam(s.len, xs, [[0, s.len, 1]], [], EI || 1); uLen = s.len; uXs = xs; uEI = EI; }
+      const eff = { M: [0, 0, 0, 0], V: [0, 0, 0, 0], dr: [0, 0, 0, 0] }, R = xs.map(() => [0, 0, 0, 0]);
       const kc = s.wc / (s.w * fa || 1);
       for (let k = 0; k < 4; k++) {
         const w = load[k] / s.len; if (w > 0) { eff.M[k] += unit.M * w * kc; eff.V[k] += unit.V * w * kc; eff.dr[k] += unit.dr * w * kc; for (let i = 0; i < xs.length; i++) R[i][k] += unit.R[i] * w; }
-        const pk = extra.filter((pt) => pt.v[k] > 0).map((pt) => [pt.x, pt.v[k]]);
+        const pk = extra.length ? extra.filter((pt) => pt.v[k] > 0).map((pt) => [pt.x, pt.v[k]]) : extra;
         if (pk.length) { const a = analyseBeam(s.len, xs, [], pk, EI || 1); eff.M[k] += a.M; eff.V[k] += a.V; eff.dr[k] += a.dr; for (let i = 0; i < xs.length; i++) R[i][k] += a.R[i]; }
       }
       if (virt) { thrust = true; add(R[xs.length - 2], R[xs.length - 1]); }
       for (let i = 0; i < who.length; i++) { for (let k = 0; k < 4; k++) if (R[i][k] < 0) R[i][k] = 0; send(who[i][1], R[i], { t: who[i][2] }, false, e.id); sup.add(who[i][1].id); conn++; }
       if (!dv || dv.kind !== 'wood') continue;
-      const chk = spanCheck(dv, s.b, s.d, eff, strips.length >= 3 && s.wc <= 0.61, limit, cosT);
+      const same = lastChk && !extra.length && !s.id && lastUnit === unit && Math.abs(load[0] / s.len * kc - lastW) < 1e-9 && s.d === lastD;
+      const chk = same ? lastChk : spanCheck(dv, s.b, s.d, eff, strips.length >= 3 && s.wc <= 0.61, limit, cosT);
+      if (!extra.length && !s.id) { lastChk = chk; lastUnit = unit; lastW = load[0] / s.len * kc; lastD = s.d; }
       if (s.id) { const an = { span: unit.span, over: unit.over, dShow: chk.ud / limit * Math.max(unit.span, 2 * unit.over) }; members[s.id] = { load: { deadN: r0(load[0]), liveN: r0(load[1] + load[2]), snowN: r0(load[3]), windN: 0 }, demand: r3(chk.demand), capacity: r3(chk.capacity), unit: chk.unit, utilisation: r3(cap(chk.u)), governs: chk.governs, supports: who.map((c) => c[1].id), ok: chk.u <= 1 }; s.chk = chk; s.an = an; }
       if (!worst || chk.u > worst.u) { worst = chk; ws = s; wan = { span: unit.span, over: unit.over, dShow: chk.ud / limit * Math.max(unit.span, 2 * unit.over) }; }
     }
@@ -622,7 +635,7 @@ export function solveStructure(pieces, env) {
           const nb = Math.max(1, Math.ceil((s1 - s0) / fr.s - 1e-6)), wb = (s1 - s0) / nb;
           for (let i = 0; i < nb; i++) { const s = s0 + (i + 0.5) * wb, c = clipLine(P, e.ax + e.ux * s, e.az + e.uz * s, e.vx, e.vz); if (c) strips.push(mkStrip(e.ax + e.ux * s + e.vx * c[0], e.az + e.uz * s + e.vz * c[0], e.vx, e.vz, c[1] - c[0], wb, null)); }
         }
-        e.apex = (p.type === 'gable' || p.type === 'hip') && els.some((o) => o !== e && o.cls === 'roof' && o.p.roof != null && o.p.roof === p.roof);
+        e.apex = (p.type === 'gable' || p.type === 'hip') && roofN.get(p.roof) > 1;
         const surf = (s, x) => e.eaveY + ((s.ox + s.dx * x - e.ax) * e.vx + (s.oz + s.dz * x - e.az) * e.vz) * e.tan;
         res = runStrips(e, strips, fr, q, 180, e.cos, (c, x, s) => { const y = surf(s, x); return c.cls === 'beam' ? y >= c.y0 - TOLY && y <= c.y1 + TOLY : c.p.type === 'gable' ? false : Math.abs(c.y1 - y) <= TOLY || (c.y1 > y && c.y0 < y - 0.5); }, 'roof');
       } else {
@@ -637,7 +650,7 @@ export function solveStructure(pieces, env) {
       } else if (!w) rec(e, { u: 0, governs: 'bending', demand: 0, capacity: 0, unit: 'MPa' }, sup, { note });
       else {
         const chk = uu > w.u ? { u: uu, governs: 'uplift', demand: e.wind, capacity: hold, unit: 'N' } : w; rec(e, chk, e.explicit ? e.rafters.map((r) => r.id) : sup, { note, spanM: r3(res.wan.span) });
-        if (w.u > 1) { const t = spanWords(e, e.explicit ? 'This roof\'s rafters' : 'This roof\'s rafters', w, res.wan, res.ws, 'the wall'); issue(res.ws.id || e.id, w.governs === 'deflection' ? 'warn' : 'fail', w.governs, w.u, t[0], w.governs === 'deflection' ? t[1] : 'Add a ridge beam on posts, a purlin, or a supporting wall mid-span, or use deeper rafters.'); }
+        if (w.u > 1) { const c = w.st && w.st.u > 1 ? w.st : w, t = spanWords(e, 'This roof\'s rafters', c, res.wan, res.ws, 'the wall'); issue(res.ws.id || e.id, c.governs === 'deflection' ? 'warn' : 'fail', c.governs, c.u, t[0], c.governs === 'deflection' ? t[1] : 'Add a ridge beam on posts, a purlin, or a supporting wall mid-span, or use deeper rafters.'); }
         if (uu > 1) issue(e.id, 'warn', 'uplift', uu, `In a ${Math.round(env.gustMs)} m/s storm gust the wind would lift this roof with about ${kN(e.wind)} kN, more than its own weight and its nailed seats hold down (${kN(hold)} kN).`, 'Strap the rafters down to the walls, give them more supports, or use a heavier covering.');
         if (res.thrust && p.type === 'gable') issue(e.id, 'warn', 'thrust', 0, 'This roof has no ridge beam held up at its ends, so its rafters lean on each other and push the tops of the walls outward.', 'Hold the ridge up with gable walls or posts, or tie each pair of rafters together at wall height.');
       }
@@ -668,7 +681,7 @@ export function solveStructure(pieces, env) {
       } else if (!w) rec(e, { u: 0, governs: 'bending', demand: 0, capacity: 0, unit: 'MPa' }, sup, { note });
       else {
         rec(e, w, e.explicit ? e.joists.map((j) => j.id) : sup, { note, spanM: r3(res.wan.span) });
-        if (w.u > 1) { const t = spanWords(e, 'This floor\'s joists', w, res.wan, res.ws, 'the wall'); issue(res.ws.id || e.id, w.governs === 'deflection' ? 'warn' : 'fail', w.governs, w.u, t[0], t[1]); }
+        if (w.u > 1) { const c = w.st && w.st.u > 1 ? w.st : w, t = spanWords(e, 'This floor\'s joists', c, res.wan, res.ws, 'the wall'); issue(res.ws.id || e.id, c.governs === 'deflection' ? 'warn' : 'fail', c.governs, c.u, t[0], t[1]); }
       }
     } else if (e.cls === 'beam') {
       const dv = designValues(p.material), v = [e.own[0] + e.got[0], e.own[1] + e.got[1], e.got[2], e.got[3]], what = p.type === 'ridge' ? 'This ridge beam' : p.kind === 'beam' ? 'This beam' : `This ${p.kind}`;
@@ -693,7 +706,7 @@ export function solveStructure(pieces, env) {
       let ub = 0;
       for (let i = 0; i < xs.length; i++) { const s = e.sup[i], r = tot(R[i]); send(s.el, R[i], s.el.cls === 'wall' ? { t: s.tc } : null, true, e.id); if (dv && dv.Fcp > 0 && s.solid == null) ub = Math.max(ub, r / (e.b * Math.min(0.3, Math.max(0.04, s.w || 0.1))) / (dv.Fcp * 1.5)); }
       if (!dv || dv.kind === 'masonry' || dv.kind === 'earth') { rec(e, { u: 0, governs: 'bending', demand: 0, capacity: 0, unit: 'MPa' }, e.sup.map((s) => s.el.id), { note: 'no bending strength is known for this material, so the beam itself was not checked' }); issue(e.id, 'info', 'bending', 0, `${what} is of a material with no known bending strength, so its own strength was not checked.`, 'Use timber or steel for beams.'); continue; }
-      let chk = spanCheck(dv, e.b, e.d, eff, false, eff.M[1] > 0 ? 240 : 180); const an = { span, over, dShow: chk.ud / (eff.M[1] > 0 ? 240 : 180) * Math.max(span, 2 * over) }, sc = chk;
+      let chk = spanCheck(dv, e.b, e.d, eff, false, eff.M[1] > 0 ? 240 : 180); const an = { span, over, dShow: chk.ud / (eff.M[1] > 0 ? 240 : 180) * Math.max(span, 2 * over) }, sc = chk.st && chk.st.u > 1 ? chk.st : chk;
       if (ub > chk.u) chk = { u: ub, governs: 'bearing', demand: ub * dv.Fcp * 1.5 / 1e6, capacity: dv.Fcp * 1.5 / 1e6, unit: 'MPa' };
       rec(e, chk, e.sup.map((s) => s.el.id), { spanM: r3(span) });
       if (sc.u > 1) { const t = spanWords(e, `${what} would`, sc, an, e, 'its last support'); issue(e.id, sc.governs === 'deflection' ? 'warn' : 'fail', sc.governs, sc.u, t[0].replace(' would span', ' spans').replace(' would overhang', ' overhangs').replace('and carry', 'and carries'), sc.governs === 'deflection' ? 'Put a post under the middle of the beam, or use a deeper one.' : 'Put a post under the middle of the beam to halve its span, or use a deeper beam.'); }
@@ -731,7 +744,7 @@ export function solveStructure(pieces, env) {
       const s = e.sup[0]; if (s) send(s.el, e.own, { x: e.ax, z: e.az }, false, e.id); else totals.groundN += e.own[0] + e.own[1];
     }
   }
-  function groundY(e) { if (e.gy === undefined) { let y = e.y0; for (const o of els) if (o.group === e.group && o.y0 < y) y = o.y0; e.gy = y; } return e.gy; }
+  function groundY(e) { return baseY.get(e.group); }
   function bearGround(e, press, what, a, P) {
     const u = env.allowableKPa > 0 ? press / env.allowableKPa : UMAX;
     foundations[e.id] = { bearingKPa: r3(press), allowableKPa: env.allowableKPa, ok: u <= 1 };
@@ -809,7 +822,7 @@ export function solveStructure(pieces, env) {
         const span = w + 0.04, EI = hd.E * h.b * h.d ** 3 / 12, one = analyseBeam(span, [0, span], [[0, span, 1 / span]], [], EI), eff = { M: hv.map((x) => x * one.M), V: hv.map((x) => x * one.V), dr: hv.map((x) => x * one.dr) };
         const hc = spanCheck(hd, h.b, h.d, eff, false, 240);
         if (wm.explicit) for (const x of hs) members[x.id] = { load: { deadN: r0(hv[0]), liveN: r0(hv[1] + hv[2]), snowN: r0(hv[3]), windN: 0 }, demand: r3(hc.demand), capacity: r3(hc.capacity), unit: hc.unit, utilisation: r3(cap(hc.u)), governs: hc.governs, supports: [e.id], ok: hc.u <= 1, spanM: r3(span) };
-        if (hc.u > 1) issue(wm.explicit ? h.id : oid, hc.governs === 'deflection' ? 'warn' : 'fail', hc.governs, hc.u, `The header over this ${m1(w)} m opening is too small: at ${mm(h.b)} x ${mm(h.d)} mm it would be loaded to ${pct(hc.u)} what it safely carries by the ${kN(tot(hv))} kN coming down from above${wm.explicit ? '' : ' (a doubled 38 x 140 header is assumed)'}.`, 'Use a deeper header, double it, or make the opening narrower.');
+        if (hc.u > 1) issue(wm.explicit ? h.id : oid, hc.governs === 'deflection' && !(hc.st.u > 1) ? 'warn' : 'fail', hc.governs, hc.u, `The header over this ${m1(w)} m opening is too small: at ${mm(h.b)} x ${mm(h.d)} mm it would be loaded to ${pct(hc.u)} what it safely carries by the ${kN(tot(hv))} kN coming down from above${wm.explicit ? '' : ' (a doubled 38 x 140 header is assumed)'}.`, 'Use a deeper header, double it, or make the opening narrower.');
         if (hc.u > chk.u) { chk = hc; why = 'head'; }
       });
       if (wm.explicit) for (const s of wm.studs) members[s.id] = { load: { deadN: 0, liveN: 0, snowN: 0, windN: 0 }, demand: r3(chk.governs === 'compression' ? chk.demand : 0), capacity: r3(chk.governs === 'compression' ? chk.capacity : 0), unit: 'N', utilisation: r3(cap(why === 'stud' || why === 'wind' ? chk.u : 0)), governs: why === 'wind' ? 'bending' : 'compression', supports: [e.id], ok: !(why === 'stud' || why === 'wind') || chk.u <= 1 };
