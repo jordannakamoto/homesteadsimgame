@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createCookingView } from './cooking/view.js';
 import { createChunkStream } from './world/chunk-stream.js';
-import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND } from './sim/index.js';
+import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -2946,6 +2946,7 @@ window.__game = {
   enemies, spawnEnemy, arrows, fireArrow, MOVES, startMove, juice, updateHud, waveHeight, depthState, lockQuality: () => { autoDropped = true; }, world, player, cam, keys, mouse, cursor, step, render, heightAt, fellTree, applyBrush, setQuality, renderer, THREE,
   camera, scene, setTool, fade: addWind, fadeR: U.fadeR, burst, editGet: getDelta, editSet: setDelta, baseHeight, chunkSize: CS, treeKinds: TREE, refreshLock: lockUi, forestAt,
   light: SKY, noise: fbm, palette: PAL, quality: () => quality.level, composer: () => composer, treeGeo, pineLite: pineLiteGeo, markStockDirty: () => { hudDirty = true; },
+  garden: gardenRead,
 };
 window.__game.cooking = createCookingView(window.__game);
 requestAnimationFrame(frame);

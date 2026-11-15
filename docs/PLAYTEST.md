@@ -240,3 +240,29 @@ Water, electricity and room heat are merged and tested headlessly. They become p
 
 - Is the Home panel enough to understand what your power and water are doing, or do you want to see it in the world?
 - Is wiring by dragging between ports clear?
+
+## F1 — farming, first playable (branch `iter/f1-farming`)
+
+**What is new**
+
+- A Garden tool on the tool bar (key 5) with a palette: Bed, Sow, Water, Hoe, Harvest, Inspect, Mulch, Compost, Almanac. Right-drag turns the view while gardening; the mouse stays free.
+- Beds: drag on the grass to mark one out (snapped to 30 cm squares, live size and area), then hold on it to dig. The grass goes and a mounded bed of soil appears.
+- Twelve crops grown on real warmth, light, water and soil: radish, lettuce, peas, potato, tomato (as transplants), bush bean, carrot, winter squash, kale, garlic, sweet corn, wheat. Seed cards say when to sow here, in plain words, and buy the packet if you have none.
+- Soil darkens when wet and pales as it dries; plants wilt when thirsty, yellow when short of nitrogen, brown when frost-burnt, and lettuce bolts in heat.
+- Inspect any plant or bed for what it is, a calendar strip from sowing to harvest (ahead or behind the seed packet), and the reason for its state. Details toggle for the numbers.
+- Almanac (N): typical last and first frost for this climate, what to sow now and soon, what is ready, and tonight's frost risk with a "Cover the beds" button (row covers keep about 2 C of frost off).
+- Harvests go to your stores (potatoes, carrots and tomatoes as the kitchen's own ingredients). The "Grow your first salad" project card and four short, skippable tips.
+
+**Try this**
+
+1. Press 5, draw a small bed, hold to dig it, sow radish on one half and lettuce on the other, water it until the soil is dark.
+2. Run 100x or 1000x and watch the seedlings come up. Inspect a radish. Harvest when ready.
+3. Plant tomatoes in early spring and watch the almanac's frost warnings; leave one bed uncovered.
+4. Stop watering a bed in midsummer and see it pale and wilt; inspect a plant for the reason.
+
+**Known gaps**
+
+- Watering refills free from anywhere ("Refill"); the hose and drip lines are not wired to tanks and taps in the interface yet (the simulation can already draw from the water system).
+- No pests, diseases or seed saving. Mulch and compost are in, rotation advice shows in the bed card; hilling and staking are not separate actions.
+- In a short year (the 20-day default) the weather model is far cloudier than in a real year, so crops yield about half; this is the weather system's, reported for a fix.
+- The supplier also lists the garden's produce for sale.

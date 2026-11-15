@@ -12,6 +12,7 @@ import { electrical } from './electrical.js';
 import { thermal } from './thermal.js';
 import { chickensSystem } from './chickens.js';
 import { structure } from './structure.js';
+import { garden } from './garden.js';
 
 export * from './sim.js';
 export * from './time.js';
@@ -26,6 +27,10 @@ export * from './site.js';
 export { water, overlayData as waterOverlay, freshStoredL } from './water.js';
 export * from './fixtures-water.js';
 export { electrical, powerAvailableAt, overlayData as electricalOverlay, FIXTURES_ELECTRICAL, WIRE_GAUGES, wireSpec } from './electrical.js';
+export { garden, gardenSteps, gardenRead, almanac, plantInfo, plantStatus, coldestNightC, bedSummary, cellInfo, frostDates, sowAdvice, frostTonight, rotationHint, nitrogenTotal, storedWaterL, CELL_M, CAN_L } from './garden.js';
+export { CROPS, CROP_IDS } from './content/crops.js';
+export { SOILS, AMENDMENTS, MULCH } from './content/soils.js';
+export { ITEMS_GARDEN } from './content/garden-items.js';
 export { findRooms, roomAt, compassName } from './rooms.js';
 export { thermal, assemblyR, uValue, innerMass, roomModels, roomIdAt, overlayData as thermalOverlayData } from './thermal.js';
 export { chickensSystem, BREEDS, FIXTURES_CHICKENS, ITEMS_CHICKENS, ITEM_CATEGORIES_CHICKENS, overlayData as chickensOverlayData } from './chickens.js';
@@ -34,8 +39,8 @@ export { structure, solveStructure, environment as structureEnvironment, overlay
 export * from './fixtures.js';
 
 // Systems are added here, in dependency order, as the iterations land. Electrical runs before water
-// so a pump's request for power is answered in the same minute.
-export const GAME_SYSTEMS = [weather, stockSystem(), siteSystem(), structure, electrical, water, thermal, cookingSystem(), chickensSystem(), physicalKitchenSystem()];
+// so a pump's request for power is answered in the same minute; the garden runs after water, whose draws it uses.
+export const GAME_SYSTEMS = [weather, stockSystem(), siteSystem(), structure, electrical, water, thermal, cookingSystem(), chickensSystem(), physicalKitchenSystem(), garden];
 
 export function createGameSim(seed, opts = {}) {
   return createSim({ seed, systems: GAME_SYSTEMS, ...opts });
