@@ -1,17 +1,22 @@
 {
-  "name": "game",
+  "name": "homesteadsimgame-combat",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Top-down action RPG prototype: world engine, skill combat, allies, camps. Readable engine source.",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "node build.mjs",
+    "sim": "node tools/sim.mjs",
+    "test:formations": "node tools/formations-allies.mjs"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "esbuild": "^0.28.2",
-    "puppeteer-core": "^25.17.0",
     "three": "^0.187.0"
+  },
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "puppeteer-core": "^25.17.0"
   }
 }
