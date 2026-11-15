@@ -875,6 +875,23 @@ export function almanac(state, t) {
   };
 }
 export { CROPS, CROP_IDS, SOILS, AMENDMENTS, MULCH, CAN_L };
+// What the page's garden view reads (window.__game.garden): pure read-outs, no state is changed through these.
+const STAGE_IDS = ['sown', 'seedling', 'leafy', 'flowering', 'fruiting', 'ready', 'past'];
+export const gardenRead = {
+  cellInfo, plantInfo, plantStatus, bedSummary, almanac, frostTonight, sowAdvice, rotationHint,
+  // the stage a plant is in, and how far through that stage (0..1), for drawing it
+  stageOf(p) {
+    const crop = CROPS[p.crop], st = crop.stages, i = p.stage, a = st[i].gdd, b = i + 1 < st.length ? st[i + 1].gdd : a * 1.5 + 1;
+    return { stage: st[i].id, within: clamp((p.gdd - a) / Math.max(1, b - a), 0, 1) };
+  },
+  doy: (state) => dayOfYear(calendarT(state.t, state.lifeT ?? state.t)),
+  // the calendar date (day and month) of a moment on the clock, in this world's year
+  dateOf(state, t) {
+    const lifeT = (state.lifeT ?? state.t) - (state.t - t) * lifeOf(state);
+    return exactDate(dayOfYear(calendarT(t, lifeT)));
+  },
+  produceOf: (cropId) => CROPS[cropId].produce,
+};
 // the two halves of the step, for the cost test
 export const gardenSteps = { soilStep, growthStep };
 export { cellAt, cellCentre, spanOf };

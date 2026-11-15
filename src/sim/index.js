@@ -23,7 +23,7 @@ export * from './site.js';
 export { water, overlayData as waterOverlay, freshStoredL } from './water.js';
 export * from './fixtures-water.js';
 export { electrical, powerAvailableAt, overlayData as electricalOverlay, FIXTURES_ELECTRICAL, WIRE_GAUGES, wireSpec } from './electrical.js';
-export { garden, gardenSteps, almanac, plantInfo, plantStatus, coldestNightC, bedSummary, cellInfo, frostDates, sowAdvice, frostTonight, rotationHint, nitrogenTotal, storedWaterL, CELL_M, CAN_L } from './garden.js';
+export { garden, gardenSteps, gardenRead, almanac, plantInfo, plantStatus, coldestNightC, bedSummary, cellInfo, frostDates, sowAdvice, frostTonight, rotationHint, nitrogenTotal, storedWaterL, CELL_M, CAN_L } from './garden.js';
 export { CROPS, CROP_IDS } from './content/crops.js';
 export { SOILS, AMENDMENTS, MULCH } from './content/soils.js';
 export { ITEMS_GARDEN } from './content/garden-items.js';
