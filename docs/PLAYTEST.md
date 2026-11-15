@@ -183,3 +183,32 @@ Close-up cooking with six recipes, a meals shelf and gentle hunger. See `docs/CO
 ### Simulated but not yet playable
 
 Water, electricity and room heat are merged and tested headlessly. They become playable when equipment can be placed and wired (the build mode agent's fixture tool) and the overlays are added.
+
+## Wave C — Plan mode: real construction, the Schedule and equipment (iteration 2a, second half)
+
+**What is new**
+
+- **A lower bar.** About 120 px instead of 200, and the view is framed above it. The backquote key folds the options away.
+- **Real foundations.** New buildings stand on pier blocks with beams and joists. Room and Floor offer the others (skids, poured piers, stem wall, slab, the old stone plinth), and a selected building can be changed.
+- **Real framing.** Timber walls are plates, studs every 40 cm, headers over doors and windows; floors are joists and subfloor; roofs are rafters, deck, underlayment and roofing. Insulation and inside lining are choices.
+- **Planned and built.** In construction mode (off for now; the construction iteration turns it on) a plan is a pale ghost, and each stage appears as it is built.
+- **Schedule** (the List button): what to buy for each stage, in plain words, with cost.
+- **Ready-made plans**: a tool shed and a small cabin (from code for now: `__build.placePlan('shed', x, z, 0)`).
+- **Equip** (E): place equipment on the ground, a floor, a wall or a roof, and join ports with wires and pipes.
+- Guides along the line of an angled wall; a room corner drags both ways; an upper storey starts over the building under the cursor.
+
+**Try this**
+
+1. Draw a room and look under its floor edge: piers, beams and joists. Select it and change "Stands on".
+2. Press List and read the Schedule.
+3. In the console: `__build.setConstructionMode(true); __build.placePlan('shed', __game.player.x, __game.player.z + 6, 0)`, then `__build.setStageBuilt(null, 'foundation', true)` and on through `__build.STAGES`.
+4. Press E, put a solar panel on a roof and a battery indoors, and drag from one port dot to the other.
+
+**Known gaps**
+
+- Only timber and dark-wood walls are framed. Log, timber-frame and A-frame construction are not in; nor is the 2D plan view.
+- A clad wall looks finished from indoors even when it is not lined. Housewrap is drawn across window openings until the wall is clad.
+- Planned (ghost) walls still block the player.
+- Group move, the ceiling field, cellars and towers were still not exercised end to end.
+- No precast pier block, door, or roof underlayment in the item catalog yet; the Schedule says "not sold yet".
+- Upper floors' joists overlap the top of the walls below by 8 cm.

@@ -35,7 +35,7 @@ async function open(opts) {
   const { ctx, page, G, step, draw } = await open({ viewport: { width: 1280, height: 720 } });
   await page.keyboard.press('KeyB'); await step(70);
   check('build mode opens on Select, the home tool', await G(() => __game.player.tool === 'build' && !document.getElementById('buildbar').hidden && __build.view().tool === 'select'));
-  check('thirteen tools, each with a letter', await G(() => { const b = [...document.querySelectorAll('#bpieces button')]; return b.length === 13 && b.every((x) => x.querySelector('.key').textContent.length === 1 && x.querySelector('svg')); }));
+  check('fourteen tools, each with a letter', await G(() => { const b = [...document.querySelectorAll('#bpieces button')]; return b.length === 14 && b.every((x) => x.querySelector('.key').textContent.length === 1 && x.querySelector('svg')); }));
 
   // screen position of a point given in a frame's own metres (the building's grid), at a height above its base
   const at = (lx, lz, up = 0.12) => G(([lx, lz, up]) => {
@@ -46,13 +46,13 @@ async function open(opts) {
   const move = async (p) => { await page.mouse.move(p[0], p[1]); await step(2); };
   const click = async (p) => { await move(p); await page.mouse.down(); await page.mouse.up(); await step(2); };
   const drag = async (a, b) => { await move(a); await page.mouse.down(); await step(1); await page.mouse.move((a[0] + b[0]) / 2, (a[1] + b[1]) / 2); await step(1); await move(b); await page.mouse.up(); await step(3); };
-  const pieces = (f) => G((f) => __build.pieces().filter((p) => !f || p.kind === f).map((p) => ({ id: p.id, kind: p.kind, type: p.type, material: p.material, length: p.length, height: p.height, area: p.area, netArea: p.netArea, y0: p.y0, y1: p.y1, wall: p.wall, free: p.free, layers: p.layers, pitchDeg: p.pitchDeg, planArea: p.planArea, openings: (p.openings || []).map((o) => ({ id: o.id, kind: o.kind, offset: o.offset, width: o.width })) })), f);
+  const pieces = (f) => G((f) => __build.pieces().filter((p) => (!f && !p.parent) || (p.kind === f && (!p.parent || f === 'door' || f === 'window'))).map((p) => ({ id: p.id, kind: p.kind, type: p.type, material: p.material, length: p.length, height: p.height, area: p.area, netArea: p.netArea, y0: p.y0, y1: p.y1, wall: p.wall, free: p.free, layers: p.layers, pitchDeg: p.pitchDeg, planArea: p.planArea, openings: (p.openings || []).map((o) => ({ id: o.id, kind: o.kind, offset: o.offset, width: o.width })) })), f);
 
   // the new building's grid: ahead of the player, clear of the bar, facing the way the view does
   await G(() => { __game.cam.dist = 44; }); await step(30);
   await page.keyboard.press('KeyR'); await step(2);
   check('R picks the Room tool and its options are shown as swatches', await G(() => __build.view().tool === 'room' && document.querySelectorAll('#bopts .bsw').length >= 18 && !!document.querySelector('#bopts .btile[aria-pressed="true"]')));
-  await G(() => { const g = __game, c = g.cam, x = g.player.x - Math.sin(c.yaw) * 6 - Math.cos(c.yaw) * 5, z = g.player.z - Math.cos(c.yaw) * 6 + Math.sin(c.yaw) * 5; const r = g.renderer.domElement.getBoundingClientRect(), v = new g.THREE.Vector3(x, g.heightAt(x, z), z).project(g.camera); window.__p0 = [r.left + (v.x * 0.5 + 0.5) * r.width, r.top + (-v.y * 0.5 + 0.5) * r.height]; });
+  await G(() => { const g = __game, c = g.cam, x = g.player.x - Math.sin(c.yaw) * 1 - Math.cos(c.yaw) * 5, z = g.player.z - Math.cos(c.yaw) * 1 + Math.sin(c.yaw) * 5; const r = g.renderer.domElement.getBoundingClientRect(), v = new g.THREE.Vector3(x, g.heightAt(x, z), z).project(g.camera); window.__p0 = [r.left + (v.x * 0.5 + 0.5) * r.width, r.top + (-v.y * 0.5 + 0.5) * r.height]; });
   await move(await G(() => window.__p0));
   await G(() => { const p = __build.state.pending; window.__F = { ox: p.ox, oz: p.oz, yaw: p.yaw }; });
 
@@ -64,8 +64,8 @@ async function open(opts) {
   await page.mouse.up(); await step(3);
   let walls = await pieces('wall'), floors = await pieces('floor');
   check('one drag makes a room: four walls and a floor', walls.length === 4 && floors.length === 1, walls.map((w) => w.length).join(','));
-  check('wall lengths, heights and areas are right', walls.map((w) => w.length).sort().join() === '4,4,5,5' && walls.every((w) => near(w.height, 2.84) && near(w.y1 - w.y0, 2.84) && near(w.area, w.length * 2.84) && w.layers.length === 3), JSON.stringify(walls[0].layers));
-  check('floor is 20 square metres with a layered build-up', near(floors[0].area, 20) && near(floors[0].y1 - floors[0].y0, 0.12) && floors[0].layers.length === 2);
+  check('wall lengths, heights and areas are right', walls.map((w) => w.length).sort().join() === '4,4,5,5' && walls.every((w) => near(w.height, 2.84) && near(w.y1 - w.y0, 2.84) && near(w.area, w.length * 2.84) && w.layers.length === 5 && w.layers[3].material === 'air'), JSON.stringify(walls[0].layers));
+  check('floor is 20 square metres with a layered build-up', near(floors[0].area, 20) && near(floors[0].y1 - floors[0].y0, 0.12) && floors[0].layers.length === 3);
   check('the floor sits at the foot of the walls', near(floors[0].y0, walls[0].y0));
   const ids0 = (await pieces()).map((p) => p.id);
 
@@ -186,6 +186,81 @@ async function open(opts) {
   check('the snap magnet is on the bar and toggles', await G(() => { const b = document.getElementById('bsnap'), was = b.getAttribute('aria-pressed'); b.click(); const off = __build.view().snap === false; b.click(); return was === 'true' && off && __build.view().snap === true; }));
   await page.keyboard.press('KeyN'); await move(await at(5.08, 4.07));
   check('the cursor snaps to a wall end and says so', await G(() => __build.state.hover && __build.state.hover.snap === 'end' && __build.state.ov.snap && __build.state.ov.snap.text === 'End'), await G(() => __build.state.hover && __build.state.hover.snap));
+  /* ---------- construction: real members, stages, built state, the shopping list, ready-made plans ---------- */
+  await page.keyboard.press('Escape'); await step(2);
+  const mem = await G((id) => __build.pieces().filter((p) => p.parent === id && p.kind !== 'window').map((p) => ({ id: p.id, kind: p.kind, type: p.type, stage: p.stage, built: p.built, b: p.section && p.section.b, d: p.section && p.section.d, length: p.length, ax: p.a.x, az: p.a.z, material: p.material })), ww.id);
+  const wwNow = (await G((id) => __build.piece(id), ww.id));
+  const studs = mem.filter((m) => m.kind === 'stud'), commons = studs.filter((m) => m.type === 'stud');
+  const alongW = (m) => Math.hypot(m.ax - wwNow.a.x, m.az - wwNow.a.z);
+  const gaps = commons.map(alongW).sort((a, b) => a - b).map((v) => Math.round(v * 100) / 100);
+  check('a framed wall lists its members: plates, studs every 0.4 m, kings, jacks and a header at the window', wwNow.members.length === mem.length && mem.filter((m) => m.kind === 'plate' && m.type !== 'sill').length === 3 && studs.every((m) => near(m.b, 0.038) && near(m.d, 0.089) && m.material === 'timber') && gaps.every((v) => near((v / 0.4) % 1, 0, 1e-6) || near((v / 0.4) % 1, 1, 1e-6)) && studs.filter((m) => m.type === 'king').length === 2 && studs.filter((m) => m.type === 'jack').length === 2 && mem.filter((m) => m.kind === 'header').length === 1, gaps.join(','));
+  check('members carry a stage, a parent and a built state; in the sandbox everything is built', mem.every((m) => m.built === true && typeof m.stage === 'string') && (await G(() => __build.pieces().every((p) => p.built === true && (!p.stage || __build.STAGES.includes(p.stage)))) ) && new Set(mem.map((m) => m.stage)).size >= 5, [...new Set(mem.map((m) => m.stage))].join(','));
+  const kinds = await G(() => [...new Set(__build.pieces().filter((p) => p.parent).map((p) => p.kind))].sort().join(','));
+  check('the house has a foundation, a floor frame, rafters, sheets and membranes as pieces', ['pier', 'beam', 'joist', 'rafter', 'sheathing', 'membrane', 'cladding', 'roofing', 'lining', 'stud', 'plate', 'header'].every((k) => kinds.split(',').includes(k)), kinds);
+  // a plan set down in construction mode starts unbuilt and is raised stage by stage
+  const shed = await G(() => { const g = __game; __build.setConstructionMode(true); const r = __build.placePlan('shed', g.player.x + 14, g.player.z + 9, 0.4); const P = __build.pieces().filter((p) => p.struct === r.struct);
+    return { r, n: P.length, planned: P.filter((p) => !p.built).length, wallLayers: P.filter((p) => p.kind === 'wall' && !p.type.startsWith('g')).map((p) => p.layers.length), floor: P.filter((p) => p.kind === 'floor').map((p) => [p.area, p.layers.length]), piers: P.filter((p) => p.kind === 'pier').length, roofs: P.filter((p) => p.kind === 'roof').map((p) => p.type), doors: P.filter((p) => p.kind === 'door').length, wins: P.filter((p) => p.kind === 'window').length, len: P.filter((p) => p.kind === 'wall' && p.type === 'wall').map((p) => p.length).sort() }; });
+  check('placePlan sets down the 2.4 x 3.0 m shed: four walls, a door, a window, a single-pitch roof, six pier blocks', !!shed.r && shed.piers === 6 && shed.doors === 1 && shed.wins === 1 && shed.roofs.join() === 'shed' && near(shed.floor[0][0], 7.2, 1e-6) && shed.len.map((v) => v.toFixed(1)).join() === '2.4,2.4,3.0,3.0' && (await G(() => __build.plans().map((p) => p.id).join())) === 'shed,cabin', JSON.stringify(shed));
+  check('in construction mode a new plan starts entirely planned, and reports no layers', shed.planned === shed.n && shed.wallLayers.every((n) => n === 0) && shed.floor[0][1] === 0, shed.planned + ' of ' + shed.n);
+  const stageUp = (to) => G(([S, to]) => { for (const st of __build.STAGES) { __build.setStageBuilt(S, st, true); if (st === to) break; } const P = __build.pieces().filter((p) => p.struct === S), w = P.find((p) => p.kind === 'wall' && p.type === 'wall'); return { layers: w.layers.map((l) => l.role + ':' + l.material), wallBuilt: w.built, built: P.filter((p) => p.built).length, n: P.length }; }, [shed.r.struct, to]);
+  let su = await stageUp('top-plates'); await step(3);
+  check('with the frames up a wall is an air cavity and nothing else', su.layers.join() === 'cavity:air' && su.wallBuilt === false && su.built > 0 && su.built < su.n, su.layers.join());
+  su = await stageUp('wrap');
+  check('sheathing and wrap appear in the layers once they are built', su.layers.join() === 'wrap:housewrap,sheathing:osb,cavity:air', su.layers.join());
+  const rt2 = await G(() => { const a = JSON.stringify(__build.serialize()), b = __build.pieces().filter((p) => !p.built).map((p) => p.id).join(); __build.restore(JSON.parse(a)); return a === JSON.stringify(__build.serialize()) && b === __build.pieces().filter((p) => !p.built).map((p) => p.id).join() && b.length > 0; });
+  check('what is built and what is planned survives saving and loading', rt2);
+  const ml = await G((S) => __build.materialsList(S), shed.r.struct);
+  const STG = await G(() => __build.STAGES);
+  check('materialsList gives the shed by stage in buyable units, each line with a plain reason', ml.length >= 20 && ml.every((l) => STG.includes(l.stage) && l.label && l.why && l.qty > 0 && l.unit) && ml.find((l) => l.label === 'Pier blocks').qty === 6 && ml.find((l) => l.label.startsWith('Studs')).itemId === 'lumber_2x4' && ml.find((l) => l.label === 'Subfloor sheets').qty === 3, ml.length + ' lines');
+  if (process.env.DUMP_SHED) (await import('node:fs')).writeFileSync(process.env.DUMP_SHED, JSON.stringify({ materials: ml, pieces: await G((S) => __build.pieces().filter((p) => p.struct === S), shed.r.struct) }, null, 1));
+  await G(() => { __build.setBuilt(__build.pieces().filter((p) => p.kind === 'stud').slice(0, 3).map((p) => p.id), false); }); await step(3);
+  check('setBuilt takes single members back to planned', (await G(() => __build.pieces().filter((p) => p.kind === 'stud' && !p.built).length)) === 3);
+  await G(() => { __build.setAllBuilt(true); __build.setConstructionMode(false); }); await step(3);
+  check('setAllBuilt finishes everything', await G(() => __build.pieces().every((p) => p.built)));
+  await page.click('#bsched'); await step(3);
+  check('the Schedule panel lists what to buy by stage, with a total', await G(() => { const p = document.getElementById('bschedp'); return !p.hidden && p.querySelectorAll('section').length >= 10 && /Studs/.test(p.textContent) && /Total/.test(p.textContent); }));
+  await draw(); await page.waitForTimeout(600); await page.screenshot({ path: 'dist/build-smoke-schedule.png' });
+  await page.click('#bsched'); await step(2);
+  const tm = await G(() => { const t = performance.now(); for (let i = 0; i < 20; i++) { __build.state.version++; __build.state.structs.forEach((S) => (S.pc = null)); __build.pieces(); } return (performance.now() - t) / 20; });
+  check('pieces() stays quick with every member in it', tm < 25, tm.toFixed(2) + ' ms to rebuild the whole list, ' + (await G(() => __build.pieces().length)) + ' pieces');
+  /* ---------- equipment: fixtures, their settings, and wires and pipes between ports ---------- */
+  await page.keyboard.press('KeyE'); await step(3);
+  check('E picks up the Equip tool with a catalog to choose from', await G(() => __build.view().tool === 'equip' && document.querySelectorAll('#bdecor .bchip').length >= 2 && Object.keys(__build.fixtureCatalog()).length >= 6));
+  // a panel on the roof takes the plane's tilt and facing; a battery and a light go on the floor by clicking
+  await click(await at(2.5, 0.8, 3.6)); await step(3);
+  let fx = await G(() => __build.pieces().filter((p) => p.kind === 'fixture' && p.fixture));
+  const plane = await G((id) => __build.piece(id), fx[0] && fx[0].settings.roofPieceId);
+  check('a solar panel clicked onto the roof takes that plane\'s tilt and facing', fx.length === 1 && fx[0].fixture === 'demo_solar_panel' && fx[0].mount === 'roof' && !!plane && plane.kind === 'roof' && near(fx[0].settings.tiltDeg, Math.round(plane.pitchDeg * 10) / 10) && near(fx[0].settings.azimuthDeg, Math.round(((Math.atan2(plane.facing.x, -plane.facing.z) * 180 / Math.PI) % 360 + 360) % 360)), JSON.stringify(fx[0] && fx[0].settings));
+  await G(() => __build.choose('fx:kind', 'demo_battery')); await page.keyboard.press('KeyV'); await step(2); await page.keyboard.press('KeyE'); await step(2); await G(() => __build.choose('fx:kind', 'demo_battery')); await step(2);
+  await click(await at(1.25, 1.25)); await step(3);
+  fx = await G(() => __build.pieces().filter((p) => p.kind === 'fixture' && p.fixture));
+  const bat = fx.find((f) => f.fixture === 'demo_battery');
+  check('a fixture piece has the contract\'s shape', !!bat && bat.mount === 'floor' && typeof bat.a.x === 'number' && typeof bat.y0 === 'number' && bat.y1 > bat.y0 && typeof bat.yawRad === 'number' && typeof bat.settings === 'object' && bat.ports.length === 1 && bat.ports[0].id === 'dc' && bat.ports[0].type === 'power' && /^p\d+$/.test(bat.id), JSON.stringify(bat));
+  const more = await G(() => { const g = __game, S = __build.state.structs[0], w = (lx, lz) => { const [x, z] = __build.toWorld(S, lx, lz); return { x, z, y: S.y0 + 0.12 }; };
+    return __build.addFixtures([{ fixture: 'demo_light', ...w(3.5, 2), mount: 'floor' }, { fixture: 'demo_water_tank', ...w(8, 2), y: undefined }, { fixture: 'demo_tap', ...w(4.5, 3.5), mount: 'floor' }]); });
+  check('addFixtures places equipment from code', more.length === 3 && more.every((id) => /^p\d+$/.test(id)));
+  const ids = { panel: fx.find((f) => f.fixture === 'demo_solar_panel').id, bat: bat.id, light: more[0], tank: more[1], tap: more[2] };
+  const c1 = await G((i) => __build.connect(i.panel, 'dc', i.bat, 'dc'), ids), c2 = await G((i) => __build.connect(i.tank, 'out', i.tap, 'in', { diameterMm: 25 }), ids), bad = await G((i) => __build.connect(i.bat, 'dc', i.tap, 'in'), ids), dup = await G((i) => __build.connect(i.bat, 'dc', i.panel, 'dc'), ids);
+  check('ports of different kinds refuse to join, in plain words', c1.ok && c2.ok && !bad.ok && /power port cannot be joined to a water port/.test(bad.reason) && !dup.ok, bad.reason);
+  // the third run is made by hand: from the battery's port dot to the light's
+  await step(3);
+  const dot = (fid, ev) => G(([fid, ev]) => { const d = [...document.querySelectorAll('.bport')].find((e) => !e.hidden && e._q && e._q.fid === fid); d.dispatchEvent(new PointerEvent(ev, { bubbles: true, cancelable: true })); return true; }, [fid, ev]);
+  await dot(ids.bat, 'pointerdown'); await step(2); await dot(ids.light, 'pointerup'); await step(3);
+  const links = await G(() => __build.pieces().filter((p) => p.kind === 'wire' || p.kind === 'pipe'));
+  const wire = links.find((l) => l.kind === 'wire' && l.to.piece === ids.light), pipe = links.find((l) => l.kind === 'pipe');
+  check('dragging from one port to another runs a wire; wires and pipes are pieces with a routed length', links.length === 3 && !!wire && wire.from.piece === ids.bat && wire.from.port === 'dc' && wire.to.port === 'in' && wire.gauge === 12 && wire.lengthM > 2 && wire.material === 'copper' && pipe.diameterMm === 25 && pipe.lengthM > 3 && pipe.gauge === undefined, JSON.stringify(wire));
+  check('the inspector offers the run\'s gauge', await G(() => __build.view().groups.some((g) => g.id === 'fx:gauge')));
+  await G(() => __build.choose('fx:gauge', 8)); await step(2);
+  check('and changing it changes the piece', (await G((id) => __build.piece(id).gauge, wire.id)) === 8);
+  const st = await G((i) => ({ a: __build.setFixtureSetting(i.light, 'on', false), b: __build.setFixtureSetting(i.panel, 'tiltDeg', 10), on: __build.piece(i.light).settings.on, tilt: __build.piece(i.panel).settings.tiltDeg }), ids);
+  check('setFixtureSetting changes a setting; a roof panel keeps the roof\'s tilt', st.a === true && st.on === false && st.b === false && st.tilt > 20, JSON.stringify(st));
+  const frt = await G(() => { const a = JSON.stringify(__build.serialize()), pj = JSON.stringify(__build.pieces().filter((p) => p.stage === 'services')); __build.restore(JSON.parse(a)); return { same: a === JSON.stringify(__build.serialize()), pieces: pj === JSON.stringify(__build.pieces().filter((p) => p.stage === 'services')), n: JSON.parse(pj).length }; });
+  check('fixtures and connections survive saving and loading, ids included', frt.same && frt.pieces && frt.n === 8, JSON.stringify(frt));
+  await G((i) => __build.removeFixture(i.tank), ids); await step(2);
+  check('removing a fixture takes its connections with it', (await G(() => __build.pieces().filter((p) => p.kind === 'pipe').length)) === 0);
+  check('the simulation sees the equipment', await G(() => { __game.step(1 / 60); return __game.sim.state.sys.site.pieces.some((p) => p.kind === 'fixture' && p.fixture === 'demo_battery' && p.ports.length === 1) && __game.sim.state.sys.site.pieces.some((p) => p.kind === 'wire' && p.material === 'copper'); }));
+  await draw(); await page.waitForTimeout(600); await page.screenshot({ path: 'dist/build-smoke-equip.png' });
+  await page.keyboard.press('Escape'); await step(2); await page.keyboard.press('Escape'); await step(2);
   await draw(); await page.waitForTimeout(600);
   await page.screenshot({ path: 'dist/build-smoke.png' });
   await ctx.close();
