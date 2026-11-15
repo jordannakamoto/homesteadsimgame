@@ -36,14 +36,16 @@ async function open(fresh = true) {
   await boot();
   const tick = (n = 3) => G((n) => window.__step(n, 1 / 30), n);
   const shot = async (name) => { if (!SHOTS) return; await G(() => { window.__step(1, 1 / 60); window.__draw(__game.scene, __game.camera); }); await page.waitForTimeout(400); await page.screenshot({ path: SHOTS + '/' + name + '.png', timeout: 120000 }); };
-  const state = () => G(() => {
+  const state0 = () => G(() => {
     const c = __construct, s = __game.sim.state.sys.construction, pr = c.current() || Object.values(s.progress)[0] || null, a = c.nextAction(), x = c.context(), st = pr && __build.structs().find((q) => q.id === pr.id);
     return { stage: pr && pr.stage, done: !!(pr && pr.done), built: pr ? Object.values(pr.members).filter((m) => m.built).length : 0, total: pr ? Object.keys(pr.members).length : 0,
       raised: pr ? Object.keys(pr.raised).length : 0, raise: pr ? c.plan(pr.id).raise : null, target: a && a.target, line: a && a.line, ctx: x && x.kind, carried: s.carried,
-      shed: st && { x: st.x, z: st.z, r: st.r }, money: __game.sim.state.sys.stock.money, stacks: s.stacks.length, deliveries: s.deliveries.length, auto: !!c.V.auto,
+      shed: st && { x: st.x, z: st.z, r: c.geom(pr.id).reach + 0.7 }, money: __game.sim.state.sys.stock.money, stacks: s.stacks.length, deliveries: s.deliveries.length, auto: !!c.V.auto,
       prompt: document.getElementById('cvprompt').hidden ? '' : document.getElementById('cvprompt').innerText.replace(/\s+/g, ' '),
       banner: document.getElementById('cvbanner').hidden ? '' : document.getElementById('cvbanner').innerText.replace(/\s+/g, ' '), played: window.__played };
   });
+  const T0 = { base: 0 };
+  const state = async () => { const q = await state0(); q.played += T0.base; return q; };
   // walk with W toward a point until within `range` of it
   const walkTo = async (t, range) => {
     let down = false;
@@ -56,7 +58,7 @@ async function open(fresh = true) {
     if (down) await page.keyboard.up('KeyW');
     await tick(1);
   };
-  return { ctx, page, G, boot, tick, shot, state, walkTo };
+  return { ctx, page, G, boot, tick, shot, state, walkTo, T0 };
 }
 const banners = new Set();
 
@@ -90,7 +92,7 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
   await page.keyboard.press('KeyN'); await tick(2);
   check('N closes the panel', await G(() => document.getElementById('cv').hidden));
   // level the site while the delivery is on its way
-  await walkTo(s.shed, 2.2);
+  await walkTo(s.shed, 1.5);
   s = await state();
   check('standing on the plan, the prompt offers to level the ground', s.ctx === 'work' && /level the ground/i.test(s.prompt), s.prompt);
   check('a ghost wall does not block the way: the player stands inside the plan', await G(() => { const st = __build.structs().find((q) => q.planned); return Math.hypot(st.x - __game.player.x, st.z - __game.player.z) < 2.6; }));
@@ -123,7 +125,7 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
       if (s.done || until(s)) return;
       if (s.stage !== lastStage) { console.log('     ' + Math.round(s.played - t0) + ' s  ' + s.stage + '  (' + s.built + ' of ' + s.total + ')'); lastStage = s.stage; }
       if (s.raise) {
-        await walkTo(s.shed, s.shed.r + 0.3);
+        await walkTo(s.shed, s.shed.r);
         if (!taken.flat) { taken.flat = 1; check('a wall frame lies flat on the deck, waiting to be raised', await G(() => { const pr = __construct.current(), par = __construct.plan(pr.id).raise, mw = __build.membersOf(pr.id); return !!par && Object.keys(pr.members).filter((id) => pr.members[id].parent === par && pr.members[id].stage === 'wall-frame').every((id) => pr.members[id].built && mw.planned.has(id)); })); await shot('06-wall-flat'); }
         await page.keyboard.down('KeyF'); await tick(22);
         if (!taken.half) { taken.half = 1; check('holding F swings it up about its bottom plate', await G(() => { const R = __construct.V.raise; return !!R && R.p > 0.1 && R.p < 0.95 && Math.abs(R.angle) > 0.2 && Math.abs(R.angle) < 1.5; })); await shot('07-wall-half-raised'); }
@@ -134,7 +136,7 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
       }
       if (!s.target) { await tick(20); continue; }
       const atShed = Math.hypot(s.target.x - s.shed.x, s.target.z - s.shed.z) < 0.1;
-      await walkTo(s.target, atShed ? s.shed.r + 0.3 : 1.0);
+      await walkTo(s.target, atShed ? s.shed.r : 1.0);
       const c = await state();
       if (c.ctx === 'work') {
         if (c.carried && c.carried.itemId === 'lumber_2x4' && !taken.carry) { taken.carry = 1; check('the load is on the shoulder and walking is a little slower', await G(() => __construct.carry.loadForm === 'lumber' && __game.player.carryK > 0.7 && __game.player.carryK < 1)); await shot('05-carrying-studs'); }
@@ -148,6 +150,7 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
           if (!reloaded && q.stage === 'wall-frame' && q.raised === 1 && q.built - 24 > 22 && q.carried && q.carried.qty > 3) {
             await page.keyboard.up('KeyF'); await tick(20);
             const snap = await G(() => { __game.saveGame(); const s = __game.sim.state.sys.construction, pr = __construct.current(); return { c: JSON.stringify(s), money: __game.sim.state.sys.stock.money, built: Object.values(pr.members).filter((m) => m.built).length, flat: Object.keys(pr.members).filter((id) => pr.members[id].built && pr.members[id].stage === 'wall-frame' && !pr.raised[pr.members[id].parent]).length }; });
+            T.T0.base = q.played;
             await T.page.reload({ waitUntil: 'domcontentloaded', timeout: 120000 }); await T.boot(); await tick(10);
             const back = await G(() => { const s = __game.sim.state.sys.construction, pr = __construct.current(), mw = __build.membersOf(pr.id); return { c: JSON.stringify(s), money: __game.sim.state.sys.stock.money, load: __construct.carry.loadForm, stacks: __construct.carry.pieceCount,
               agree: Object.keys(pr.members).every((id) => { const m = pr.members[id], lying = m.stage === 'wall-frame' && !pr.raised[m.parent]; return mw.planned.has(id) === !(m.built && !lying); }) }; });
@@ -180,7 +183,7 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
     s = await state();
     if (s.done) break;
     if (s.banner) banners.add(s.banner.split(' ').slice(0, 2).join(' '));
-    if (!s.auto) { await walkTo(s.shed, s.shed.r + 0.3); if ((await state()).ctx === 'auto') await page.keyboard.press('KeyF'); await tick(4); }
+    if (!s.auto) { await walkTo(s.shed, s.shed.r); if ((await state()).ctx === 'auto') await page.keyboard.press('KeyF'); await tick(4); }
     for (let i = 0; i < 400; i++) { await tick(10); const q = await state(); if (q.banner) banners.add(q.banner.split(' ').slice(0, 2).join(' ')); if (!q.auto) break; }
   }
   await tick(40);
@@ -215,7 +218,7 @@ let guidedAll = 0;
   check('guided: with instant deliveries the stacks are there at once', s.stacks >= 14 && s.deliveries === 0);
   await page.keyboard.press('KeyN'); await tick(2);
   const t0 = s.played;
-  await walkTo(s.shed, s.shed.r + 0.3);
+  await walkTo(s.shed, s.shed.r);
   let presses = 0;
   for (let guard = 0; guard < 40; guard++) {
     s = await state();

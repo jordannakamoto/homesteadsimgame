@@ -56,6 +56,8 @@
     let n = 0;
     for (const m of g.byId.values()) if (m.kind === 'plate') { g.cx += (m.a[0] + m.b[0]) / 2; g.cz += (m.a[2] + m.b[2]) / 2; n++; }
     if (n) { g.cx /= n; g.cz /= n; }
+    g.reach = 1;
+    for (const m of g.byId.values()) if (m.kind === 'plate' || m.kind === 'joist' || m.kind === 'pier') g.reach = Math.max(g.reach, Math.hypot(m.a[0] - g.cx, m.a[2] - g.cz), Math.hypot(m.b[0] - g.cx, m.b[2] - g.cz));
     // the order pieces go in: by stage, then by kind, then along the building
     for (const m of g.byId.values()) {
       const mx = (m.a[0] + m.b[0]) / 2, mz = (m.a[2] + m.b[2]) / 2, my = (m.a[1] + m.b[1]) / 2;
@@ -261,14 +263,16 @@
   // ------------------------------------------------------------------ what F does here and now
   function nearBuilding(x, z) {
     let best = null, bd = 1e9;
-    for (const pr of inProgress()) { const st = V.structs.get(pr.id), d = Math.hypot(st.x - x, st.z - z) - st.r; if (d < 0.9 && d < bd) { bd = d; best = pr; } }
+    for (const pr of inProgress()) { const st = V.structs.get(pr.id), g = geom(pr.id), d = Math.hypot(st.x - x, st.z - z) - (g ? g.reach : st.r); if (d < 1.5 && d < bd) { bd = d; best = pr; } }
     return best;
   }
+  const wantedStack = (d) => d.itemId === V.wantItem;
+  const pickable = (d) => !C.SITE_SUPPLY.includes(d.itemId);
   function context() {
     const P = G.player, s = S(), c = s.carried;
     if (P.tool === 'build' || V.placing || s.options.sandbox) return null;
     if (V.auto) return { kind: 'stop', id: V.auto.id };
-    const pr = nearBuilding(P.x, P.z), stack = carry.nearest(P.x, P.z, 2.1);
+    const pr = nearBuilding(P.x, P.z), stack = (V.wantItem && carry.nearest(P.x, P.z, 2.1, wantedStack)) || carry.nearest(P.x, P.z, 2.1, pickable) || carry.nearest(P.x, P.z, 1.3);
     if (pr) {
       const pl = plan(pr.id);
       if (pl) {
@@ -473,6 +477,7 @@
     if (V.placing) { setPrompt('', V.placing.ok ? 'Click to set it down · wheel or Q / E turns it · Esc cancels' : V.placing.why, '', null); return; }
     if (!ctx) { setPrompt('', '', '', null); return; }
     const pr = ctx.id !== undefined ? s.progress[ctx.id] : null;
+    if (ctx.kind === 'stop' && !V.auto) { setPrompt('', '', '', null); return; }
     if (ctx.kind === 'stop') {
       const A = V.auto, w = V.working && workLabel(pr, V.working.memberId), v = plan(A.id).view.stages.find((q) => q.id === A.stage);
       setPrompt('F', 'Stop · ' + (V.raise ? 'raising the wall' : w ? low(w.text) : A.wait > 0 ? 'fetching more' : low(C.STAGE[A.stage].name)), v ? v.built + ' of ' + v.total : '', V.raise ? Math.min(1, V.raise.p) : W.job ? W.progress() : null);
@@ -517,12 +522,13 @@
     const c = s.carried;
     if (c && c.itemId === ln.itemId) return { ...out, line: 'Carry the ' + stackName(c.itemId) + ' to the ' + low(pr.name) + ' and hold <kbd>F</kbd>.', target: at };
     const stack = homeStack(ln.itemId) || s.stacks.find((k) => k.itemId === ln.itemId);
-    return { ...out, line: (s.options.auto ? 'Press <kbd>F</kbd> by the ' + low(pr.name) + ' to work until done, or pick' : 'Pick') + ' up ' + stackName(ln.itemId) + ' at the stacks with <kbd>F</kbd>.', target: s.options.auto ? at : stack ? { x: stack.x, z: stack.z, y: 1.9 } : null };
+    return { ...out, line: (s.options.auto ? 'Press <kbd>F</kbd> by the ' + low(pr.name) + ' to work until done, or pick' : 'Pick') + ' up ' + stackName(ln.itemId) + ' at the stacks with <kbd>F</kbd>.', target: s.options.auto ? at : stack ? { x: stack.x, z: stack.z, y: 1.9 } : null, item: ln.itemId };
   }
   function drawNext() {
     const a = nextAction(), s = S();
     V.anyOpen = inProgress().length > 0;
     V.target = a && a.target ? a.target : null;
+    V.wantItem = a && a.item ? a.item : null;
     // a card with the reason, once for each stage as it opens
     const card = a && a.stage && s.options.cards && !s.tutorial.seen[a.stage] ? a.stage : null;
     const sig = a ? [a.k, a.title, a.line, a.btn && a.btn.join(), a.btn2 && a.btn2.join(), card].join('|') : '';

@@ -105,9 +105,9 @@
           loadRoot.rotation.y = P.face;
         }
       },
-      nearest(x, z, r) {
+      nearest(x, z, r, only) {
         let best = null, bd = r;
-        for (const d of stacks) { const dd = Math.hypot(d.x - x, d.z + (d.form === 'lumber' || d.form === 'sheet' ? 0 : 0.2) - z); if (dd < bd) { bd = dd; best = d; } }
+        for (const d of stacks) { if (only && !only(d)) continue; const dd = Math.hypot(d.x - x, d.z + (d.form === 'lumber' || d.form === 'sheet' ? 0 : 0.2) - z); if (dd < bd) { bd = dd; best = d; } }
         return best;
       },
       get pieceCount() { return mesh.count; },

@@ -83,11 +83,11 @@ export function carryLimitKg(tools = []) {
 
 // ---- work: blows to put in one member of each kind, and how fast the blows come by the best tool owned
 export const WORK = Object.freeze({
-  beats: Object.freeze({ site: 8, pier: 2, post: 2, beam: 3, skid: 3, footing: 4, stemwall: 5, slab: 6, joist: 2, plate: 2, stud: 2, header: 3, rafter: 3, sheathing: 3, membrane: 3, cladding: 5, roofing: 5, insulation: 2, lining: 4, door: 5, window: 4 }),
-  beatS: 0.26,                        // seconds between blows with a hammer
+  beats: Object.freeze({ site: 8, pier: 3, post: 2, beam: 4, skid: 4, footing: 4, stemwall: 5, slab: 6, joist: 3, plate: 3, stud: 3, header: 4, rafter: 4, sheathing: 4, membrane: 3, cladding: 6, roofing: 6, insulation: 2, lining: 5, door: 6, window: 4 }),
+  beatS: 0.33,                        // seconds between blows with a hammer
   tools: Object.freeze([{ tool: 'hammer', speed: 1 }, { tool: 'framing_nailer', speed: 3, power: true }]),
   sound: Object.freeze({ pier: 'scrape', footing: 'scrape', slab: 'scrape', stemwall: 'scrape', site: 'dig', sheathing: 'thunk', membrane: 'rustle', roofing: 'thunk', insulation: 'rustle', door: 'thunk', window: 'thunk' }),
-  guidedSpeed: 4,                     // Guided fills a stage in this many times faster than working by hand
+  guidedSpeed: 2.5,                     // Guided fills a stage in this many times faster than working by hand
 });
 export function workSpeed(tools = [], hasPower = false) {
   let k = 0.6;                        // bare hands and a rock
