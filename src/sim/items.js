@@ -11,11 +11,13 @@
 // Prices are 2026 US retail, rounded; they are game prices, not quotes.
 
 import { MATERIALS } from './materials.js';
+import { INGREDIENTS, foodId } from './food-catalog.js';
 
 export const ITEM_UNITS = Object.freeze(['each', 'm', 'm2', 'm3', 'kg', 'L']);
 
 // Shop and inventory order. `tool` categories live in stock.tools, everything else in stock.items.
 export const ITEM_CATEGORIES = Object.freeze([
+  { id: 'food', name: 'Food & pantry', blurb: 'Ingredients for your homestead kitchen' },
   { id: 'lumber', name: 'Dimensional lumber', blurb: 'Framing lumber sold by the metre' },
   { id: 'logs', name: 'Logs and boards', blurb: 'Raw logs, boards and cut wood' },
   { id: 'sheet', name: 'Sheets and membranes', blurb: 'Plywood, OSB, board, wraps' },
@@ -141,6 +143,13 @@ add({ id: 'circular_saw', name: 'Circular saw', category: 'tools_power', unit: '
 add({ id: 'power_drill', name: 'Drill', category: 'tools_power', unit: 'each', massKg: 1.8, priceUsd: 75, powerW: 710 });
 add({ id: 'chainsaw', name: 'Electric chainsaw', category: 'tools_power', unit: 'each', massKg: 4.5, priceUsd: 120, powerW: 1800 });
 add({ id: 'table_saw', name: 'Table saw', category: 'tools_power', unit: 'each', massKg: 25, priceUsd: 400, powerW: 1800 });
+
+for (const [id, ingredient] of Object.entries(INGREDIENTS)) {
+  add({ id: foodId(id), name: ingredient.name, category: 'food', unit: 'each',
+    massKg: ingredient.massKg, priceUsd: ingredient.priceUsd });
+}
+add({ id: 'kitchen_chopper', name: 'Mechanical vegetable chopper', category: 'tools_hand',
+  unit: 'each', massKg: 1.5, priceUsd: 35, blurb: 'Fast chopping and batch preparation for recipes you have cooked' });
 
 export const ITEMS = Object.freeze(Object.fromEntries(list.map((i) => [i.id, i])));
 export const item = (id) => ITEMS[id];
