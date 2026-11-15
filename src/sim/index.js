@@ -9,6 +9,8 @@ import { physicalKitchenSystem } from './physical-kitchen.js';
 import { cookingSystem } from './cooking.js';
 import { water } from './water.js';
 import { electrical } from './electrical.js';
+import { thermal } from './thermal.js';
+import { chickensSystem } from './chickens.js';
 
 export * from './sim.js';
 export * from './time.js';
@@ -23,10 +25,15 @@ export * from './site.js';
 export { water, overlayData as waterOverlay, freshStoredL } from './water.js';
 export * from './fixtures-water.js';
 export { electrical, powerAvailableAt, overlayData as electricalOverlay, FIXTURES_ELECTRICAL, WIRE_GAUGES, wireSpec } from './electrical.js';
+export { findRooms, roomAt, compassName } from './rooms.js';
+export { thermal, assemblyR, uValue, innerMass, roomModels, roomIdAt, overlayData as thermalOverlayData } from './thermal.js';
+export { chickensSystem, BREEDS, FIXTURES_CHICKENS, ITEMS_CHICKENS, ITEM_CATEGORIES_CHICKENS, overlayData as chickensOverlayData } from './chickens.js';
+export * as animals from './animals.js';
+export * from './fixtures.js';
 
 // Systems are added here, in dependency order, as the iterations land. Electrical runs before water
 // so a pump's request for power is answered in the same minute.
-export const GAME_SYSTEMS = [weather, stockSystem(), siteSystem(), electrical, water, cookingSystem(), physicalKitchenSystem()];
+export const GAME_SYSTEMS = [weather, stockSystem(), siteSystem(), electrical, water, thermal, cookingSystem(), chickensSystem(), physicalKitchenSystem()];
 
 export function createGameSim(seed, opts = {}) {
   return createSim({ seed, systems: GAME_SYSTEMS, ...opts });

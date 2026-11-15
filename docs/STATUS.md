@@ -32,9 +32,9 @@ The scope roughly doubled after the first playtest. These rules put landing each
 | A | 0 simulation spine | Merged, live | `68c7226` |
 | B | 1 weather, 2 materials, 2a build mode (first half) | Merged, live | see `git log` for "Wave B complete" |
 | C | 3 structure, 4 thermal, 6 electrical, 7 water, 13 chickens, 2a build mode (second half) | Water and electrical merged headless; the rest in progress | |
-| C-int | Wave C made playable; files moved into engine and game folders: equipment catalog in the store, fixture placement wired to power and water, overlays for structure, heat, power and water | Not started | |
+| C-int | Partly done: real equipment catalog in the Equip tool, power and water running in play, a Home panel. Still owed: store pricing for equipment, overlays in the world, engine and game folders. Wave C made playable; files moved into engine and game folders: equipment catalog in the store, fixture placement wired to power and water, overlays for structure, heat, power and water | Not started | |
 | F1 | In progress. **Farming, first playable: soil water, growth model, twelve crops, beds, sowing, watering, harvest, the first-salad card** (from owner feedback; `docs/FARMING.md`). Runs alongside wave C and D1 because it does not touch build mode | Not started | |
-| D1 | **2c construction and 2d store and plan book: the first shed, end to end** (from owner feedback) | Not started | |
+| D1 | **2c construction and 2d store and plan book: the first shed, end to end** (from owner feedback) | In progress | |
 | D2 | 1a weather you can see, 5 heating and moisture, 5b camp and journal | Not started | |
 | D3 | 7a groundworks, 7b rented machines, 8 soil and irrigation, 14 chicken lifecycle | Not started | |
 | D4 | 5a interiors, 18 salvage and renovation | Not started | |
@@ -68,11 +68,12 @@ State at 02:10 Pacific, 15 Nov. Usage window runs to 06:30. Keep at most four ag
 |---|---|---|---|
 | 7 water | `wt-07-water` | `a794eb67a6f7cff9d` | Merged (headless) |
 | 6 electrical | `wt-06-electrical` | `a8d26ca299cbd8bc9` | Merged (headless) |
-| 13 chickens | `wt-13-chickens` | `a194e2272cd6e5656` | Running; told to use key H and the seasonal clock |
-| 2a second half (framing, stages, materials list, plans, fixtures) | `wt-02b-build` | `a4d4f2abc82ad3b82` | Running |
+| 13 chickens | `wt-13-chickens` | `a194e2272cd6e5656` | Merged, live |
+| 2a second half (framing, stages, materials list, plans, fixtures) | `wt-02b-build` | `a4d4f2abc82ad3b82` | Merged, live. Not done: log, timber frame, A-frame, 2D plan view, placing single members by hand |
 | F1 farming | `wt-f1-farming` | `aff01250a5f1dc736` | Running |
-| 4 thermal | `wt-04-thermal` | `a1ed4e1a9cafe5d67` | Running |
-| 3 structure | `wt-03-structure` | `ac42fcd07389e8bfb` | Not started; resume when a slot frees, with the same notes thermal got (built flag, `ctx.ct`) |
+| 4 thermal | `wt-04-thermal` | `a1ed4e1a9cafe5d67` | Merged (headless) |
+| 3 structure | `wt-03-structure` | `ac42fcd07389e8bfb` | Resumed 02:35 |
+| 2c construction and 2d store: the first shed | `wt-2c-construction` | `a167a5466628b76ba` | Started 02:45 |
 
 Also on `main` from other sessions: the kitchen (cooking, key K, `docs/COOKING.md`), terrain streaming and save fixes, `docs/FOUNDATIONS.md` (Steam and co-op plan). Unmerged branch `renderer-low-memory` is left for the owner to decide.
 
