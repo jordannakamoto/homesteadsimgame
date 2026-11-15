@@ -215,7 +215,7 @@
   }
   if (btn) btn.addEventListener("click", () => { setOpen(!open); $("view") && $("view").focus(); });
   window.addEventListener("keydown", (e) => {
-    if (e.code === "KeyY" && !e.repeat && !(e.target && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName))) setOpen(!open);
+    if (e.code === "KeyY" && !e.repeat && G.player.tool !== "build" && !(e.target && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName))) setOpen(!open);
   });
   const sel = $("wxclimate");
   if (sel) {

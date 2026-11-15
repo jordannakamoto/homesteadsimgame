@@ -3617,12 +3617,15 @@
     try {
       localStorage.setItem(SAVE + B.seed, JSON.stringify(serialize()));
     } catch {}
+    if (G.saveGame) G.saveGame();
   }
   function loadBuilds() {
     try {
+      // the world save carries the buildings; build mode's own copy is the fallback for older saves
+      const fromWorld = G.savedBuilds && G.savedBuilds();
       const raw = localStorage.getItem(SAVE + B.seed);
-      if (!raw || B.structs.length) return;
-      restoreAll(JSON.parse(raw));
+      if ((!raw && !fromWorld) || B.structs.length) return;
+      restoreAll(fromWorld && Array.isArray(fromWorld.structs) ? fromWorld : JSON.parse(raw));
     } catch {}
   }
   /* ---------- copy and stamp ---------- */

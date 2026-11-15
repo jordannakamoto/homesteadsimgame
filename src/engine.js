@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createGameSim, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND } from './sim/index.js';
+import { createGameSim, mapPieces, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -2050,6 +2050,7 @@ function saveData() {
   return makeSave(sim.serialize(), {
     edits, removed: [...world.removed], wood: world.wood, stone: world.stone,
     player: { x: player.x, z: player.z }, cam: { yaw: cam.yaw, pitch: cam.pitch, dist: cam.dist },
+    builds: window.__build && window.__build.serialize ? window.__build.serialize() : simCtl.builds,
   });
 }
 function saveGame() {
@@ -2069,6 +2070,7 @@ function applySave(raw) {
   for (const k in (w.edits || {})) world.edits.set(k, base64ToF32(w.edits[k]));
   for (const id of (w.removed || [])) world.removed.add(id);
   world.wood = w.wood || 0; world.stone = w.stone || 0;
+  simCtl.builds = w.builds || null;
   if (w.player) { player.x = w.player.x; player.z = w.player.z; }
   if (w.cam) { cam.yaw = cam.prevYaw = w.cam.yaw; cam.pitch = w.cam.pitch; cam.dist = w.cam.dist; }
   return true;
@@ -2090,7 +2092,7 @@ el('helpbtn').addEventListener('click', () => { el('help').hidden = true; canvas
 function resetWorld(seed) {
   SEED = seed >>> 0;
   noise = makeSimplex(SEED);
-  sim = createGameSim(SEED);
+  sim = createGameSim(SEED); simCtl.builds = null; simCtl.siteV = -1;
   clearEnemies();
   if (window.__build) window.__build.reset();
   for (const c of world.chunks.values()) c.dispose();
@@ -2844,6 +2846,11 @@ function step(dt) {
   }
   // hand real time to the simulation; it advances in fixed ticks, a bounded number per frame
   sim.advance(dt * WORLD_SECONDS_PER_REAL_SECOND * (keys.KeyT ? Math.max(simCtl.speed, 100) : simCtl.speed), 24);
+  // keep the simulation's picture of what is built in step with build mode
+  if (window.__build && window.__build.pieces && window.__build.version !== simCtl.siteV) {
+    simCtl.siteV = window.__build.version;
+    sim.commandNow('site.setPieces', { pieces: mapPieces(window.__build.pieces()) });
+  }
   simCtl.saveT += dt;
   if (simCtl.saveT > 20) { simCtl.saveT = 0; saveGame(); }
   updateChunks(player.x, player.z, 5);
@@ -2912,7 +2919,7 @@ setTool('axe');
 lockUi();
 window.__game = {
   pm, get seed() { return SEED; },
-  get sim() { return sim; }, powerAvailable: () => false,
+  get sim() { return sim; }, savedBuilds: () => simCtl.builds, powerAvailable: () => false,
   stock: {
     MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, stockMassKg, canAfford, toolAvailable,
     get state() { return stockState(); },

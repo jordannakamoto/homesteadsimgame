@@ -57,6 +57,15 @@ export function createSim({ seed = 1, systems = [], record = false } = {}) {
     sim.queue.push({ name, payload });
   };
 
+  // Apply a command immediately, for interface actions that must take effect while time is paused
+  // (buying, building). Same handler and same recording as a queued command, so replays see it.
+  sim.commandNow = (name, payload = {}) => {
+    const h = sim.handlers.get(name);
+    if (!h) throw new Error('unknown command: ' + name);
+    if (sim.recorded) sim.recorded.push({ tick: S().tick, name, payload });
+    return h.fn({ ...ctxFor(h.sys), dt: 0 }, payload);
+  };
+
   function tickOnce() {
     const st = S();
     if (sim.queue.length) {

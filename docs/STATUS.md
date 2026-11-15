@@ -15,8 +15,8 @@ The single place to see where the V1 run stands. Updated by the orchestrator at 
 | Wave | Iterations | State | Commit on `main` |
 |---|---|---|---|
 | A | 0 simulation spine | Merged, live | `68c7226` |
-| B | 1 weather, 2 materials, 2a build mode (first half) | In progress | |
-| C | 3 structure, 4 thermal, 6 electrical, 7 water, 13 chickens, 2a build mode (second half) | Contracts written | |
+| B | 1 weather, 2 materials, 2a build mode (first half) | Merged, live | see `git log` for "Wave B complete" |
+| C | 3 structure, 4 thermal, 6 electrical, 7 water, 13 chickens, 2a build mode (second half) | In progress | |
 | D | 5 heating and moisture, 5a interiors, 5b camp and journal, 8 soil and irrigation, 14 chicken lifecycle, 18 salvage and renovation | Not started | |
 | E | 9 crops, 19 contractors, 20 automation | Not started | |
 | F | 10 soil and compost, 11 greenhouse, 12 hydroponics, 15 goats, 16 kitchen | Not started | |
@@ -33,6 +33,9 @@ Things decided on the owner's behalf that are easy to reverse. Say so if any is 
 - Starting money is a placeholder until prices and the pace of play can be felt.
 
 ## Deviations from the plan
+
+- The run stopped from about 7:25pm to 8:35pm Pacific on 14 Nov when the usage limit was reached, then restarted itself.
+- Another session pushed two fixes to `main` during wave B (dollhouse view, potted plant on High); they are merged in.
 
 - Wave tags could not be pushed from the build environment; waves are identified by commit instead.
 - Iteration 2a was split across waves B and C.
