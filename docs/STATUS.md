@@ -17,6 +17,7 @@ The scope roughly doubled after the first playtest. These rules put landing each
 1. **One thing is the spine: the first shed.** Until a new player can go from bare land to a finished shed (plan, order, delivery, raise it stage by stage, dried in, insulated) and enjoy it, nothing else is added to the live page. Every other system is judged by whether it makes that path better.
 2. **Nothing merges on its report alone.** Each iteration is merged only after the orchestrator has run the tests, played the feature in a browser, looked at screenshots, and read the code that touches shared files. Data tables from cheaper agents are spot-checked against references.
 3. **Definition of done for an iteration:** headless tests against known physical relationships pass; the page loads clean on Low and High; the feature is reachable without reading docs; it is not tedious; old saves load; the frame budget is measured; `docs/PLAYTEST.md` says what to try and what is weak.
+3a. **Engine and game stay separate.** Mechanisms (vehicles, carrying, assembly, networks, animals) are generic and take homestead content as data, so the engine can be reused for other games. See `ARCHITECTURE.md`, "Engine and game".
 4. **Integrate before widening.** A wave is not finished until its systems are visibly connected in play (overlays, catalog, placement), not just merged. No new wave starts while the previous one is only headless.
 5. **Fewer agents at once from wave D on.** At most three in parallel, and the construction loop is built by one Fable agent with nothing else touching build mode.
 6. **An end-to-end test is the gate.** A browser test that builds the tutorial shed through real input, from ordering to the last stage, must pass before each publish.
@@ -30,7 +31,7 @@ The scope roughly doubled after the first playtest. These rules put landing each
 | A | 0 simulation spine | Merged, live | `68c7226` |
 | B | 1 weather, 2 materials, 2a build mode (first half) | Merged, live | see `git log` for "Wave B complete" |
 | C | 3 structure, 4 thermal, 6 electrical, 7 water, 13 chickens, 2a build mode (second half) | In progress | |
-| C-int | Wave C made playable: equipment catalog in the store, fixture placement wired to power and water, overlays for structure, heat, power and water | Not started | |
+| C-int | Wave C made playable; files moved into engine and game folders: equipment catalog in the store, fixture placement wired to power and water, overlays for structure, heat, power and water | Not started | |
 | D1 | **2c construction and 2d store and plan book: the first shed, end to end** (from owner feedback) | Not started | |
 | D2 | 1a weather you can see, 5 heating and moisture, 5b camp and journal | Not started | |
 | D3 | 7a groundworks, 7b rented machines, 8 soil and irrigation, 14 chicken lifecycle | Not started | |

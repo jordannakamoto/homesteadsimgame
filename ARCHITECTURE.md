@@ -42,6 +42,33 @@ Findings that shaped the plan:
 
 **The rule that keeps this honest:** delete every renderer and the simulation must still produce the same world. The headless tests do exactly that.
 
+## Engine and game: keeping the engine reusable
+
+The owner wants to reuse this engine for other games (the archived `combat` branch is one). So every feature is built in two parts: a **generic mechanism** that knows nothing about homesteading, and **content** that configures it. The test for a generic module: could a different game use it unchanged by supplying different data?
+
+| Generic mechanism (engine) | Homestead content (game) |
+|---|---|
+| Simulation core: ticks, state, commands, seeded randomness, save and migrations | The list of systems registered for this game |
+| Calendar, sun and weather model | Climate presets |
+| Materials and items registry format, stock and money | The actual materials, items and prices |
+| Pieces, fixtures, ports and connections; network solving for flows | Catalogs of panels, tanks, pumps, stoves |
+| Individual-animal framework: traits, inheritance, energy and water budgets | Chickens, goats, breeds |
+| **Vehicles: a body, a drive model, seats, attachment points, and implements that perform a work function** | Mini excavator, skid steer, their buckets, forks and augers, rental rates |
+| Carrying, the hold-to-work action, staged assembly of ghosts | Construction stages, the shed tutorial, how-it-goes-together cards |
+| Terrain editing, trenches as terrain plus a run | Frost depth rules, sewer fall rules |
+| Overlays framework | Which overlays exist and how they are coloured |
+| Build and plan tools, snapping, selection, inspector | Wall styles, framing methods, plans in the plan book |
+
+Rules:
+
+- A generic module contains no homesteading words, catalog ids, prices or tutorial text. It takes them as data or callbacks.
+- Content lives in its own files (catalogs, presets, plans, card text) and may be replaced wholesale.
+- A generic module does not import a content module. Content registers itself with the mechanism.
+- New generic modules are named for what they are (`vehicles.js`, `carry.js`, `assembly.js`, `networks.js`), not for their first use.
+- Vehicles in particular: one drive model and controller for any wheeled or tracked body; a vehicle is a data record (dimensions, mass, speed, turning, seats, attachment points); an implement is a data record plus a work function (dig, grade, lift, drill). An excavator is content. A cart, a tractor, a truck or a boat in another game should need only new records.
+- File layout: today everything sits in `src/` and `src/sim/`. New generic modules go in `src/engine/` (page side) and `src/sim/core/` (simulation side); new content goes in `src/game/` and `src/sim/content/`. Existing files move into that layout in a dedicated tidy-up after wave C merges, not while agents are editing them.
+- Definition of done for any iteration now includes: the mechanism and the content are in separate files, and the mechanism passes its tests with a non-homestead test fixture.
+
 ## Simulation core
 
 `src/sim/sim.js`. One state object, advanced in fixed ticks.
