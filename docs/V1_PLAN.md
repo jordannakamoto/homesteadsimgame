@@ -79,6 +79,7 @@ Build: One registry for materials and items with real properties (density, stren
 Playtest: Buy lumber, carry it, place it. An inspected wall reports the material it was built from.
 
 ### 2a. Build mode redesign — `fable`
+Split by the orchestrator: the interface (clarity, precision, remodeling, touch, the full piece interface) lands in wave B; construction methods, assisted building and the plan, elevation and section views land in wave C on the same files.
 Needs: 0. Owns the build tools and build UI; iteration 2 owns the registry. Both code against the piece interface from iteration 0.
 Goal: a build mode that merges the clarity of The Sims 4 or a Nintendo game with the precision of CAD and architectural software. The current one is neither clear enough nor precise enough. Study it first, keep everything it can build, and redesign how the player gets there.
 Clarity: a new player understands what each tool does without reading anything. Large legible icons, a small number of top-level tools, immediate ghost previews, obvious valid and invalid states, one-step undo and redo, no deep nested menus. Decide the look and layout yourself and hold it to that standard.

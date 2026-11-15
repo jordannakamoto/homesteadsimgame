@@ -103,6 +103,37 @@ piece = {
 - **Iteration 2a** owns the full version: persistent ids, roofs and towers as proper pieces, layered assemblies, openings, and a notification when pieces change. Structure (3) and thermal (4) code against the shape above, not against build mode internals.
 - A piece is the same piece for its whole life: built, removed, stored, sold, reinstalled. Its properties never change with where it is.
 
+## Wave B contracts
+
+Three iterations run in parallel in wave B. Each owns the files listed and touches shared files only where stated.
+
+### Iteration 1: calendar, sun and weather
+
+Owns `src/sim/calendar.js`, `src/sim/weather.js`, `src/weather-view.js` (add-on), `test/weather.test.mjs`. In `src/engine.js` it may change only `updateSky()` and the sky constants beside it.
+
+- `calendar.js` exports pure functions of world time `t` and a site `{ latitudeDeg }`: `dayOfYear(t)` (0..364, 365-day year), `yearIndex(t)`, `season(t)` ("spring" | "summer" | "autumn" | "winter"), `dateText(t)`, `sunPosition(t, site)` -> `{ elevationRad, azimuthRad }` (azimuth clockwise from north), `dayLengthHours(t, site)`, `clearSkyIrradiance(t, site)` -> `{ directNormalWm2, diffuseWm2, globalHorizontalWm2 }`. A new world starts on a spring date; `START_T` in `time.js` stays the zero point and calendar adds a start-of-year offset.
+- System `weather`, state `sim.state.sys.weather`:
+  `{ site: { latitudeDeg, climate }, tempC, humidity (relative, 0..1), dewPointC, windMs, windDirRad, cloud (0..1), rainMmH, snowMmH (water equivalent), snowDepthM, pressureHPa, solar: { directNormalWm2, diffuseWm2, globalHorizontalWm2 }, groundTempC (deep soil, slow), ...internal generator state }`
+  Other systems read these fields with `ctx.get('weather')`. Field names and units are fixed from here on.
+- Engine world +x is east and +z is south for sun azimuth.
+
+### Iteration 2: materials, items and inventory
+
+Owns `src/sim/materials.js`, `src/sim/items.js`, `src/sim/stock.js`, `src/stock-view.js` (add-on), `test/materials.test.mjs`. In `src/engine.js` it may change only the `world` object's `wood` and `stone` fields (into views of the stock, the way `time` is a view of the clock), the tree-felling and pickup functions, and the HUD stock lines.
+
+- `materials.js` exports `MATERIALS`, a frozen map `id -> { id, name, class ("wood" | "masonry" | "metal" | "insulation" | "glass" | "roofing" | "earth" | "membrane" | "fabric"), densityKgM3, conductivityWmK, specificHeatJkgK, bendingStrengthMPa?, compressiveStrengthMPa?, elasticModulusGPa?, embodiedNote? }` with real published values, and `material(id)`. It also exports `APPEARANCE_MATERIAL`, mapping every build-mode appearance name (wall, floor, roof and path surfaces in `src/build.js`) to a registry id.
+- `items.js` exports `ITEMS`, a frozen map `id -> { id, name, category, unit ("each" | "m" | "m2" | "m3" | "kg" | "L"), material?, massKgPerUnit, priceUsd, dims? }` covering lumber sizes, logs, sheet goods, insulation, roofing, fasteners, glass, stone, hand tools and power tools.
+- System `stock`, state `sim.state.sys.stock = { money, items: { [itemId]: quantity }, tools: [...], projects: [...] }`. Commands: `stock.add`, `stock.remove`, `stock.buy` (fails cleanly if unaffordable), `projects.add`, `projects.done`, `projects.dismiss`. Mass and money are conserved by every command.
+- Power tools declare `powerW`; whether power is available is asked through `window.__game.powerAvailable()` (returns false until the electrical iteration).
+
+### Iteration 2a (first half): build mode redesign
+
+Owns `src/build.js`, `src/touch.js`, the build markup and styles in `template/head.html` (`#buildbar`, `#blabel`, `#bdecor`, `#btouch` and new build elements), and `test/build.smoke.mjs`. It does not touch `src/engine.js` except to add names to `window.__game`.
+
+- Delivers the clear-and-precise interface (see `docs/V1_PLAN.md` iteration 2a: clarity and precision), remodeling, and the full piece interface: persistent piece ids, roofs and towers as proper pieces, `layers`, `openings`, `window.__build.onChange(fn)`, and `window.__build.serialize()` / `window.__build.restore(data)` so buildings join the world save.
+- The second half (construction methods: stick frame, log, timber frame, A-frame; assisted framing; plan, elevation and section views) runs in wave C on the same files.
+- Material ids: until iteration 2 merges, pieces carry build mode's appearance names; the orchestrator maps them through `APPEARANCE_MATERIAL` at merge.
+
 ## Global hooks
 
 Add-ons and tests reach the game only through these. Add a name here rather than reaching into internals.
