@@ -152,7 +152,7 @@ body.building #view { cursor: default; }
 /* ---------- stock: the money readout, inventory, supplier and projects panel (src/stock-view.js) ---------- */
 #stock { gap: 12px; }
 #stock .num.money { color: var(--accent); min-width: 4ch; }
-#svbar { top: 108px; left: 16px; display: flex; gap: 6px; padding: 5px 6px; }
+#svbar { top: 140px; left: 16px; display: flex; gap: 6px; padding: 5px 6px; }
 #svbar button { padding: 3px 10px; font-family: var(--font-display); font-size: 15px; white-space: nowrap; }
 #svbar .key { font-family: var(--font-body); font-size: 11px; color: var(--ink-dim); margin-left: 2px; }
 #sv { top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(780px, calc(100vw - 24px)); height: min(640px, calc(100vh - 24px)); display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 14px; z-index: 30; background: rgba(22, 28, 30, 0.94); font-size: 16px; }
@@ -198,7 +198,7 @@ body.building #view { cursor: default; }
 #sv .card button { font-size: 15px; padding: 6px 12px; }
 @media (max-width: 720px) {
   #svbar .key { display: none; }
-  #svbar { top: 70px; left: 6px; }
+  #svbar { top: 92px; left: 6px; }
   html body.touch #stock, html body #stock { top: 112px; left: 6px; }
   #sv .svtabs { width: 100%; }
   #sv .svtabs button { flex: 1; }
@@ -286,7 +286,7 @@ body.touch #tools button .name { font-size: 14px; }
   #tools button { min-width: 58px; }
 }
 /* chickens panel (iteration 13) */
-#ckbar { top: 150px; left: 16px; padding: 5px 6px; }
+#ckbar { top: 182px; left: 16px; padding: 5px 6px; }
 #ckbar button { padding: 3px 10px; font-family: var(--font-display); font-size: 15px; white-space: nowrap; }
 #ckbar .key { font-family: var(--font-body); font-size: 11px; color: var(--ink-dim); margin-left: 2px; }
 #ck { top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(760px, calc(100vw - 24px)); height: min(660px, calc(100vh - 24px)); display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 14px; z-index: 30; background: rgba(22, 28, 30, 0.94); font-size: 16px; }
@@ -322,7 +322,7 @@ body.touch #tools button .name { font-size: 14px; }
 #ck .ckbuy .n { min-width: 22px; text-align: center; font-weight: 700; }
 #ck .ckbuy .go { font-family: var(--font-display); font-size: 17px; border-color: var(--accent); background: rgba(226, 182, 90, 0.2); }
 #ck .ckblurb { color: var(--ink-dim); font-size: 14px; }
-@media (max-width: 700px) { #ckbar { top: 112px; left: 6px; } #ckbar .key { display: none; } }
+@media (max-width: 700px) { #ckbar { top: 134px; left: 6px; } #ckbar .key { display: none; } }
 </style>
 </head>
 <body>

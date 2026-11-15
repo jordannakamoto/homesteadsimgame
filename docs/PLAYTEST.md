@@ -135,3 +135,51 @@ Everything below is live. Wave B is the first wave where the game looks and play
 - Buildings are now part of the main save.
 - Whatever you build is mirrored into the simulation as pieces with real materials, even while time is paused. Structure and heat will read that in wave C.
 - 44 headless tests and two browser tests pass.
+
+## Wave C so far — chickens, the kitchen, a short year (live; more of wave C still to land)
+
+### Chickens (press H, or the Chickens button)
+
+**What is new**
+
+- Buy hens of six real breeds and place a starter coop or a movable chicken tractor from the panel.
+- Each bird is an individual with a name, a temperament and inherited plumage. The panel lists every bird with a plain sentence about how it is doing.
+- **Morning chores in a few clicks:** open the door, fill the feeder, fresh water, collect eggs.
+- **Laying follows day length.** Expect about 260 eggs a year per Rhode Island Red with a coop light and about 175 without, with almost none in midwinter.
+- They leave the coop at dawn, forage, crowd the feeder when you fill it, and roost at dusk.
+- Eggs go to your pantry and can be cooked in the kitchen.
+
+**Try this**
+
+1. Press H, place a starter coop, buy six hens, fill feed and water.
+2. Run a few days at 100x and collect eggs each morning.
+3. Leave the feeder empty for three days and read what the panel says about the birds.
+
+**Known gaps**
+
+- Tall meadow grass hides much of the birds. They need shorter ground around the coop.
+- The coop and its fittings are placed from the panel and are free for now; they move into the store and build mode when fixture placement lands.
+- A coop light needs electricity, and nothing can supply it yet, so the light does nothing in play for now.
+- No chicks, illness or death yet (that is the lifecycle iteration).
+- H no longer opens the controls help.
+
+**Critique prompts**
+
+- Do they read as chickens? Too chunky?
+- Is the chore round pleasant or fiddly?
+
+### The kitchen (press K) — built in another session
+
+Close-up cooking with six recipes, a meals shelf and gentle hunger. See `docs/COOKING.md`. Hens' eggs use the kitchen's egg ingredient.
+
+### A shorter year
+
+- New worlds have a 20-day year, five days a season. Change it in the weather panel (Y): 12, 20, 40, 120 or 365 days.
+- Days are unchanged. Seasons, plants and animals move faster in a shorter year; hens reach laying age about 15 times sooner in a 20-day year and still eat the same each day.
+- Worlds saved before this keep the real year until you change it.
+
+**Critique prompt:** is five days a season too fast to enjoy a season, or about right?
+
+### Simulated but not yet playable
+
+Water, electricity and room heat are merged and tested headlessly. They become playable when equipment can be placed and wired (the build mode agent's fixture tool) and the overlays are added.
