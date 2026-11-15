@@ -981,7 +981,7 @@ function makeGrassTex() {
 }
 const grassTex = makeGrassTex();
 const grassMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: grassTex, alphaTest: 0.5, alphaToCoverage: true, side: THREE.DoubleSide });
-addWind(grassMat, 0.0, 0.6, 0.2, false, true);
+addWind(grassMat, 0.0, 0.6, 0.11, false, true);   // a light breeze: the sward stirs, it does not thrash
 function tuftGeo(cards, w, h, u0, u1, lean) {
   const pos = [], nor = [], uv = [], colr = [], idx = [];
   for (let k = 0; k < cards; k++) {
