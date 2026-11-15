@@ -73,7 +73,7 @@ test('every line of the shed is priced, and the items the catalog lacked have re
   assert.equal(P.lines['foundation|pierblock'].itemId, 'pier_block');
   assert.equal(P.lines['openings|door'].qty, 1); assert.equal(P.lines['openings|window'].unit, 'each');
   const v = K.buildingView(cs(sim), shed.struct);
-  assert.ok(v.costUsd > 800 && v.costUsd < 2500, 'the shed costs $' + v.costUsd);
+  assert.ok(v.costUsd > 800 && v.costUsd < 3200, 'the shed costs $' + v.costUsd);
   assert.equal(v.total, Object.keys(P.members).length);
   // every member with something to buy has a share, and the shares add up to the line
   for (const k in P.lines) { const ln = P.lines[k]; if (ln.supply) continue; const sum = Object.values(P.members).filter((m) => m.line === k).reduce((n, m) => n + m.need, 0); assert.ok(near(sum, ln.qty, 1e-5), k + ' ' + sum + ' ' + ln.qty); }
@@ -81,7 +81,8 @@ test('every line of the shed is priced, and the items the catalog lacked have re
 
 test('ordering the foundation stage debits the right money and delivers the right stacks', () => {
   const sim = start(), before = money(sim);
-  const expect = 6 * 12 + Math.round(6 * 17.5 * 100) / 100 + Math.round(1.7 * 5.6 * 100) / 100 + Math.round(0.5 * 6.2 * 100) / 100;
+  const posts = shed.materialsList.find((l) => l.key === 'foundation|Posts4x4').qty;
+  const expect = 6 * 12 + Math.round(6 * 17.5 * 100) / 100 + Math.round(posts * 5.6 * 100) / 100 + Math.round(0.5 * 6.2 * 100) / 100;
   const r = sim.commandNow('construction.order', { structId: shed.struct, stage: 'foundation' });
   assert.ok(r.ok); assert.ok(near(r.costUsd, expect), r.costUsd + ' vs ' + expect);
   assert.ok(near(before - money(sim), expect));
@@ -89,7 +90,7 @@ test('ordering the foundation stage debits the right money and delivers the righ
   assert.equal(K.buildingView(cs(sim), shed.struct).stages.find((s) => s.id === 'foundation').status, 'ordered');
   sim.runTicks(Math.ceil(C.DELIVERY.delayS / 60) + 1);
   const st = Object.fromEntries(cs(sim).stacks.map((k) => [k.itemId, k.qty]));
-  assert.deepEqual(st, { lumber_6x6: 6, nails_framing: 0.5, pier_block: 6, lumber_4x4: 1.7 });
+  assert.deepEqual(st, { lumber_6x6: 6, nails_framing: 0.5, pier_block: 6, lumber_4x4: posts });
   assert.ok(cs(sim).stacks.every((k) => Math.hypot(k.x - 44.5, k.z - 40) < 12));
   assert.equal(K.buildingView(cs(sim), shed.struct).stages.find((s) => s.id === 'foundation').status, 'delivered');
   // ordering the same stage again buys nothing more

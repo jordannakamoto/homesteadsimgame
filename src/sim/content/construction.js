@@ -32,6 +32,7 @@ export const STAGE_ORDER = Object.freeze(STAGES.map((s) => s.id));
 export const LINE_ITEM = Object.freeze({
   pierblock: { itemId: 'pier_block' },
   felt: { itemId: 'roof_underlayment' },
+  roofshingle: { itemId: 'roof_asphalt', label: 'Roof shingles' },
   door: { itemId: 'door_prehung', each: true, label: 'Door, ready hung in its frame' },
   window: { itemId: 'window_shed', each: true, label: 'Window' },
 });
@@ -42,7 +43,7 @@ export const SITE_SUPPLY = Object.freeze(['nails_framing', 'screws_wood', 'screw
 export const ITEMS_CONSTRUCTION = Object.freeze({
   pier_block: { id: 'pier_block', name: 'Precast concrete pier block', category: 'stone', unit: 'each', material: 'concrete', dims: { lengthM: 0.3, widthM: 0.3, thicknessM: 0.2 }, massKgPerUnit: 20, priceUsd: 12, blurb: 'Sits on firm ground; a post or beam drops into the top' },
   roof_underlayment: { id: 'roof_underlayment', name: 'Roof underlayment (felt)', category: 'roofing', unit: 'm2', massKgPerUnit: 0.55, priceUsd: 1.1, dims: { thicknessM: 0.0008 }, blurb: 'The waterproof layer under the roofing' },
-  door_prehung: { id: 'door_prehung', name: 'Exterior door, pre-hung', category: 'glass', unit: 'each', massKgPerUnit: 38, priceUsd: 240, dims: { lengthM: 2.03, widthM: 0.915, thicknessM: 0.045 }, blurb: 'Comes in its frame with hinges on: set it in the opening and fix it' },
+  door_prehung: { id: 'door_prehung', name: 'Exterior door, pre-hung', category: 'glass', unit: 'each', massKgPerUnit: 38, priceUsd: 180, dims: { lengthM: 2.03, widthM: 0.915, thicknessM: 0.045 }, blurb: 'Comes in its frame with hinges on: set it in the opening and fix it' },
   window_shed: { id: 'window_shed', name: 'Shed window 600 x 900', category: 'glass', unit: 'each', massKgPerUnit: 9, priceUsd: 95, dims: { lengthM: 0.9, widthM: 0.6, thicknessM: 0.08 }, blurb: 'A small fixed window in its own frame' },
   framing_nailer: { id: 'framing_nailer', name: 'Framing nail gun', category: 'tools_power', unit: 'each', massKgPerUnit: 3.8, priceUsd: 230, powerW: 1500, blurb: 'Drives a nail a second. Needs power' },
   wheelbarrow: { id: 'wheelbarrow', name: 'Wheelbarrow', category: 'tools_hand', unit: 'each', massKgPerUnit: 18, priceUsd: 120, blurb: 'Carries three armfuls at once' },

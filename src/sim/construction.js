@@ -277,10 +277,10 @@ function order(ctx, p) {
   const q = quoteStage(pr, stage);
   if (!q.ok) return { ok: false, reason: q.reason };
   const at = dropOf(s, pr);
-  if (!s.dropPoint) s.dropPoint = { x: at.x, z: at.z };
   const stages = [...new Set(q.keys.map((k) => pr.lines[k].stage))];
   const r = SUP.placeOrder(s, q, { t: ctx.state.t, delayS: s.options.instant ? 0 : C.DELIVERY.delayS, tag: { structId: pr.id, stages }, pay: (usd) => pay(ctx, usd), x: at.x, z: at.z });
   if (!r.ok) { ctx.emit('construction.order', { ok: false, reason: r.reason, costUsd: r.costUsd }); return r; }
+  if (!s.dropPoint) s.dropPoint = { x: at.x, z: at.z };
   q.keys.forEach((k, i) => { pr.lines[k].ordered = round6(pr.lines[k].ordered + q.lines[i].qty); });
   const out = { ok: true, costUsd: r.costUsd, deliveryId: r.delivery.id, dueT: r.delivery.dueT, stages, lines: q.lines };
   ctx.emit('construction.order', out);
