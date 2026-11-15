@@ -2,14 +2,17 @@
 // simulation through createGameSim, so they always run the same systems in the same order.
 
 import { createSim } from './sim.js';
+import { weather } from './weather.js';
 
 export * from './sim.js';
 export * from './time.js';
 export * from './save.js';
 export { stream, hashString } from './rng.js';
+export * as calendar from './calendar.js';
+export { weather, CLIMATES, conditionWord } from './weather.js';
 
 // Systems are added here, in dependency order, as the iterations land (weather, thermal, power...).
-export const GAME_SYSTEMS = [];
+export const GAME_SYSTEMS = [weather];
 
 export function createGameSim(seed, opts = {}) {
   return createSim({ seed, systems: GAME_SYSTEMS, ...opts });
