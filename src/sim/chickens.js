@@ -59,7 +59,7 @@ const MANURE_DM = 0.25;                 // fresh droppings about 75% moisture
 const GUT_TAU_S = 4 * HOUR;             // feed passage time 3-5 h
 const GUT_CAP = 0.04;                   // crop and gut hold up to about 4% of body mass as fed
 const HERBAGE_MAX_KG_DM = 0.025;        // herbage a hen eats at most, kg DM/day (free-range studies: 20-40 g DM)
-const SCRATCH_WASTE = 1.0;              // herbage scratched up or trampled per kg eaten
+const SCRATCH_WASTE = 2.0;              // herbage scratched up or trampled per kg eaten
 const PASTURE_K = 250;                  // g DM/m2, a grazed sward at full cover
 const PASTURE_GMAX = 8;                 // g DM/m2/day at the best of spring
 const PASTURE_HALF = 50;                // g DM/m2 at which a hen finds half her fill
@@ -460,7 +460,7 @@ function step(c) {
   for (const e of idx.waterers) waterTotal += s.fx[e.id].waterL;
   s.flock.feedKg = round4(feedTotal); s.flock.waterL = round4(waterTotal);
   s.flock.count = count; s.flock.laying = laying; s.flock.eggsWaiting = s.eggs.length;
-  for (const e of idx.feeders) { const f = s.fx[e.id]; if (f.feedKg <= 1e-6) { f.feedKg = 0; if (f.emptySinceT === null) f.emptySinceT = t; } else f.emptySinceT = null; }
+  for (const e of idx.feeders) { const f = s.fx[e.id]; if (f.feedKg <= 1e-6) { s.totals.feederWastedKg += f.feedKg; f.feedKg = 0; if (f.emptySinceT === null) f.emptySinceT = t; } else f.emptySinceT = null; }
   for (const e of idx.waterers) { const f = s.fx[e.id]; if (f.waterL - f.iceL <= 1e-6) { if (f.dryT === null) f.dryT = t; } else f.dryT = null; }
   s.issues = computeIssues(s, idx, t, W, days, wild);
   for (const id in s.birds) s.birds[id].status = statusLine(s, s.birds[id], idx, t, days, wild);
@@ -573,7 +573,7 @@ function stepBird(c, s, b, home, ld, idx, hour, T, W, dt, dtD, t, today, rngLay,
         const f = s.fx[fe.id], waste = fe.cat.wasteFrac || 0;
         const kg = Math.min(wantMJ / FEED.meMJkg, f.feedKg * (1 - waste));
         const used = kg / (1 - waste);
-        f.feedKg = Math.max(0, f.feedKg - used);
+        f.feedKg -= used;
         s.totals.feederEatenKg += kg; s.totals.feederWastedKg += used - kg;
         ateMJ += kg * FEED.meMJkg; ateDM += kg * FEED.dm; ateInd += kg * FEED.dm * FEED.indigestible; ateN += kg * FEED.n;
         waterInFood += kg * (1 - FEED.dm); b.hungerKg += kg;
@@ -980,7 +980,7 @@ const commands = {
       if (kg <= 0) continue;
       const r = itemRemove(c, 'layer_feed', kg);
       if (!r.ok) break;
-      f.feedKg = round6(f.feedKg + kg); have -= kg; put += kg; f.emptySinceT = null;
+      f.feedKg = f.feedKg + kg; have -= kg; put += kg; f.emptySinceT = null;
       c.s.totals.feedFilledKg += kg;
     }
     if (put <= 0) return bad('the feeder is already full');
