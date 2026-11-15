@@ -2271,9 +2271,9 @@
   // warm light that comes on when you are home
   const hearth = new T.PointLight(0xffb469, 0, 11, 1.6);
   G.scene.add(hearth);
-  function makeWallMat(plane, near) {
+  function makeWallMat(plane, near, sideA, sideB) {
     // a wall is cut only where it is both above waist height and between the camera and you
-    const m = new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide, clippingPlanes: [plane, near], clipIntersection: true, clipShadows: true });
+    const m = new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide, clippingPlanes: [plane, near, sideA, sideB], clipIntersection: true, clipShadows: true });
     G.fade(m, 0, 1, 0, true);
     return texel(m);
   }
@@ -2369,6 +2369,8 @@
       lift: F.lift || 0,
       clip: new T.Plane(new T.Vector3(0, -1, 0), 1e5),
       near: new T.Plane(new T.Vector3(0, 0, 1), 1e5),
+      sideA: new T.Plane(new T.Vector3(1, 0, 0), -1e5),
+      sideB: new T.Plane(new T.Vector3(-1, 0, 0), -1e5),
       cutH: 99,
       stairs: [],
       polyRoofs: [],
@@ -2400,7 +2402,7 @@
       corners: [],
       b: null,
     };
-    S.wallMat = makeWallMat(S.clip, S.near);
+    S.wallMat = makeWallMat(S.clip, S.near, S.sideA, S.sideB);
     S.group.position.set(S.ox, S.y0, S.oz);
     S.group.rotation.y = S.yaw;
     G.scene.add(S.group);
@@ -4505,7 +4507,9 @@
           }
           else if (S.cutH < 99) S.cutH = S.cutH + dt * 9 > full ? 99 : S.cutH + dt * 9;
           S.clip.constant = S.cutH >= 99 ? 1e5 : S.y0 + S.cutH;
-          // keep everything from just in front of you and beyond; only the near walls open up
+          // Only the stretch of wall that stands between the camera and you opens: walls nearer the camera than you
+          // are, within a few paces to either side of the line of sight. The wall behind you and the walls off to the
+          // sides stay up, so the room still reads as a room wherever you stand in it.
           const cp = G.camera.position;
           let fx = P.x - cp.x,
             fz = P.z - cp.z;
@@ -4513,10 +4517,15 @@
           fx /= fl;
           fz /= fl;
           S.near.normal.set(fx, 0, fz);
-          S.near.constant = -(fx * P.x + fz * P.z) - 0.9;
+          S.near.constant = -(fx * P.x + fz * P.z) + 0.15;
+          const CUT_W = 3, rp = -fz * P.x + fx * P.z;
+          S.sideA.normal.set(-fz, 0, fx);
+          S.sideA.constant = -rp - CUT_W;
+          S.sideB.normal.set(fz, 0, -fx);
+          S.sideB.constant = rp - CUT_W;
           for (const dr of S.doors) {
             const [wx, wz] = toWorld(S, dr.mx, dr.mz);
-            dr.mesh.visible = S.cutH > 2.2 || fx * (wx - P.x) + fz * (wz - P.z) > 0.9;
+            dr.mesh.visible = S.cutH > 2.2 || fx * (wx - P.x) + fz * (wz - P.z) > -0.15 || Math.abs(-fz * (wx - P.x) + fx * (wz - P.z)) > CUT_W;
           }
         }
         const pi = polyAt(S, lx, lz);
