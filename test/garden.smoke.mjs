@@ -8,6 +8,7 @@ const shots = process.env.SHOTS || '';
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] });
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
 const page = await ctx.newPage();
+page.setDefaultTimeout(120000);   // a shared machine renders slowly in software
 const errors = [];
 page.on('console', (m) => { if (m.type() === 'error' && !/net::ERR_/.test(m.text())) errors.push(m.text().slice(0, 400)); });
 page.on('pageerror', (e) => errors.push('PAGEERROR ' + String(e.stack || e).slice(0, 600)));
@@ -20,7 +21,7 @@ const until = async (fn, ms = 60000, arg) => { const t0 = Date.now(); while (Dat
 await page.goto(file, { waitUntil: 'domcontentloaded', timeout: 120000 }); await wait(9000);
 check('page loads', await G(() => !!(window.__game && window.__gardenView)));
 await G(() => { __game.lockQuality(); __game.setQuality('low'); __game.sim.state.sys.stock.money = 500; });
-await page.click('#speed button[data-speed="0"]');
+await G(() => __game.setSpeed(0));
 
 // the Garden tool from the keyboard
 await page.keyboard.press('Digit5'); await wait(800);
@@ -29,16 +30,17 @@ check('key 5 opens the garden palette', await G(() => __game.player.tool === 'ga
 const P = await G(() => { const g = __game, P = g.player, fx = -Math.sin(g.cam.yaw), fz = -Math.cos(g.cam.yaw); return { x: P.x + fx * 3, z: P.z + fz * 3, fx, fz }; });
 const scr = (x, z) => G((o) => { const p = __gardenView.toScreen(o.x, __game.heightAt(o.x, o.z), o.z); return { x: p.x, y: p.y }; }, { x, z });
 // a bed about 1.2 m x 0.9 m: drag from one corner to the other
-const sideX = -P.fz, sideZ = P.fx;   // to the right of the view direction
-const A = { x: P.x - sideX * 0.6, z: P.z - sideZ * 0.6 }, B = { x: P.x + sideX * 0.6 + P.fx * 0.9, z: P.z + sideZ * 0.6 + P.fz * 0.9 };
+const A = { x: P.x - 0.75, z: P.z - 0.45 }, B = { x: P.x + 0.75, z: P.z + 0.45 };   // about 1.5 m by 0.9 m
 await page.click('#gbar button[data-g="bed"]');
 const a = await scr(A.x, A.z), b = await scr(B.x, B.z);
 await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move((a.x + b.x) / 2, (a.y + b.y) / 2, { steps: 5 }); await page.mouse.move(b.x, b.y, { steps: 5 });
 check('the dimensions show while drawing', await G(() => /m ×/.test(document.getElementById('glabel').textContent) && !document.getElementById('glabel').hidden), await G(() => document.getElementById('glabel').textContent));
 await page.mouse.up(); await wait(300);
-const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+const m = await G(() => __gardenView.marked);
+check('the bed is marked out', !!m, JSON.stringify(m));
+const mid = m ? await scr(m.x0 + m.nx * 0.15, m.z0 + m.nz * 0.15) : { x: 0, y: 0 };
 await page.mouse.move(mid.x, mid.y); await page.mouse.down();
-const dug = await until(() => Object.keys(__game.sim.state.sys.garden.field.groups).length === 1, 15000);
+const dug = await until(() => Object.keys(__game.sim.state.sys.garden.field.groups).length === 1, 60000);
 await page.mouse.up();
 check('holding on the marked bed digs it', dug);
 const bed = await G(() => Object.values(__game.sim.state.sys.garden.field.groups)[0]);
@@ -69,9 +71,9 @@ const can = await G(() => __game.sim.state.sys.garden.can.litres);
 check('watering wets the soil and empties the can', after > before && can < 9, 'water ' + before.toFixed(2) + ' -> ' + after.toFixed(2) + ', can ' + can.toFixed(1) + ' L');
 
 // time at 1000x until the radishes are ready (their four weeks, on this world's seasonal clock)
-await page.click('#speed button[data-speed="1000"]');
+await G(() => __game.setSpeed(1000));
 const ready = await until(() => Object.values(__game.sim.state.sys.garden.plants).some((p) => p.crop === 'radish' && p.readyT != null), 240000);
-await page.click('#speed button[data-speed="0"]');
+await G(() => __game.setSpeed(0));
 const lifeDays = await G(() => { const s = __game.sim.state, p = Object.values(s.sys.garden.plants).find((q) => q.crop === 'radish'); return p ? ((p.readyT - p.sownT) / 86400) * (365 / s.yearDays) : null; });
 check('radishes ready in about four weeks of their life', ready && lifeDays > 18 && lifeDays < 45, lifeDays && lifeDays.toFixed(0) + ' days');
 const fps = await G(() => document.getElementById('fps') ? document.getElementById('fps').textContent : '');

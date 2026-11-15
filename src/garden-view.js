@@ -985,12 +985,13 @@
   });
 
   /* ================= every frame (cheap) and four times a second (the garden's look) ================= */
-  let last = performance.now(), slow = 0, bedSig = '';
+  let last = performance.now(), lastAct = last, slow = 0, bedSig = '';
   function frame(t) {
     const dt = Math.min(0.1, (t - last) / 1000); last = t;
     const want = G.player.tool === 'garden';
     if (want !== on) { if (want) enter(); else leave(); }
-    if (on && ptr.down) holdAct(dt);
+    if (on && ptr.down) holdAct(Math.min(0.5, (t - lastAct) / 1000));   // a held tool works on real time, even when frames are slow
+    lastAct = t;
     if (!(on && ptr.down && tool === 'bed' && marked && marked.digging)) prog.hidden = true;
     if (pops.length) animatePops(dt);
     slow += dt;
@@ -1019,7 +1020,7 @@
 
   // test hooks
   window.__gardenView = {
-    get on() { return on; }, get tool() { return tool; }, setTool: setGTool, choose: (c) => { crop = c; renderSeeds(); },
+    get on() { return on; }, get tool() { return tool; }, get marked() { return marked; }, setTool: setGTool, choose: (c) => { crop = c; renderSeeds(); },
     groundAt: (nx, ny) => { const o = {}; return groundAt(nx, ny, o) ? o : null; }, toScreen: (x, y, z) => toScreen(x, y, z, {}),
     meshes: () => [...meshes.entries()].map(([k, m]) => [k, m.count]), beds: () => [...bedViews.keys()], almanac: toggleAlmanac,
     inspect: (x, z) => inspectAt({ x, z }), refresh: () => { dirty = true; refresh(); },
