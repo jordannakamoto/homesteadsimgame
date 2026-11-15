@@ -211,10 +211,27 @@ try {
     () => __game.sim.state.sys.cooking.fullness,
   );
   await begin(pan.id);
+  const beforeToss = (await state()).objects.find((o) => o.kind === "carrot");
+  await page.keyboard.press("Space");
+  assert.ok(
+    (await state()).group[beforeToss.id],
+    "Space leaves the food in the pan",
+  );
+  await page.mouse.down({ button: "right" });
+  await step(10);
+  const airborne = (await state()).objects.find((o) => o.id === beforeToss.id);
+  assert.ok(
+    airborne.p.y > beforeToss.p.y + 0.12,
+    "right-click while dragging tosses food",
+  );
+  await page.mouse.up({ button: "right" });
+  await step(80);
+  assert.equal((await state()).held, pan.id, "right-click keeps the pan held");
+  console.log("ok mouse-controlled toss");
   const plate = await screen({ x: 0.05, y: 0.025, z: 0.8 });
   await page.mouse.move(plate.x, plate.y);
   await page.mouse.up();
-  await step(120);
+  await step(1);
   assert.match(
     await page.locator("#physical-kitchen-readout").textContent(),
     /Meal ready/,
@@ -227,6 +244,7 @@ try {
     await page.evaluate(() => __game.sim.state.sys.cooking.fullness),
     fullness,
   );
+  await step(120);
   console.log("ok smoke and plating into inventory");
   const before = await state();
   await page.keyboard.press("Escape");

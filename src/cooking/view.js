@@ -58,7 +58,7 @@ export function createCookingView(G) {
   ui.id = "physical-kitchen-ui";
   ui.hidden = true;
   ui.innerHTML =
-    '<div class="kitchen-title">Homestead kitchen <small>Esc · leave</small></div><div id="physical-kitchen-readout"></div><div class="kitchen-instructions">Click knife to pick it up · Click food to cut · Right-click to put knife down<br>Drag board or Shift-drag food to gather · Space while holding pan to toss · Drag pan onto plate to serve · E · eat packed meal · H · heat view</div>';
+    '<div class="kitchen-title">Homestead kitchen <small>Esc · leave</small></div><div id="physical-kitchen-readout"></div><div class="kitchen-instructions">Click knife to pick it up · Click food to cut · Right-click to put knife down<br>Drag board or Shift-drag food to gather · Right-click while dragging pan to toss · Drag pan onto plate to serve · E · eat packed meal · H · heat view</div>';
   const style = document.createElement("style");
   style.textContent = `
     #physical-kitchen-ui{position:fixed;inset:0;z-index:34;pointer-events:none;color:#fff0d4;font:14px system-ui}
@@ -533,8 +533,20 @@ export function createCookingView(G) {
       if (!active) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (drag) moveDrag(event);
-      else if (knife && !stroke) {
+      if (drag) {
+        if (event.pointerType === "mouse") {
+          // Chord changes arrive as pointermove while another button is held.
+          if (!(event.buttons & 1)) {
+            finishDrag(event);
+            return;
+          }
+          const rightHeld = Boolean(event.buttons & 2);
+          if (drag.kind === "pan" && rightHeld && !drag.rightHeld)
+            command("toss");
+          drag.rightHeld = rightHeld;
+        }
+        moveDrag(event);
+      } else if (knife && !stroke) {
         const p = tabletop(event);
         if (p) aimKnife(p);
       } else if (!knife) hover = pick(event);
@@ -557,8 +569,19 @@ export function createCookingView(G) {
     drag = knife = stroke = null;
   }
   canvas.addEventListener("pointercancel", cancelDrag);
-  canvas.addEventListener("lostpointercapture", () => {
-    if (drag) cancelDrag();
+  canvas.addEventListener("lostpointercapture", (event) => {
+    if (!drag) return;
+    // Some browsers release capture on the secondary mouse-up, even while
+    // the primary button is still holding the pan.
+    if (
+      drag.kind === "pan" &&
+      event.pointerType === "mouse" &&
+      event.buttons & 1
+    ) {
+      canvas.setPointerCapture(event.pointerId);
+      if (canvas.hasPointerCapture(event.pointerId)) return;
+    }
+    cancelDrag();
   });
   window.addEventListener("blur", () => {
     if (active) cancelDrag();
@@ -606,8 +629,6 @@ export function createCookingView(G) {
       }
       if (!active) return;
       if (event.code === "Escape") close();
-      if (event.code === "Space" && !event.repeat && drag?.kind === "pan")
-        command("toss");
       if (event.code === "KeyH" && !event.repeat) heatMap = !heatMap;
       if (event.code === "KeyE" && !event.repeat) {
         const meal = freshMeal();
