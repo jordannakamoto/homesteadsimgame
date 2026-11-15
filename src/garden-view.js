@@ -109,19 +109,29 @@
   const coverMat = new T.MeshLambertMaterial({ color: 0xf4f2ea, transparent: true, opacity: 0.45, side: T.DoubleSide, depthWrite: false });
   const bedViews = new Map();   // bed id -> { group, soil, colors, sig: Float32Array, x0, z0, nx, nz, cover }
   const hash = (a, b) => { let h = (a * 374761393 + b * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
-  const SOIL_DRY = new T.Color(0x9c7b58), SOIL_WET = new T.Color(0x3d2a1c), STRAW = new T.Color(0xcdb176), WEEDY = new T.Color(0x56703a), _c = new T.Color();
+  const SOIL_DRY = new T.Color(0x8c7860), SOIL_WET = new T.Color(0x3a2c22), STRAW = new T.Color(0xcdb176), WEEDY = new T.Color(0x56703a), _c = new T.Color();
   const RAISE = 0.05;
+  const SUB = 2;   // each 30 cm cell is drawn as 2 x 2 little quads, so the tilth has clods and furrows
   function buildBed(b) {
     const g = new T.Group();
-    const n = b.nx * b.nz, pos = new Float32Array(n * 6 * 3), col = new Float32Array(n * 6 * 3);
-    const H = (x, z) => G.heightAt(x, z) + RAISE;
+    const n = b.nx * b.nz, per = SUB * SUB * 6, pos = new Float32Array(n * per * 3), col = new Float32Array(n * per * 3);
+    const W = b.nx * CELL, D = b.nz * CELL;
+    // a mounded bed: the soil rises from the edges, with clods and gentle furrows along the long side
+    const along = W >= D;
+    const H = (x, z) => {
+      const e = Math.min(x - b.x0, b.x0 + W - x, z - b.z0, b.z0 + D - z);
+      const mound = 0.015 + RAISE * Math.min(1, Math.max(0, e) / 0.22);
+      const across = along ? z - b.z0 : x - b.x0;
+      const furrow = 0.008 * Math.cos((across / CELL) * Math.PI * 2);
+      const clod = (hash(Math.round(x * 60), Math.round(z * 60)) - 0.5) * 0.02;
+      return G.heightAt(x, z) + mound + furrow + clod;
+    };
     let k = 0;
-    for (let iz = 0; iz < b.nz; iz++) for (let ix = 0; ix < b.nx; ix++) {
-      const x0 = b.x0 + ix * CELL, z0 = b.z0 + iz * CELL, x1 = x0 + CELL, z1 = z0 + CELL;
-      // a little tilth: each corner a centimetre up or down, so the bed is not a flat card
-      const j = (x, z) => H(x, z) + (hash(Math.round(x * 100), Math.round(z * 100)) - 0.5) * 0.025;
+    const st = CELL / SUB;
+    for (let iz = 0; iz < b.nz; iz++) for (let ix = 0; ix < b.nx; ix++) for (let sz = 0; sz < SUB; sz++) for (let sx = 0; sx < SUB; sx++) {
+      const x0 = b.x0 + ix * CELL + sx * st, z0 = b.z0 + iz * CELL + sz * st, x1 = x0 + st, z1 = z0 + st;
       const q = [[x0, z0], [x0, z1], [x1, z0], [x1, z0], [x0, z1], [x1, z1]];
-      for (const [x, z] of q) { pos[k++] = x; pos[k++] = j(x, z); pos[k++] = z; }
+      for (const [x, z] of q) { pos[k++] = x; pos[k++] = H(x, z); pos[k++] = z; }
     }
     const geo = new T.BufferGeometry();
     geo.setAttribute('position', new T.BufferAttribute(pos, 3));
@@ -130,19 +140,11 @@
     const soil = new T.Mesh(geo, soilMat);
     soil.receiveShadow = true;
     g.add(soil);
-    // the sides of the raised bed, down into the ground
-    const side = [], W = b.nx * CELL, D = b.nz * CELL, seg = (ax, az, bx, bz, steps) => {
-      for (let s = 0; s < steps; s++) {
-        const t0 = s / steps, t1 = (s + 1) / steps, xa = lerp(ax, bx, t0), za = lerp(az, bz, t0), xb = lerp(ax, bx, t1), zb = lerp(az, bz, t1);
-        const ya = H(xa, za), yb = H(xb, zb);
-        side.push(xa, ya, za, xa, ya - 0.14, za, xb, yb, zb, xb, yb, zb, xa, ya - 0.14, za, xb, yb - 0.14, zb);
-      }
-    };
-    seg(b.x0, b.z0, b.x0 + W, b.z0, b.nx); seg(b.x0 + W, b.z0, b.x0 + W, b.z0 + D, b.nz); seg(b.x0 + W, b.z0 + D, b.x0, b.z0 + D, b.nx); seg(b.x0, b.z0 + D, b.x0, b.z0, b.nz);
-    const sg = new T.BufferGeometry(); sg.setAttribute('position', new T.BufferAttribute(new Float32Array(side), 3)); sg.computeVertexNormals();
-    const sm = new T.Mesh(sg, new T.MeshLambertMaterial({ color: 0x4a3324, side: T.DoubleSide })); g.add(sm);
     G.scene.add(g);
-    const v = { group: g, soil, geo, col, sig: new Float32Array(n).fill(-1), b, cover: null };
+    const v = { group: g, soil, geo, col, sig: new Float32Array(n).fill(-1), b, cover: null, per };
+    // a fixed speckle per vertex: lighter grains and darker crumbs
+    v.noise = new Float32Array(n * per);
+    for (let i = 0; i < v.noise.length; i++) { const r = hash(i, b.nx * 31 + b.nz); v.noise[i] = r < 0.08 ? 1.25 : r > 0.9 ? 0.72 : 0.9 + 0.16 * hash(i, 7); }
     bedViews.set(b.id, v);
     hideGrass();
     return v;
@@ -156,9 +158,9 @@
       if (v.sig[i] === s) continue;
       v.sig[i] = s; changed = true;
       _c.copy(SOIL_DRY).lerp(SOIL_WET, Math.pow(wet, 0.8)).lerp(STRAW, ci.mulch * 0.85).lerp(WEEDY, ci.weed * 0.35);
-      for (let k = 0; k < 6; k++) {
-        const n = 0.92 + 0.14 * hash(i * 7 + k, b.nx);
-        v.col[(i * 6 + k) * 3] = _c.r * n; v.col[(i * 6 + k) * 3 + 1] = _c.g * n; v.col[(i * 6 + k) * 3 + 2] = _c.b * n;
+      for (let k = 0; k < v.per; k++) {
+        const o = i * v.per + k, n = v.noise[o];
+        v.col[o * 3] = _c.r * n; v.col[o * 3 + 1] = _c.g * n; v.col[o * 3 + 2] = _c.b * n;
       }
     }
     if (changed) v.geo.attributes.color.needsUpdate = true;
@@ -382,7 +384,7 @@
       const col = st === 'past' ? 0xb4a65a : 0x5c9a3a;
       p.push(part(stick(h, 0.018), 0x7aa648));
       for (let i = 0; i < Math.max(2, Math.round(h / 0.2)); i++) { const y = 0.1 + i * 0.18; if (y > h - 0.1) break; p.push(part(strapGeo(0.55 * Math.min(1, h / 1), 0.06, 0.65), col, 0, y, 0, -0.75, i * Math.PI + 0.3 * i, 0)); }
-      if (h > 1.2) p.push(part(cone(0.22, 0.05, 5), 0xd8c37a, 0, h, 0));   // the tassel
+      if (h > 1.2) for (let i = 0; i < 5; i++) p.push(part(stick(0.2, 0.004, 3), 0xd8c37a, 0, h - 0.02, 0, 0.5 * Math.cos(i * 1.26), 0, 0.5 * Math.sin(i * 1.26) * (i ? 1 : 0)));   // the tassel
       if (st === 'fruiting' || st === 'ready' || st === 'past') { p.push(part(ball(0.035, 0), 0x8dbf55, 0.04, h * 0.5, 0, 0.3, 0, -0.3, 1, 4, 1)); p.push(part(stick(0.06, 0.008, 4), 0xc9a86a, 0.07, h * 0.5 + 0.11, 0, 0, 0, -0.5)); }
       return merge(p);
     },
@@ -399,13 +401,15 @@
   const plantMat = new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide });
   if (G.fade) G.fade(plantMat, 0.05, 0.9, 0.035, false, false);   // the engine's shared breeze
   const geoCache = new Map();
-  const geoFor = (c, st) => { const k = c + ':' + st; let g = geoCache.get(k); if (!g) { g = (LOOK[c] || LOOK.lettuce)(st); geoCache.set(k, g); } return g; };
+  const geoFor = (c, st) => { if (st === 'sown') return sownGeo; const k = c + ':' + st; let g = geoCache.get(k); if (!g) { g = (LOOK[c] || LOOK.lettuce)(st); geoCache.set(k, g); } return g; };
   const meshes = new Map();    // key -> InstancedMesh
-  const VIS_STAGE = { sown: null, seedling: 'seedling', leafy: 'leafy', flowering: 'flowering', fruiting: 'fruiting', ready: 'ready', past: 'past' };
+  const sownGeo = (() => { const g = part(ball(0.03, 1), 0x2e2219, 0, -0.012, 0, 0, 0, 0, 1, 0.35, 1); return merge([g]); })();
+  const VIS_STAGE = { sown: 'sown', seedling: 'seedling', leafy: 'leafy', flowering: 'flowering', fruiting: 'fruiting', ready: 'ready', past: 'past' };
   // which look each crop has for each stage (crops without a flower or fruit look keep their leafy or ready look)
   const looksOf = { radish: ['seedling', 'leafy', 'ready', 'past', 'flowering'], lettuce: ['seedling', 'leafy', 'ready', 'past', 'flowering'], carrot: ['seedling', 'leafy', 'ready', 'past'],
     kale: ['seedling', 'leafy', 'ready', 'past'], garlic: ['seedling', 'leafy', 'ready', 'past'] };
   function lookStage(c, st, p) {
+    if (st === 'sown') return 'sown';
     if (p.bolted && (c === 'lettuce' || c === 'radish')) return 'flowering';
     const l = looksOf[c];
     if (!l) return st;
@@ -851,7 +855,7 @@
       h += '<div><span class="st ' + cls + '">' + esc(p.status) + '.</span> ' + esc(p.reason) + '</div>';
       if (!p.dead) {
         h += '<div class="strip"><div class="bar"><i style="width:' + Math.round(clamp(p.progress, 0, 1) * 100) + '%"></i></div><div class="mk" style="left:' + Math.round(Math.min(1, now) * 100) + '%"></div>' +
-          '<span class="lab" style="left:6%">Sown ' + esc(dayText(p.sownT)) + '</span><span class="lab" style="left:88%">' + (p.readyT ? 'Ready ' : 'Harvest ~') + esc(dayText(p.expectT)) + '</span></div>';
+          '<span class="lab" style="left:0">Sown ' + esc(dayText(p.sownT)) + '</span><span class="lab r">' + (p.readyT ? 'Ready ' : 'Harvest ~') + esc(dayText(p.expectT)) + '</span></div>';
         h += '<div style="font-size:13px;color:var(--ink-dim)">' + esc(p.stageWord) + ', ' + ahead + (p.yieldKg > 0.01 ? ' · about ' + (p.yieldKg < 1 ? Math.round(p.yieldKg * 1000) + ' g' : p.yieldKg.toFixed(1) + ' kg') + (p.harvest === 'repeat' ? ' ripe' : ' if harvested now') : '') + '</div>';
         h += '<div class="chips">' + p.needs.map((n) => '<span>' + esc(n) + '</span>').join('') + '</div>';
       }

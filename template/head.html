@@ -320,7 +320,7 @@ body.gardening #view { cursor: crosshair; }
 #gfx .pop { position: absolute; transform: translate(-50%, -100%); font-family: var(--font-display); font-size: 20px; color: #fff4d6; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85); white-space: nowrap; animation: gpop 1.6s ease-out forwards; }
 #gfx .pop small { display: block; font-family: var(--font-body); font-size: 13px; text-align: center; color: #ffe2a0; }
 @keyframes gpop { 0% { opacity: 0; margin-top: 8px; transform: translate(-50%, -100%) scale(0.7); } 15% { opacity: 1; transform: translate(-50%, -100%) scale(1.12); } 30% { transform: translate(-50%, -100%) scale(1); } 100% { opacity: 0; margin-top: -54px; } }
-#gcard { top: 84px; right: 14px; width: min(330px, calc(100vw - 28px)); z-index: 8; display: flex; flex-direction: column; gap: 6px; font-size: 15px; line-height: 1.4; }
+#gcard { top: 122px; right: 14px; width: min(330px, calc(100vw - 28px)); z-index: 8; display: flex; flex-direction: column; gap: 6px; font-size: 15px; line-height: 1.4; }
 #gcard[hidden] { display: none; }
 #gcard h2 { font-family: var(--font-display); font-weight: 400; font-size: 22px; margin: 0; display: flex; align-items: baseline; gap: 8px; }
 #gcard h2 small { font-family: var(--font-body); font-size: 13px; color: var(--ink-dim); }
@@ -331,12 +331,13 @@ body.gardening #view { cursor: crosshair; }
 #gcard .strip .bar { position: absolute; left: 0; right: 0; top: 9px; height: 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
 #gcard .strip .bar i { display: block; height: 100%; background: linear-gradient(90deg, #7fae5a, #b9d77a); }
 #gcard .strip .mk { position: absolute; top: 0; width: 2px; height: 26px; background: var(--accent); }
-#gcard .strip .lab { position: absolute; top: 26px; font-size: 11px; color: var(--ink-dim); white-space: nowrap; transform: translateX(-50%); }
+#gcard .strip .lab { position: absolute; top: 26px; font-size: 11px; color: var(--ink-dim); white-space: nowrap; }
+#gcard .strip .lab.r { right: 0; }
 #gcard .chips { display: flex; flex-wrap: wrap; gap: 5px; }
 #gcard .chips span { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: rgba(255, 255, 255, 0.08); }
 #gcard .det { font-size: 12px; color: var(--ink-dim); font-variant-numeric: tabular-nums; display: grid; grid-template-columns: 1fr auto; gap: 1px 10px; }
 #gcard .row2 { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
-#galm { top: 84px; left: 14px; width: min(360px, calc(100vw - 28px)); max-height: calc(100vh - 200px); overflow-y: auto; z-index: 8; font-size: 15px; line-height: 1.4; display: flex; flex-direction: column; gap: 6px; }
+#galm { top: 150px; left: 14px; width: min(360px, calc(100vw - 28px)); max-height: calc(100vh - 200px); overflow-y: auto; z-index: 8; font-size: 15px; line-height: 1.4; display: flex; flex-direction: column; gap: 6px; }
 #galm[hidden] { display: none; }
 #galm h2 { font-family: var(--font-display); font-weight: 400; font-size: 22px; margin: 0; display: flex; justify-content: space-between; align-items: center; }
 #galm h3 { font-family: var(--font-display); font-weight: 400; font-size: 17px; margin: 6px 0 0; color: var(--accent); }
