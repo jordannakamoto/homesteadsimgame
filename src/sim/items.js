@@ -11,6 +11,7 @@
 // Prices are 2026 US retail, rounded; they are game prices, not quotes.
 
 import { MATERIALS } from './materials.js';
+import { ITEMS_GARDEN, GARDEN_CATEGORIES } from './content/garden-items.js';
 
 export const ITEM_UNITS = Object.freeze(['each', 'm', 'm2', 'm3', 'kg', 'L']);
 
@@ -26,6 +27,7 @@ export const ITEM_CATEGORIES = Object.freeze([
   { id: 'fasteners', name: 'Fasteners', blurb: 'Nails and screws, sold by weight' },
   { id: 'tools_hand', name: 'Hand tools', blurb: 'Work anywhere, no power needed' },
   { id: 'tools_power', name: 'Power tools', blurb: 'Need electricity' },
+  ...GARDEN_CATEGORIES,
 ]);
 export const isToolCategory = (c) => c === 'tools_hand' || c === 'tools_power';
 
@@ -141,6 +143,9 @@ add({ id: 'circular_saw', name: 'Circular saw', category: 'tools_power', unit: '
 add({ id: 'power_drill', name: 'Drill', category: 'tools_power', unit: 'each', massKg: 1.8, priceUsd: 75, powerW: 710 });
 add({ id: 'chainsaw', name: 'Electric chainsaw', category: 'tools_power', unit: 'each', massKg: 4.5, priceUsd: 120, powerW: 1800 });
 add({ id: 'table_saw', name: 'Table saw', category: 'tools_power', unit: 'each', massKg: 25, priceUsd: 400, powerW: 1800 });
+
+// ---- the garden: seeds, garden tools, amendments and produce (src/sim/content/garden-items.js)
+for (const g of ITEMS_GARDEN) add(g);
 
 export const ITEMS = Object.freeze(Object.fromEntries(list.map((i) => [i.id, i])));
 export const item = (id) => ITEMS[id];
