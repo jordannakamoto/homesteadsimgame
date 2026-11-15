@@ -2475,7 +2475,27 @@
     for (const [k, ds] of deg) if (!(ds.length === 2 && ds[0] === ds[1])) S.corners.push(parse(k));
   }
 
+  // after a structure changes, the terrain chunks under it are refreshed (a moment later, so a drag does it once)
+  // to hide or bring back the grass and ground cover beneath its floors and paths
+  const COVER_TAPS = [[0, 0], [0.3, 0], [-0.3, 0], [0, 0.3], [0, -0.3]];
+  const coverDirty = new Set();
+  let coverT = 0;
+  function markCover(S) {
+    if (S.cx === undefined) return;
+    const cs = G.chunkSize, r = (S.rad || 4) + 4;
+    for (let h = Math.floor((S.cz - r) / cs); h <= Math.floor((S.cz + r) / cs); h++) for (let u = Math.floor((S.cx - r) / cs); u <= Math.floor((S.cx + r) / cs); u++) coverDirty.add(u + "," + h);
+    coverT = 0.35;
+  }
+  function flushCover(dt) {
+    if (!coverDirty.size || (coverT -= dt) > 0) return;
+    for (const k of coverDirty) { const c = W.chunks.get(k); c && c.refresh(); }
+    coverDirty.clear();
+  }
   function rebuild(S) {
+    markCover(S);
+    try { return rebuild0(S); } finally { markCover(S); }
+  }
+  function rebuild0(S) {
     // bounds
     let i0 = 1e9,
       i1 = -1e9,
@@ -4349,6 +4369,19 @@
       }
       if (!near) e.__bp = null;
     },
+    // true where a floor, tower floor, yard or path lies over the ground: grass and ground cover are hidden there
+    covers(x, z) {
+      for (const S of B.structs) {
+        if (Math.hypot(x - S.cx, z - S.cz) > S.rad + 3) continue;
+        const [lx, lz] = toLocal(S, x, z);
+        for (const [ax, az] of COVER_TAPS) if (onFloorAt(S, lx + ax, lz + az)) return true;
+        for (const sg of S.paths) {
+          const dx = sg[2] - sg[0], dz = sg[3] - sg[1], L2 = dx * dx + dz * dz || 1, t = clamp(((lx - sg[0]) * dx + (lz - sg[1]) * dz) / L2, 0, 1);
+          if (Math.hypot(lx - sg[0] - dx * t, lz - sg[1] - dz * t) < sg[4] * 0.5 + 0.15) return true;
+        }
+      }
+      return false;
+    },
     ground(x, z, y, terrain) {
       let g = terrain;
       for (const S of B.structs) {
@@ -4370,6 +4403,7 @@
       return g;
     },
     update(dt) {
+      flushCover(dt);
       const on = P.tool === "build" && !(P.dead > 0);
       if (on !== B.on) on ? enter() : exit();
       {
@@ -4396,8 +4430,20 @@
       B.smokeT -= dt;
       const puff = B.smokeT <= 0;
       if (puff) B.smokeT = 0.3;
+      // which floor you are standing on (if any), found once so that every wing of the same building opens together.
+      // The height band reaches well above the floor so the walls do not flap when you jump indoors.
+      let homeY = null, homeUnder = false;
+      for (const S of B.structs) {
+        const [hx, hz] = toLocal(S, P.x, P.z), hi = Math.floor(hx), hj = Math.floor(hz), dy = P.y - (S.y0 + FLOOR_T);
+        if ((S.floors.has(ck(hi, hj)) || ringAt(S, hx, hz) >= 0 || polyAt(S, hx, hz) >= 0) && dy > -0.7 && dy < Math.min(2.2, EAVE * S.hs - 0.5)) {
+          homeY = S.y0;
+          homeUnder = covered(S, hi, hj) || (S.floors.has(ck(hi, hj)) && S.roofs.length > 0);
+          break;
+        }
+      }
       for (const S of B.structs) {
         const [lx, lz] = toLocal(S, P.x, P.z);
+        const sameHome = homeY !== null && Math.abs(S.y0 - homeY) < 0.4 && Math.hypot(P.x - S.cx, P.z - S.cz) < S.rad + 5;
         if (S.decor.length && Math.hypot(P.x - S.cx, P.z - S.cz) < S.rad + 45) {
           S.glowMat.color.setScalar(0.86 + 0.14 * Math.sin(performance.now() * 0.011 + S.id * 1.7) * Math.sin(performance.now() * 0.0047 + S.id));
           for (const l of S.lights) lit.push([Math.hypot(l[0] - lx, l[2] - lz), S, l]);
@@ -4420,7 +4466,7 @@
           inTower = tri >= 0 && P.y > S.y0 + 1 && P.y < S.y0 + S.rings[tri].h * EAVE * S.hs - 0.5;
         {
           // open the building up while you stand in it, so rooms read like a floor plan
-          const onFloor = (S.floors.has(ck(ci, cj)) || ringAt(S, lx, lz) >= 0 || polyAt(S, lx, lz) >= 0) && Math.abs(P.y - (S.y0 + FLOOR_T)) < 0.7;
+          const onFloor = sameHome;
           const full = EAVE * S.hs * S.rings.reduce((m, r) => Math.max(m, r.h), 1) + 0.4;
           const cutT = onFloor ? 1.15 : inTower ? P.y - S.y0 + 1.05 : 0;
           if (!B.on && cutT && !(P.dead > 0)) {
@@ -4448,7 +4494,7 @@
         if (inPoly && Math.abs(P.y - (S.y0 + FLOOR_T)) < 0.5) sheltered = true;
         const ri = ringAt(S, lx, lz);
         const inRing = ri >= 0 && Math.abs(P.y - S.y0) < headroom;
-        const underAny = under || inPoly || (inRing && S.rings[ri].roof) || inTower;
+        const underAny = under || inPoly || (inRing && S.rings[ri].roof) || inTower || (sameHome && homeUnder);
         if (inRing && S.rings[ri].roof && S.rings[ri].sides.every((t) => t) && Math.abs(P.y - (S.y0 + FLOOR_T)) < 0.5) ((sheltered = true), (cosy = Math.max(cosy, S.ringCosy[ri] || 0)));
         const target = B.on ? (B.tool === "roof" || B.tool === "erase" ? 1 : 0) : underAny ? 0 : 1;
         if (S.roofOp !== target) {

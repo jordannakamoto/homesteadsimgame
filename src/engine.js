@@ -1279,7 +1279,7 @@ class Chunk {
       if (!mesh) continue;
       list.forEach((g, i) => {
         const hh = this.heightLocal(g.lx, g.lz);
-        if (Math.abs(hh - this.baseLocal(g.lx, g.lz)) > 0.25 || hh < 0.4) { mesh.setMatrixAt(i, ZERO_M); return; }
+        if (Math.abs(hh - this.baseLocal(g.lx, g.lz)) > 0.25 || hh < 0.4 || (window.__build && window.__build.covers(this.ox + g.lx, this.oz + g.lz))) { mesh.setMatrixAt(i, ZERO_M); return; }
         _p.set(this.ox + g.lx, hh - 0.04, this.oz + g.lz);
         _q.setFromAxisAngle(UP, g.rot); _s.set(g.s, g.s * g.sy, g.s);
         mesh.setMatrixAt(i, _m.compose(_p, _q, _s));
@@ -1634,7 +1634,7 @@ window.addEventListener('keydown', (e) => {
     if (e.code === 'Digit4') setTool('level');
   }
   if (e.code === 'KeyG') setQuality(quality.level === 'high' ? 'low' : 'high');
-  if (e.code === 'KeyH') document.getElementById('help').classList.toggle('closed');
+  if (e.code === 'KeyH') { const h = document.getElementById('help'); h.hidden = !h.hidden; }
   if (e.altKey || ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'AltLeft', 'AltRight'].includes(e.code)) e.preventDefault();
 });
 window.addEventListener('keyup', (e) => { keys[e.code] = false; if (e.code === 'AltLeft' || e.code === 'AltRight') e.preventDefault(); });
@@ -1969,7 +1969,7 @@ function setQuality(q) {
 }
 el('quality').addEventListener('click', () => { setQuality(quality.level === 'high' ? 'low' : 'high'); canvas.focus(); });
 el('newworld').addEventListener('click', () => { resetWorld((Math.random() * 1e6) | 0); canvas.focus(); });
-el('helpbtn').addEventListener('click', () => { el('help').classList.toggle('closed'); canvas.focus(); });
+el('helpbtn').addEventListener('click', () => { el('help').hidden = true; canvas.focus(); });
 
 function resetWorld(seed) {
   SEED = seed >>> 0;

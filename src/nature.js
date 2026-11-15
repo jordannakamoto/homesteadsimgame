@@ -464,6 +464,7 @@
     for (const it of ch.litterItems) {
       const h = ch.heightLocal(it.lx, it.lz);
       if (Math.abs(h - ch.baseLocal(it.lx, it.lz)) > 0.25 || (it.kind === "reed" ? h < -0.5 : h < 0.3)) continue;
+      if (BL.covers && BL.covers(ch.ox + it.lx, ch.oz + it.lz)) continue;
       const tp = template(it.kind, it.v),
         c = Math.cos(it.rot) * it.s,
         s = Math.sin(it.rot) * it.s,
