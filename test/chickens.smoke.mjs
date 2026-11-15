@@ -21,7 +21,7 @@ await page.$eval('#ckbody button[data-act="water"]', (b) => b.click()); await wa
 await page.screenshot({ path: out + '/ck-panel.png' });
 await page.keyboard.press('Escape');
 // frame the coop: camera close, looking at it
-const frameCoop = async (dist, pitch) => G(([d, p]) => { const g = __game, own = g.sim.state.sys.chickens.own[0]; const c = g.cam; c.dist = d; c.pitch = p; c.yaw = g.player.face + Math.PI + 0.5; g.player.x = own.a.x - Math.sin(g.player.face) * 3.5; g.player.z = own.a.z - Math.cos(g.player.face) * 3.5; }, [dist, pitch]);
+const frameCoop = async (dist, pitch, side = 0.6) => G(([d, p, sd]) => { const g = __game, own = g.sim.state.sys.chickens.own[0]; const c = g.cam; c.dist = d; c.pitch = p; const f = own.yawRad; g.pm.root.visible = false; document.getElementById('lock').hidden = true; g.player.x = own.a.x + Math.sin(f) * 1.6; g.player.z = own.a.z + Math.cos(f) * 1.6; c.yaw = f + sd; c.prevYaw = c.yaw; }, [dist, pitch, side]);
 await G(() => { __game.world.time = 0.4; }); await wait(6000);
 await frameCoop(9, 0.5); await wait(2500);
 await page.screenshot({ path: out + '/ck-day.png' });

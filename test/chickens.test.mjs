@@ -314,3 +314,47 @@ test('thirty birds cost well under 0.05 ms per physiology step', () => {
   assert.equal(Object.keys(C(sim).birds).length, 30);
   assert.ok(runs[0] < 0.05, runs[0] + ' ms');
 });
+
+test('with a 20-day year a pullet reaches point of lay about 18 times sooner in game days, eating the same each day', () => {
+  // the seasonal clock as the core provides it (ctx.lifeT, ctx.lifeDt, ctx.lifeScale, ctx.ct), staged here so the test
+  // runs on a core with or without it
+  const short = (inner) => ({ ...inner, step: (c) => inner.step(withLife(c)), commands: Object.fromEntries(Object.entries(inner.commands).map(([k, f]) => [k, (c, p) => f(withLife(c), p)])) });
+  const SCALE = 365 / 20;
+  const withLife = (c) => {
+    const lifeT = c.state.lifeT ?? (c.state.lifeT = c.state.t);
+    const doyT = calendar.START_DAY_OF_YEAR !== undefined ? lifeT : lifeT;
+    const ct = Math.floor(doyT / DAY) * DAY + (c.t % DAY);
+    return new Proxy(c, { get: (o, k) => (k === 'lifeT' ? lifeT : k === 'lifeScale' ? SCALE : k === 'lifeDt' ? o.dt * SCALE : k === 'ct' ? ct : o[k]) });
+  };
+  const clock = { name: 'lifeclock', every: 1, init: () => ({}), step: (c) => { c.state.lifeT = (c.state.lifeT ?? c.state.t) + 60 * SCALE; } };
+  const run = (scaled) => {
+    const sim = createSim({ seed: 51, systems: [fakeWeather(() => 18), stockSystem(), siteSystem(), scaled ? short(chickensSystem()) : chickensSystem(), ...(scaled ? [clock] : [])] });
+    sim.commandNow('chickens.placeStarter', { x: 0, z: 0 });
+    sim.commandNow('chickens.setLight', { on: true, hours: 15 });
+    sim.commandNow('chickens.buy', { breed: 'rir', count: 4, ageWeeks: 12 });
+    let first = null, feed3 = null;
+    for (let d = 0; d < 80 && first === null; d++) {
+      chores(sim); const k0 = C(sim).totals.feederEatenKg;
+      sim.runDays(1);
+      if (d === 2) feed3 = ((C(sim).totals.feederEatenKg - k0) / 4) * 1000;
+      if (first === null && hens(sim).every((b) => ((sim.state.lifeT ?? sim.state.t) - b.bornT) / DAY / 7 >= pointOfLayWeeks(b))) first = d + 1;
+    }
+    return { first, feed3 };
+  };
+  const real = run(false);
+  const adultFeed = (scaled) => {
+    const sim = createSim({ seed: 52, systems: [fakeWeather(() => 18), stockSystem(), siteSystem(), scaled ? short(chickensSystem()) : chickensSystem(), ...(scaled ? [clock] : [])] });
+    sim.commandNow('chickens.placeStarter', { x: 0, z: 0 }); sim.commandNow('chickens.setDoor', { open: false });
+    sim.commandNow('chickens.setLight', { on: true, hours: 15 });
+    sim.commandNow('chickens.buy', { breed: 'rir', count: 4, ageWeeks: 60 });
+    for (let d = 0; d < 3; d++) { chores(sim); sim.runDays(1); }
+    const k0 = C(sim).totals.feederEatenKg;
+    for (let d = 0; d < 4; d++) { chores(sim); sim.runDays(1); }
+    return ((C(sim).totals.feederEatenKg - k0) / 4 / 4) * 1000;
+  };
+  const realFeed = adultFeed(false);
+  const fast = { ...run(true), feed3: adultFeed(true) };
+  console.log('  whole flock at point of lay after', real.first, 'game days in a 365-day year,', fast.first, 'in a 20-day year; feed on day 3:', realFeed.toFixed(0), 'vs', fast.feed3.toFixed(0), 'g a day');
+  assert.ok(Math.abs(real.first / fast.first - SCALE) < 0.2 * SCALE, real.first + ' / ' + fast.first);
+  assert.ok(Math.abs(fast.feed3 / realFeed - 1) < 0.15, 'feed ' + fast.feed3 + ' vs ' + realFeed);
+});

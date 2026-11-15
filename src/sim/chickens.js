@@ -2,7 +2,7 @@
 // fills, laying by day length, age and nutrition, roosting at dusk, foraging on range or under a tractor.
 //
 // State, at sim.state.sys.chickens (see ARCHITECTURE.md, iteration 13):
-//   birds: { [id]: { name, sex, breed, bornT, traits: { bv, pe, genes }, massKg, hungerKg (crop and gut fill, kg as fed),
+//   birds: { [id]: { name, sex, breed, bornT (on the seasonal clock, lifeT), traits: { bv, pe, genes }, massKg, hungerKg (crop and gut fill, kg as fed),
 //            waterL (body-water balance, 0 = fully hydrated, negative = short), energy (smoothed energy balance, MJ/day),
 //            health (0..1), stress (0..1), roosting, location (pieceId | "range"), eggs: { nextT, laidTotal, ... }, mood,
 //            plus: home, phase, status, personality, quirk, plumage, comb, gut {...}, lastMatedT, matedBy, dam, sire } }
@@ -190,7 +190,7 @@ export function matureKg(b) { const br = BREEDS[b.breed]; return (b.sex === 'roo
 // target (well-grown, well-fed) mass at this age
 export function targetKg(b, t) {
   const br = BREEDS[b.breed];
-  return gompertz(ageDays(b, t), matureKg(b), br.k, br.ti + (b.sex === 'rooster' ? 5 : 0));
+  return gompertz(ageDays(b, LT), matureKg(b), br.k, br.ti + (b.sex === 'rooster' ? 5 : 0));
 }
 export function pointOfLayWeeks(b) { return BREEDS[b.breed].pointOfLayWeeks * (1 - 0.6 * (b.traits.bv.lay + b.traits.pe.lay)); }
 
@@ -227,7 +227,7 @@ export function makeBird(s, rng, breedId, sex, bornT, t) {
   const name = pickName(rng, sex === 'rooster' ? ROOSTER_NAMES : HEN_NAMES, used);
   const traits = founderTraits(rng, TRAIT_SPECS, founderGenes(br, sex));
   const b = blankBird(id, name, sex, breedId, bornT, traits, 0);
-  b.massKg = round4(targetKg(b, t));
+  b.massKg = round4(targetKg(b, LT));
   return finishBird(s, b, rng);
 }
 
@@ -394,7 +394,7 @@ function pastureGrowth(W) {
 function step(c) {
   const s = c.s, W = c.get('weather');
   if (!W) return;
-  const t = c.t, dt = c.dt, dtD = dt / DAY, dtH = dt / HOUR;
+  const t = c.t, dt = c.dt, dtD = dt / DAY, dtH = dt / HOUR, ct = clocks(c);
   const idx = fixtureIndex(c);
   const site = W.site || { latitudeDeg: 45 };
   const hour = hourOfDay(t), today = dayIndex(t);
@@ -413,7 +413,7 @@ function step(c) {
   }
 
   // pasture: the range and every tractor cell grow back
-  const g = pastureGrowth(W) * PASTURE_GMAX * dtD;
+  const g = pastureGrowth(W) * PASTURE_GMAX * dtD * LIFE;
   if (g > 0) {
     const r = s.ground.range;
     r.forageGm2 += g * (1 - r.forageGm2 / PASTURE_K);
@@ -430,7 +430,7 @@ function step(c) {
 
   // light per shelter today
   const days = {};
-  const sun = sunTimes(t, site);
+  const sun = sunTimes(ct, site);
   for (const co of idx.coops) {
     const f = s.fx[co.id];
     let lit = !!(f.light && f.light.on);
@@ -479,11 +479,16 @@ function words(s, idx, t, W, days, wild) {
 function refreshNow(c) {
   const s = c.s, W = c.get('weather');
   if (!s || !W) return;
-  const idx = fixtureIndex(c), sun = sunTimes(c.t, W.site || { latitudeDeg: 45 }), days = {};
+  const ct = clocks(c), idx = fixtureIndex(c), sun = sunTimes(ct, W.site || { latitudeDeg: 45 }), days = {};
   for (const co of idx.coops) days[co.id] = lightDay(sun, s.fx[co.id].light, !!(s.fx[co.id].light && s.fx[co.id].light.on));
   tidy(s, idx, c.t);
   words(s, idx, c.t, W, days, lightDay(sun, null, false));
 }
+
+// The seasonal clock (a short game year): ages, growth, ageing and pasture regrowth run on lifeT and lifeDt;
+// daily things (eating, drinking, the egg cycle, dusk and dawn) on the ordinary clock. Set at every entry.
+let LT = 0, LIFE = 1;
+function clocks(c) { LT = c.lifeT ?? c.t; LIFE = c.lifeScale ?? 1; return c.ct ?? c.t; }
 
 const homeLoad = {};                    // scratch: birds per shelter in the current step (derived, not state)
 
@@ -541,7 +546,7 @@ function stepBird(c, s, b, home, ld, idx, hour, T, W, dt, dtD, t, today, rngLay,
   const awake = !b.roosting;
   const inShelter = home && b.location === home.id;
   const ambient = inShelter && !home.cat.confines ? T + 3 : T;    // body heat in a small closed coop; the lifecycle iteration reads the real coop
-  const Wt = targetKg(b, t), mass = b.massKg;
+  const Wt = targetKg(b, LT), mass = b.massKg;
   const cond = mass / Wt;
   b.cond = round4(cond);
 
@@ -549,9 +554,9 @@ function stepBird(c, s, b, home, ld, idx, hour, T, W, dt, dtD, t, today, rngLay,
   const fast = clamp(-b.energy / 1.2, 0, 1);
   const maint = maintenanceMJ(mass, ambient) * (b.phase === 'range' ? 1.05 : 1) * (1 - 0.2 * fast);
   const forming = b.eggs.nextT !== null;
-  const eggG = eggMassG(b, t);
-  const eggMJday = forming ? (KJ_PER_G_EGG * eggG / 1000) * (24 / eggIntervalH(b, t)) : 0;
-  const ageD = ageDays(b, t);
+  const eggG = eggMassG(b, LT);
+  const eggMJday = forming ? (KJ_PER_G_EGG * eggG / 1000) * (24 / eggIntervalH(b, LT)) : 0;
+  const ageD = ageDays(b, LT);
   const growKgDay = gompertzRate(ageD, matureKg(b), br.k, br.ti + (b.sex === 'rooster' ? 5 : 0));
   const needMJ = maint + eggMJday + growKgDay * MJ_PER_KG_GAIN;
   const dehyd = clamp(-b.waterL / mass, 0, 1);                    // fraction of body mass short of water
@@ -612,11 +617,14 @@ function stepBird(c, s, b, home, ld, idx, hour, T, W, dt, dtD, t, today, rngLay,
   const net = absMJ - spentMJ;
   let dMass = net >= 0 ? net / MJ_PER_KG_GAIN : net / MJ_PER_KG_LOSS;
   if (dMass > 0 && mass > Wt * 1.12) dMass = 0;                   // a fat hen does not keep laying down fat: the surplus is burned
+  // A short game year compresses growth to fit the seasons. Daily feed stays real, so the extra growth the
+  // seasonal clock adds (lifeScale - 1 times the real rate) is laid on without its feed, only while the bird is well fed.
+  if (LIFE > 1 && growKgDay > 0 && cond > 0.95 && ateMJ > 0) dMass += growKgDay * (LIFE - 1) * dtD;
   b.massKg = round6(Math.max(0.03, mass + dMass));
   b.energy = relax(b.energy, net / dtD, dt, DAY);
 
   // ---- droppings and nitrogen: N absorbed minus N into the forming egg and into gain
-  const eggN = forming ? EGG_N * (eggG / 1000) * (dt / (eggIntervalH(b, t) * HOUR)) : 0;
+  const eggN = forming ? EGG_N * (eggG / 1000) * (dt / (eggIntervalH(b, LT) * HOUR)) : 0;
   const nOut = Math.max(0, absN - eggN - Math.max(0, dMass) * GAIN_N);
   const manureKg = outInd / MANURE_DM;                              // droppings by mass from undigested dry matter at 25% DM
   depositManure(s, b, home, manureKg, nOut);
@@ -721,11 +729,11 @@ function reachable(s, idx, b, home, e) {
 
 // ---------------------------------------------------------------------------------------- laying
 export function eggIntervalH(b, t) {
-  const yrs = Math.max(0, (ageDays(b, t) / 7 - pointOfLayWeeks(b)) / 52);
+  const yrs = Math.max(0, (ageDays(b, LT) / 7 - pointOfLayWeeks(b)) / 52);
   return BREEDS[b.breed].eggIntervalH + 0.4 * yrs;               // the interval lengthens as hens age
 }
 export function eggMassG(b, t) {
-  const w = ageDays(b, t) / 7 - pointOfLayWeeks(b);
+  const w = ageDays(b, LT) / 7 - pointOfLayWeeks(b);
   const young = 0.8 + 0.2 * clamp(w / 10, 0, 1);                // pullet eggs are small for the first couple of months
   return BREEDS[b.breed].eggG * young * (1 + 0.04 * clamp(w / 52, 0, 3)) * Math.sqrt(sizeFactor(b));
 }
@@ -734,7 +742,7 @@ export const photoFactor = (photoH) => smoothstep(9.5, 14.5, photoH);
 // Age: nothing before point of lay, a rise to peak over about six weeks, then a slow decline
 // (persistency: production falls about 15-20% a year).
 export function ageFactor(b, t) {
-  const w = ageDays(b, t) / 7 - pointOfLayWeeks(b);
+  const w = ageDays(b, LT) / 7 - pointOfLayWeeks(b);
   if (w < 0) return 0;
   if (w < 6) return 0.35 + 0.65 * (w / 6);
   return Math.exp(-0.0042 * (w - 6));
@@ -745,7 +753,7 @@ export function layDrive(b, t, photoH, cond, dehyd) {
   const peak = clamp(br.eggsPerYear / 365 / LAY_CAL, 0, 1);
   const nutrition = clamp((cond - 0.88) / 0.08, 0, 1) * clamp(1 + b.energy / 1.0, 0, 1);
   const water = clamp(1 - (dehyd - 0.02) / 0.04, 0, 1);
-  return clamp(peak * layFactor(b) * ageFactor(b, t) * photoFactor(photoH) * nutrition * water * (1 - 0.8 * b.stress) * b.health * b.health, 0, 1);
+  return clamp(peak * layFactor(b) * ageFactor(b, LT) * photoFactor(photoH) * nutrition * water * (1 - 0.8 * b.stress) * b.health * b.health, 0, 1);
 }
 // Calibration of the breed figure to the ovulation model: the mean hen-day rate of a hen with drive 1 over her
 // first laying year (sequence limits from the open period and the 25-26 h interval, the rise to peak and the
@@ -761,8 +769,8 @@ function stepLaying(c, s, b, home, ld, idx, hour, t, dt, today, rng, cond, dehyd
     // next ovulation about half an hour after laying, if it still falls inside the open period
     const candT = laidT + 0.5 * HOUR;
     const candH = hourOfDay(candT) + (dayIndex(candT) - dayIndex(laidT)) * 24;
-    if (candH <= ld.onH + OPEN_PERIOD_H && rng.float() < layDrive(b, t, ld.photoH, cond, dehyd)) {
-      b.eggs.nextT = candT + eggIntervalH(b, t) * HOUR;
+    if (candH <= ld.onH + OPEN_PERIOD_H && rng.float() < layDrive(b, LT, ld.photoH, cond, dehyd)) {
+      b.eggs.nextT = candT + eggIntervalH(b, LT) * HOUR;
     } else {
       b.eggs.nextT = null;
       b.eggs.tryDay = today;                                      // a pause day: try again tomorrow morning
@@ -771,7 +779,7 @@ function stepLaying(c, s, b, home, ld, idx, hour, t, dt, today, rng, cond, dehyd
   // after a pause, the first ovulation comes in the morning, soon after lights-on
   if (b.eggs.nextT === null && b.eggs.tryDay !== today && hour >= ld.onH + 0.5) {
     b.eggs.tryDay = today;
-    if (rng.float() < layDrive(b, t, ld.photoH, cond, dehyd)) b.eggs.nextT = t + rng.float() * HOUR + eggIntervalH(b, t) * HOUR;
+    if (rng.float() < layDrive(b, LT, ld.photoH, cond, dehyd)) b.eggs.nextT = t + rng.float() * HOUR + eggIntervalH(b, LT) * HOUR;
   }
 }
 
@@ -785,7 +793,7 @@ function layEgg(c, s, b, home, idx, laidT, t) {
     if (best) { nestId = best; where = 'nest'; } else where = 'floor';
   }
   const fertile = b.lastMatedT !== null && laidT - b.lastMatedT < FERTILE_DAYS * DAY;
-  const massG = Math.round(eggMassG(b, t) * 10) / 10;
+  const massG = Math.round(eggMassG(b, LT) * 10) / 10;
   const egg = { id: newId(c.rng('egg'), 'e', null), laidT, nestId, where, fertile, hen: b.id, sire: fertile ? b.matedBy : null, massG };
   s.eggs.push(egg);
   b.eggs.laidTotal++;
@@ -836,7 +844,7 @@ function statusLine(s, b, idx, t, days, wild) {
   const feedEmpty = fs.length && fs.every((e) => s.fx[e.id].feedKg <= 1e-6);
   const waterDry = ws.length && ws.every((e) => s.fx[e.id].waterL - s.fx[e.id].iceL <= 1e-6);
   const frozen = waterDry && ws.some((e) => s.fx[e.id].iceL > 0.05);
-  const ageW = ageDays(b, t) / 7;
+  const ageW = ageDays(b, LT) / 7;
   if (b.out) return n + ' could not get into the coop and is roosting outside: the door was shut before ' + she(b) + ' went in.';
   if (b.mood === 'thirsty') {
     if (!ws.length) return n + ' is thirsty: there is no waterer.';
@@ -877,7 +885,7 @@ function computeIssues(s, idx, t, W, days, wild) {
   const out = [], birds = Object.values(s.birds);
   if (!birds.length) return out;
   const hens = birds.filter((b) => b.sex === 'hen');
-  if (!idx.coops.length) out.push({ id: 'no-coop', severity: 'bad', reason: 'Your birds have no coop and roost wherever they can.', fix: 'Place a coop or a chicken tractor (Chickens panel, K).' });
+  if (!idx.coops.length) out.push({ id: 'no-coop', severity: 'bad', reason: 'Your birds have no coop and roost wherever they can.', fix: 'Place a coop or a chicken tractor (Chickens panel, H).' });
   const feeders = idx.feeders;
   if (!feeders.length) out.push({ id: 'no-feeder', severity: 'warn', reason: 'There is no feeder.', fix: 'Place a feeder near the coop.' });
   for (const e of feeders) {
@@ -914,7 +922,7 @@ function computeIssues(s, idx, t, W, days, wild) {
   if (s.eggs.length) out.push({ id: 'eggs', severity: 'info', reason: s.eggs.length + ' egg' + (s.eggs.length > 1 ? 's are' : ' is') + ' waiting to be collected.', fix: 'Collect the eggs.' });
   const outside = s.eggs.filter((e) => e.where !== 'nest').length;
   if (outside) out.push({ id: 'eggs-outside', severity: 'info', reason: outside + ' egg' + (outside > 1 ? 's were' : ' was') + ' laid outside a nest.', fix: 'Give them a nest box and keep them in until mid-morning.' });
-  const laid = hens.filter((b) => ageDays(b, t) / 7 >= pointOfLayWeeks(b));
+  const laid = hens.filter((b) => ageDays(b, LT) / 7 >= pointOfLayWeeks(b));
   const anyLit = idx.coops.some((co) => s.fx[co.id].light && s.fx[co.id].light.on);
   const ld = idx.coops.length ? days[idx.coops[0].id] : wild;
   if (laid.length && !anyLit && ld.photoH < 12.5) out.push({ id: 'short-days', severity: 'info', reason: 'The days are short (' + ld.photoH.toFixed(1) + ' hours of light). Hens lay little below about 12 hours.', fix: 'Let them rest (it is natural), or put a light in the coop on a timer for 15 hours.' });
@@ -973,8 +981,9 @@ const commands = {
     if (!r.ok) return r;
     itemRemove(c, item, count);                                   // the bird leaves the stock and joins the flock
     const rng = c.rng('birth'), ids = [];
-    const bornT = c.t - ageWeeks * 7 * DAY;
-    for (let i = 0; i < count; i++) { const b = makeBird(s, rng, br.id, sex, bornT, c.t); s.birds[b.id] = b; ids.push(b.id); }
+    clocks(c);
+    const bornT = LT - ageWeeks * 7 * DAY;                          // birth on the seasonal clock
+    for (let i = 0; i < count; i++) { const b = makeBird(s, rng, br.id, sex, bornT, LT); s.birds[b.id] = b; ids.push(b.id); }
     assignHomes(s, fixtureIndex(c));
     for (const id of ids) { const b = s.birds[id]; const home = b.home && fixtureIndex(c).byId[b.home]; if (home && (home.cat.confines || !s.fx[home.id].doorOpen)) b.location = home.id; }
     s.flock.count = Object.keys(s.birds).length;

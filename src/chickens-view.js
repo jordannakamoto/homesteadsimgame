@@ -1,4 +1,4 @@
-/* Chickens view: the birds, their coop and kit, and the Chickens panel (K).
+/* Chickens view: the birds, their coop and kit, and the Chickens panel (H).
    Draws the simulation's flock (sim.state.sys.chickens); owns no truth. Where a bird walks, pecks, dust-bathes
    or sits is animation derived from the sim's phase for that bird (range, coop, tractor, roost, out).
    Cheap: every bird is one instance of one InstancedMesh, posed in the vertex shader from four floats; eggs are
@@ -221,7 +221,7 @@
   }
   function buildFeeder(e) {
     const g = new T.Group();
-    for (const a of [0, 2.1, 4.2]) { const l = box(g, 0.03, 0.75, 0.03, M.dark, Math.sin(a) * 0.18, 0.36, Math.cos(a) * 0.18); l.rotation.set(Math.cos(a) * 0.22, 0, -Math.sin(a) * 0.22); }
+    box(g, 0.34, 0.04, 0.34, M.dark, 0, 0.02, 0); box(g, 0.05, 0.2, 0.05, M.dark, 0, 0.12, 0);   // a little stand
     const tube = new T.Mesh(new T.CylinderGeometry(0.1, 0.1, 0.36, 10, 1, true), M.metal); tube.position.y = 0.42; tube.material.side = T.DoubleSide; g.add(tube);
     const feed = new T.Mesh(new T.CylinderGeometry(0.095, 0.095, 1, 10), M.feed); g.add(feed);
     const pan = new T.Mesh(new T.CylinderGeometry(0.17, 0.15, 0.05, 12), M.metal); pan.position.y = 0.22; pan.castShadow = true; g.add(pan);
@@ -295,7 +295,7 @@
     const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * far;
     return [cx + Math.cos(a) * r, cz + Math.sin(a) * r];
   }
-  let frameT = performance.now();
+  let frameT = performance.now(), lastSimT = 0;
   const rosterIdx = {};
   function update() {
     const now = performance.now(), dt = Math.min(0.1, (now - frameT) / 1000); frameT = now;
@@ -316,7 +316,8 @@
     let cx = 0, cz = 0;
     for (const b of birds) { const v = vb.get(b.id); if (v) { cx += v.x; cz += v.z; } }
     const centre = [cx / birds.length, cz / birds.length];
-    const fast = G.speed >= 100, fedRecently = now - lastFed < 9000;
+    const simT = G.sim.state.t, jumped = simT - lastSimT > 1200 || simT < lastSimT; lastSimT = simT;
+    const fast = G.speed >= 100 || jumped, fedRecently = now - lastFed < 9000;
     for (const k in rosterIdx) delete rosterIdx[k];
     let i = 0;
     for (const b of birds) {
@@ -470,7 +471,7 @@
     if (birds.length) {
       h += '<h3>Your flock</h3>';
       for (const b of birds) {
-        const wk = Math.floor((G.sim.state.t - b.bornT) / 86400 / 7);
+        const wk = Math.floor(((G.sim.state.lifeT ?? G.sim.state.t) - b.bornT) / 86400 / 7);
         const c = b.colour || [0.5, 0.5, 0.5], css = 'rgb(' + c.map((x) => Math.round(x * 255)).join(',') + ')';
         h += '<div class="ckbird"><span class="dot" style="background:' + css + '"></span><div class="name">' + esc(b.name) + '<small>' + esc(b.breedName) + (b.sex === 'rooster' ? ' rooster' : '') + ', ' + (wk < 52 ? wk + ' weeks' : (wk / 52).toFixed(1) + ' years') + ', ' + b.massKg.toFixed(2) + ' kg, ' + esc(b.personality) + ' · ' + b.eggs.laidTotal + ' eggs</small><span class="st">' + esc(b.status) + '</span></div><span class="mood ' + b.mood + '">' + b.mood + '</span></div>';
       }
@@ -503,13 +504,15 @@
   const toggle = () => (panel.hidden ? openPanel() : closePanel());
   $('ckb').addEventListener('click', toggle);
   $('ckclose').addEventListener('click', closePanel);
+  // H ("Hens"). Listened for in the capture phase so the engine's old H (show the controls) does not also fire.
   window.addEventListener('keydown', (e) => {
     const t = e.target && e.target.tagName;
-    if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT' || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+    if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT' || e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.code === 'Escape' && !panel.hidden) { closePanel(); return; }
-    if (G.player.tool === 'build') return;
-    if (e.code === 'KeyK') toggle();
-  });
+    if (G.player.tool === 'build' || e.code !== 'KeyH') return;
+    e.stopImmediatePropagation();
+    if (!e.repeat) toggle();
+  }, true);
   function inFront(dist) { const f = G.player.face; return { x: G.player.x + Math.sin(f) * dist, z: G.player.z + Math.cos(f) * dist, yawRad: f + Math.PI }; }
   function place(list) {
     if (typeof G.addFixtures === 'function') return G.addFixtures(list);
