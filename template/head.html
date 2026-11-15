@@ -79,32 +79,70 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 #err { top: 50%; left: 50%; transform: translate(-50%, -50%); border-color: var(--danger); max-width: 80%; }
 body.building #tools, body.building #help, body.building #stance, body.building #lock, body.building #reticle, body.building #combo { display: none; }
 body.building #view { cursor: default; }
-#buildbar { bottom: 16px; left: 50%; transform: translateX(-50%); width: max-content; display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 10px; max-width: calc(100% - 24px); }
-#buildbar[hidden] { display: none; }
-#bkeys { order: 3; color: var(--ink-dim); font-size: 12px; text-align: center; opacity: 0.8; }
-#bhint { color: var(--ink-dim); font-size: 13px; text-align: center; min-height: 18px; padding: 0 6px; }
-#buildbar .row { display: flex; gap: 8px; align-items: stretch; justify-content: center; flex-wrap: wrap; }
-#bpieces { display: flex; gap: 4px; justify-content: center; }
-#blevel { display: grid; gap: 3px; text-align: center; font-size: 12px; color: var(--ink-dim); align-content: center; }
-#blevel button { font-size: 12px; padding: 2px 8px; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#bpieces button { display: grid; grid-template-columns: auto; justify-items: center; gap: 1px; min-width: 44px; padding: 6px 5px 4px; }
-#bpieces button .name { font-family: var(--font-display); font-size: 14px; }
-#bpieces button .key, #bdone .key { font-size: 11px; color: var(--ink-dim); }
-#bpieces button[aria-pressed="true"] { border-color: var(--accent); background: rgba(226, 182, 90, 0.18); color: var(--accent); }
-#buildbar .side { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; align-content: stretch; }
-#buildbar .side button { font-size: 12px; padding: 3px 8px; white-space: nowrap; }
-#buildbar .side #bfree, #buildbar .side #bdone { grid-column: span 1; }
-#buildbar button:disabled { opacity: 0.4; cursor: default; }
-#bfree[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
-#bdecor { display: grid; gap: 4px; justify-items: center; }
-#bdecor[hidden] { display: none; }
-#bdcats, #bditems { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }
-#bdecor button { font-size: 12px; padding: 3px 9px; }
-#bdcats button { font-family: var(--font-display); font-size: 13px; }
-#bdecor button[aria-pressed="true"] { border-color: var(--accent); background: rgba(226, 182, 90, 0.18); color: var(--accent); }
-#buildbar .sep { width: 1px; background: var(--panel-edge); }
-#blabel { position: fixed; pointer-events: none; background: rgba(22, 28, 30, 0.86); border: 1px solid var(--panel-edge); border-radius: 6px; padding: 3px 9px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; z-index: 5; }
-#blabel.bad { border-color: var(--danger); color: #ffc9bd; }
+/* ---------- build mode: tool palette, options strip and inspector, things drawn over the view ---------- */
+#buildbar { --blue: #9fe3ff; bottom: 14px; left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% - 20px); display: flex; flex-direction: column; gap: 7px; padding: 8px 10px 9px; }
+#buildbar[hidden], #bopts[hidden], #bdecor[hidden], #bstop[hidden] { display: none; }
+#buildbar button:disabled { opacity: 0.35; cursor: default; }
+#buildbar kbd, #bstop kbd { font: 600 10px var(--font-body); color: var(--ink-dim); border: 1px solid var(--panel-edge); border-radius: 4px; padding: 0 4px; margin-left: 5px; white-space: nowrap; }
+#bhead { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+#bhead .grow { flex: 1; }
+#bhint { color: var(--ink); font-size: 13.5px; padding-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#bundo, #bredo, #bstop { display: flex; align-items: center; gap: 5px; padding: 3px 9px 3px 7px; font-size: 12.5px; flex: none; }
+#bstop { border-color: var(--accent); color: var(--accent); }
+#bopts, #bdecor { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 7px 12px; padding: 7px 2px 8px; border-top: 1px solid var(--panel-edge); max-width: 1236px; }
+#bdecor { padding-top: 0; border-top: 0; margin-top: -4px; }
+.bgroup { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.blab { font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-dim); white-space: nowrap; height: 14px; }
+.blab .bval { color: var(--ink); font-weight: 700; letter-spacing: 0.02em; text-transform: none; font-size: 11.5px; margin-left: 3px; }
+.bitems { display: flex; gap: 3px; align-items: center; min-height: 40px; }
+.bsw { width: 27px; height: 27px; padding: 0; border-radius: 6px; overflow: hidden; border: 1px solid rgba(0, 0, 0, 0.5); flex: none; }
+.bsw svg { display: block; width: 100%; height: 100%; }
+.bsw[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.btile { display: grid; justify-items: center; gap: 1px; min-width: 44px; padding: 4px 5px 3px; font-size: 11px; line-height: 1.15; white-space: nowrap; }
+.bchip { min-height: 30px; padding: 4px 8px; font-size: 12.5px; white-space: nowrap; }
+.btile.danger { color: #ffc9bd; border-color: rgba(224, 118, 95, 0.55); }
+.btile[aria-pressed="true"], .bchip[aria-pressed="true"], #bpieces button[aria-pressed="true"], #bsnap[aria-pressed="true"], #bfree[aria-pressed="true"] { border-color: var(--accent); background: rgba(226, 182, 90, 0.2); color: var(--accent); }
+.bstep .bchip { padding: 4px 6px; display: flex; }
+.bnum { font-variant-numeric: tabular-nums; font-size: 13px; }
+.bstep .bnum { min-width: 42px; text-align: center; font-weight: 700; }
+.bfield { background: rgba(0, 0, 0, 0.3); border: 1px solid var(--panel-edge); border-radius: 6px; padding: 0 8px 0 2px; height: 30px; color: var(--ink-dim); font-size: 12.5px; }
+.bfield input { width: 46px; background: none; border: 0; color: var(--ink); font: 700 13px var(--font-body); font-variant-numeric: tabular-nums; text-align: right; outline: none; padding: 0 3px; }
+.bfield:focus-within { border-color: var(--blue); }
+.binfo { justify-content: flex-end; gap: 2px; padding-right: 4px; max-width: 330px; }
+.binfo .btitle { font-family: var(--font-display); font-size: 16px; color: var(--accent); white-space: nowrap; }
+.binfo .bnum { color: var(--ink); font-size: 12.5px; white-space: normal; }
+#bmain { display: flex; gap: 10px; align-items: stretch; justify-content: center; border-top: 1px solid var(--panel-edge); padding-top: 8px; }
+#bpieces { display: flex; gap: 4px; }
+#bpieces .sep { width: 1px; background: var(--panel-edge); margin: 4px 3px; }
+#bpieces button, #bsnap, #bdone { position: relative; display: grid; justify-items: center; align-content: center; gap: 1px; min-width: 58px; padding: 6px 5px 4px; }
+#bpieces .name, #baids .name { font-family: var(--font-display); font-size: 13.5px; line-height: 1.1; }
+#buildbar .key { position: absolute; top: 2px; right: 4px; font-size: 10px; font-weight: 700; color: var(--ink-dim); opacity: 0.85; }
+#baids { display: flex; gap: 5px; align-items: stretch; padding-left: 10px; border-left: 1px solid var(--panel-edge); }
+#blevel { display: grid; grid-template-columns: auto; justify-items: center; align-content: center; gap: 0; min-width: 76px; font-size: 12.5px; color: var(--ink); }
+#blevel button { padding: 0 14px; display: flex; border-color: transparent; background: none; }
+#blevel button:hover { background: rgba(255, 255, 255, 0.13); }
+#bfree { font-size: 12px; padding: 4px 8px; align-self: center; }
+#blabel { position: fixed; left: 0; top: 0; pointer-events: none; background: rgba(22, 28, 30, 0.9); border: 1px solid var(--panel-edge); border-radius: 6px; padding: 3px 9px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; z-index: 5; }
+#blabel[hidden], #bover [hidden] { display: none; }
+#blabel.bad { border-color: var(--danger); color: #ffc9bd; background: rgba(60, 22, 18, 0.92); }
+#bover { position: fixed; inset: 0; pointer-events: none; z-index: 4; overflow: hidden; }
+#bover > div { position: absolute; left: 0; top: 0; }
+.bdim { margin: -13px 0 0 -40px; min-width: 80px; display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; column-gap: 3px; background: rgba(16, 24, 30, 0.92); border: 1px solid #9fe3ff; border-radius: 6px; padding: 2px 8px; color: #dff5ff; font: 700 14px var(--font-body); font-variant-numeric: tabular-nums; white-space: nowrap; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5); }
+.bdim input { display: none; width: 46px; background: rgba(159, 227, 255, 0.14); border: 0; border-bottom: 1px dashed #9fe3ff; border-radius: 3px 3px 0 0; color: #fff; font: inherit; text-align: right; outline: none; padding: 0 2px; pointer-events: auto; }
+.bdim.field input { display: block; }
+.bdim input:focus { background: rgba(159, 227, 255, 0.3); border-bottom-style: solid; }
+.bdim em { flex-basis: 100%; text-align: center; font: 400 10px var(--font-body); color: #9fd0e6; }
+.bdim em:empty { display: none; }
+#bsnapm { display: flex; align-items: center; gap: 6px; margin: -7px 0 0 -7px; color: #9fe3ff; font: 700 11px var(--font-body); text-shadow: 0 1px 3px #000, 0 0 2px #000; white-space: nowrap; }
+#bsnapm i { width: 14px; height: 14px; box-sizing: border-box; border: 2px solid #9fe3ff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); flex: none; }
+#bsnapm.k-grid i { width: 8px; height: 8px; margin: 3px; border-radius: 50%; opacity: 0.8; }
+#bsnapm.k-mid i { border: 0; box-shadow: none; width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-bottom: 14px solid #9fe3ff; margin-left: -1px; }
+#bsnapm.k-centre i, #bsnapm.k-point i { border-radius: 50%; }
+#bsnapm.k-edge i, #bsnapm.k-guide i, #bsnapm.k-angle i { transform: rotate(45deg); }
+.bhandle { width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: #fff; border: 3px solid var(--accent); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); }
+.bmeas { margin: -12px 0 0 -60px; min-width: 120px; display: flex; justify-content: center; align-items: center; gap: 6px; background: rgba(16, 24, 30, 0.92); border: 1px solid #9fe3ff; border-radius: 12px; padding: 2px 5px 2px 10px; color: #dff5ff; font: 700 12.5px var(--font-body); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bmeas button { pointer-events: auto; padding: 3px; display: flex; border-radius: 50%; }
+#bmarq { border: 1px dashed #fff; background: rgba(255, 255, 255, 0.12); }
 #shelter { top: 146px; left: 16px; padding: 5px 12px; color: var(--accent); font-family: var(--font-display); font-size: 15px; }
 #shelter[hidden] { display: none; }
 #shelter small { font-family: var(--font-body); color: var(--ink-dim); font-size: 12px; margin-left: 6px; }
@@ -112,7 +150,7 @@ body.building #view { cursor: default; }
 /* combat-only parts of the HUD are hidden while the game runs as a peaceful homestead builder */
 body.peaceful .cb, body.peaceful #stance, body.peaceful #combo { display: none !important; }
 #baim { position: fixed; width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 2px solid var(--accent); border-radius: 50%; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55); pointer-events: none; z-index: 6; }
-#baim[hidden], #touchui[hidden], #btouch { display: none; }
+#baim[hidden], #touchui[hidden] { display: none; }
 #touchui { --lift: 90px; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 #touchui .stick { position: fixed; bottom: var(--lift); width: 124px; height: 124px; border-radius: 50%; background: rgba(22, 28, 30, 0.4); border: 1px solid var(--panel-edge); touch-action: none; z-index: 5; }
 #tsl { left: max(14px, env(safe-area-inset-left)); }
@@ -127,32 +165,26 @@ body.peaceful .cb, body.peaceful #stance, body.peaceful #combo { display: none !
 #touchui[data-mode="build"] .stick { width: 104px; height: 104px; }
 body.touch { overscroll-behavior: none; -webkit-user-select: none; user-select: none; }
 body.touch button { touch-action: manipulation; }
-body.touch #help, body.touch #lock, body.touch #stance, body.touch #bkeys, body.touch #tools .key, body.touch #bpieces .key, body.touch #bdone .key, body.touch #status .pair.dev { display: none; }
-body.touch #btouch { display: grid; grid-template-rows: 1fr 1fr; grid-auto-flow: column; gap: 4px; align-content: center; flex: none; }
-#btouch button { font-size: 12px; padding: 5px 9px; white-space: nowrap; }
-#btouch button[aria-pressed="true"] { border-color: var(--accent); background: rgba(226, 182, 90, 0.18); color: var(--accent); }
+body.touch #help, body.touch #lock, body.touch #stance, body.touch #tools .key, body.touch #buildbar .key, body.touch #status .pair.dev { display: none; }
 body.touch #buildbar { width: auto; left: max(6px, env(safe-area-inset-left)); right: max(6px, env(safe-area-inset-right)); bottom: max(6px, env(safe-area-inset-bottom)); transform: none; max-width: none; padding: 6px; gap: 5px; }
-body.touch #buildbar .row { flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; padding-bottom: 2px; scrollbar-width: none; }
-body.touch #bpieces, body.touch #blevel, body.touch #buildbar .side { flex: none; }
-body.touch #bpieces button { min-width: 50px; padding: 7px 6px; }
-body.touch #blevel button, body.touch #buildbar .side button { padding: 5px 9px; }
-body.touch #bdecor { justify-items: stretch; }
-body.touch #bdcats, body.touch #bditems { flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; scrollbar-width: none; }
-body.touch #bdecor button { flex: none; }
-body.touch #bhint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; min-height: 16px; }
+body.touch #bhead { flex-wrap: wrap; row-gap: 4px; }
+body.touch #bhint { order: 5; flex-basis: 100%; font-size: 12.5px; padding: 0 2px; }
+body.touch #bundo span, body.touch #bredo span, body.touch #buildbar kbd { display: none; }
+body.touch #bundo, body.touch #bredo, body.touch #bstop { min-width: 44px; min-height: 40px; justify-content: center; }
+body.touch #bopts, body.touch #bdecor, body.touch #bmain { flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; scrollbar-width: none; max-width: none; }
+body.touch #bopts { padding: 6px 2px; }
+body.touch .bgroup, body.touch #bpieces, body.touch #baids { flex: none; }
+body.touch .bsw { width: 40px; height: 40px; }
+body.touch .bchip, body.touch .btile, body.touch .bfield { min-height: 40px; }
+body.touch .bchip { min-width: 40px; justify-content: center; }
+body.touch #bpieces button, body.touch #bsnap, body.touch #bdone { min-width: 56px; min-height: 48px; }
+body.touch #blevel button { min-height: 22px; padding: 2px 16px; }
+body.touch #bfree { min-height: 40px; }
 body.touch #tools { bottom: max(6px, env(safe-area-inset-bottom)); gap: 5px; padding: 5px; }
 body.touch #tools button { min-width: 54px; padding: 7px 6px; }
 body.touch #tools button .name { font-size: 14px; }
-body.touch #buildbar .row { align-items: center; }
-body.touch #blevel { grid-template-columns: none !important; grid-template-rows: 1fr 1fr; grid-auto-flow: column; column-gap: 4px; }
-body.touch #blname { align-self: center; padding: 0 4px; }
-body.touch #bdecor { gap: 3px; }
-body.touch #bdecor button { padding: 4px 10px; }
 @media (max-width: 520px) {
   body.touch #stock .item:nth-child(3) { display: none; }
-}
-@media (min-height: 620px) {
-  body.touch #bkeys { display: block; font-size: 11px; }
 }
 @media (max-width: 900px), (max-height: 480px) {
   body.touch #stock { top: 6px; left: 6px; padding: 4px 8px; gap: 9px; }
@@ -246,20 +278,7 @@ body.touch #bdecor button { padding: 4px 10px; }
   <button type="button" data-tool="build" aria-pressed="false"><span class="key">B</span><span class="name">Build</span></button>
 </div>
 
-<div id="buildbar" class="panel" hidden>
-  <div id="bhint" aria-live="polite"></div>
-  <div id="bkeys">Right-drag or Q / E turns the view &middot; Wheel zooms &middot; R changes the style of the tool (Shift+R steps back) &middot; M material, P paints, I picks one up &middot; Page Up / Down storey &middot; V ceiling height &middot; + / &minus; raises the next floor &middot; Shift-drag starts a separate wing &middot; Ctrl+Z undoes &middot; Buildings are saved with the world</div>
-  <div class="row">
-    <div id="bpieces" role="group" aria-label="Build tools"></div>
-    <span class="sep"></span>
-    <div class="side">
-      <button id="bundo" type="button" title="Undo (Ctrl+Z)">Undo</button>
-      <button id="bredo" type="button" title="Redo (Ctrl+Shift+Z)">Redo</button>
-      <button id="bfree" type="button" aria-pressed="true" title="When off, pieces cost wood and removing them refunds it">Free: on</button>
-      <button id="bdone" type="button" title="Leave build mode (B or Esc)">Done <span class="key">B</span></button>
-    </div>
-  </div>
-</div>
+<div id="buildbar" class="panel" hidden></div>
 <div id="blabel" hidden></div>
 <div id="shelter" class="panel" hidden>Sheltered<small>resting</small></div>
 
