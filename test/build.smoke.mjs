@@ -87,6 +87,10 @@ async function open(opts) {
   check('piece ids did not shift when the door, window and roof were added', (await pieces()).filter((p) => ids0.includes(p.id)).length === ids0.length);
   const q = await G(() => __build.quantities());
   check('quantities add up from the piece list', near(q.wallLength, 18) && near(q.floorArea, 20) && q.doors === 1 && q.windows === 1 && near(q.roofArea, roof[0].area * 2, 1e-6), JSON.stringify(q));
+  if (process.env.DUMP_HOUSE) {   // refresh the fixture the simulation tests use: a real small house as the simulation sees it
+    const fs = await import('node:fs'); await step(3);
+    fs.writeFileSync(process.env.DUMP_HOUSE, JSON.stringify(await G(() => __game.sim.state.sys.site.pieces), null, 1));
+  }
 
   // a wall drawn point to point with a typed length
   await page.keyboard.press('KeyN'); await click(await at(8, 0)); await move(await at(11.2, 2.3));
