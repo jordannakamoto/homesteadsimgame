@@ -28,6 +28,7 @@ export { findRooms, roomAt, compassName } from './rooms.js';
 export { thermal, assemblyR, uValue, innerMass, roomModels, roomIdAt, overlayData as thermalOverlayData } from './thermal.js';
 export { chickensSystem, BREEDS, FIXTURES_CHICKENS, ITEMS_CHICKENS, ITEM_CATEGORIES_CHICKENS, overlayData as chickensOverlayData } from './chickens.js';
 export * as animals from './animals.js';
+export * from './fixtures.js';
 
 // Systems are added here, in dependency order, as the iterations land. Electrical runs before water
 // so a pump's request for power is answered in the same minute.
