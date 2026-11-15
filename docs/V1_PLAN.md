@@ -97,6 +97,19 @@ Assisted building: draw a wall, room or roof as one gesture and have the framing
 Touch: the same tools work with the mobile build menus.
 Playtest: Build a small house with a pitched roof, a round room and a cellar in a few minutes without consulting anything, then set one wall to an exact typed length.
 
+## Direction change after the first playtest (14 Nov, owner)
+
+The owner's verdict on wave B: build mode "is more like a design mode"; foundations and walls need to be more realistic; it should "actually feel like building with lumber"; the supplier is "a bit overwhelming"; the owner has never built anything and the game should teach it; weather must be readable by eye, because "the player plays visually". Decisions taken, for a general gaming audience:
+
+- **Plan, then build.** What exists is now Plan mode: draw the house. Building it is a separate, physical loop. A free-build Sandbox option keeps today's instant building for players who only want to design.
+- **The plan writes the shopping list.** The player never has to know what to buy. A plan produces a materials list by stage, each line saying what it is for, with one button to order it.
+- **Deliveries.** Orders arrive as pallets and stacks set down near the build site. Materials are physical: you can see how much lumber a cabin is.
+- **Raise it by hand, in real order.** Foundation, floor frame, subfloor, wall frames built flat and tilted up, plates, rafters, roof deck, roofing, sheathing, wrap, windows and doors, cladding. The player carries material to the ghost and works it into place; members go in one after another with weight and sound. Detail is abstracted (no measuring or cutting), order and structure are real. Tilting up a framed wall and setting the ridge are the big moments.
+- **A plan book before a blank page.** Start with ready-made small plans (a tool shed, a lean-to, a 3.6 x 4.8 m cabin). Building one teaches how a building goes together. Then modify it, then draw your own.
+- **A store organised by job, not by material.** Aisles are Foundation, Framing, Roof, Weatherproofing, Insulation, Windows and doors, Power, Water, Animals, Tools. A few items each, in good, better, best. Each item says in one line what it does.
+- **Unlock by doing.** New methods and materials open when a project is finished, not by grinding: the shed opens the cabin; the cabin opens insulation choices, concrete, timber frame and log. This is the learning ramp and keeps the store small at the start.
+- **Weather you can see.** Temperature, wind, cloud and wetness read from the world, not from numbers.
+
 ## Wave C
 
 ### 3. Structural loads — `fable`
@@ -138,6 +151,21 @@ A space-performance readout that says how well a room works: walkable clearances
 Prefabricated shells to fit out as homes: a van-sized shell, a tiny house on a trailer, and a shipping container. In each, the same systems (12-volt power, water tanks, insulation, ventilation) must all fit.
 Before-and-after snapshots of any room.
 Playtest: Fit a bed, kitchen, table, storage and a water tank into a van-sized shell and have it read as livable. Then furnish one room of the house and repaint it in a minute.
+
+### 2c. Construction: deliveries and raising it by hand — `fable`
+Needs: 2a second half (framing members with stages and built state, materials list), 2, 3.
+Build: Construction mode on by default for new worlds, with Sandbox as an option. A plan placed in Plan mode appears as a ghost. A Build panel for the selected building shows its stages in order, each with its materials, and "Order this stage" or "Order everything". Orders are delivered as visible pallets, lumber stacks, sheet stacks and bags at a delivery spot the player chooses near the site (a short wait with a truck arriving if cheap to do well; instant otherwise). The player picks up material (visibly carried, a few pieces per trip by mass; a wheelbarrow or bigger loads later), walks to the ghost and holds to work: members go in one after another, each with a hammer-blow rhythm, a small settle and a sound, taking material from what is carried. The next stage unlocks when the current one is complete; the structural model is consulted, so a wall cannot be raised on a missing floor. Signature moments get their own interaction: assembling a wall frame flat on the deck and tilting it up; setting the ridge; the last sheet of roofing. Work speed depends on tools owned (a hammer works; a nail gun with power is faster). Leftover material stays in the stacks. Taking a building apart returns its members. Abstracted on purpose: no measuring, cutting or fasteners by count. Never tedious: a small cabin wall is under a minute of work, and any stage can be finished by "work until done" while the player watches, or handed to a contractor later.
+Playtest: Pick the shed from the plan book, order it, watch it arrive, and raise it from foundation to roof in about ten minutes, understanding at each stage what you just built and why.
+
+### 2d. The store and the plan book — `mid`
+Needs: 2, 2c.
+Build: Replace the supplier with a store organised by job, a few items per aisle in good, better, best, each with a one-line plain description and one or two numbers that matter. The default way to buy is the plan's shopping list; browsing is secondary. Unlocks: methods and materials open when projects are finished, shown as "Finish your first shed to open cabin plans", never as a grind. A plan book of ready-made small buildings that can be placed, built and then edited. Short "how this goes together" cards for each stage, shown at the moment they are needed, skippable, never a mandatory tutorial.
+Playtest: A player who has never built anything can get from nothing to an ordered shed without wondering what any item is.
+
+### 1a. Weather you can see — `mid`
+Needs: 1.
+Build: Make conditions readable by eye. Cloud: a visible sky layer and soft cloud shadows drifting over the ground with the wind. Wind: grass, foliage, smoke and rain lean and gust with real wind speed and direction. Wet: ground and roofs darken in rain and dry afterwards, puddles in hollows. Cold: breath mist, frost on grass at dawn, the character hunches; ice on still water in a hard freeze. Heat: haze, the character wipes their brow. Warm indoors against cold outdoors shows as lit windows and chimney smoke. More weather: fog on calm humid mornings, thunderstorms in summer, sleet near freezing. The top bar uses a small icon and a colour-banded thermometer instead of only numbers. No new full-screen passes.
+Playtest: With the HUD hidden, say whether it is cold, windy, wet or about to rain.
 
 ### 5b. Arrival, camp and the build journal — `mid`
 Needs: 2, 2a, 4.
