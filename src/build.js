@@ -28,6 +28,7 @@
     { id: "pillar", name: "Pillar", key: "9", code: "Digit9", group: 2 },
     { id: "path", name: "Path", key: "0", code: "Digit0", group: 3 },
     { id: "decor", name: "Furnish", key: "F", code: "KeyF", group: 3 },
+    { id: "equip", name: "Equip", key: "E", code: "", group: 3 },
     { id: "measure", name: "Measure", key: "U", code: "KeyU", group: 4 },
     { id: "erase", name: "Remove", key: "X", code: "KeyX", group: 4 },
   ];
@@ -96,7 +97,19 @@
     uiVer: 1,
     ovVer: 1,
     hintText: "",
+    fold: false,
+    barH: 0,
+    // construction: what new buildings stand on and are filled with, and whether plans start unbuilt
+    found: "pier-blocks",
+    ins: null,
+    lining: "boards",
+    cmode: false,
+    gstage: null,
+    dirty: new Set(),
   };
+  try {
+    B.fold = localStorage.getItem("build:fold") === "1";
+  } catch {}
 
   /* ---------- small helpers ---------- */
   const isWin = (t) => !!t && t.startsWith("window");
@@ -2156,16 +2169,19 @@
       rg = new Geo();
     const hs = D.hs || 1;
     // floors raised well clear of the ground stand on posts instead of a solid plinth
-    const open = D.lift > 0 && depth > 1.6,
+    // a building on a real foundation has no stone skirt: its floor frame shows, and the piers stand under it
+    const raised = !!D.found && D.found !== "plinth" && !D.level,
+      open = !raised && D.lift > 0 && depth > 1.6,
       full = depth;
     if (open) depth = 0.2;
+    if (raised) depth = D.found === "slab" ? 0.06 : 0.085;
     for (const k of D.floors) {
       const [i, j] = parse(k);
       if (D.id && wellOver(D, i, j)) continue;
       const fm = FLOORS[(D.fmat && D.fmat.get(k)) || "planks"],
         fcol = fm.c2 && (i + j) & 1 ? fm.c2 : fm.c;
       for (let p = 0; p < 2; p++) g.abox(i, 0, j + p * 0.5, i + 1, FLOOR_T - (p ? 0.006 : 0), j + p * 0.5 + 0.5, shade(fcol, 0.9 + 0.2 * hash(i, j, p)));
-      const st = open ? C.beam : shade(C.stone, 0.85);
+      const st = raised ? (D.found === "slab" ? CONCRETE : shade(C.beam, 1.2)) : open ? C.beam : shade(C.stone, 0.85);
       if (!D.floors.has(ck(i, j - 1))) g.abox(i, -depth, j, i + 1, 0.04, j + 0.12, st);
       if (!D.floors.has(ck(i, j + 1))) g.abox(i, -depth, j + 0.88, i + 1, 0.04, j + 1, st);
       if (!D.floors.has(ck(i - 1, j))) g.abox(i, -depth, j, i + 0.12, 0.04, j + 1, st);
@@ -2193,7 +2209,7 @@
       const [i, j, d] = parse(k);
       if (D.hid && D.hid.has(k)) continue;
       const wm = (D.wmat && D.wmat.get(k)) || "timber";
-      PAL = WALLS[wm];
+      PAL = raised ? woodFoot(wm) : WALLS[wm];
       wallPieces(isLow(type) ? late : g, i, j, d, type, depth);
       if (isThick(type)) (thick.add(ck(i, j)), thick.add(d === 0 ? ck(i + 1, j) : ck(i, j + 1)));
       for (const vk of [ck(i, j), d === 0 ? ck(i + 1, j) : ck(i, j + 1)]) vmat.has(vk) || vmat.set(vk, wm);
@@ -2228,7 +2244,7 @@
     (D.segs || []).forEach((sg, n) => {
       const low = isLow(sg[4]);
       if (D.id && inRings(D, (sg[0] + sg[2]) / 2, (sg[1] + sg[3]) / 2)) return;
-      PAL = WALLS[sg[5] || "timber"];
+      PAL = raised ? woodFoot(sg[5] || "timber") : WALLS[sg[5] || "timber"];
       freePiece(low ? late : g, sg[0], sg[1], sg[2], sg[3], sg[4], depth, n);
       for (const [x, z] of [
         [sg[0], sg[1]],
@@ -2470,6 +2486,14 @@
       cellRoom: new Map(),
       corners: [],
       b: null,
+      found: F.found || "plinth",
+      ins: F.ins || null,
+      lining: F.lining === undefined ? "boards" : F.lining,
+      plan: new Set(),
+      known: F.fresh ? new Set() : null,
+      sitePlanned: !!F.fresh && B.cmode,
+      mem: null,
+      memMeshes: [],
     };
     S.wallMat = makeWallMat(S.clip, S.near, S.sideA, S.sideB);
     S.group.position.set(S.ox, S.y0, S.oz);
@@ -2485,6 +2509,7 @@
     S.wallMat.dispose();
     S.glow && S.glow.geometry.dispose();
     S.glowMat.dispose();
+    dropMembers(S);
     const i = B.structs.indexOf(S);
     i >= 0 && B.structs.splice(i, 1);
   }
@@ -2546,6 +2571,23 @@
     for (const [k, ds] of deg) if (!(ds.length === 2 && ds[0] === ds[1])) S.corners.push(parse(k));
   }
 
+  // wall corners of every building standing on the same grid as a frame (its own included), in the frame's metres
+  function gridCorners(F) {
+    const out = [];
+    for (const O of B.structs) {
+      if (O.po || O.cx === undefined || (F.level !== undefined && O.level !== (F.level || 0)) || Math.hypot(O.cx - F.ox, O.cz - F.oz) > O.rad + 40) continue;
+      for (const [ci, cj] of O.corners) {
+        if (O === F) {
+          out.push([ci, cj]);
+          continue;
+        }
+        const [x, z] = toWorld(O, ci, cj),
+          [lx, lz] = toLocal(F, x, z);
+        if (Math.abs(lx - Math.round(lx)) < 1e-3 && Math.abs(lz - Math.round(lz)) < 1e-3) out.push([Math.round(lx), Math.round(lz)]);
+      }
+    }
+    return out;
+  }
   // after a structure changes, the terrain chunks under it are refreshed (a moment later, so a drag does it once)
   // to hide or bring back the grass and ground cover beneath its floors and paths
   // Building materials take the engine's see-through circle (the dithered hole that shows you behind things), but
@@ -2688,8 +2730,10 @@
     }
     S.b = { i0, i1, j0, j1 };
     S.polys = findPolys(S);
+    for (const p of S.polys) p.cov = p.roofed || S.roofs.some((r) => p.cx >= r.i0 && p.cx <= r.i1 + 1 && p.cz >= r.j0 && p.cz <= r.j1 + 1);
     identify(S);
-    const geo = buildGeo(S, S.depth);
+    const st = memberState(S),
+      geo = buildGeo(st.all ? S : st.built, S.depth);
     for (const key of ["main", "roof"]) {
       if (S[key]) {
         S.group.remove(S[key]);
@@ -2709,6 +2753,7 @@
       S.glow = new T.Mesh(geo.glow.build(), S.glowMat);
       S.group.add(S.glow);
     }
+    drawMembers(S, st);
     // what the decorations do: block the way, give light, make smoke
     S.lights = [];
     S.beds = [];
@@ -2730,9 +2775,11 @@
     for (const dr of S.doors) S.group.remove(dr.mesh);
     S.doors = [];
     const kk = (EAVE * S.hs - 0.3) / (EAVE - 0.3);
-    const doorways = S.colSegs.filter((sg) => isDoor(sg[4])).map((sg) => sg.slice(0, 5));
+    // a door that is still only planned has no leaf to swing yet
+    const doorways = S.rings.length ? S.colSegs.filter((sg) => isDoor(sg[4]) && !S.segs.some((q) => q[0] === sg[0] && q[1] === sg[1] && q[2] === sg[2] && q[3] === sg[3])).map((sg) => sg.slice(0, 5)) : [];
+    for (const sg of S.segs) isDoor(sg[4]) && !S.plan.has(sg[7]) && !(S.rings.length && inRings(S, (sg[0] + sg[2]) / 2, (sg[1] + sg[3]) / 2)) && doorways.push(sg.slice(0, 5));
     for (const [k, type] of S.walls) {
-      if (!isDoor(type) || S.hid.has(k)) continue;
+      if (!isDoor(type) || S.hid.has(k) || S.plan.has(S.oid.get(k))) continue;
       const [i, j, d] = parse(k);
       doorways.push(d === 0 ? [i, j, i + 1, j, type] : [i, j, i, j + 1, type]);
     }
@@ -2830,7 +2877,7 @@
       z0 = Math.min(z0, z);
       z1 = Math.max(z1, z);
     }
-    const target = S.y0 - 0.05,
+    const target = S.y0 - dropOf(S),
       CORE = pit ? 0.8 : 1.05,
       RIM = pit ? 0.801 : 2.9;
     let changed = false;
@@ -3497,6 +3544,10 @@
       ids: { walls: S.runs.map((g) => [g.m[0].k, g.id]), open: [...S.oid], floors: S.regs.map((g) => [g.m[0], g.id]), polys: S.pids.map((x) => x.slice()) },
     };
     if (Object.keys(S.asm).length) data.asm = { ...S.asm };
+    if (S.found !== "plinth") data.found = S.found;
+    if (S.ins) data.ins = S.ins;
+    if (S.lining !== "boards") data.lining = S.lining;
+    if (S.plan.size) data.plan = [...S.plan].sort();
     S.ser = { ver: S.ver, data };
     return data;
   }
@@ -3521,10 +3572,17 @@
     S.pids = (ids.polys || []).map((x) => x.slice());
     S.asm = d.asm ? { ...d.asm } : {};
     S.fresh = !!fresh;
+    S.found = d.found || "plinth";
+    S.ins = d.ins || null;
+    S.lining = d.lining === undefined ? "boards" : d.lining;
+    // a copy is a new plan: unbuilt where plans start unbuilt, built otherwise
+    S.plan = new Set(fresh ? [] : d.plan || []);
+    S.known = fresh ? new Set() : null;
+    S.sitePlanned = fresh ? B.cmode : [...S.plan].some((id) => id.endsWith(".site"));
     return S;
   }
   function snapshot() {
-    return { wood: W.wood, structs: B.structs.map(serial) };
+    return { wood: W.wood, structs: B.structs.map(serial), fx: fxSerial() };
   }
   // put back an undo step
   function restoreSnap(snap) {
@@ -3532,6 +3590,7 @@
     for (const d of snap.structs) fill(newStruct(d), d);
     // storeys look at each other for stairwells, so build once all are in place
     for (const S of B.structs) rebuild(S);
+    fxRestore(snap.fx);
     W.wood = snap.wood;
     G.markStockDirty();
     B.version++;
@@ -3564,7 +3623,7 @@
   // level the ground under freshly placed structures, then build them
   function settle(list) {
     for (const S of list) {
-      if (S.po) continue;
+      if (S.po || S.sitePlanned) continue;
       const smp = localSamples(S).map(([a, b]) => toWorld(S, a, b));
       if (!S.level) cutTerrain(S, smp, !!S.lift);
       else if (S.level < 0) cutTerrain(S, smp, true);
@@ -3577,7 +3636,10 @@
   const SAVE = "world-engine-build:1:",
     FORMAT = "homestead-buildings";
   function serialize() {
-    return { format: FORMAT, v: 2, nextStruct: B.nextId, nextPiece: B.nextPid, structs: B.structs.map(serial) };
+    const d = { format: FORMAT, v: 2, nextStruct: B.nextId, nextPiece: B.nextPid, structs: B.structs.map(serial) };
+    if (FX.list.length) Object.assign(d, fxSerial());
+    if (B.cmode) d.construction = true;
+    return d;
   }
   // the highest piece number used anywhere in saved data
   function topPid(data) {
@@ -3585,6 +3647,8 @@
     const see = (id) => {
       if (typeof id === "string" && id[0] === "p") top = Math.max(top, pidNum(id));
     };
+    for (const f of data.fixtures || []) see(f.id);
+    for (const l of data.links || []) see(l.id);
     for (const d of data.structs) {
       for (const r of d.roofs || []) see(r.id);
       for (const r of d.rings || []) see(r.id);
@@ -3610,6 +3674,7 @@
     B.drag = null;
     B.nextId = 1;
     const made = data.structs.map((d) => fill(newStruct(d), d));
+    fxRestore(data);
     B.nextId = Math.max(B.nextId, data.nextStruct || 1);
     B.nextPid = Math.max(topPid(data) + 1, data.nextPiece || 1);
     B.claim = new Set();
@@ -3776,7 +3841,7 @@
   function applyOp(op, noUndo) {
     if (!op || !op.valid) return null;
     noUndo || pushUndo();
-    let S = op.F.isNew ? newStruct({ ox: op.F.ox, oz: op.F.oz, yaw: op.F.yaw, y0: op.y0, level: op.F.level || 0, hs: op.F.hs || B.hs, lift: op.F.lift || 0, po: op.addPaths.length > 0 || op.addDecor.length > 0 }) : op.F;
+    let S = op.F.isNew ? newStruct({ ox: op.F.ox, oz: op.F.oz, yaw: op.F.yaw, y0: op.y0, level: op.F.level || 0, hs: op.F.hs || B.hs, lift: op.F.lift || 0, po: op.addPaths.length > 0 || op.addDecor.length > 0, found: B.found, ins: B.ins, lining: B.lining, fresh: true }) : op.F;
     let refund = 0;
     for (const idx of [...op.delRoofs].sort((a, b) => b - a)) {
       const r = S.roofs.splice(idx, 1)[0];
@@ -3852,7 +3917,8 @@
       G.markStockDirty();
     }
     const samples = opSamples(op).map(([lx, lz]) => toWorld(S, lx, lz));
-    if (!S.level) cutTerrain(S, samples, !!S.lift);
+    if (S.sitePlanned) {
+    } else if (!S.level) cutTerrain(S, samples, !!S.lift);
     else if (S.level < 0) cutTerrain(S, samples, true);
     if (isEmpty(S)) {
       disposeStruct(S);
@@ -3860,7 +3926,7 @@
       S = null;
     } else {
       rebuild(S);
-      if (!S.level && S.polys.length) {
+      if (!S.level && S.polys.length && !S.sitePlanned) {
         const inner = [];
         for (const p of S.polys) {
           inner.push(toWorld(S, p.cx, p.cz));
@@ -3901,7 +3967,7 @@
   const SNAP = { x: 0, z: 0, type: "", g: [], ang: null, wx: 0, wz: 0 };
   const POINT_TOOL = { wall: 1, path: 1, pillar: 1, tower: 1, measure: 1 };
   const snapOn = () => B.snap !== (B.ctrl && !B.ctrlWheel);
-  const SNAP_NAME = { end: "End", mid: "Middle", centre: "Centre", point: "Measured point", edge: "On wall", angle: "", guide: "Lined up", grid: "", free: "" };
+  const SNAP_NAME = { end: "End", mid: "Middle", centre: "Centre", point: "Measured point", edge: "On wall", angle: "", guide: "Lined up", extend: "In line with wall", cross: "Where two walls would meet", grid: "", free: "" };
   // the points and wall lines of a structure that others can snap to, in world metres
   function snapData(S) {
     if (S.snapV === S.ver) return S.snapD;
@@ -4073,6 +4139,61 @@
       if (az) o.g.push([az[0], az[1], gx, gz]);
       if (ax || az) o.type = "guide";
     }
+    // 5. in line with a wall that runs at an angle to this grid: carry its line on past its end. (Walls square to the
+    // grid are already covered by lining up with their corners.) Two such lines near the cursor meet at a point.
+    let e1 = null,
+      e2 = null;
+    for (const S of near) {
+      const D = snapData(S).lines;
+      for (let n = 0; n < D.length; n += 4) {
+        const p0x = (D[n] - F.ox) * c - (D[n + 1] - F.oz) * s,
+          p0z = (D[n] - F.ox) * s + (D[n + 1] - F.oz) * c,
+          p1x = (D[n + 2] - F.ox) * c - (D[n + 3] - F.oz) * s,
+          p1z = (D[n + 2] - F.ox) * s + (D[n + 3] - F.oz) * c,
+          len = Math.hypot(p1x - p0x, p1z - p0z);
+        if (len < 0.2) continue;
+        const ux = (p1x - p0x) / len,
+          uz = (p1z - p0z) / len;
+        if (Math.abs(ux) < 0.02 || Math.abs(uz) < 0.02) continue;
+        const t = (rx - p0x) * ux + (rz - p0z) * uz,
+          dd = Math.abs((rx - p0x) * uz - (rz - p0z) * ux);
+        if (dd > 0.25 || (t > -0.3 && t < len + 0.3) || t < -15 || t > len + 15) continue;
+        const cand = { d: dd, ux, uz, ex: t < 0 ? p0x : p1x, ez: t < 0 ? p0z : p1z, k: t < 0 ? -t : t - len, sg: t < 0 ? -1 : 1 };
+        if (!e1 || dd < e1.d) ((e2 = e1 && Math.abs(e1.ux * uz - e1.uz * ux) > 0.2 ? e1 : e2), (e1 = cand));
+        else if ((!e2 || dd < e2.d) && Math.abs(e1.ux * uz - e1.uz * ux) > 0.2) e2 = cand;
+      }
+    }
+    if (e1) {
+      // where it ends: on the second wall's line, on the round angle or the lined-up corner already found, else a
+      // round distance past the wall's end
+      const meet = (qx, qz, vx, vz) => {
+        const den = e1.ux * vz - e1.uz * vx;
+        if (Math.abs(den) < 0.05) return null;
+        const k = ((qx - e1.ex) * vz - (qz - e1.ez) * vx) / den;
+        return [e1.ex + e1.ux * k, e1.ez + e1.uz * k];
+      };
+      let pt = null,
+        kind = "extend";
+      if (e2) ((pt = meet(e2.ex, e2.ez, e2.ux, e2.uz)), (kind = "cross"));
+      else if (o.type === "angle") pt = meet(a.i, a.j, Math.cos(o.ang), Math.sin(o.ang));
+      else if (ax) pt = meet(ax[0], ax[1], 0, 1);
+      else if (az) pt = meet(az[0], az[1], 1, 0);
+      if (!pt || Math.hypot(pt[0] - rx, pt[1] - rz) > 0.45) {
+        const k = Math.max(0.5, Math.round(e1.k * 2) / 2) * e1.sg;
+        pt = [e1.ex + e1.ux * k, e1.ez + e1.uz * k];
+        kind = "extend";
+        o.g.length = 0;
+      }
+      gx = pt[0];
+      gz = pt[1];
+      o.g.push([e1.ex, e1.ez, gx, gz]);
+      if (kind === "cross") o.g.push([e2.ex, e2.ez, gx, gz]);
+      o.type = kind;
+      o.ang = null;
+      o.x = gx;
+      o.z = gz;
+      return o;
+    }
     o.x = tidy(gx);
     o.z = tidy(gz);
     return o;
@@ -4142,7 +4263,7 @@
     }
     return t0;
   }
-  const roofsShown = () => B.tool === "roof" || B.tool === "erase" || (B.tool === "select" && B.showRoofs);
+  const roofsShown = () => B.tool === "roof" || B.tool === "erase" || (B.tool === "equip" && fxRoofs()) || (B.tool === "select" && B.showRoofs);
   function pickAt(opt) {
     if (!pick.valid) return null;
     const wallsOnly = opt === WALLS_ONLY,
@@ -4629,6 +4750,71 @@
     return finishOp(op);
   }
   const stretchable = (q) => q.kind === "run" && stretchOp(q.S, q.g, 1).addFloors.length + stretchOp(q.S, q.g, -1).addFloors.length > 0;
+  // A structure's grid as it would stand after an op, without touching the structure: for edits made of two steps.
+  function virtualAfter(S, op) {
+    const V = { ...S, floors: new Set(S.floors), walls: new Map(S.walls), wmat: new Map(S.wmat), fmat: new Map(S.fmat), oid: new Map(S.oid), wid: new Map(S.wid), roofs: S.roofs.slice() };
+    for (const idx of [...op.delRoofs].sort((a, b) => b - a)) V.roofs.splice(idx, 1);
+    for (const [i, j] of op.delFloors) (V.floors.delete(ck(i, j)), V.fmat.delete(ck(i, j)));
+    for (const [i, j, d] of op.delWalls) {
+      const k = ek(i, j, d);
+      (V.walls.delete(k), V.wmat.delete(k), V.oid.delete(k), V.wid.delete(k));
+    }
+    for (const [i, j, m] of op.addFloors) (V.floors.add(ck(i, j)), m && m !== "planks" ? V.fmat.set(ck(i, j), m) : V.fmat.delete(ck(i, j)));
+    for (const [i, j, d, ty, m] of op.addWalls) {
+      const k = ek(i, j, d);
+      V.walls.set(k, ty || "wall");
+      m && m !== "timber" ? V.wmat.set(k, m) : V.wmat.delete(k);
+    }
+    for (const r of op.addRoofs) V.roofs.push({ ...r });
+    if (op.ids) {
+      for (const [k, id] of op.ids.wid || []) V.wid.set(k, id);
+      for (const [k, id] of op.ids.oid || []) V.oid.set(k, id);
+    }
+    return V;
+  }
+  // the one op that takes a structure's grid from where it stands to a virtual state
+  function diffOp(S, V) {
+    const op = blankOp(S),
+      mat = (M, k) => M.wmat.get(k) || "timber",
+      sameRoof = (p, q) => p.id === q.id && p.i0 === q.i0 && p.i1 === q.i1 && p.j0 === q.j0 && p.j1 === q.j1;
+    op.ids = { wid: [], oid: [], fid: [] };
+    op.move = true;
+    for (const k of S.floors) V.floors.has(k) || op.delFloors.push(parse(k));
+    for (const k of V.floors) S.floors.has(k) || op.addFloors.push([...parse(k), V.fmat.get(k) || "planks"]);
+    for (const [k, ty] of S.walls) (V.walls.get(k) === ty && mat(V, k) === mat(S, k)) || op.delWalls.push(parse(k));
+    for (const [k, ty] of V.walls) {
+      if (S.walls.get(k) === ty && mat(V, k) === mat(S, k)) continue;
+      op.addWalls.push([...parse(k), ty, mat(V, k)]);
+      V.wid.get(k) && op.ids.wid.push([k, V.wid.get(k)]);
+      V.oid.get(k) && op.ids.oid.push([k, V.oid.get(k)]);
+    }
+    S.roofs.forEach((r, idx) => V.roofs.some((q) => sameRoof(q, r)) || op.delRoofs.push(idx));
+    for (const q of V.roofs) S.roofs.some((r) => sameRoof(q, r)) || op.addRoofs.push(q);
+    op.replacing = op.delRoofs.length > 0;
+    return op;
+  }
+  // Drag a room's corner both ways at once: the wall round the corner is pushed al metres and this wall ac metres.
+  function cornerOp(S, g, corner, al, ac) {
+    const op1 = stretchOp(S, corner, al);
+    if (!op1.adds && !op1.dels) return stretchOp(S, g, ac);
+    const V = virtualAfter(S, op1),
+      mid = (g.t0 + g.t1) / 2,
+      g2 = gridRuns(V).find((r) => r.d === g.d && r.line === g.line && r.t0 <= mid && r.t1 >= mid);
+    if (!g2) return op1;
+    g2.id = g.id;
+    const op2 = stretchOp(V, g2, ac);
+    if (!op2.adds && !op2.dels) return op1;
+    const V2 = virtualAfter(V, op2),
+      op = diffOp(S, V2),
+      runs = gridRuns(V2),
+      x = g.d === 0,
+      line2 = g.line + (op2.addWalls.length ? Math.sign(ac) * Math.max(...op2.addWalls.filter((w) => w[2] === g.d).map((w) => Math.abs((x ? w[1] : w[0]) - g.line))) : 0),
+      r1 = runs.find((r) => r.d === g.d && r.line === line2 && r.t0 <= mid && r.t1 >= mid);
+    if (r1) dim(op, x ? (r1.t0 + r1.t1) / 2 : r1.line, x ? r1.line : (r1.t0 + r1.t1) / 2, fmtM(r1.t1 - r1.t0));
+    for (const q of op2.dims) op.dims.push(q);
+    op.label = op2.label || op1.label;
+    return finishOp(op);
+  }
   // the grid wall that turns the corner at one end of another
   function cornerRun(S, g, which) {
     const t = which ? g.t1 : g.t0;
@@ -4726,7 +4912,8 @@
         ac = Math.round(x ? dz : dx),
         corner = cornerRun(S, g, M.end);
       key = "e" + al + "," + ac;
-      if (key !== M.key) op = Math.abs(al) >= Math.abs(ac) ? (al ? (corner ? stretchOp(S, corner, al) : endOp(S, g, M.end, M.end ? al : -al)) : null) : stretchOp(S, g, ac);
+      // a corner goes both ways at once; an end that is not a corner follows the larger of the two movements
+      if (key !== M.key) op = al && ac && corner ? cornerOp(S, g, corner, al, ac) : Math.abs(al) >= Math.abs(ac) ? (al ? (corner ? stretchOp(S, corner, al) : endOp(S, g, M.end, M.end ? al : -al)) : null) : stretchOp(S, g, ac);
     } else {
       // free-angle end: snap it like a wall being drawn from its other end
       const a = M.end ? { i: g.x0, j: g.z0 } : { i: g.x1, j: g.z1 },
@@ -5088,7 +5275,7 @@
 
   /* ---------- hover and preview ---------- */
   // what the interface draws over the view: live dimensions, the snap marker, wall handles, measurements, the marquee
-  B.ov = { dims: [], snap: null, handles: [], meas: [], marq: null };
+  B.ov = { dims: [], snap: null, handles: [], meas: [], marq: null, ports: [] };
   B.label = "";
   B.labelBad = false;
   B.gap = 2;
@@ -5150,7 +5337,9 @@
     let F = null;
     if (B.drag) F = B.drag.F;
     else {
-      let best = 1e9;
+      let best = 1e9,
+        bt = 1e9;
+      const along = (y) => (ray.ray.direction.y < -1e-4 ? (y - ray.ray.origin.y) / ray.ray.direction.y : 1e9);
       for (const S of B.structs) {
         // paths and loose furniture live in their own structures, which only those tools draw into
         if (S.level !== B.level || (S.po ? tool !== "path" && tool !== "decor" : tool === "path")) continue;
@@ -5158,22 +5347,38 @@
         const [lx, lz] = toLocal(S, hit[0], hit[1]);
         const dx = Math.max(S.b.i0 - lx, 0, lx - S.b.i1),
           dz = Math.max(S.b.j0 - lz, 0, lz - S.b.j1),
-          dist = Math.hypot(dx, dz);
-        if (dist < (tool === "decor" && !S.po ? 0.6 : 3.5) && (dist < best || (dist === best && !S.po))) {
+          dist = Math.hypot(dx, dz),
+          t = S.po ? 1e9 : along(S.y0 + FLOOR_T);
+        // of two the cursor is right over, the one the ray meets first is the one you are pointing at
+        if (dist < (tool === "decor" && !S.po ? 0.6 : 3.5) && (dist < best - 1e-6 || (Math.abs(dist - best) <= 1e-6 && (S.po ? false : F && F.po ? true : t < bt)))) {
           best = dist;
+          bt = t;
           F = S;
         }
       }
-      if (!F && B.level !== 0 && tool !== "path" && tool !== "copy" && tool !== "decor" && tool !== "select" && tool !== "measure") {
+      if (B.level !== 0 && tool !== "path" && tool !== "copy" && tool !== "decor" && tool !== "select" && tool !== "measure") {
+        // A storey that does not exist yet starts over (or a cellar under) the building the cursor is on. That may be
+        // a different building from the nearest one that already has this storey, standing at a different height.
         const below = B.level > 0 ? B.level - 1 : 0;
+        let FN = null,
+          bn = F ? best : 1e9,
+          tn = F ? bt : 1e9;
         for (const S of B.structs) {
           if (S.level !== below || S.po) continue;
-          const y0 = B.level > 0 ? S.y0 + EAVE * S.hs : S.y0 - EAVE * B.hs,
-            hit = planeHit(y0 + FLOOR_T);
+          const y0 = B.level > 0 ? S.y0 + EAVE * S.hs : S.y0 - EAVE * B.hs;
+          if (B.structs.some((O) => O.level === B.level && !O.po && sameGrid(O, S) && Math.abs(O.y0 - y0) < 0.3)) continue;
+          const hit = planeHit(y0 + FLOOR_T);
           if (!hit) continue;
-          const [lx, lz] = toLocal(S, hit[0], hit[1]);
-          if (lx > S.b.i0 - 3 && lx < S.b.i1 + 3 && lz > S.b.j0 - 3 && lz < S.b.j1 + 3) F = { ox: S.ox, oz: S.oz, yaw: S.yaw, y0, isNew: true, level: B.level, hs: B.hs };
+          const [lx, lz] = toLocal(S, hit[0], hit[1]),
+            dist = Math.hypot(Math.max(S.b.i0 - lx, 0, lx - S.b.i1), Math.max(S.b.j0 - lz, 0, lz - S.b.j1)),
+            t = along(y0 + FLOOR_T);
+          if (dist < 3 && (dist < bn - 1e-6 || (Math.abs(dist - bn) <= 1e-6 && t < tn))) {
+            bn = dist;
+            tn = t;
+            FN = { ox: S.ox, oz: S.oz, yaw: S.yaw, y0, isNew: true, level: B.level, hs: B.hs };
+          }
         }
+        if (FN) F = FN;
         if (!F) {
           B.hover = null;
           return;
@@ -5209,7 +5414,7 @@
             }
           }
         }
-        p.y0 = c.y + B.lift;
+        p.y0 = c.y + B.lift + FOUNDATIONS[B.found].drop - 0.05;
         p.lift = B.lift;
         F = p;
       }
@@ -5310,10 +5515,10 @@
       gg.obox([(x0 + x1) / 2, FLOOR_T + 0.05, (z0 + z1) / 2], [dx / 2, 0, dz / 2], [0, 0.01, 0], [(-dz / L) * gw, 0, (dx / L) * gw], [1, 1, 1]);
     };
     for (const q of op.guides) line(q[0], q[1], q[2], q[3]);
-    if (S && tip && B.tool === "room" && snapOn()) {
+    if (tip && B.tool === "room" && snapOn()) {
       let gi = null,
         gj = null;
-      for (const [ci, cj] of S.corners) {
+      for (const [ci, cj] of gridCorners(F)) {
         if (ci === tip.i && cj !== tip.j && (!gi || Math.abs(cj - tip.j) < Math.abs(gi[1] - tip.j))) gi = [ci, cj];
         if (cj === tip.j && ci !== tip.i && (!gj || Math.abs(ci - tip.i) < Math.abs(gj[0] - tip.i))) gj = [ci, cj];
       }
@@ -5363,6 +5568,7 @@
       return;
     }
     if (B.tool === "copy") return copyPreview(h);
+    if (B.tool === "equip") return fxPreview();
     const F = h.F,
       d = B.drag,
       ty = B.typed;
@@ -5409,6 +5615,7 @@
     decor: "Pick a piece, then click to place it. Wall pieces snap to walls.",
     measure: "Click two points to measure between them. Measurements stay until you clear them.",
     erase: "Click a piece to remove it, or drag a box to clear an area.",
+    equip: "Pick a piece of equipment and click to place it: on the ground, a floor, a wall or a roof. Drag from one port dot to another to run a wire or pipe.",
     copy: "Click where you want a copy.",
   };
   function hint() {
@@ -5528,7 +5735,7 @@
     return { d: Math.hypot(q.x - p.x, q.y - p.y) || 1, ang: Math.atan2(q.y - p.y, q.x - p.x), my: (p.y + q.y) / 2 };
   };
   // the tools that act on a single click
-  const tapTool = () => B.tool === "copy" || B.tool === "measure" || (B.drag && B.drag.mode === "click") || (B.move && B.move.hand) || (B.tool === "path" && B.alt) || B.tool === "decor";
+  const tapTool = () => B.tool === "equip" || B.tool === "copy" || B.tool === "measure" || (B.drag && B.drag.mode === "click") || (B.move && B.move.hand) || (B.tool === "path" && B.alt) || B.tool === "decor";
   function tapAct() {
     if (B.move && B.move.hand) return moveCommit();
     if (B.tapMode === "pick") {
@@ -5536,6 +5743,7 @@
       return void (B.hoverId && pickUp(B.hoverId));
     }
     if (B.tool === "measure") return measClick();
+    if (B.tool === "equip") return fxClick();
     if (B.tool === "copy") return void (B.clipb ? stamp() : copyPick());
     commit();
   }
@@ -5727,6 +5935,7 @@
   // put down what is in hand: a stroke, a copy, a measurement half taken. With nothing in hand, go home to Select.
   function putDown(home) {
     if (B.typed.a !== null || B.typed.b !== null) return (typedClear(), true);
+    if (B.tool === "equip" && (FX.from || FX.moving || FX.sel)) return ((FX.from = FX.moving = FX.sel = null), FX.v++, (B.key = ""), touchUi(), true);
     if (B.move) return (moveEnd(), true);
     if (B.marq) return ((B.marq = B.ov.marq = B.press = null), B.ovVer++, true);
     if (B.drag) return ((B.drag = null), (B.key = ""), hint(), touchUi(), true);
@@ -5757,6 +5966,9 @@
   function setTool(id) {
     if (B.tool !== id && (B.tool === "select" || id !== "select")) B.showRoofs = B.selRoofAuto = false;
     B.tool = id;
+    FX.from = FX.moving = FX.sel = null;
+    FX.v++;
+    fxGhost.visible = false;
     B.drag = null;
     B.tapMode = "";
     B.measA = null;
@@ -5800,6 +6012,7 @@
     else if (t === "stairs") B.stairDir = (B.stairDir + (back ? 3 : 1)) % 4;
     else if (t === "path") B.pwidth = cyc([1, 2, 3], B.pwidth, back);
     else if (t === "decor") B.drot = (B.drot + (back ? 7 : 1)) % 8;
+    else if (t === "equip") fxChoose("fx:turn");
     else if (t === "copy") B.clipb && (B.clipb.rot = (B.clipb.rot + (back ? 7 : 1)) % 8);
     else if (t === "roof") {
       if (overTower()) B.tshape = cyc(Object.keys(TOP_NAME), B.tshape, back);
@@ -5855,6 +6068,21 @@
     rebuild(t.S);
     touchUi();
   }
+  // Build mode frames the site in the part of the view the bar leaves free: the picture is shifted up by half the
+  // bar's height. It is an off-centre projection, so the camera itself, picking and the post pass all stay in step.
+  const VIEW = { off: 0, w: 0, h: 0 };
+  window.addEventListener("resize", () => (VIEW.w = 0));
+  function frameView(dt) {
+    const want = B.on ? Math.round((B.barH || 0) / 2) : 0;
+    if (VIEW.off === want && (VIEW.w || !want)) return;
+    const d = want - VIEW.off;
+    VIEW.off = Math.abs(d) < 0.75 ? want : VIEW.off + d * (1 - Math.exp(-14 * dt));
+    VIEW.w = window.innerWidth;
+    VIEW.h = window.innerHeight;
+    if (VIEW.off > 0.25) G.camera.setViewOffset(VIEW.w, VIEW.h, 0, VIEW.off, VIEW.w, VIEW.h);
+    else if (G.camera.view) G.camera.clearViewOffset();
+    B.key = "";
+  }
   function toggle() {
     if (P.tool !== "build") {
       B.prevTool = P.tool;
@@ -5867,6 +6095,7 @@
     try {
       document.pointerLockElement && document.exitPointerLock();
     } catch {}
+    shellMat.opacity = 0.5;
     B.camSaved = { pitch: G.cam.pitch, dist: G.cam.dist };
     B.camT = 0.6;
     G.refreshLock && G.refreshLock();
@@ -5874,6 +6103,7 @@
     $("buildbar").hidden = false;
     for (const S of B.structs) S.gapMesh && (S.gapMesh.visible = true);
     B.key = "";
+    FX.v++;
     measDraw(null);
     hint();
     touchUi();
@@ -5886,13 +6116,15 @@
       B.camSaved = null;
     }
     G.refreshLock && G.refreshLock();
+    shellMat.opacity = 0.3;
     B.drag = null;
     B.tapMode = "";
     B.press = B.marq = B.ov.marq = null;
     B.move && moveEnd();
     document.body.classList.remove("building");
     $("buildbar").hidden = true;
-    ghostGroup.visible = gridGroup.visible = selGroup.visible = measMesh.visible = false;
+    ghostGroup.visible = gridGroup.visible = selGroup.visible = measMesh.visible = fxGhost.visible = fxHi.visible = false;
+    FX.v++;
     B.ov.dims.length = 0;
     B.ov.snap = null;
     label("");
@@ -5925,7 +6157,38 @@
     step: (id, label, text, key) => ({ type: "stepper", id, label, text, key }),
     field: (id, label, value, unit, title) => ({ type: "field", id, label, value, unit, title }),
     info: (title, text) => ({ type: "info", title, text }),
+    select: (id, label, items, value, title) => ({ type: "select", id, label, items, value, title }),
   };
+  const FOUND_ITEMS = ["pier-blocks", "skids", "piers", "stemwall", "slab", "plinth"].map((v) => ({ v, name: window.__framing.FOUNDATIONS[v].name })),
+    INS_ITEMS = [{ v: null, name: "None" }, { v: "fibreglass_batt", name: "Fibreglass batts" }, { v: "mineral_wool", name: "Mineral wool" }, { v: "sheep_wool", name: "Sheep's wool" }],
+    LIN_ITEMS = [{ v: null, name: "None" }, { v: "boards", name: "Boards" }, { v: "gypsum", name: "Panels" }];
+  const makeUp = (g, pre, f, i, l) => {
+    g.push(G_.select(pre + "found", "Stands on", FOUND_ITEMS, f, (window.__framing.FOUNDATIONS[f] || {}).note));
+    g.push(G_.select(pre + "ins", "Insulation", INS_ITEMS, i, "What fills the spaces between studs, joists and rafters"));
+    g.push(G_.select(pre + "lining", "Inside", LIN_ITEMS, l, "What covers the inside of the walls"));
+  };
+  // the shopping list as the Schedule panel shows it: by stage, with what each line costs and how far along it is
+  function schedule() {
+    const S = B.sel.length ? (selRefs()[0] || {}).S : null,
+      grp = S ? groupOf(S) : null,
+      ids = grp ? new Set(grp.map((O) => O.id)) : null,
+      pcs = listPieces().filter((p) => p.stage && (!ids || ids.has(p.struct))),
+      items = G.stock && G.stock.ITEMS,
+      stages = [];
+    let total = 0;
+    for (const ln of FR.materialsList(pcs)) {
+      let st = stages[stages.length - 1];
+      if (!st || st.id !== ln.stage) {
+        const of = pcs.filter((p) => p.stage === ln.stage);
+        stages.push((st = { id: ln.stage, name: FR.STAGE_NAME[ln.stage], lines: [], cost: 0, built: of.filter((p) => p.built).length, of: of.length }));
+      }
+      const cost = ln.itemId && items && items[ln.itemId] ? items[ln.itemId].priceUsd * ln.qty : 0;
+      st.lines.push({ label: ln.label, qty: fmt(ln.qty) + (ln.unit === "each" ? "" : " " + ln.unit.replace("m2", "m²").replace("m3", "m³")), why: ln.why, cost, missing: !ln.itemId });
+      st.cost += cost;
+      total += cost;
+    }
+    return { title: grp ? "This building" : "Everything planned and built", stages, total };
+  }
   const hsItems = () => HEIGHTS.map((x) => ({ v: x[0], name: x[1], note: fmtM(EAVE * x[0]) }));
   const gapItems = (unit) => [1, 2, 3, 4].map((v) => ({ v, name: v + " m", note: unit }));
   const PAINT = () => [G_.toggle("paint", "Paint", B.tapMode === "paint", "paint", "Paint pieces already built with this material: click or drag across them (K)"), G_.toggle("pick", "Pick", B.tapMode === "pick", "pick", "Take the style and material of any piece in hand (I)")];
@@ -6016,6 +6279,12 @@
         g.push(G_.field("s:z", "Along", fmt(at[1]), "m", "Position on the building's grid"));
       }
     }
+    if (refs.length && !refs[0].S.po && refs.every((q) => groupOf(refs[0].S).includes(q.S))) {
+      const S0 = groupOf(refs[0].S).find((O) => O.level === 0) || refs[0].S,
+        left = groupOf(S0).reduce((a, O) => a + O.plan.size, 0);
+      if (left) g.push(G_.info("Being built", plural(left, "piece") + " still to build"));
+      makeUp(g, "s:", S0.found, S0.ins, S0.lining);
+    }
     g.push(G_.act("s:all", "Whole building", "building"));
     if (one) g.push(G_.act("s:pick", "More like this", "pick", "I"));
     g.push(G_.act("s:dup", "Copy", "copy", "Ctrl D"));
@@ -6044,6 +6313,7 @@
       ceil();
       lift();
       t === "room" && wing();
+      t === "room" && makeUp(g, "", B.found, B.ins, B.lining);
     } else if (t === "wall") {
       g.push(G_.tiles("style", "Style", tiles(STYLE_SHORT, "w-"), B.style, "Shift wheel"));
       g.push(G_.sw("wmat", "Material", SW.wall, B.wmat, "M"));
@@ -6056,6 +6326,7 @@
       g.push(...PAINT());
       lift();
       wing();
+      makeUp(g, "", B.found, B.ins, B.lining);
     } else if (t === "roof") {
       g.push(G_.tiles("rshape", "Shape", tiles(ROOF_SHAPES, "r-"), RS[0], "Shift wheel"));
       if (RS[0] === "gable" || RS[0] === "hip") g.push(G_.toggle("steep", "Steep", RS[3] > 1, "r-steep"));
@@ -6089,7 +6360,8 @@
       g.push(G_.act("turn", "Turn " + B.drot * 45 + "°", "turn", "Shift wheel"));
       g.push(...PAINT());
       g.push({ ...G_.chips("dkind", "", DKEYS.filter((k) => DECOR[k].cat === cat).map((k) => ({ v: k, name: DECOR[k].name })), B.dkind), row: 2 });
-    } else if (t === "measure") {
+    } else if (t === "equip") fxView(g);
+    else if (t === "measure") {
       if (B.meas.length) {
         const m = measText(B.meas[B.meas.length - 1].a, B.meas[B.meas.length - 1].b);
         g.push(G_.info("Last measured", fmtM(m.len) + " across · " + (Math.abs(m.rise) > 0.02 ? (m.rise > 0 ? "up " : "down ") + fmtM(Math.abs(m.rise)) : "level") + " · " + Math.round(m.angle) + "° from the grid" + (Math.abs(m.rise) > 0.02 ? " · " + fmtM(m.direct) + " direct" : "")));
@@ -6097,13 +6369,26 @@
       }
     } else if (t === "copy") g.push(G_.act("turn", "Turn", "turn", "Shift wheel"));
     const busy = B.move ? "move" : B.drag && B.drag.mode === "click" ? "chain" : B.tapMode ? B.tapMode : B.measA ? "measure" : t === "copy" ? "copy" : "";
-    return { tool: t, top: t === "tower" ? "room" : t === "copy" ? "select" : t, tools: TOOLS, groups: g, hint: B.hintText, undo: B.undo.length, redo: B.redo.length, snap: B.snap, free: B.free, level: B.level, levelName: LEVEL_NAME(B.level), busy, sel: B.sel.length };
+    return { tool: t, top: t === "tower" ? "room" : t === "copy" ? "select" : t, tools: TOOLS, groups: g, hint: B.hintText, undo: B.undo.length, redo: B.redo.length, snap: B.snap, free: B.free, level: B.level, levelName: LEVEL_NAME(B.level), busy, sel: B.sel.length, fold: B.fold, sched: B.sched ? schedule() : null };
   }
   function choose(id, v) {
     const RS = RSHAPES[B.rshape],
       turnOf = RS[0] === "gable" || RS[0] === "shed" ? RS[1] : 0;
     if (id === "shape") return setTool(v);
-    if (id === "wmat" || id === "fmat" || id === "rmat" || id === "pmat" || id === "dcol" || id === "style" || id === "wstyle" || id === "dstyle" || id === "pkind" || id === "pwidth" || id === "levels" || id === "tshape" || id === "gap" || id === "hs") B[id] = v;
+    if (id.startsWith("fx:")) fxChoose(id, v);
+    else if (id === "found" || id === "ins" || id === "lining") B[id] = v;
+    else if (id === "sched") B.sched = !B.sched;
+    else if (id === "s:found") {
+      const q = selRefs()[0];
+      q && setFound(q.S, v);
+    } else if (id === "s:ins" || id === "s:lining") {
+      const q = selRefs()[0];
+      if (q) {
+        pushUndo();
+        for (const O of groupOf(q.S)) ((O[id.slice(2)] = v), O.ver++);
+        for (const O of groupOf(q.S)) rebuild(O);
+      }
+    } else if (id === "wmat" || id === "fmat" || id === "rmat" || id === "pmat" || id === "dcol" || id === "style" || id === "wstyle" || id === "dstyle" || id === "pkind" || id === "pwidth" || id === "levels" || id === "tshape" || id === "gap" || id === "hs") B[id] = v;
     else if (id === "lift") B.lift = clamp(B.lift + v * 0.5, -3, 6);
     else if (id === "wing") B.wingNext = !B.wingNext;
     else if (id === "roofs") B.showRoofs = !B.showRoofs;
@@ -6133,7 +6418,12 @@
     else if (id === "s:del") selDelete();
     else if (id === "s:dup") duplicate();
     else if (id === "snap") B.snap = !B.snap;
-    else if (id === "free") B.free = !B.free;
+    else if (id === "fold") {
+      B.fold = !B.fold;
+      try {
+        localStorage.setItem("build:fold", B.fold ? "1" : "");
+      } catch {}
+    } else if (id === "free") B.free = !B.free;
     else if (id === "level") return setLevel(B.level + v);
     else if (id === "undo") return undo();
     else if (id === "redo") return redo();
@@ -6166,12 +6456,14 @@
   }
   window.addEventListener("keyup", (e) => {
     if (e.code === "AltLeft" || e.code === "AltRight") ((B.alt = false), (B.key = ""));
+    if (e.code === "KeyE" && B.on && B.eDown && performance.now() - B.eDown < 220 && !(e.target && e.target.tagName === "INPUT")) setTool("equip");
     if (e.code === "ControlLeft" || e.code === "ControlRight" || e.code === "MetaLeft" || e.code === "MetaRight") ((B.ctrl = B.ctrlWheel = false), (B.key = ""));
   });
   window.addEventListener("blur", () => (B.alt = B.ctrl = B.ctrlWheel = false));
   const TOOL_KEY = { KeyV: "select", KeyR: "room", KeyN: "wall", KeyF: "floor", KeyO: "roof", KeyJ: "door", KeyU: "window", KeyZ: "stairs", KeyP: "pillar", KeyL: "path", KeyC: "decor", KeyY: "measure", KeyX: "erase" };
   const TOOL_LETTER = {};
   for (const k in TOOL_KEY) TOOL_LETTER[TOOL_KEY[k]] = k.slice(3);
+  TOOL_LETTER.equip = "E";
   function onKey(e) {
     if (e.code === "AltLeft" || e.code === "AltRight") ((B.alt = true), (B.key = ""));
     if (e.code === "ControlLeft" || e.code === "ControlRight" || e.code === "MetaLeft" || e.code === "MetaRight") ((B.ctrl = true), (B.key = ""));
@@ -6197,11 +6489,15 @@
     if (e.code === "Equal" || e.code === "Minus" || e.code === "NumpadAdd" || e.code === "NumpadSubtract") return (choose("lift", e.code === "Equal" || e.code === "NumpadAdd" ? 1 : -1), true);
     if (e.code === "Comma" || e.code === "Period") return (cycleStyle(e.code === "Comma"), true);
     if (e.code === "Slash" && !e.repeat) return (choose("snap"), true);
+    if (e.code === "Backquote" && !e.repeat) return (choose("fold"), true);
     if (e.code === "KeyM" && !e.repeat) return (cycleMat(e.shiftKey), true);
     if (e.code === "KeyK" && !e.repeat) return (choose("paint"), true);
     if (e.code === "KeyI" && !e.repeat) return (B.tool === "select" && B.sel.length === 1 ? pickUp(B.sel[0]) : choose("pick"), true);
     if (e.code === "Escape") return (putDown(true) || toggle(), true);
+    if ((e.code === "Delete" || e.code === "Backspace") && !e.repeat && B.tool === "equip" && FX.sel) return (choose("fx:del"), true);
     if ((e.code === "Delete" || e.code === "Backspace") && !e.repeat) return (B.tool === "select" && B.sel.length ? selDelete() : setTool("erase"), true);
+    // E turns the view while it is held; a quick tap picks up the Equip tool
+    if (e.code === "KeyE") return (e.repeat || (B.eDown = performance.now()), true);
     if (digit && !e.repeat) {
       const tl = TOOLS.find((x) => x.code === e.code);
       tl && setTool(tl.id);
@@ -6605,6 +6901,900 @@
     }
   }
 
+  /* ---------- construction: real members, build stages, what is built and what is still only planned ---------- */
+  // src/framing.js lists every member of a building (piers, joists, studs, sheets, rafters, batts). Here they are
+  // tied to the structures: each has an id, a stage and a built state, is drawn (solid when built, a pale ghost
+  // when it is next to be built), is reported in pieces(), and decides what layers a wall, floor or roof reports.
+  const FR = window.__framing,
+    FOUNDATIONS = FR.FOUNDATIONS,
+    STAGES = FR.STAGES,
+    CONCRETE = col(0xb5b2aa),
+    MEMBER_EXTRA = ["area", "thickness", "volume", "size", "plies", "roof", "opening", "height"];
+  const Lz = (material, thickness, role) => Object.freeze({ material, thickness, role });
+  const footPal = new Map();
+  function woodFoot(wm) {
+    let p = footPal.get(wm);
+    if (!p) footPal.set(wm, (p = WALLS[wm].courses ? WALLS[wm] : { ...WALLS[wm], stone: shade(WALLS[wm].beam, 1.15) }));
+    return p;
+  }
+  const dropOf = (S) => (S.level || S.po ? 0.05 : FOUNDATIONS[S.found].drop);
+  const stickWall = (cls, mat) => cls === "wall" && (mat === "timber" || mat === "dark");
+  // every member of a structure, in its own metres above its base; kept until the structure changes
+  function membersOf(S) {
+    if (S.mem && S.mem.ver === S.ver) return S.mem;
+    const H = EAVE * S.hs,
+      kS = (H - 0.3) / (EAVE - 0.3),
+      up = (y) => (y <= 0.3 ? y : 0.3 + (y - 0.3) * kS),
+      yo = (S.hs - 1) * EAVE,
+      desc = { found: S.level === 0 ? S.found : S.found === "plinth" ? "plinth" : "upper", spec: { ins: S.ins, lining: S.lining }, floors: [], walls: [], roofs: [] },
+      groundY = (x, z) => {
+        const [wx, wz] = toWorld(S, x, z);
+        return G.heightAt(wx, wz) - S.y0;
+      },
+      opening = (list, s0, mlen, type, id) => {
+        const sp = OPEN[type];
+        sp && list.push({ id, kind: sp.kind, offset: s0 + sp.t0 * mlen, width: (sp.t1 - sp.t0) * mlen, sill: up(sp.y0), height: up(sp.y1) - up(sp.y0) });
+      },
+      side = (ax, az, bx, bz) => {
+        // which side is outdoors: the one with no floor against the wall
+        const L = Math.hypot(bx - ax, bz - az) || 1,
+          nx = -(bz - az) / L,
+          nz = (bx - ax) / L,
+          mx = (ax + bx) / 2,
+          mz = (az + bz) / 2,
+          l = onFloorAt(S, mx + nx * 0.4, mz + nz * 0.4),
+          r = onFloorAt(S, mx - nx * 0.4, mz - nz * 0.4);
+        return l && r ? 0 : l ? -1 : 1;
+      };
+    if (!S.po) {
+      for (const g of S.regs) desc.floors.push({ id: g.id, outline: outlineOf(g.m)[0], y0: 0, ground: S.level === 0, groundY, mat: g.mat });
+      for (const p of S.polys) desc.floors.push({ id: p.id, outline: p.pts, y0: 0, ground: S.level === 0, groundY, mat: p.fmat });
+      for (const g of S.runs) {
+        if (!stickWall(g.cls, g.mat)) continue;
+        const x = g.d === 0,
+          a = x ? [g.t0, g.line] : [g.line, g.t0],
+          b = x ? [g.t1, g.line] : [g.line, g.t1],
+          opens = [];
+        for (const e of g.m) opening(opens, e.t - g.t0, 1, e.type, S.oid.get(e.k));
+        desc.walls.push({ id: g.id, a, b, y0: 0, h: H, out: side(a[0], a[1], b[0], b[1]), mat: g.mat, openings: opens, foot: desc.found === "plinth" ? 0.3 : undefined });
+      }
+      for (const g of S.fruns) {
+        if (!stickWall(g.cls, g.mat)) continue;
+        const opens = [];
+        for (const q of g.mods) opening(opens, q.s, q.len, q.type, S.segs[q.idx][7]);
+        desc.walls.push({ id: g.id, a: [g.x0, g.z0], b: [g.x1, g.z1], y0: 0, h: H, out: side(g.x0, g.z0, g.x1, g.z1), mat: g.mat, openings: opens, foot: desc.found === "plinth" ? 0.3 : undefined });
+      }
+      for (const r of S.roofs) {
+        const parts = roofParts(r),
+          R = { id: r.id, mat: r.mat || "thatch", planes: [], ridges: [], infills: [], ties: [] };
+        let n = 0,
+          gi = 0;
+        const topAt = (x, z) => {
+          let best = -1e9;
+          for (const pl of R.planes) {
+            const e0 = pl.pts[0],
+              t = (x - e0[0]) * -pl.facing[0] + (z - e0[1]) * -pl.facing[1];
+            if (pl.run && t > -0.01 && t < pl.run + 0.01) best = Math.max(best, pl.eaveY + ((pl.ridgeY - pl.eaveY) * t) / pl.run);
+          }
+          return best < -1e8 ? H : best;
+        };
+        for (const q of parts) {
+          if (q.part === "plane") R.planes.push({ id: r.id + "." + n++, pts: q.pts, eaveY: q.eaveY + yo, ridgeY: q.ridgeY + yo, run: q.run, facing: q.facing, overhang: (r.shape || "gable") === "gable" || r.shape === "shed" ? 0.45 : 0 });
+          else if (q.part === "ridge") R.ridges.push({ a: q.a, b: q.b, y: q.y0 + yo + ((r.shape || "gable") === "gable" ? 0 : 0.03) });
+        }
+        for (const q of parts) if (q.part === "infill") R.infills.push({ id: r.id + ".g" + gi++, a: q.a, b: q.b, y0: H, y1: q.y1 + yo, area: q.area, top: topAt });
+        if ((r.shape || "gable") === "gable") {
+          const ax = r.axis === "x",
+            a0 = ax ? r.i0 : r.j0,
+            a1 = (ax ? r.i1 : r.j1) + 1,
+            b0 = ax ? r.j0 : r.i0,
+            b1 = (ax ? r.j1 : r.i1) + 1,
+            nt = Math.max(1, Math.round((a1 - a0) / 1.2));
+          for (let k = 0; k <= nt; k++) {
+            const a = a0 + 0.02 + ((a1 - a0 - 0.04) * k) / nt;
+            R.ties.push({ a: ax ? [a, b0] : [b0, a], b: ax ? [a, b1] : [b1, a], y: H });
+          }
+        }
+        desc.roofs.push(R);
+      }
+    }
+    const list = FR.generate(desc),
+      byParent = new Map(),
+      byId = new Map();
+    for (const m of list) {
+      byId.set(m.id, m);
+      let L = byParent.get(m.parent);
+      if (!L) byParent.set(m.parent, (L = []));
+      L.push(m);
+    }
+    return (S.mem = { ver: S.ver, list, byParent, byId, planes: new Map(desc.roofs.map((R) => [R.id, R.planes.map((p) => p.id)])) });
+  }
+  // every id of a structure that can be planned or built on its own: members, doors and windows, and the pieces
+  // that are not made of members (stone walls, round rooms, stairs, pillars)
+  function plannable(S, stage) {
+    const out = [],
+      mem = membersOf(S);
+    for (const m of mem.list) (!stage || m.stage === stage) && out.push(m.id);
+    if (!stage || stage === "openings") {
+      for (const id of S.oid.values()) out.push(id);
+      for (const sg of S.segs) sg[7] && out.push(sg[7]);
+    }
+    if (!stage || stage === "wall-frame") {
+      for (const g of S.runs) mem.byParent.has(g.id) || out.push(g.id);
+      for (const g of S.fruns) mem.byParent.has(g.id) || out.push(g.id);
+      for (const r of S.rings) out.push(r.id);
+      for (const st of S.stairs) out.push(st.id);
+      for (const p of S.pillars) out.push(p[4]);
+    }
+    return out;
+  }
+  // What of a structure is finished (drawn as it always was), what is still only a plan (drawn as a ghost of the
+  // finished thing) and what is part way (its members are drawn one by one).
+  function memberState(S) {
+    const mem = membersOf(S),
+      ids = plannable(S),
+      all = new Set(ids);
+    if (S.known && B.cmode) for (const id of ids) S.known.has(id) || S.plan.add(id);
+    S.known = all;
+    for (const id of [...S.plan]) all.has(id) || S.plan.delete(id);
+    S.sitePlanned = mem.list.some((m) => m.kind === "site" && S.plan.has(m.id));
+    const st = { all: !S.plan.size, mem, finRun: null, finFloor: null, finRoof: null, cur: null, built: null, shell: null };
+    if (st.all) return st;
+    const P = (id) => S.plan.has(id),
+      kids = (id) => mem.byParent.get(id),
+      fin = (id, tail) => (kids(id) ? !P(id + tail) : !P(id)),
+      bare = (id) => (kids(id) ? kids(id).every((m) => P(m.id)) : true),
+      Db = { ...S, floors: new Set(), walls: new Map(), segs: [], polys: [], roofs: [], rings: [], portals: [], stairs: [], pillars: [] },
+      Ds = { ...Db, floors: new Set(), walls: new Map(), segs: [], polys: [], roofs: [], rings: [], portals: [], stairs: [], pillars: [], decor: [], paths: [], polyRoofs: [] };
+    st.finRun = new Set();
+    st.finFloor = new Set();
+    st.finRoof = new Set();
+    for (const g of S.runs) {
+      const f = fin(g.id, ".cl"),
+        D = f ? Db : bare(g.id) ? Ds : null;
+      f && st.finRun.add(g.id);
+      if (D) for (const e of g.m) D.walls.set(e.k, e.type);
+    }
+    for (const g of S.fruns) {
+      const f = fin(g.id, ".cl"),
+        D = f ? Db : bare(g.id) ? Ds : null;
+      f && st.finRun.add(g.id);
+      if (D) for (const n of g.m) D.segs.push(S.segs[n]);
+    }
+    for (const g of S.regs) {
+      const f = fin(g.id, ".fl"),
+        D = f ? Db : bare(g.id) && (!kids(g.id + ".fd") || bare(g.id + ".fd")) ? Ds : null;
+      f && st.finFloor.add(g.id);
+      if (D) for (const c of g.m) D.floors.add(c);
+    }
+    for (const p of S.polys) {
+      const f = fin(p.id, ".fl");
+      f && st.finFloor.add(p.id);
+      if (f) Db.polys.push(p);
+      else if (bare(p.id) && (!kids(p.id + ".fd") || bare(p.id + ".fd"))) Ds.polys.push({ ...p, roofed: false });
+    }
+    for (const r of S.roofs) {
+      const pl = mem.planes.get(r.id) || [],
+        f = pl.every((id) => !P(id + ".rc"));
+      f && st.finRoof.add(r.id);
+      if (f) Db.roofs.push(r);
+      else if (pl.every(bare) && !mem.list.some((m) => m.roof === r.id && !P(m.id))) Ds.roofs.push(r);
+    }
+    S.rings.forEach((r, n) => {
+      const D = P(r.id) ? Ds : Db;
+      D.rings.push(r);
+      D.portals.push(S.portals[n]);
+    });
+    for (const q of S.stairs) (P(q.id) ? Ds : Db).stairs.push(q);
+    for (const q of S.pillars) (P(q[4]) ? Ds : Db).pillars.push(q);
+    let cur = 99;
+    for (const m of mem.list) if (P(m.id)) cur = Math.min(cur, STAGES.indexOf(m.stage));
+    for (const id of S.plan) mem.byId.has(id) || (cur = Math.min(cur, STAGES.indexOf(S.oid.size && [...S.oid.values()].includes(id) ? "openings" : "wall-frame")));
+    st.cur = STAGES[cur] || null;
+    st.built = Db;
+    st.shell = Ds.walls.size || Ds.floors.size || Ds.segs.length || Ds.polys.length || Ds.roofs.length || Ds.rings.length || Ds.stairs.length || Ds.pillars.length ? Ds : null;
+    return st;
+  }
+  // members are drawn as instances of one box: built ones solid, the next ones to build as a calm pale ghost
+  const boxGeo = new T.BoxGeometry(1, 1, 1),
+    memMat = new T.MeshLambertMaterial({ color: 0xffffff }),
+    memGhost = new T.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.3, depthWrite: false, fog: false }),
+    shellMat = new T.MeshLambertMaterial({ vertexColors: true, color: 0xd4e8f8, transparent: true, opacity: 0.3, depthWrite: false, side: T.DoubleSide });
+  const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), concrete: CONCRETE, gravel: col(0x8f8b82) };
+  const _m4 = new T.Matrix4(),
+    _c = new T.Color();
+  function dropMembers(S) {
+    for (const m of S.memMeshes) {
+      S.group.remove(m);
+      m.userData.own && m.geometry.dispose();
+      m.dispose && m.dispose();
+    }
+    S.memMeshes = [];
+  }
+  function drawMembers(S, st) {
+    dropMembers(S);
+    const mem = st.mem,
+      P = (id) => S.plan.has(id),
+      gs = B.gstage || st.cur,
+      sets = [[], [], [], []]; // solid, solid under the roof, ghost, ghost under the roof
+    for (const m of mem.list) {
+      if (m.draw === 0) continue;
+      const roofId = m.roof || (/^(roof-frame|roof-deck|roofing)$/.test(m.stage) || m.type === "roof-batt" ? m.parent.split(".")[0] : null),
+        top = roofId ? 1 : 0;
+      if (P(m.id)) {
+        if (m.stage === gs && m.kind !== "site") sets[2 + top].push(m);
+        continue;
+      }
+      if (m.stage === "foundation" || m.stage === "floor-frame") sets[0].push(m);
+      else if (roofId) (st.all || st.finRoof.has(roofId)) || sets[1].push(m);
+      else if (m.stage === "subfloor" || m.type === "floor-batt") (st.all || st.finFloor.has(m.parent)) || sets[0].push(m);
+      else (st.all || st.finRun.has(m.parent)) || sets[0].push(m);
+    }
+    sets.forEach((list, k) => {
+      if (!list.length) return;
+      const mesh = new T.InstancedMesh(boxGeo, k < 2 ? memMat : memGhost, list.length);
+      list.forEach((m, n) => {
+        const ax = m.b[0] - m.a[0],
+          ay = m.b[1] - m.a[1],
+          az = m.b[2] - m.a[2],
+          L = Math.hypot(ax, ay, az) || 1,
+          d = m.section.d,
+          b = m.section.b / L,
+          nx = m.n[0],
+          ny = m.n[1],
+          nz = m.n[2];
+        // columns: along the member, across its depth, across its breadth
+        _m4.set(ax, nx * d, (ay * nz - az * ny) * b, (m.a[0] + m.b[0]) / 2, ay, ny * d, (az * nx - ax * nz) * b, (m.a[1] + m.b[1]) / 2, az, nz * d, (ax * ny - ay * nx) * b, (m.a[2] + m.b[2]) / 2, 0, 0, 0, 1);
+        mesh.setMatrixAt(n, _m4);
+        if (k < 2) {
+          const c = MCOL[m.col || "timber"],
+            v = 0.9 + 0.2 * hash(n, list.length, 7);
+          mesh.setColorAt(n, _c.setRGB(c[0] * v, c[1] * v, c[2] * v));
+        }
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      if (k < 2) mesh.castShadow = mesh.receiveShadow = true;
+      else mesh.renderOrder = 3;
+      mesh.userData.roof = k % 2 === 1;
+      mesh.visible = !mesh.userData.roof || S.roofOp > 0.5;
+      mesh.computeBoundingSphere();
+      S.group.add(mesh);
+      S.memMeshes.push(mesh);
+    });
+    if (st.shell) {
+      const ga = buildGeo(st.shell, S.depth),
+        g = ga.main,
+        mesh = new T.Mesh(g.build(), shellMat),
+        rm = new T.Mesh(ga.roof.build(), shellMat);
+      mesh.userData.own = rm.userData.own = true;
+      rm.userData.roof = true;
+      rm.visible = S.roofOp > 0.5;
+      mesh.renderOrder = rm.renderOrder = 2;
+      S.group.add(mesh, rm);
+      S.memMeshes.push(mesh, rm);
+    }
+  }
+  // what a framed wall is made of right now, from the outside in: only the layers that are built
+  function builtWallLayers(S, id, mat, kids) {
+    const ok = (f) => {
+        const L = kids.filter(f);
+        return L.length > 0 && L.every((m) => !S.plan.has(m.id));
+      },
+      out = [];
+    if (!ok((m) => m.kind === "stud")) return Object.freeze(out);
+    const outside = kids.some((m) => m.kind === "cladding");
+    if (ok((m) => m.kind === "cladding")) out.push(Lz("softwood-boards", 0.019, "cladding"));
+    if (ok((m) => m.kind === "membrane")) out.push(Lz("housewrap", 0.0002, "wrap"));
+    if (ok((m) => m.kind === "sheathing")) out.push(Lz("osb", 0.011, "sheathing"));
+    if (!outside && ok((m) => m.kind === "lining")) out.push(Lz("softwood-boards", 0.019, "lining"));
+    out.push(ok((m) => m.kind === "insulation") ? Lz(S.ins, 0.089, "insulation") : Lz("air", 0.089, "cavity"));
+    if (ok((m) => m.kind === "lining")) out.push(Lz(S.lining === "gypsum" ? "gypsum_board" : "softwood-boards", S.lining === "gypsum" ? 0.0127 : 0.019, "lining"));
+    return Object.freeze(out);
+  }
+  function builtFloorLayers(S, id, def) {
+    const kids = membersOf(S).byParent.get(id) || [],
+      fd = membersOf(S).byParent.get(id + ".fd") || [],
+      on = (f) => kids.concat(fd).some(f) && kids.concat(fd).filter(f).every((m) => !S.plan.has(m.id)),
+      fin = on((m) => m.type === "flooring") ? [def[def.length - 1]] : [];
+    if (kids.some((m) => m.kind === "joist")) {
+      if (!on((m) => m.kind === "joist")) return Object.freeze([]);
+      return Object.freeze([on((m) => m.kind === "insulation") ? Lz(S.ins, 0.14, "insulation") : Lz("air", 0.184, "joist-bay"), ...(on((m) => m.type === "subfloor") ? [Lz("osb", 0.018, "subfloor")] : []), ...fin]);
+    }
+    if (fd.some((m) => m.kind === "slab")) return Object.freeze(on((m) => m.kind === "slab") ? [Lz("gravel", 0.1, "base"), Lz("concrete", 0.1, "slab"), ...fin] : []);
+    return S.plan.has(id) || !fin.length ? Object.freeze([]) : def;
+  }
+  function builtRoofLayers(S, pid, def) {
+    const kids = membersOf(S).byParent.get(pid) || [],
+      on = (f) => kids.some(f) && kids.filter(f).every((m) => !S.plan.has(m.id));
+    if (!on((m) => m.kind === "rafter")) return Object.freeze([]);
+    return Object.freeze([...(on((m) => m.kind === "roofing") ? [def[0]] : []), ...(on((m) => m.type === "roof-deck") ? [Lz("osb", 0.011, "deck")] : []), on((m) => m.kind === "insulation") ? Lz(S.ins, 0.14, "insulation") : Lz("air", 0.14, "rafter-bay")]);
+  }
+  // mark members (or everything a wall, floor, roof or foundation is made of) as built or as still planned
+  function setBuilt(ids, on) {
+    on = on !== false;
+    let any = false;
+    const pcs = listPieces(),
+      want = new Set(Array.isArray(ids) ? ids : [ids]);
+    for (const S of B.structs) {
+      const mem = membersOf(S),
+        own = new Set(plannable(S)),
+        hit = [];
+      for (const id of want) {
+        if (own.has(id)) hit.push(id);
+        else if (mem.byParent.has(id)) {
+          for (const m of mem.byParent.get(id)) hit.push(m.id);
+          for (const p of pcs) p.wall === id && p.struct === S.id && own.has(p.id) && hit.push(p.id);
+        }
+      }
+      if (hit.length) markBuilt(S, hit, on), (any = true);
+    }
+    return any;
+  }
+  function markBuilt(S, ids, on) {
+    const wasSite = S.sitePlanned;
+    for (const id of ids) on ? S.plan.delete(id) : S.plan.add(id);
+    if (S.known) for (const id of ids) S.known.add(id);
+    S.ver++;
+    S.pc = null;
+    S.sitePlanned = membersOf(S).list.some((m) => m.kind === "site" && S.plan.has(m.id));
+    B.version++;
+    // once the site is cleared and levelled, the ground really is
+    if (wasSite && !S.sitePlanned) settle([S]);
+    else B.dirty.add(S);
+    touchUi();
+  }
+  function setStageBuilt(structId, stage, on) {
+    let any = false;
+    for (const S of B.structs) {
+      if (structId !== undefined && structId !== null && S.id !== structId) continue;
+      const ids = plannable(S, stage);
+      if (ids.length) markBuilt(S, ids, on !== false), (any = true);
+    }
+    return any;
+  }
+  function setAllBuilt(on) {
+    for (const S of B.structs) markBuilt(S, plannable(S), on !== false);
+  }
+  // what to buy, by stage, for one building (a structure id) or for everything
+  function materialsList(structId) {
+    const list = listPieces().filter((p) => p.stage && (structId === undefined || structId === null || p.struct === structId));
+    return FR.materialsList(list);
+  }
+  // change what a building stands on; it rises or settles so that the ground under it stays where it is
+  function setFound(S, v) {
+    if (!FOUNDATIONS[v] || S.found === v) return;
+    pushUndo();
+    const grp = groupOf(S),
+      base = grp.find((O) => O.level === 0) || S,
+      delta = FOUNDATIONS[v].drop - dropOf(base);
+    for (const O of grp) {
+      O.found = v;
+      O.y0 += delta;
+      O.group.position.y = O.y0;
+    }
+    for (const O of grp) rebuild(O);
+    touchUi();
+  }
+  /* ready-made plans: small buildings in real framing sizes, set down whole */
+  const PLANS = {
+    shed: { id: "shed", name: "Tool shed", size: "2.4 x 3.0 m", w: 2.4, l: 3.0, note: "A single-pitch roof, one door and one window, on six pier blocks.", roof: { shape: "shed", dir: 0, axis: "x", pitch: 1, mat: "shingle" }, door: [2, 0], windows: [[1, 1]], found: "pier-blocks", ins: null, lining: null },
+    cabin: { id: "cabin", name: "Small cabin", size: "3.6 x 4.8 m", w: 3.6, l: 4.8, note: "A gable roof, a door and two windows, insulated and lined, on pier blocks.", roof: { shape: "gable", dir: 0, axis: "z", pitch: 1, mat: "shingle" }, door: [2, 1], windows: [[1, 2], [3, 2]], found: "pier-blocks", ins: "fibreglass_batt", lining: "boards" },
+  };
+  const planList = () => Object.values(PLANS).map((p) => ({ id: p.id, name: p.name, size: p.size, widthM: p.w, lengthM: p.l, note: p.note, foundation: p.found }));
+  // door and windows are [side, module]: side 0 the back (z = 0), 1 the right, 2 the front, 3 the left
+  function placePlan(id, x, z, yawRad) {
+    const pl = PLANS[id];
+    if (!pl) return null;
+    pushUndo();
+    const S = newStruct({ ox: x, oz: z, yaw: yawRad || 0, y0: G.heightAt(x, z) + FOUNDATIONS[pl.found].drop - 0.05, level: 0, hs: 1, found: pl.found, ins: pl.ins, lining: pl.lining, fresh: true }),
+      hw = pl.w / 2,
+      hl = pl.l / 2,
+      cs = [[-hw, -hl], [hw, -hl], [hw, hl], [-hw, hl]];
+    for (let k = 0; k < 4; k++) {
+      const a = cs[k],
+        b = cs[(k + 1) % 4],
+        L = Math.hypot(b[0] - a[0], b[1] - a[1]),
+        n = Math.max(1, Math.round(L));
+      for (let m = 0; m < n; m++) {
+        const type = pl.door[0] === k && pl.door[1] === m ? "door" : pl.windows.some((q) => q[0] === k && q[1] === m) ? "window" : "wall";
+        S.segs.push([a[0] + ((b[0] - a[0]) * m) / n, a[1] + ((b[1] - a[1]) * m) / n, a[0] + ((b[0] - a[0]) * (m + 1)) / n, a[1] + ((b[1] - a[1]) * (m + 1)) / n, type, "timber", null, null]);
+      }
+    }
+    S.roofs.push({ i0: -hw, i1: hw - 1, j0: -hl, j1: hl - 1, ...pl.roof });
+    rebuild(S);
+    if (!S.sitePlanned) {
+      const inner = [];
+      for (let a = -hw; a <= hw + 1e-6; a += pl.w / 4) for (let b = -hl; b <= hl + 1e-6; b += pl.l / 4) inner.push(toWorld(S, a, b));
+      cutTerrain(S, inner);
+      rebuild(S);
+    }
+    touchUi();
+    return { struct: S.id, pieces: structPieces(S).filter((p) => !p.parent).map((p) => p.id) };
+  }
+
+  /* ---------- equipment: fixtures from a catalog, and the wires and pipes between their ports ---------- */
+  // A fixture is a panel, a tank, a stove: anything a system needs that is not part of the building's fabric. The
+  // catalog comes from outside (setFixtureCatalog); until then a few demonstration pieces stand in. Fixtures and
+  // connections are pieces like any other (ARCHITECTURE.md, "Fixtures and connections").
+  const DEMO_FIXTURES = {
+    demo_solar_panel: { id: "demo_solar_panel", name: "Solar panel 300 W", category: "solar", system: "electrical", ports: [{ id: "dc", type: "power" }], dims: { w: 1.0, d: 1.65, h: 0.04 }, priceUsd: 220, massKg: 19, ratedW: 300, settingsSchema: [{ key: "tiltDeg", label: "Tilt", type: "number", min: 0, max: 90, step: 5, unit: "°", default: 35 }, { key: "azimuthDeg", label: "Faces", type: "number", min: 0, max: 359, step: 15, unit: "°", default: 180 }] },
+    demo_battery: { id: "demo_battery", name: "Battery 12 V 100 Ah", category: "battery", system: "electrical", ports: [{ id: "dc", type: "power" }], dims: { w: 0.33, d: 0.17, h: 0.22 }, priceUsd: 320, massKg: 12, capacityWh: 1200 },
+    demo_light: { id: "demo_light", name: "Light", category: "light", system: "electrical", ports: [{ id: "in", type: "power" }], dims: { w: 0.2, d: 0.2, h: 0.25 }, priceUsd: 12, massKg: 0.4, ratedW: 9, settingsSchema: [{ key: "on", label: "Switched on", type: "boolean", default: true }] },
+    demo_water_tank: { id: "demo_water_tank", name: "Water tank 1000 L", category: "tank", system: "water", ports: [{ id: "in", type: "water" }, { id: "out", type: "water" }], dims: { w: 1.1, d: 1.1, h: 1.3 }, priceUsd: 450, massKg: 25, capacityL: 1000 },
+    demo_tap: { id: "demo_tap", name: "Tap", category: "tap", system: "water", ports: [{ id: "in", type: "water" }], dims: { w: 0.15, d: 0.2, h: 0.9 }, priceUsd: 18, massKg: 0.6, settingsSchema: [{ key: "open", label: "Open", type: "boolean", default: false }] },
+    demo_wood_stove: { id: "demo_wood_stove", name: "Wood stove", category: "stove", system: "heating", ports: [{ id: "flue", type: "flue" }], dims: { w: 0.6, d: 0.5, h: 0.75 }, priceUsd: 900, massKg: 110, ratedW: 6000, settingsSchema: [{ key: "damper", label: "Air", type: "choice", options: ["low", "medium", "high"], default: "medium" }] },
+  };
+  const FX = { cat: DEMO_FIXTURES, list: [], links: [], kind: "demo_solar_panel", yaw: 0, sel: null, moving: null, from: null, v: 0, drawn: -1, group: new T.Group(), geo: new Map(), place: null, hov: null };
+  G.scene.add(FX.group);
+  const WIRE_GAUGES = [14, 12, 10, 8, 6, 4, 2, 0],
+    PIPE_MM = [13, 19, 25, 32, 50],
+    CONN = { power: { kind: "wire", name: "wire", material: "copper", key: "gauge", def: 12 }, water: { kind: "pipe", name: "pipe", material: "copper", key: "diameterMm", def: 19 }, flue: { kind: "pipe", name: "flue pipe", material: "steel", key: "diameterMm", def: 150 } };
+  const fxMat = texel(new T.MeshLambertMaterial({ vertexColors: true })),
+    fxGhost = new T.Mesh(new T.BufferGeometry(), new T.MeshBasicMaterial({ color: 0xffe2a0, transparent: true, opacity: 0.55, depthWrite: false, fog: false })),
+    fxHi = new T.Mesh(new T.BufferGeometry(), new T.MeshBasicMaterial({ color: 0xffc95e, transparent: true, opacity: 0.4, depthTest: false, depthWrite: false, fog: false })),
+    wireMat = new T.MeshBasicMaterial({ vertexColors: true, fog: false });
+  fxGhost.visible = fxHi.visible = false;
+  fxGhost.frustumCulled = fxHi.frustumCulled = false;
+  fxHi.renderOrder = 22;
+  G.scene.add(fxGhost, fxHi);
+  const fxDef = (id) => FX.cat[id] || DEMO_FIXTURES[id] || null;
+  const fxWords = (d) => (d.shape || "") + " " + d.id + " " + (d.category || "") + " " + (d.name || "");
+  const fxShape = (d) => {
+    const w = fxWords(d).toLowerCase();
+    return /gutter/.test(w) ? "gutter" : /solar|panel|pv/.test(w) ? "panel" : /batter/.test(w) ? "battery" : /tank|cistern|barrel/.test(w) ? "tank" : /pump/.test(w) ? "pump" : /stove|heater|boiler/.test(w) ? "stove" : /tap|faucet|shower|sink/.test(w) ? "tap" : /feeder|waterer|trough/.test(w) ? "feeder" : /light|lamp|bulb/.test(w) ? "light" : /nest|roost|coop/.test(w) ? "nest" : "box";
+  };
+  const fxSchema = (d) => (Array.isArray(d.settingsSchema) ? d.settingsSchema : d.settingsSchema ? Object.keys(d.settingsSchema).map((key) => ({ key, ...d.settingsSchema[key] })) : []);
+  function fxDefaults(d) {
+    const out = { ...(d.settings || {}) };
+    for (const f of fxSchema(d)) if (out[f.key] === undefined && f.default !== undefined) out[f.key] = f.default;
+    return out;
+  }
+  // a simple, tidy stand-in built from the catalog's dimensions: recognisable, not a model
+  function fxGeo(d, tilt) {
+    const shape = fxShape(d),
+      key = d.id + "|" + shape + "|" + Math.round(tilt || 0);
+    if (FX.geo.has(key)) return FX.geo.get(key);
+    const g = new Geo(),
+      { w, d: dp, h } = d.dims || { w: 0.5, d: 0.5, h: 0.5 },
+      hw = w / 2,
+      hd = dp / 2,
+      IRON = col(0x34373c),
+      STEEL = col(0xaab1b6),
+      DARK = col(0x23272c);
+    if (shape === "panel") {
+      // dims are the panel lying flat: w across, d up the slope. Off a roof it stands on a rack at its tilt.
+      const t = ((tilt || 0) * Math.PI) / 180,
+        c = Math.cos(t),
+        s = Math.sin(t),
+        up = tilt ? 0.25 : 0,
+        P = (x, v, o) => [x, up + (hd + v) * s + o * c, -v * c + o * s];
+      // it faces its front (+z): the low edge is at the front, the high edge at the back
+      g.obox(P(0, 0, 0.02), [hw, 0, 0], [0, hd * s, -hd * c], [0, 0.02 * c, 0.02 * s], STEEL);
+      for (let a = 0; a < 3; a++) for (let b = 0; b < 5; b++) g.obox(P(-hw + (a + 0.5) * (w / 3), -hd + (b + 0.5) * (dp / 5), 0.042), [w / 6 - 0.012, 0, 0], [0, (dp / 10 - 0.012) * s, -(dp / 10 - 0.012) * c], [0, 0.004 * c, 0.004 * s], shade(col(0x1f3558), 0.9 + 0.2 * hash(a, b, 3)));
+      if (tilt) for (const x of [-hw + 0.08, hw - 0.08]) (g.abox(x - 0.02, 0, -hd * c - 0.02, x + 0.02, up + 2 * hd * s, -hd * c + 0.02, STEEL), g.abox(x - 0.02, 0, hd * c - 0.02, x + 0.02, up, hd * c + 0.02, STEEL), g.abox(x - 0.02, 0, -hd * c, x + 0.02, 0.04, hd * c, STEEL));
+    } else if (shape === "tank") {
+      const c0 = col(0x4c6a58);
+      g.cyl([0, 0, 0], [0, h * 0.9, 0], hw, hw, 14, shade(c0, 0.85), c0);
+      g.cyl([0, h * 0.9, 0], [0, h, 0], hw, hw * 0.35, 14, c0, shade(c0, 1.15));
+      for (const y of [0.25, 0.55]) g.cyl([0, h * y, 0], [0, h * y + 0.04, 0], hw + 0.012, hw + 0.012, 14, shade(c0, 0.7), shade(c0, 0.7), false);
+      g.cyl([0, h, 0], [0, h + 0.05, 0], 0.12, 0.12, 8, DARK, DARK);
+      g.cyl([0, 0.12, hd], [0, 0.12, hd + 0.08], 0.03, 0.03, 6, col(0xb08d3c), col(0xb08d3c));
+    } else if (shape === "battery") {
+      g.abox(-hw, 0, -hd, hw, h * 0.86, hd, DARK);
+      g.abox(-hw - 0.006, h * 0.86, -hd - 0.006, hw + 0.006, h * 0.92, hd + 0.006, shade(DARK, 1.6));
+      g.cyl([-hw * 0.6, h * 0.92, 0], [-hw * 0.6, h, 0], 0.016, 0.016, 6, col(0xb5352e), col(0xb5352e));
+      g.cyl([hw * 0.6, h * 0.92, 0], [hw * 0.6, h, 0], 0.016, 0.016, 6, IRON, IRON);
+    } else if (shape === "stove") {
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.abox(sx * (hw - 0.06) - 0.03, 0, sz * (hd - 0.06) - 0.03, sx * (hw - 0.06) + 0.03, 0.14, sz * (hd - 0.06) + 0.03, IRON);
+      g.abox(-hw, 0.14, -hd, hw, h, hd, IRON);
+      g.abox(-hw - 0.02, h, -hd - 0.02, hw + 0.02, h + 0.03, hd + 0.02, shade(IRON, 1.4));
+      g.abox(-hw * 0.6, 0.26, hd, hw * 0.6, h - 0.12, hd + 0.02, shade(IRON, 1.5));
+      g.abox(-hw * 0.45, 0.34, hd + 0.02, hw * 0.45, h - 0.2, hd + 0.03, [1, 0.62, 0.2]);
+      g.cyl([0, h, -hd * 0.4], [0, h + 1.5, -hd * 0.4], 0.075, 0.075, 8, shade(IRON, 0.9), IRON);
+    } else if (shape === "tap") {
+      const BR = col(0xb08d3c);
+      g.cyl([0, 0, 0], [0, h, 0], 0.02, 0.02, 6, STEEL, STEEL);
+      g.cyl([0, h, 0], [0, h, 0.13], 0.018, 0.018, 6, BR, BR);
+      g.cyl([0, h, 0.13], [0, h - 0.06, 0.13], 0.016, 0.016, 6, BR, BR);
+      g.abox(-0.05, h + 0.03, -0.012, 0.05, h + 0.05, 0.012, BR);
+    } else if (shape === "pump") {
+      g.abox(-hw, 0, -hd, hw, 0.05, hd, IRON);
+      g.cyl([-hw * 0.8, h * 0.5, 0], [hw * 0.2, h * 0.5, 0], h * 0.38, h * 0.38, 10, col(0x2f5d86), col(0x3a6c98));
+      g.cyl([hw * 0.2, h * 0.5, 0], [hw * 0.9, h * 0.5, 0], h * 0.3, h * 0.3, 10, STEEL, STEEL);
+      g.cyl([hw * 0.55, h * 0.5, 0], [hw * 0.55, h, 0], 0.03, 0.03, 6, STEEL, STEEL);
+    } else if (shape === "feeder") {
+      g.cyl([0, 0.04, 0], [0, 0.1, 0], hw, hw, 12, STEEL, shade(STEEL, 0.8));
+      g.cyl([0, 0.1, 0], [0, h * 0.8, 0], hw * 0.45, hw * 0.6, 12, shade(STEEL, 0.9), STEEL);
+      g.cyl([0, h * 0.8, 0], [0, h, 0], hw * 0.66, 0.02, 12, col(0xb5352e), col(0xc8473c));
+    } else if (shape === "light") {
+      g.cyl([0, h, 0], [0, h * 0.45, 0], 0.012, 0.012, 5, DARK, DARK);
+      g.cyl([0, h * 0.5, 0], [0, h * 0.2, 0], hw * 0.3, hw, 10, DARK, shade(DARK, 1.5), false);
+      g.ball([0, h * 0.2, 0], hw * 0.35, hw * 0.35, hw * 0.35, [1, 0.9, 0.6], { lat: 3, lon: 6 });
+    } else if (shape === "gutter") {
+      g.abox(-hw, -0.1, 0.02, hw, -0.02, 0.14, STEEL);
+      g.abox(-hw, -0.1, 0.02, hw, -0.09, 0.14, shade(STEEL, 0.7));
+      g.cyl([hw - 0.1, -0.1, 0.08], [hw - 0.1, -0.5, 0.08], 0.035, 0.035, 6, STEEL, STEEL);
+    } else if (shape === "nest") {
+      const WD = col(0xb08a5a);
+      g.abox(-hw, 0, -hd, hw, 0.03, hd, WD);
+      g.abox(-hw, 0, -hd, hw, h, -hd + 0.02, shade(WD, 0.9));
+      for (const sx of [-1, 1]) g.abox(sx * hw - 0.01, 0, -hd, sx * hw + 0.01, h, hd, shade(WD, 0.85));
+      g.abox(-hw, h - 0.02, -hd, hw, h, hd, shade(WD, 1.1));
+      g.abox(-hw, 0, hd - 0.02, hw, h * 0.3, hd, WD);
+      g.ball([0, 0.07, 0], hw * 0.7, 0.05, hd * 0.7, col(0xcdb25e), { lat: 2, lon: 7 });
+    } else {
+      const c0 = col(0x8d9499);
+      g.abox(-hw, 0, -hd, hw, h, hd, c0);
+      g.abox(-hw * 0.7, h * 0.25, hd, hw * 0.7, h * 0.75, hd + 0.012, shade(c0, 1.25));
+    }
+    FX.geo.set(key, g);
+    return g;
+  }
+  const fxTilt = (f) => (f.mount !== "roof" && fxShape(fxDef(f.fixture)) === "panel" ? (f.settings.tiltDeg === undefined ? 35 : +f.settings.tiltDeg) : 0);
+  // where a port is, in world metres: along the front of the piece at a third of its height
+  function portPos(f, pid) {
+    const d = fxDef(f.fixture),
+      n = d.ports.length,
+      k = Math.max(0, d.ports.findIndex((p) => p.id === pid)),
+      dm = d.dims || { w: 0.5, d: 0.5, h: 0.5 },
+      lx = n > 1 ? -dm.w * 0.3 + (dm.w * 0.6 * k) / (n - 1) : 0,
+      lz = fxShape(d) === "panel" ? 0 : dm.d / 2,
+      c = Math.cos(f.yaw),
+      s = Math.sin(f.yaw);
+    return [f.x + lx * c + lz * s, f.y + (fxShape(d) === "panel" ? 0.12 : Math.min(dm.h * 0.35, 0.4)), f.z - lx * s + lz * c];
+  }
+  // the run of a wire or pipe: down to the foot of one piece, along the ground or floor, and up to the other
+  function linkRoute(ln) {
+    const A = FX.list.find((f) => f.id === ln.from.piece),
+      Bq = FX.list.find((f) => f.id === ln.to.piece);
+    if (!A || !Bq) return null;
+    const a = portPos(A, ln.from.port),
+      b = portPos(Bq, ln.to.port),
+      ya = A.mount === "roof" || A.mount === "wall" ? Math.min(a[1], Bq.y) + 0.03 : A.y + 0.03,
+      yb = Bq.mount === "roof" || Bq.mount === "wall" ? Math.min(b[1], ya) : Bq.y + 0.03,
+      pts = [a, [a[0], ya, a[2]], [b[0], ya, a[2]], [b[0], yb, b[2]], b];
+    let L = 0;
+    for (let k = 1; k < pts.length; k++) L += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1], pts[k][2] - pts[k - 1][2]);
+    return { pts, len: Math.round(L * 1000) / 1000 };
+  }
+  function fxDraw() {
+    if (FX.drawn === FX.v) return;
+    FX.drawn = FX.v;
+    for (const m of [...FX.group.children]) (FX.group.remove(m), m.geometry.dispose());
+    for (const f of FX.list) {
+      const d = fxDef(f.fixture);
+      if (!d) continue;
+      const m = new T.Mesh(fxGeo(d, fxTilt(f)).build(), fxMat);
+      m.position.set(f.x, f.y, f.z);
+      m.rotation.order = "YXZ";
+      m.rotation.y = f.yaw;
+      m.rotation.x = f.mount === "roof" ? ((f.tilt || 0) * Math.PI) / 180 : 0;
+      m.castShadow = m.receiveShadow = true;
+      FX.group.add(m);
+    }
+    const g = new Geo();
+    for (const ln of FX.links) {
+      const r = linkRoute(ln);
+      if (!r) continue;
+      const w = ln.kind === "wire" ? 0.012 : Math.max(0.015, (ln.diameterMm || 19) / 2000),
+        c = ln.kind === "wire" ? [0.95, 0.7, 0.2] : (ln.diameterMm || 0) >= 100 ? [0.35, 0.36, 0.38] : [0.35, 0.65, 0.95],
+        cc = ln.id === FX.sel ? [1, 1, 1] : c;
+      for (let k = 1; k < r.pts.length; k++) {
+        const p = r.pts[k - 1],
+          q = r.pts[k];
+        g.abox(Math.min(p[0], q[0]) - w, Math.min(p[1], q[1]) - w, Math.min(p[2], q[2]) - w, Math.max(p[0], q[0]) + w, Math.max(p[1], q[1]) + w, Math.max(p[2], q[2]) + w, cc);
+      }
+    }
+    if (g.p.length) FX.group.add(new T.Mesh(g.build(), wireMat));
+    // the dots the interface draws on ports and in the middle of each run
+    const pv = [];
+    if (B.on && B.tool === "equip") {
+      for (const f of FX.list) for (const p of (fxDef(f.fixture) || { ports: [] }).ports) pv.push({ p: portPos(f, p.id), type: p.type, fid: f.id, pid: p.id, from: !!FX.from && FX.from.piece === f.id && FX.from.port === p.id });
+      for (const ln of FX.links) {
+        const r = linkRoute(ln);
+        r && pv.push({ p: [(r.pts[1][0] + r.pts[3][0]) / 2, r.pts[1][1], (r.pts[1][2] + r.pts[3][2]) / 2], type: "link", lid: ln.id, text: fmtM(r.len), sel: ln.id === FX.sel });
+      }
+    }
+    B.ov.ports = pv;
+    B.ovVer++;
+    const sf = FX.list.find((f) => f.id === FX.sel);
+    fxHi.visible = B.on && !!sf;
+    if (sf) {
+      setGeo(fxHi, fxGeo(fxDef(sf.fixture), fxTilt(sf)));
+      fxHi.position.set(sf.x, sf.y, sf.z);
+      fxHi.rotation.order = "YXZ";
+      fxHi.rotation.y = sf.yaw;
+      fxHi.rotation.x = sf.mount === "roof" ? ((sf.tilt || 0) * Math.PI) / 180 : 0;
+    }
+  }
+  // roofs stay on for the things that go on roofs, and lift away for everything else so you can reach indoors
+  function fxRoofs() {
+    if (FX.roofs !== undefined && FX.roofs !== null) return FX.roofs;
+    const mv = FX.moving && FX.list.find((f) => f.id === FX.moving),
+      d = fxDef(mv ? mv.fixture : FX.kind);
+    return !!d && /panel|gutter/.test(fxShape(d));
+  }
+  const fxTouch = () => (FX.v++, B.version++, (B.key = ""), touchUi());
+  const azOf = (fx, fz) => (((Math.atan2(fx, -fz) * 180) / Math.PI) % 360 + 360) % 360;
+  // where the piece in hand would go: on a roof plane, against a wall, on a floor, or on the ground
+  function fxPlacement(d) {
+    const dm = d.dims || { w: 0.5, d: 0.5, h: 0.5 },
+      o = ray.ray.origin,
+      r = ray.ray.direction,
+      pk = pickAt(ANY_PIECE),
+      shape = fxShape(d),
+      out = { x: pick.x, y: pick.y, z: pick.z, yaw: FX.yaw, mount: "ground", on: null, struct: null, tilt: 0, set: {}, text: "on the ground" };
+    if (pk && pk.kind === "roof") {
+      for (const p of listPieces()) {
+        if (p.roof !== pk.id || p.kind !== "roof" || !p.footprint) continue;
+        const tp = Math.tan((p.pitchDeg * Math.PI) / 180),
+          nx = p.facing.x * tp,
+          nz = p.facing.z * tp,
+          den = r.x * nx + r.y + r.z * nz;
+        if (Math.abs(den) < 1e-6) continue;
+        const t = ((p.a.x - o.x) * nx + (p.eaveY - o.y) + (p.a.z - o.z) * nz) / den,
+          x = o.x + r.x * t,
+          z = o.z + r.z * t;
+        if (t <= 0 || !pip(p.footprint.map((q) => [q.x, q.z]), x, z)) continue;
+        Object.assign(out, { x, y: o.y + r.y * t + 0.09, z, mount: "roof", on: p.id, struct: p.struct, tilt: p.pitchDeg, yaw: p.pitchDeg > 3 ? Math.atan2(p.facing.x, p.facing.z) : FX.yaw });
+        out.set = { roofPieceId: p.id, tiltDeg: Math.round(p.pitchDeg * 10) / 10, azimuthDeg: Math.round(p.pitchDeg > 3 ? azOf(p.facing.x, p.facing.z) : azOf(Math.sin(FX.yaw), Math.cos(FX.yaw))) };
+        out.text = "on the roof · tilted " + Math.round(p.pitchDeg) + "°";
+        if (shape === "gutter") {
+          // a gutter hangs along the whole eave of the plane it is put on
+          Object.assign(out, { x: (p.a.x + p.b.x) / 2, y: p.eaveY, z: (p.a.z + p.b.z) / 2, tilt: 0, yaw: Math.atan2(p.facing.x, p.facing.z) });
+          out.set = { roofPieceId: p.id, lengthM: Math.round(p.length * 100) / 100 };
+          out.text = "along the eave · " + fmtM(p.length);
+        }
+        return out;
+      }
+    }
+    if (pk && (pk.kind === "wall" || (pk.kind === "ring" && pk.side !== undefined)) && pk.kind === "wall") {
+      const p = pieceById(pk.id);
+      if (p && p.length > 0.2) {
+        const ex = p.b.x - p.a.x,
+          ez = p.b.z - p.a.z,
+          den = r.x * ez - r.z * ex;
+        if (Math.abs(den) > 1e-9) {
+          const t = ((p.a.x - o.x) * ez - (p.a.z - o.z) * ex) / den,
+            L = Math.hypot(ex, ez);
+          let nx = -ez / L,
+            nz = ex / L;
+          if (nx * r.x + nz * r.z > 0) ((nx = -nx), (nz = -nz));
+          const off = 0.08 + (shape === "panel" || shape === "light" ? 0.02 : dm.d / 2);
+          Object.assign(out, { x: o.x + r.x * t + nx * off, z: o.z + r.z * t + nz * off, y: clamp(o.y + r.y * t - dm.h / 2, p.y0 + 0.15, p.y1 - dm.h), mount: "wall", on: p.id, struct: p.struct, yaw: Math.atan2(nx, nz), text: "on the wall" });
+          if (snapOn()) out.y = Math.round(out.y * 10) / 10;
+          return out;
+        }
+      }
+    }
+    const h = B.hover;
+    if (h && !h.F.isNew && !h.F.po && onFloorAt(h.F, h.lx, h.lz)) {
+      const lx = snapOn() ? Math.round(h.lx * 4) / 4 : h.lx,
+        lz = snapOn() ? Math.round(h.lz * 4) / 4 : h.lz,
+        [x, z] = toWorld(h.F, lx, lz);
+      Object.assign(out, { x, z, y: h.F.y0 + FLOOR_T, mount: "floor", on: h.F.fid.get(ck(Math.floor(lx), Math.floor(lz))) || (h.F.polys[polyAt(h.F, lx, lz)] || {}).id || null, struct: h.F.id, yaw: FX.yaw + h.F.yaw, text: "on the floor" });
+    } else if (snapOn()) ((out.x = Math.round(out.x * 4) / 4), (out.z = Math.round(out.z * 4) / 4), (out.y = G.heightAt(out.x, out.z)));
+    if (fxSchema(d).some((f) => f.key === "azimuthDeg") || shape === "panel") out.set = { azimuthDeg: Math.round(azOf(Math.sin(out.yaw), Math.cos(out.yaw))) };
+    return out;
+  }
+  const fxAt = () => {
+    const R = localRay({ ox: 0, oz: 0, yaw: 0, y0: 0 });
+    let best = null,
+      bt = 1e9;
+    for (const f of FX.list) {
+      const dm = (fxDef(f.fixture) || {}).dims || { w: 0.5, d: 0.5, h: 0.5 },
+        w = Math.max(0.12, Math.max(dm.w, dm.d) / 2),
+        t = hitBox(R, f.x - w, f.y - 0.1, f.z - w, f.x + w, f.y + Math.max(0.25, dm.h), f.z + w);
+      if (t >= 0 && t < bt) ((bt = t), (best = f));
+    }
+    return best;
+  };
+  function fxPreview() {
+    B.op = null;
+    gridGroup.visible = ghostGroup.visible = false;
+    if (B.ov.dims.length || B.ov.snap) ((B.ov.dims.length = 0), (B.ov.snap = null), B.ovVer++);
+    const mv = FX.moving ? FX.list.find((f) => f.id === FX.moving) : null,
+      d = fxDef(mv ? mv.fixture : FX.kind);
+    FX.hov = mv ? null : fxAt();
+    FX.place = null;
+    fxGhost.visible = false;
+    if (FX.from) return label("Drag to a port on another piece");
+    if (FX.hov) return label("Click to select the " + fxDef(FX.hov.fixture).name.toLowerCase());
+    if (!d || !pick.valid) return label("");
+    const p = (FX.place = fxPlacement(d));
+    setGeo(fxGhost, fxGeo(d, p.mount === "roof" ? 0 : fxShape(d) === "panel" ? (mv ? fxTilt(mv) : fxDefaults(d).tiltDeg === undefined ? 35 : fxDefaults(d).tiltDeg) : 0));
+    fxGhost.position.set(p.x, p.y, p.z);
+    fxGhost.rotation.order = "YXZ";
+    fxGhost.rotation.y = p.yaw;
+    fxGhost.rotation.x = p.mount === "roof" ? (p.tilt * Math.PI) / 180 : 0;
+    fxGhost.visible = true;
+    label(d.name + " · " + p.text);
+  }
+  function fxPut(f, p) {
+    Object.assign(f, { x: p.x, y: p.y, z: p.z, yaw: p.yaw, mount: p.mount, on: p.on, struct: p.struct, tilt: p.tilt });
+    if (p.mount !== "roof") (delete f.settings.roofPieceId, f.wasRoof && delete f.settings.lengthM);
+    f.wasRoof = p.mount === "roof";
+    Object.assign(f.settings, p.set);
+  }
+  function fxClick() {
+    updateHover();
+    setRay();
+    fxPreview();
+    if (FX.from) return void ((FX.from = null), fxTouch());
+    if (FX.hov) return void ((FX.sel = FX.hov.id), FX.v++, (B.key = ""), touchUi());
+    const p = FX.place;
+    if (!p) return;
+    pushUndo();
+    if (FX.moving) (fxPut(FX.list.find((f) => f.id === FX.moving), p), (FX.sel = FX.moving), (FX.moving = null));
+    else {
+      const d = fxDef(FX.kind),
+        f = { id: newPid(), fixture: d.id, settings: fxDefaults(d) };
+      fxPut(f, p);
+      FX.list.push(f);
+      FX.sel = null;
+      G.burst(p.x, p.y + 0.3, p.z, 5, 0xcdb48a, 1.4, 2, 0.08, 0.4);
+    }
+    fxTouch();
+  }
+  // join two ports. Returns { ok, id } or { ok: false, reason } in plain words.
+  function fxConnect(a, ap, b, bp, opts) {
+    const A = FX.list.find((f) => f.id === a),
+      Bq = FX.list.find((f) => f.id === b),
+      pa = A && fxDef(A.fixture).ports.find((p) => p.id === ap),
+      pb = Bq && fxDef(Bq.fixture).ports.find((p) => p.id === bp),
+      no = (reason) => ({ ok: false, reason });
+    if (!pa || !pb) return no("There is no such port.");
+    if (A === Bq) return no("A piece cannot be joined to itself.");
+    if (pa.type !== pb.type) return no("A " + pa.type + " port cannot be joined to a " + pb.type + " port.");
+    const c = CONN[pa.type];
+    if (!c) return no("Nothing can be run from a " + pa.type + " port yet.");
+    if (FX.links.some((l) => (l.from.piece === a && l.from.port === ap && l.to.piece === b && l.to.port === bp) || (l.from.piece === b && l.from.port === bp && l.to.piece === a && l.to.port === ap))) return no("These two ports are already joined.");
+    pushUndo();
+    const ln = { id: newPid(), kind: c.kind, from: { piece: a, port: ap }, to: { piece: b, port: bp }, material: (opts && opts.material) || c.material };
+    ln[c.key] = (opts && opts[c.key]) || c.def;
+    FX.links.push(ln);
+    FX.sel = ln.id;
+    fxTouch();
+    return { ok: true, id: ln.id };
+  }
+  function fxPort(fid, pid, end) {
+    if (!end && FX.from && (FX.from.piece !== fid || FX.from.port !== pid)) end = true;   // a second click finishes the run too
+    if (!end) return void ((FX.from = { piece: fid, port: pid }), FX.v++, (B.key = ""), touchUi());
+    const from = FX.from;
+    FX.from = null;
+    if (!from || (from.piece === fid && from.port === pid)) return void fxTouch();
+    const r = fxConnect(from.piece, from.port, fid, pid);
+    r.ok || ((B.fxNote = r.reason), (B.fxNoteT = performance.now()), fxTouch());
+    return r;
+  }
+  function fxRemove(id) {
+    const n = FX.list.length + FX.links.length;
+    FX.list = FX.list.filter((f) => f.id !== id);
+    FX.links = FX.links.filter((l) => l.id !== id && l.from.piece !== id && l.to.piece !== id);
+    if (FX.sel === id) FX.sel = null;
+    return n !== FX.list.length + FX.links.length;
+  }
+  function fxSetting(id, key, value) {
+    const f = FX.list.find((q) => q.id === id);
+    if (!f) return false;
+    const sp = fxSchema(fxDef(f.fixture)).find((q) => q.key === key);
+    if (sp && sp.type === "number") {
+      value = +value;
+      if (!isFinite(value)) return false;
+      if (sp.min !== undefined) value = Math.max(sp.min, value);
+      if (sp.max !== undefined) value = Math.min(sp.max, value);
+    } else if (sp && sp.type === "boolean") value = !!value;
+    else if (sp && sp.type === "choice" && !sp.options.some((o) => (o && o.value !== undefined ? o.value : o) === value)) return false;
+    if ((key === "tiltDeg" || key === "azimuthDeg" || key === "roofPieceId") && f.mount === "roof") return false; // these come from the roof it is on
+    f.settings[key] = value;
+    if (key === "azimuthDeg") f.yaw = ((180 - value) * Math.PI) / 180;
+    fxTouch();
+    return true;
+  }
+  function fxAdd(list) {
+    const ids = [];
+    for (const q of list || []) {
+      const d = fxDef(q.fixture);
+      if (!d) {
+        ids.push(null);
+        continue;
+      }
+      const f = { id: q.id && !FX.list.some((o) => o.id === q.id) ? q.id : newPid(), fixture: d.id, x: q.x || 0, z: q.z || 0, y: q.y === undefined ? G.heightAt(q.x || 0, q.z || 0) : q.y, yaw: q.yawRad || 0, mount: q.mount || "ground", on: q.on || null, struct: q.struct || null, tilt: q.tilt || 0, settings: { ...fxDefaults(d), ...(q.settings || {}) } };
+      FX.list.push(f);
+      ids.push(f.id);
+    }
+    fxTouch();
+    return ids;
+  }
+  function fxPieces(out) {
+    for (const f of FX.list) {
+      const d = fxDef(f.fixture);
+      if (!d) continue;
+      const dm = d.dims || { w: 0.5, d: 0.5, h: 0.5 },
+        a = { x: f.x, z: f.z };
+      out.push({ id: f.id, struct: f.struct, storey: 0, kind: "fixture", type: d.id, fixture: d.id, name: d.name, category: d.category, system: d.system, built: true, stage: "services", a, b: a, y0: f.y, y1: f.y + dm.h, yawRad: f.yaw, rotationRad: f.yaw, width: dm.w, depth: dm.d, height: dm.h, mount: f.mount, on: f.on, settings: { ...f.settings }, ports: d.ports.map((p) => ({ ...p })) });
+    }
+    for (const ln of FX.links) {
+      const r = linkRoute(ln);
+      if (!r) continue;
+      const p = { id: ln.id, struct: null, storey: 0, kind: ln.kind, type: ln.kind, built: true, stage: "services", from: { ...ln.from }, to: { ...ln.to }, lengthM: r.len, material: ln.material, a: { x: r.pts[0][0], z: r.pts[0][2] }, b: { x: r.pts[4][0], z: r.pts[4][2] }, y0: Math.min(...r.pts.map((q) => q[1])), y1: Math.max(...r.pts.map((q) => q[1])) };
+      if (ln.kind === "wire") p.gauge = ln.gauge;
+      else p.diameterMm = ln.diameterMm;
+      out.push(p);
+    }
+  }
+  const fxSerial = () => ({ fixtures: FX.list.map((f) => ({ ...f, settings: { ...f.settings } })), links: FX.links.map((l) => ({ ...l, from: { ...l.from }, to: { ...l.to } })) });
+  function fxRestore(d) {
+    FX.list = ((d && d.fixtures) || []).map((f) => ({ ...f, settings: { ...f.settings } }));
+    FX.links = ((d && d.links) || []).map((l) => ({ ...l, from: { ...l.from }, to: { ...l.to } }));
+    FX.sel = FX.moving = FX.from = null;
+    FX.v++;
+  }
+  // the inspector and the catalog, for the options strip
+  function fxView(g) {
+    const sel = FX.list.find((f) => f.id === FX.sel),
+      ln = FX.links.find((l) => l.id === FX.sel);
+    if (B.fxNote && performance.now() - B.fxNoteT < 6000) g.push(G_.info("Cannot join these", B.fxNote));
+    if (sel) {
+      const d = fxDef(sel.fixture),
+        dm = d.dims || {},
+        n = FX.links.filter((l) => l.from.piece === sel.id || l.to.piece === sel.id).length;
+      g.push(G_.info(d.name, fmt(dm.w) + " × " + fmt(dm.d) + " × " + fmt(dm.h) + " m · " + (sel.mount === "roof" ? "on the roof" : sel.mount === "wall" ? "on a wall" : sel.mount === "floor" ? "on the floor" : "on the ground") + " · " + (n ? plural(n, "connection") : "not connected")));
+      for (const f of fxSchema(d)) {
+        const v = sel.settings[f.key],
+          locked = sel.mount === "roof" && (f.key === "tiltDeg" || f.key === "azimuthDeg");
+        if (f.type === "boolean") g.push(G_.toggle("fx:" + f.key, f.label || f.key, !!v, v ? "done" : "stop"));
+        else if (f.type === "choice") g.push(G_.select("fx:" + f.key, f.label || f.key, f.options.map((o) => (o && o.value !== undefined ? { v: o.value, name: o.label || String(o.value) } : { v: o, name: String(o) })), v));
+        else g.push({ ...G_.field("fx:" + f.key, f.label || f.key, fmt(+v || 0), f.unit || "", locked ? "Set by the roof it is on" : ""), locked });
+      }
+      g.push(G_.act("fx:turn", "Turn", "turn", "Shift wheel"));
+      g.push(G_.act("fx:move", "Move", "copy"));
+      g.push(G_.act("fx:del", "Remove", "bin", "Del", true));
+      g.push(G_.act("fx:none", "Done", "done"));
+    } else if (ln) {
+      const r = linkRoute(ln),
+        c = ln.kind === "wire" ? CONN.power : ln.diameterMm >= 100 ? CONN.flue : CONN.water,
+        nm = (id) => (fxDef((FX.list.find((f) => f.id === id) || {}).fixture) || { name: "?" }).name;
+      g.push(G_.info(c.name[0].toUpperCase() + c.name.slice(1) + " · " + fmtM(r ? r.len : 0), nm(ln.from.piece) + " to " + nm(ln.to.piece)));
+      if (ln.kind === "wire") g.push(G_.chips("fx:gauge", "Gauge (AWG)", WIRE_GAUGES.map((v) => ({ v, name: v === 0 ? "1/0" : String(v) })), ln.gauge));
+      else g.push(G_.chips("fx:dia", "Diameter", (ln.diameterMm >= 100 ? [100, 125, 150, 200] : PIPE_MM).map((v) => ({ v, name: v + " mm" })), ln.diameterMm));
+      g.push(G_.act("fx:del", "Remove", "bin", "Del", true));
+      g.push(G_.act("fx:none", "Done", "done"));
+    } else {
+      const all = Object.values(FX.cat),
+        cur = fxDef(FX.kind) || all[0],
+        sys = [...new Set(all.map((d) => d.system || "other"))];
+      g.push(G_.chips("fx:sys", "", sys.map((v) => ({ v, name: v[0].toUpperCase() + v.slice(1) })), cur.system || "other"));
+      g.push(G_.act("fx:turn", "Turn " + Math.round((((FX.yaw * 180) / Math.PI) % 360 + 360) % 360) + "°", "turn", "Shift wheel"));
+      g.push(G_.toggle("fx:roofs", "Roofs", fxRoofs(), "roofs", "Show the roofs to put something on one; hide them to reach indoors"));
+      g.push(G_.info(cur.name, (cur.priceUsd !== undefined ? "$" + cur.priceUsd + " · " : "") + (cur.dims ? fmt(cur.dims.w) + " × " + fmt(cur.dims.d) + " × " + fmt(cur.dims.h) + " m" : "")));
+      g.push({ ...G_.chips("fx:kind", "", all.filter((d) => (d.system || "other") === (cur.system || "other")).map((d) => ({ v: d.id, name: d.name })), cur.id), row: 2 });
+    }
+  }
+  function fxChoose(id, v) {
+    const key = id.slice(3),
+      sel = FX.list.find((f) => f.id === FX.sel),
+      ln = FX.links.find((l) => l.id === FX.sel);
+    if (key === "sys") FX.kind = (Object.values(FX.cat).find((d) => (d.system || "other") === v) || {}).id || FX.kind;
+    else if (key === "kind") ((FX.kind = v), (FX.roofs = null));
+    else if (key === "roofs") FX.roofs = !fxRoofs();
+    else if (key === "none") FX.sel = null;
+    else if (key === "sel") FX.sel = v;
+    else if (key === "turn") {
+      if (sel && sel.mount !== "roof") (pushUndo(), (sel.yaw += Math.PI / 4), sel.settings.azimuthDeg !== undefined && (sel.settings.azimuthDeg = Math.round(azOf(Math.sin(sel.yaw), Math.cos(sel.yaw)))), B.version++);
+      else if (!sel) FX.yaw += Math.PI / 4;
+    } else if (key === "move" && sel) FX.moving = sel.id;
+    else if (key === "del" && FX.sel) (pushUndo(), fxRemove(FX.sel), B.version++);
+    else if (key === "gauge" && ln) (pushUndo(), (ln.gauge = v), B.version++);
+    else if (key === "dia" && ln) (pushUndo(), (ln.diameterMm = v), B.version++);
+    else if (sel) {
+      const sp = fxSchema(fxDef(sel.fixture)).find((f) => f.key === key);
+      pushUndo();
+      fxSetting(sel.id, key, sp && sp.type === "boolean" ? !sel.settings[key] : v);
+    }
+    FX.v++;
+  }
+
   /* ---------- the piece interface ---------- */
   // Every built element as plain data (see ARCHITECTURE.md): what it is, what it is made of, and its size and
   // place in world metres. Structure, heat, salvage and the rest read buildings only through this list.
@@ -6826,8 +8016,11 @@
       return { x, z };
     };
     const loop = (pts) => pts.map((q) => W2(q[0], q[1]));
-    const head = (id, kind, type, material) => ({ id, struct: S.id, storey: S.level, kind, type, material });
+    const head = (id, kind, type, material) => ({ id, struct: S.id, storey: S.level, kind, type, material, built: !S.plan.has(id) });
     const lay = (id, def) => S.asm[id] || def;
+    const mem = membersOf(S),
+      kids = (id) => mem.byParent.get(id) || null,
+      done = (id) => !S.plan.has(id);
     // height above the structure's base of a point y up a wall module that starts lvl storeys up (low walls are not stretched)
     const up = (y, lvl, fixed) => (fixed ? y : (lvl || 0) * H + (y <= 0.3 ? y : 0.3 + (y - 0.3) * kS));
     // one opening: its module starts s0 metres along the wall from (ax, az) and is mlen long
@@ -6846,12 +8039,12 @@
     };
     const wall = (id, cls, mat, ax, az, bx, bz, len, opens, storeys, extra) => {
       const hgt = cls === "rail" ? 1.02 : cls === "parapet" ? 1.5 : H * (storeys || 1),
-        L = lay(id, wallLayers(cls, mat)),
+        L = S.asm[id] || (kids(id) ? builtWallLayers(S, id, mat, kids(id)) : wallLayers(cls, mat)),
         gross = len * hgt;
       let cut = 0;
       for (const o of opens) cut += o.area;
       out.push({ ...head(id, "wall", cls, mat), a: W2(ax, az), b: W2(bx, bz), y0: y0 + (extra && extra.base ? extra.base : 0), y1: y0 + (extra && extra.base ? extra.base : 0) + hgt, length: len, height: hgt, thickness: sumT(L), area: gross, netArea: gross - cut, layers: L, openings: opens, ...(extra && extra.more) });
-      for (const p of pend) out.push(p);
+      for (const p of pend) ((p.stage = "openings"), (p.parent = id), out.push(p));
       pend.length = 0;
     };
     const floorLay = (id, mat) => lay(id, ASSEMBLIES.floor[mat] || ASSEMBLIES.floor.planks);
@@ -6859,7 +8052,8 @@
     const footing = (id, a, b, area, outline, holes) => {
       if (S.level !== 0 || S.po) return;
       const posts = S.lift > 0 && S.depth > 1.6;
-      out.push({ ...head(id + ".fd", "foundation", posts ? "posts" : "plinth", posts ? "timber" : "stone"), a, b, y0: y0 - S.depth, y1: y0, height: S.depth, area, outline, holes, floor: id });
+      const fd = S.found === "plinth" ? null : FOUNDATIONS[S.found];
+      out.push({ ...head(id + ".fd", "foundation", fd ? S.found : posts ? "posts" : "plinth", fd ? (S.found === "skids" || S.found === "pier-blocks" ? "timber" : "concrete") : posts ? "timber" : "stone"), a, b, y0: y0 - (fd ? fd.drop : S.depth), y1: y0, height: fd ? fd.drop : S.depth, area, outline, holes, floor: id, stage: "foundation" });
     };
 
     for (const g of S.runs) {
@@ -6883,7 +8077,7 @@
         b = W2(g.i1 + 1, g.j1 + 1),
         outline = loop(loops[0] || []),
         holes = loops.slice(1).map(loop);
-      out.push({ ...head(g.id, "floor", "floor", g.mat), a, b, y0, y1: y0 + FLOOR_T, thickness: sumT(L), area: g.m.length, perimeter: loops.reduce((s, q) => s + polyLen(q), 0), outline, holes, layers: L });
+      out.push({ ...head(g.id, "floor", "floor", g.mat), a, b, y0, y1: y0 + FLOOR_T, thickness: sumT(L), area: g.m.length, perimeter: loops.reduce((s, q) => s + polyLen(q), 0), outline, holes, layers: S.asm[g.id] || builtFloorLayers(S, g.id, L) });
       footing(g.id, a, b, g.m.length, outline, holes);
     }
     for (const p of S.polys) {
@@ -6896,7 +8090,7 @@
         a = W2(ax, az),
         b = W2(bx, bz),
         outline = loop(p.pts);
-      out.push({ ...head(p.id, "floor", "floor", p.fmat || "planks"), a, b, y0, y1: y0 + FLOOR_T, thickness: sumT(L), area: p.area, perimeter: polyLen(p.pts), outline, holes: [], layers: L });
+      out.push({ ...head(p.id, "floor", "floor", p.fmat || "planks"), a, b, y0, y1: y0 + FLOOR_T, thickness: sumT(L), area: p.area, perimeter: polyLen(p.pts), outline, holes: [], layers: S.asm[p.id] || builtFloorLayers(S, p.id, L) });
       footing(p.id, a, b, p.area, outline, []);
       if (!p.roofed || !p.roofId) continue;
       // a pointed roof over the shape, its eave pushed out a little
@@ -6927,10 +8121,10 @@
             e0 = q.pts[0],
             e1 = q.pts[1];
           const pid = r.id + "." + n++;
-          out.push({ ...head(pid, "roof", r.shape || "gable", mat), roof: r.id, a: W2(e0[0], e0[1]), b: W2(e1[0], e1[1]), y0: base + q.eaveY, y1: base + q.ridgeY, eaveY: base + q.eaveY, ridgeY: base + q.ridgeY, pitchDeg: (pitch * 180) / Math.PI, length: Math.hypot(e1[0] - e0[0], e1[1] - e0[1]), area: plan / Math.cos(pitch), planArea: plan, thickness: sumT(L), footprint: loop(q.pts), facing: { x: q.facing[0] * cy + q.facing[1] * sy, z: -q.facing[0] * sy + q.facing[1] * cy }, layers: S.asm[pid] || L });
+          out.push({ ...head(pid, "roof", r.shape || "gable", mat), roof: r.id, a: W2(e0[0], e0[1]), b: W2(e1[0], e1[1]), y0: base + q.eaveY, y1: base + q.ridgeY, eaveY: base + q.eaveY, ridgeY: base + q.ridgeY, pitchDeg: (pitch * 180) / Math.PI, length: Math.hypot(e1[0] - e0[0], e1[1] - e0[1]), area: plan / Math.cos(pitch), planArea: plan, thickness: sumT(L), footprint: loop(q.pts), facing: { x: q.facing[0] * cy + q.facing[1] * sy, z: -q.facing[0] * sy + q.facing[1] * cy }, layers: S.asm[pid] || S.asm[r.id] || builtRoofLayers(S, pid, L) });
         } else if (q.part === "infill") {
           out.push({ ...head(r.id + ".g" + gi++, "wall", "gable", "timber"), roof: r.id, a: W2(q.a[0], q.a[1]), b: W2(q.b[0], q.b[1]), y0: base + q.y0, y1: base + q.y1, length: Math.hypot(q.b[0] - q.a[0], q.b[1] - q.a[1]), height: q.y1 - q.y0, thickness: sumT(FRAME_WALL), area: q.area, netArea: q.area, shape: q.shape, layers: FRAME_WALL, openings: [] });
-        } else out.push({ ...head(r.id + ".rb", "beam", "ridge", "timber"), roof: r.id, a: W2(q.a[0], q.a[1]), b: W2(q.b[0], q.b[1]), y0: base + q.y0, y1: base + q.y1, length: Math.hypot(q.b[0] - q.a[0], q.b[1] - q.a[1]), height: q.y1 - q.y0, thickness: 0.2 });
+        } // the ridge is one of the roof's members
       }
     }
     S.rings.forEach((r, ni) => {
@@ -7070,6 +8264,24 @@
         c = W2(it[0], it[1]);
       out.push({ ...head(it[5], "fixture", it[2], "mixed"), name: def.name, a: c, b: c, y0: y0 + y, y1: y0 + y + bb.h, height: bb.h, width: bb.w, depth: bb.d, rotationRad: S.yaw + ((it[3] || 0) * Math.PI) / 4, colour: DYES[it[4] || 0][0], light: !!def.light, cosy: def.cosy || 0 });
     }
+    // every member of the construction, as a piece of its own; what it belongs to lists it and is built when they all are
+    for (const p of out) {
+      const k = kids(p.id);
+      if (!k) continue;
+      p.members = k.map((m) => m.id);
+      p.built = k.every((m) => done(m.id));
+    }
+    for (const m of mem.list) {
+      const ax = m.b[0] - m.a[0],
+        ay = m.b[1] - m.a[1],
+        az = m.b[2] - m.a[2],
+        al = Math.hypot(ax, ay, az) || 1,
+        wy = (az * m.n[0] - ax * m.n[2]) / al,
+        e = (Math.abs(m.n[1]) * m.section.d + Math.abs(wy) * m.section.b) / 2,
+        q = { ...head(m.id, m.kind, m.type, m.material), stage: m.stage, parent: m.parent, section: m.section, length: m.length, a: W2(m.a[0], m.a[2]), b: W2(m.b[0], m.b[2]), y0: y0 + Math.min(m.a[1], m.b[1]) - e, y1: y0 + Math.max(m.a[1], m.b[1]) + e };
+      for (const f of MEMBER_EXTRA) if (m[f] !== undefined) q[f] = m[f];
+      out.push(q);
+    }
     return out;
   }
   const PC = { v: -1, list: [], byId: null };
@@ -7081,6 +8293,7 @@
       if (!S.pc) S.pc = structPieces(S);
       for (const p of S.pc) out.push(p);
     }
+    fxPieces(out);
     PC.v = B.version;
     PC.list = out;
     PC.byId = null;
@@ -7098,6 +8311,7 @@
   function quantities(list) {
     const q = { pieces: 0, wallLength: 0, wallArea: 0, floorArea: 0, roofArea: 0, roofPlanArea: 0, doors: 0, windows: 0, posts: 0, beams: 0, stairs: 0, fixtures: 0, pathLength: 0 };
     for (const p of list || listPieces()) {
+      if (p.parent && p.kind !== "door" && p.kind !== "window") continue;   // members are counted through what they make up
       q.pieces++;
       if (p.kind === "wall" && p.type !== "gable") ((q.wallLength += p.length), (q.wallArea += p.netArea));
       else if (p.kind === "floor") q.floorArea += p.area;
@@ -7149,6 +8363,30 @@
     restore: restoreAll,
     ensureLoaded,
     setLayers,
+    // construction (docs/CONSTRUCTION.md): stages, built state, the shopping list and ready-made plans
+    STAGES,
+    FOUNDATIONS,
+    setConstructionMode(on) {
+      B.cmode = !!on;
+      touchUi();
+    },
+    get constructionMode() {
+      return B.cmode;
+    },
+    setBuilt,
+    setStageBuilt,
+    setAllBuilt,
+    showStage(stage) {
+      B.gstage = stage || null;
+      for (const S of B.structs) B.dirty.add(S);
+    },
+    materialsList,
+    plans: planList,
+    placePlan,
+    setFoundation(structId, type) {
+      const S = B.structs.find((O) => O.id === structId);
+      S && setFound(S, type);
+    },
     ASSEMBLIES,
     get LAYER_MATERIALS() {
       const names = new Set();
@@ -7221,6 +8459,10 @@
     update(dt) {
       ensureLoaded();
       flushCover(dt);
+      if (B.dirty.size) {
+        for (const S of B.dirty) B.structs.includes(S) && rebuild(S);
+        B.dirty.clear();
+      }
       if (changeV !== B.version) {
         changeV = B.version;
         for (const fn of changeFns.slice()) {
@@ -7317,7 +8559,7 @@
           }
         }
         const pi = polyAt(S, lx, lz);
-        const inPoly = pi >= 0 && S.polys[pi].roofed && Math.abs(P.y - S.y0) < headroom;
+        const inPoly = pi >= 0 && S.polys[pi].cov && Math.abs(P.y - S.y0) < headroom;
         if (inPoly && Math.abs(P.y - (S.y0 + FLOOR_T)) < 0.5) sheltered = true;
         const ri = ringAt(S, lx, lz);
         const inRing = ri >= 0 && Math.abs(P.y - S.y0) < headroom;
@@ -7327,6 +8569,7 @@
         if (S.roofOp !== target) {
           S.roofOp = clamp(S.roofOp + Math.sign(target - S.roofOp) * dt * 4, 0, 1);
           S.roofMat.opacity = S.roofOp;
+          for (const m of S.memMeshes) if (m.userData.roof) m.visible = S.roofOp > 0.5;
         }
         const room = S.cellRoom.get(ck(ci, cj));
         if (room && room.enclosed && room.roofed && Math.abs(P.y - (S.y0 + FLOOR_T)) < 0.5) ((sheltered = true), (cosy = Math.max(cosy, room.cosy || 0)));
@@ -7381,6 +8624,8 @@
         hearth.position.set(P.x, P.y + 1.9, P.z);
       }
       B.sheltered = sheltered;
+      fxDraw();
+      frameView(dt);
       if (!B.on) return;
       if (B.camT > 0) {
         B.camT -= dt;
@@ -7388,7 +8633,7 @@
         G.cam.pitch += (1.12 - G.cam.pitch) * k;
         G.cam.dist += (Math.max(B.camSaved.dist, 27) - G.cam.dist) * k;
       }
-      const turn = (G.keys.KeyQ ? 1 : 0) - (G.keys.KeyE ? 1 : 0);
+      const turn = (G.keys.KeyQ ? 1 : 0) - (G.keys.KeyE && performance.now() - (B.eDown || 0) > 220 ? 1 : 0);
       if (turn) G.cam.yaw += turn * 1.9 * dt;
       // the hover is worked out again only when the pointer, the view or something built has moved
       const m = G.camera.matrixWorld.elements,
@@ -7415,8 +8660,26 @@
       B.selV++;
       B.meas.length = 0;
       B.measA = null;
+      fxRestore(null);
       touchUi();
     },
+    // equipment (ARCHITECTURE.md, "Fixtures and connections")
+    setFixtureCatalog(map) {
+      FX.cat = map && Object.keys(map).length ? map : DEMO_FIXTURES;
+      if (!FX.cat[FX.kind]) FX.kind = Object.keys(FX.cat)[0];
+      FX.geo.clear();
+      fxTouch();
+    },
+    fixtureCatalog: () => FX.cat,
+    addFixtures: fxAdd,
+    setFixtureSetting: fxSetting,
+    connect: fxConnect,
+    removeFixture(id) {
+      const ok = fxRemove(id);
+      ok && fxTouch();
+      return ok;
+    },
+    port: fxPort,
     state: B,
     Geo,
     texel,
