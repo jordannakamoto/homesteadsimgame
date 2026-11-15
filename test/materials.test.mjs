@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { FOOD_STARTER, foodId } from '../src/sim/food-catalog.js';
 import {
   MATERIALS, material, MATERIAL_CLASSES, APPEARANCE_MATERIAL, APPEARANCE_BY_KIND, rValue,
   ITEMS, ITEM_CATEGORIES, unitVolumeM3,
@@ -161,7 +162,7 @@ test('a new world starts with money and a starter kit', () => {
   const s = fresh().state.sys.stock;
   assert.equal(s.money, START_MONEY_USD);
   assert.deepEqual(s.tools, [...STARTER_TOOLS]);
-  assert.deepEqual(s.items, {});
+  assert.deepEqual(s.items, Object.fromEntries(Object.entries(FOOD_STARTER).map(([id, qty]) => [foodId(id), qty])));
   assert.ok(s.projects.length >= 3 && s.projects.every((p) => p.status === 'open' && p.title && p.blurb));
   assert.equal(toolAvailable(s, 'axe', false), true);
   assert.equal(toolAvailable(s, 'circular_saw', true), false, 'not owned');

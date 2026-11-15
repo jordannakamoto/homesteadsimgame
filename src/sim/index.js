@@ -5,6 +5,7 @@ import { createSim } from './sim.js';
 import { stockSystem } from './stock.js';
 import { weather } from './weather.js';
 import { siteSystem } from './site.js';
+import { cookingSystem } from './cooking.js';
 import { water } from './water.js';
 import { electrical } from './electrical.js';
 
@@ -24,7 +25,7 @@ export { electrical, powerAvailableAt, overlayData as electricalOverlay, FIXTURE
 
 // Systems are added here, in dependency order, as the iterations land. Electrical runs before water
 // so a pump's request for power is answered in the same minute.
-export const GAME_SYSTEMS = [weather, stockSystem(), siteSystem(), electrical, water];
+export const GAME_SYSTEMS = [weather, stockSystem(), siteSystem(), electrical, water, cookingSystem()];
 
 export function createGameSim(seed, opts = {}) {
   return createSim({ seed, systems: GAME_SYSTEMS, ...opts });
