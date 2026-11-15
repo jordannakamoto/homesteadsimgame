@@ -60,7 +60,7 @@ const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 // env: { days, temps: [hourly air C], n, soilC (seed-zone temperature), topWet (0..1 water in the seed zone),
 //        minC (the coldest the plant felt), rsMJ (global solar reaching the canopy over the step, per m2),
 //        dayH (day length), water (Ks 0..1), nutrient (0..1), light (0..1, already in rsMJ: for reporting),
-//        competition (0..1: share of light weeds leave) }
+//        competition (0..1: share of light weeds leave), nStatus (N held / critical N), pk (P and K factor) }
 // Returns dBio (g DM per m2 grown this step; 0 when nothing grew). Sets plant.events bit flags in `ev`.
 export const EV_EMERGED = 1, EV_STAGE = 2, EV_FROST = 4, EV_KILLED = 8, EV_BOLTED = 16;
 export function advance(p, r, env, ev = { flags: 0 }) {
@@ -72,7 +72,9 @@ export function advance(p, r, env, ev = { flags: 0 }) {
     const dd = env.soilC > r.germMinC ? thermalRate(env.soilC, r) * env.days * clamp((env.topWet - 0.15) / 0.35, 0, 1) : 0;
     p.gdd += dd;
     if (p.gdd >= r.stages[1].gdd) { p.emerged = true; p.lai = Math.max(p.lai, 0.01 * p.density); p.bio = Math.max(p.bio, 1.5 * p.density); ev.flags |= EV_EMERGED; }
-  } else p.gdd += degreeDays(env.temps, env.n, r, (env.days * 24) / Math.max(1, env.n));
+  }
+  const ddNow = p.emerged ? degreeDays(env.temps, env.n, r, (env.days * 24) / Math.max(1, env.n)) : 0;
+  if (p.emerged && !(ev.flags & EV_EMERGED)) p.gdd += ddNow;
   const st = stageIndex(r, p.gdd);
   if (st !== p.stage) { p.stage = st; ev.flags |= EV_STAGE; }
   // frost: only what is above ground can freeze
@@ -81,12 +83,13 @@ export function advance(p, r, env, ev = { flags: 0 }) {
     if (env.minC <= r.frost.killC) { p.dead = 'frost'; p.lai = 0; ev.flags |= EV_KILLED | EV_FROST; return 0; }
     const f = (r.frost.damageC - env.minC) / (r.frost.damageC - r.frost.killC);
     p.lai *= 1 - 0.7 * f; p.health -= 0.4 * f; p.frostBurn = Math.max(p.frostBurn, f); ev.flags |= EV_FROST;
-    if (p.health <= 0.1) { p.dead = 'frost'; p.lai = 0; ev.flags |= EV_KILLED; return 0; }   // frost after frost
+    // frost after frost finishes off a tender or half-hardy plant; a hardy one dies back and waits for spring
+    if (p.health <= 0.1) { if (r.frost.class === 'hardy') p.health = 0.1; else { p.dead = 'frost'; p.lai = 0; ev.flags |= EV_KILLED; return 0; } }
   }
   if (!p.emerged) return 0;
   const x = p.gdd / r.readyGdd;
   // heat: premature flowering (bolting) and lost fruit set
-  if (r.bolt && !p.bolted && x > 0.3) {
+  if (r.bolt && !p.bolted && x > 0.15) {
     let hot = 0; for (let i = 0; i < env.n; i++) hot += Math.max(0, env.temps[i] - r.bolt.aboveC);
     p.bolt += (hot * env.days * (env.dayH >= r.bolt.longDayH ? 1.3 : 1)) / Math.max(1, env.n);
     if (p.bolt >= r.bolt.index) { p.bolted = true; ev.flags |= EV_BOLTED; }
@@ -105,16 +108,17 @@ export function advance(p, r, env, ev = { flags: 0 }) {
   L.water = env.water; L.nutrient = env.nutrient; L.light = env.light; L.crowd = crowd; L.temp = tf; L.weeds = env.competition;
   // once the harvested part is filling, the plant moves nutrients out of its leaves into it (remobilisation),
   // so a shortage then slows growth less than it does in a young plant
-  const nut = x > r.partition.from ? 0.4 + 0.6 * env.nutrient : env.nutrient;
+  const nut = x > r.partition.from && env.nStatus != null ? clamp((env.nStatus - 0.2) / 0.5, 0, 1) * (env.pk ?? 1) : env.nutrient;
   const g = Math.min(env.water, nut) * p.health;
   // canopy: follows its potential (more plants per m2 make more leaf, with diminishing returns), held back by stress
   const past = x > r.stages[r.stages.length - 1].gdd / r.readyGdd;
-  const target = laiPotential(r, Math.min(x, 1)) * Math.pow(p.density, 0.35) * p.health * (past ? 0.5 : 1);
-  if (target > p.lai) p.lai += (target - p.lai) * clamp(degreeDays(env.temps, env.n, r, (env.days * 24) / Math.max(1, env.n)) / 60, 0, 1) * g;
+  const target = laiPotential(r, Math.min(x, 1)) * (p.densF ?? (p.densF = Math.pow(p.density, 0.35))) * p.health * (past ? 0.5 : 1);
+  if (target > p.lai) p.lai += (target - p.lai) * clamp(ddNow / 60, 0, 1) * g;
   else p.lai += (target - p.lai) * clamp(env.days / 20, 0, 1);
   p.peakLai = Math.max(p.peakLai, p.lai);
   // dry matter from intercepted light
-  const dBio = r.rue * env.rsMJ * env.competition * interception(p.lai, r.k) * tf * g;
+  p.cover = interception(p.lai, r.k);
+  const dBio = r.rue * env.rsMJ * env.competition * p.cover * tf * g;
   p.bio += dBio;
   // the harvested part
   const pr = r.partition;
@@ -126,7 +130,7 @@ export function advance(p, r, env, ev = { flags: 0 }) {
   p.yieldDM += dBio * share;
   // repeat harvests ripen behind the growth, and ripe produce left on the plant spoils
   if (r.ripenGdd && x >= 1) {
-    const dd = degreeDays(env.temps, env.n, r, (env.days * 24) / Math.max(1, env.n));
+    const dd = ddNow;
     const unripe = p.yieldDM - p.ripeDM;
     p.ripeDM += unripe * clamp(dd / r.ripenGdd, 0, 1);
     const hang = p.ripeDM - p.pickedDM - p.lostDM;

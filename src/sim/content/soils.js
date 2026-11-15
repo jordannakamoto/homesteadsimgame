@@ -42,15 +42,16 @@ export const DEFAULT_SOIL = 'loam';
 
 // Amendments, per litre as sold (loose volume). Nutrient contents are on a dry-matter basis.
 //   Finished compost: bulk about 550 kg/m3 at 45% moisture; N 1.5%, P 0.4%, K 0.8% of dry matter; organic
-//   matter about half the dry matter; roughly a tenth of its nitrogen becomes available in the first year
+//   matter about half the dry matter; about 5% of its N is already mineral, and roughly a tenth of the rest becomes
+//   available in a temperate first year (releasePerYear is the rate at a steady 20 C, so about half that in practice)
 //   (approx: university extension compost guides, e.g. Cornell, Washington State).
 //   Aged manure (composted cattle or horse): bulk about 700 kg/m3 at 60% moisture; N 2.0%, P 0.6%, K 1.6% dry;
-//   about a quarter of its nitrogen available in the first year (approx: extension manure fact sheets).
+//   a tenth of its N mineral, about a quarter of the rest available in the first year (approx: extension manure fact sheets).
 //   Ground limestone: calcium carbonate, reacting over a couple of months in moist soil.
 //   Straw mulch: about 50 kg/m3 loose; a 7.5 cm layer (75 L per m2) is full cover, and it rots down over a season.
 export const AMENDMENTS = Object.freeze({
-  compost: Object.freeze({ id: 'compost', name: 'Compost', kgPerL: 0.55, moisture: 0.45, nPct: 1.5, pPct: 0.4, kPct: 0.8, omFrac: 0.5, releasePerYear: 0.12, pAvail: 0.5, kAvail: 0.9 }),
-  manure: Object.freeze({ id: 'manure', name: 'Aged manure', kgPerL: 0.7, moisture: 0.6, nPct: 2.0, pPct: 0.6, kPct: 1.6, omFrac: 0.6, releasePerYear: 0.3, pAvail: 0.5, kAvail: 0.9 }),
+  compost: Object.freeze({ id: 'compost', name: 'Compost', kgPerL: 0.55, moisture: 0.45, nPct: 1.5, pPct: 0.4, kPct: 0.8, omFrac: 0.5, mineralFrac: 0.05, releasePerYear: 0.25, pAvail: 0.5, kAvail: 0.9 }),
+  manure: Object.freeze({ id: 'manure', name: 'Aged manure', kgPerL: 0.7, moisture: 0.6, nPct: 2.0, pPct: 0.6, kPct: 1.6, omFrac: 0.6, mineralFrac: 0.1, releasePerYear: 0.5, pAvail: 0.5, kAvail: 0.9 }),
   lime: Object.freeze({ id: 'lime', name: 'Ground limestone', perKg: true, reactTauDays: 60 }),
 });
 export const MULCH = Object.freeze({ id: 'straw', name: 'Straw mulch', kgPerL: 0.05, fullCoverLPerM2: 75, decayPerYear: 1.6, nPct: 0.6, evapCut: 0.5, weedCut: 0.85 });

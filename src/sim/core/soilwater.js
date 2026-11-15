@@ -82,7 +82,7 @@ export function infiltrate(cell, b, mm) {
 // out (reused, no allocation): { evap, transp, drain, ks } in mm.
 export function stepCell(cell, b, inp, hours, out) {
   // drainage: water above field capacity moves down the profile with the soil's time constant
-  if (b.hours !== hours) { b.hours = hours; b.k1 = 1 - Math.exp(-hours / b.tauH); b.k2 = 1 - Math.exp(-hours / (b.tauH * 2)); b.kc = 1 - Math.exp(-hours / 12); }
+  if (b.hours !== hours) { b.hours = hours; b.k1 = 1 - Math.exp(-hours / b.tauH); b.k2 = 1 - Math.exp(-hours / (b.tauH * 2)); b.kc = 1 - Math.exp(-hours / 4); }
   const k = b.k1, k2 = b.k2;
   if (cell.w > b.fc1) { const m = (cell.w - b.fc1) * k; cell.w -= m; cell.d += m; }
   let drain = 0;
@@ -92,7 +92,7 @@ export function stepCell(cell, b, inp, hours, out) {
   out.evap = 0; out.transp = 0;
   out.ks = stressOf(cell, b, inp.rootFrac, inp.p);
   // the seed zone is fed from below by capillary rise, toward the moisture of the soil under it
-  const under = b.swCap * Math.max(0, 1 - cell.de / b.tew, 0.8 * Math.min(1, (cell.w - b.wp1) / (b.fc1 - b.wp1)));
+  const under = b.swCap * Math.max(0, 1 - cell.de / b.tew, 0.9 * Math.min(1, (cell.w - b.wp1) / (b.fc1 - b.wp1)));
   if (under > (cell.sw || 0)) cell.sw = (cell.sw || 0) + (under - (cell.sw || 0)) * b.kc;
   if (inp.frozen || !(inp.et0 > 0)) return out;
   // evaporation from the wet surface, cut by the canopy shading it and by mulch (FAO-56 eqs. 71 to 77)

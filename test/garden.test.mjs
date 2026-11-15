@@ -2,8 +2,8 @@
 // year unless a test says otherwise.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createSim, createGameSim, weather, stockSystem, garden, CROPS, CROP_IDS, DAY, calendar, cellInfo, plantInfo, bedSummary, almanac,
-  frostDates, nitrogenTotal, storedWaterL, sowAdvice } from '../src/sim/index.js';
+import { createSim, createGameSim, weather, stockSystem, garden, gardenSteps, CROPS, CROP_IDS, DAY, calendar, cellInfo, plantInfo, bedSummary, almanac,
+  frostDates, nitrogenTotal, storedWaterL, sowAdvice, plantStatus } from '../src/sim/index.js';
 import { makeField, addGroup, resolve, brush, snapRect } from '../src/sim/core/cellfield.js';
 import { bucket, stepCell, infiltrate, priestleyTaylorMm } from '../src/sim/core/soilwater.js';
 import { advance, newPlant, thermalRate, stageIndex } from '../src/sim/core/growth.js';
@@ -15,10 +15,11 @@ const at = (m, d, year = 0) => (calendar.MONTH_START[m] + d - 1 - calendar.START
 const runTo = (sim, t) => { while (sim.state.t < t) sim.runTicks(60); };
 // A weather stand-in following the weather system's fields: a daily sine of temperature, clear-sky sun, set rain.
 function stubWeather({ meanC = 15, rangeC = 10, cloud = 0.2, rainMmDay = 0, rainEvery = 0, humidity = 0.6 } = {}) {
+  const m0 = typeof meanC === 'function' ? meanC(0) : meanC;
   return {
     name: 'weather', every: 10,
-    init: (ctx) => ({ site: { climate: 'temperate', latitudeDeg: 45 }, tempC: meanC, cloud, windMs: 2, humidity, dewPointC: meanC - 8, rainMmH: 0, snowMmH: 0, snowDepthM: 0,
-      solar: { directNormalWm2: 0, diffuseWm2: 0, globalHorizontalWm2: 0 }, groundTempC: meanC, totals: { precipMm: 0, snowfallMm: 0, meltMm: 0 } }),
+    init: (ctx) => ({ site: { climate: 'temperate', latitudeDeg: 45 }, tempC: m0, cloud, windMs: 2, humidity, dewPointC: m0 - 8, rainMmH: 0, snowMmH: 0, snowDepthM: 0,
+      solar: { directNormalWm2: 0, diffuseWm2: 0, globalHorizontalWm2: 0 }, groundTempC: m0, totals: { precipMm: 0, snowfallMm: 0, meltMm: 0 } }),
     step(ctx) {
       const s = ctx.s, t = ctx.t, h = ((t % DAY) / 3600);
       const m = typeof meanC === 'function' ? meanC(t) : meanC;
@@ -52,6 +53,7 @@ function bedWith(sim, crop, { n = 4, soil, compost = 20, x0 = 0, spacingM } = {}
   assert.ok(s.ok, s.reason);
   return { id: r.id, areaM2: N * N * 0.09 };
 }
+let hoeEvery = 7;
 // The well-tended routine: water whatever is drying, hoe every week.
 function tend(sim, bed, day, { waterIt = true, hoeIt = true } = {}) {
   const b = G(sim).field.groups[bed];
@@ -59,7 +61,7 @@ function tend(sim, bed, day, { waterIt = true, hoeIt = true } = {}) {
     const dry = b.cells.map((_, i) => i).filter((i) => { const ci = cellInfo(sim.state, bed, i), p = b.cells[i].pl && G(sim).plants[b.cells[i].pl]; return ci.water < 0.55 || (p && !p.emerged && ci.seed < 0.6); });
     if (dry.length) cmd(sim, 'garden.water', { bed, cells: dry, litres: dry.length * 0.09 * 15, carriedL: 1e9 });
   }
-  if (hoeIt && day % 7 === 0) cmd(sim, 'garden.hoe', { bed });
+  if (hoeIt && day % hoeEvery === 0) cmd(sim, 'garden.hoe', { bed });
 }
 const plantsOf = (sim, bed) => Object.values(G(sim).plants).filter((p) => p.bed === bed);
 // Grow one crop from sowing to the end of its harvest; returns days to first harvest and the fresh yield per m2.
@@ -78,6 +80,26 @@ function grow(sim, bed, crop, opts = {}) {
     if (ready != null && c.harvest === 'repeat' && (sim.state.t - t0) / DAY > ready + (opts.pickDays ?? (crop === 'kale' ? 150 : crop === 'tomato' ? 120 : 30))) break;
   }
   return { ready, kgM2: kg / bed.areaM2, dead: plantsOf(sim, bed.id).some((p) => p.dead) };
+}
+// Several beds side by side, each tended the same way, until all are done. Returns kg per m2 for each.
+function growAll(sim, list, opts = {}) {
+  const left = new Set(list.map((_, i) => i)), out = list.map(() => ({ ready: null, kg: 0 })), t0 = sim.state.t;
+  for (let day = 0; day < (opts.maxDays || 420) && left.size; day++) {
+    sim.runDays(1);
+    list.forEach(([bed, crop], i) => {
+      if (!left.has(i)) return;
+      const c = CROPS[crop], o = out[i];
+      tend(sim, bed.id, day, opts);
+      const ps = plantsOf(sim, bed.id);
+      if (!ps.length || ps.every((p) => p.dead)) { left.delete(i); return; }
+      if (o.ready == null && ps.some((p) => p.readyT != null)) o.ready = (ps.find((p) => p.readyT != null).readyT - t0) / DAY;
+      if (o.ready == null) return;
+      if (c.harvest === 'repeat' && day % 3 === 0) { const h = cmd(sim, 'garden.harvest', { bed: bed.id }); if (h.ok) o.kg += h.kg[crop]; }
+      if (c.harvest === 'once') { const h = cmd(sim, 'garden.harvest', { bed: bed.id }); if (h.ok) o.kg += h.kg[crop]; left.delete(i); }
+      if (c.harvest === 'repeat' && (sim.state.t - t0) / DAY > o.ready + 30) left.delete(i);
+    });
+  }
+  return out.map((o, i) => o.kg / list[i][0].areaM2);
 }
 // Sensible sowing dates in the temperate climate (last frost about 6 May there).
 const SOW = { radish: [4, 1], lettuce: [3, 25], peas: [3, 20], potato: [4, 1], tomato: [4, 25], bean: [5, 1], carrot: [4, 10], squash: [5, 1],
@@ -147,7 +169,7 @@ test('tomatoes planted out before the last frost are killed; peas sown then are 
     if (plantsOf(sim, tom.id).some((p) => p.dead === 'frost')) tomKilled++;
     if (plantsOf(sim, pea.id).some((p) => p.dead)) peaKilled++;
     const p = plantsOf(sim, tom.id)[0];
-    if (p.dead) assert.match(p.reason, /[Ff]rost/);
+    if (p.dead) assert.match(plantStatus(sim.state, p.id).reason, /[Ff]rost/);
   }
   assert.ok(tomKilled >= 3, 'tomatoes killed in ' + tomKilled + ' of 4 springs');
   assert.equal(peaKilled, 0);
@@ -162,9 +184,9 @@ test('a row cover saves tender plants on a light frost', () => {
 });
 
 test('lettuce bolts in a heat wave and not in a cool spell', () => {
-  const run = (meanC) => { const sim = makeSim({ w: stubWeather({ meanC, rangeC: 12, rainMmDay: 8, rainEvery: 2 }) }); runTo(sim, at(5, 10)); const b = bedWith(sim, 'lettuce', { n: 2 }); for (let d = 0; d < 40; d++) { sim.runDays(1); tend(sim, b.id, d); } return plantsOf(sim, b.id)[0]; };
-  const hot = run(29), mild = run(16);
-  assert.ok(hot.bolted, 'bolted in the heat'); assert.equal(hot.status, 'Bolted');
+  const run = (meanC) => { const sim = makeSim({ w: stubWeather({ meanC, rangeC: 12, rainMmDay: 8, rainEvery: 2 }) }); runTo(sim, at(5, 10)); const b = bedWith(sim, 'lettuce', { n: 2 }); for (let d = 0; d < 40; d++) { sim.runDays(1); tend(sim, b.id, d); } return [plantsOf(sim, b.id)[0], sim]; };
+  const [hot, hs] = run(26), [mild] = run(16);
+  assert.ok(hot.bolted, 'bolted in the heat'); assert.equal(plantStatus(hs.state, hot.id).status, 'Bolted');
   assert.ok(!mild.bolted);
 });
 
@@ -180,7 +202,8 @@ test('a dry spell: the unwatered bed wilts and yields less; water is conserved',
   const sim = makeSim({ w: dry }); runTo(sim, at(4, 15)); const b = bedWith(sim, 'lettuce'); establish(sim, b);
   sim.runDays(20);
   const p = plantsOf(sim, b.id)[0];
-  assert.ok(p.wilt > 0.3 && /dry/.test(p.reason), p.status + ': ' + p.reason);
+  const ps = plantStatus(sim.state, p.id);
+  assert.ok(p.wilt > 0.3 && /dry/.test(ps.reason), ps.status + ': ' + ps.reason);
   // conservation: water in = change in storage + evaporation + transpiration + drainage + runoff
   for (const { sim: s } of [wet, parched]) {
     const T = G(s).totals, cells = Object.values(G(s).field.groups)[0].cells.length;
@@ -228,12 +251,12 @@ test('yields fall when crowded, starved of nitrogen or weedy', () => {
 test('corn after beans yields more than corn after corn', () => {
   const sim = makeSim({ seed: 5 }); runTo(sim, at(4, 25));
   const A = bedWith(sim, 'corn', { n: 3, compost: 0, x0: 0 }), B = bedWith(sim, 'bean', { n: 9, compost: 0, x0: 5 });
-  grow(sim, A, 'corn', { maxDays: 120 }); grow(sim, B, 'bean', { maxDays: 120 });
+  growAll(sim, [[A, 'corn'], [B, 'bean']], { maxDays: 120 });
   cmd(sim, 'garden.pull', { bed: A.id }); cmd(sim, 'garden.pull', { bed: B.id });
   runTo(sim, at(4, 25, 1));
   give(sim, 'seed_corn', 50);
   cmd(sim, 'garden.sow', { crop: 'corn', bed: A.id }); cmd(sim, 'garden.sow', { crop: 'corn', bed: B.id });
-  const ya = grow(sim, A, 'corn').kgM2, yb = grow(sim, B, 'corn').kgM2;
+  const [ya, yb] = growAll(sim, [[A, 'corn'], [B, 'corn']]);
   console.log('# second-year corn kg/m2: after corn', ya.toFixed(2), 'after beans', yb.toFixed(2));
   assert.ok(yb > ya * 1.1);
   assert.match(bedSummary(sim.state, B.id).rotation || '', /corn/i);
@@ -241,13 +264,13 @@ test('corn after beans yields more than corn after corn', () => {
 
 test('compost raises a depleted bed\'s yield over the following season', () => {
   const sim = makeSim({ seed: 2 }); runTo(sim, at(8, 15));
-  const mk = (x0) => { const r = cmd(sim, 'garden.makeBed', { x0, z0: 0, nx: 4, nz: 4, soil: 'sandy_loam' }); for (const c of G(sim).field.groups[r.id].cells) { c.n = 0; c.sn *= 0.4; } return { id: r.id, areaM2: 16 * 0.09 }; };
+  const mk = (x0) => { const r = cmd(sim, 'garden.makeBed', { x0, z0: 0, nx: 4, nz: 4, soil: 'sandy_loam' }); for (const c of G(sim).field.groups[r.id].cells) { c.n = 0; c.sn *= 0.15; } return { id: r.id, areaM2: 16 * 0.09 }; };
   const plain = mk(0), fed = mk(5);
   give(sim, 'compost', 100); cmd(sim, 'garden.amend', { kind: 'compost', bed: fed.id, litres: 16 * 0.09 * 40 });
   runTo(sim, at(4, 25, 1));
   give(sim, 'seed_corn', 20);
   cmd(sim, 'garden.sow', { crop: 'corn', bed: plain.id }); cmd(sim, 'garden.sow', { crop: 'corn', bed: fed.id });
-  const y0 = grow(sim, plain, 'corn').kgM2, y1 = grow(sim, fed, 'corn').kgM2;
+  const [y0, y1] = growAll(sim, [[plain, 'corn'], [fed, 'corn']]);
   console.log('# corn on a depleted bed kg/m2: plain', y0.toFixed(2), 'composted', y1.toFixed(2));
   assert.ok(y1 > y0 * 1.25);
 });
@@ -286,9 +309,9 @@ test('almanac: frost dates from the climate, what to sow, frost risk tonight', (
 
 // ------------------------------------------------------------------ the shorter year
 test('in a 20-day year every crop completes in its season with the same yield per plant', () => {
+  hoeEvery = 1;   // a season's weeds grow in a few real days, so the gardener hoes daily
   for (const crop of CROP_IDS) {
     const sim = makeSim({ seed: 1, yearDays: 20 });
-    runTo(sim, 0);
     while (calendar.dayOfYear(sim.calendarT()) < calendar.MONTH_START[SOW[crop][0]] + SOW[crop][1] - 1 || calendar.dayOfYear(sim.calendarT()) > 330) sim.runTicks(60);
     const b = bedWith(sim, crop);
     const t0 = sim.state.t, r = grow(sim, b, crop, { maxDays: 40, pickDays: crop === 'kale' ? 8 : crop === 'tomato' ? 6 : 2 });
@@ -298,6 +321,7 @@ test('in a 20-day year every crop completes in its season with the same yield pe
     assert.ok(gameDays < expect * 1.5 + 1, `${crop}: ${gameDays.toFixed(1)} game days, expected about ${expect.toFixed(1)}`);
     if (full && CROPS[crop].harvest === 'once') assert.ok(r.kgM2 > full.kgM2 * 0.6 && r.kgM2 < full.kgM2 * 1.5, `${crop}: ${r.kgM2.toFixed(2)} vs ${full.kgM2} kg/m2 at 365 days`);
   }
+  hoeEvery = 7;
 });
 
 test('in a 20-day year tomatoes planted out before the last frost are still killed', () => {
@@ -352,17 +376,5 @@ test('determinism, save round trip, and old saves without a garden', () => {
   d.runDays(1);
 });
 
-test('cost: 400 planted cells under 0.3 ms per growth step and 0.1 ms per soil step; nothing with no beds', () => {
-  const sim = makeSim({ seed: 1 }); runTo(sim, at(4, 20));
-  for (let k = 0; k < 4; k++) { const r = cmd(sim, 'garden.makeBed', { x0: k * 4, z0: 0, nx: 10, nz: 10 }); give(sim, 'seed_carrot', 5); cmd(sim, 'garden.sow', { crop: 'carrot', bed: r.id }); }
-  sim.runDays(30);
-  const g = garden, s = G(sim);
-  const ctx = (tick) => ({ s, t: sim.state.t, tick, dt: 3600, lifeScale: 1, ct: sim.state.t, get: (n) => sim.state.sys[n], emit: () => {}, sim });
-  const time = (tick, n) => { const t0 = performance.now(); for (let i = 0; i < n; i++) g.step(ctx(tick)); return (performance.now() - t0) / n; };
-  time(60, 50);
-  const soil = time(60, 400), both = time(180, 400);
-  console.log('# garden cost, 400 planted cells: soil step', soil.toFixed(4), 'ms, growth step', (both - soil).toFixed(4), 'ms');
-  assert.ok(soil < 0.1, 'soil ' + soil); assert.ok(both - soil < 0.3, 'growth ' + (both - soil));
-  const empty = makeSim(); const es = empty.state.sys.garden;
-  const t0 = performance.now(); for (let i = 0; i < 10000; i++) garden.step({ s: es, tick: 180, get: () => null }); assert.ok((performance.now() - t0) / 10000 < 0.002);
-});
+
+

@@ -160,7 +160,7 @@ const list = [
     emergeGdd: 150, readyGdd: 1750, stages: S(0, 0.2, null, null, 1.12), daysToMaturity: 270, daysFrom: 'planting',
     spacingM: 0.15, seedItem: 'seed_garlic', seedsPerUnit: 100, seedsPerPlant: 1, produce: 'produce_garlic',
     kcb: [0.15, 0.9, 0.6], rootDepthM: 0.4, comfortP: 0.3,
-    frost: { class: 'hardy', damageC: -12, killC: -25 },
+    frost: { class: 'hardy', damageC: -12, killC: -32 },   // the cloves sit below ground: hardy to zone 3
     npk: [12, 1.5, 10], nRemovedGPerKg: 8, ph: [6.0, 7.0],
     rue: 1.0, k: 0.6, laiMax: 1.8, partition: { from: 0.6, to: 0.75, max: 0.8, needsDayH: 13 }, dmf: 0.38,
     yieldKgM2: [0.6, 1.2], harvest: 'once', gesture: 'pull', storageDays: 210,
