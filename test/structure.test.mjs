@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createGameSim, analyseBeam, joistCheck, maxSpan, columnCapacity, designValues, designSnowKPa, solveStructure, structureEnvironment,
-  structureOverlayData, swayNow, SOILS, makeSave, readSave } from '../src/sim/index.js';
+  structureOverlayData, swayNow, GROUND_SOILS as SOILS, makeSave, readSave } from '../src/sim/index.js';
 import { house, setSite } from './helpers/pieces.mjs';
 import { framedCabin, builtTo, STAGES } from './helpers/framed.mjs';
 
