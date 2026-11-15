@@ -261,7 +261,7 @@
   // ------------------------------------------------------------------ what F does here and now
   function nearBuilding(x, z) {
     let best = null, bd = 1e9;
-    for (const pr of inProgress()) { const st = V.structs.get(pr.id), d = Math.hypot(st.x - x, st.z - z) - st.r; if (d < 3.2 && d < bd) { bd = d; best = pr; } }
+    for (const pr of inProgress()) { const st = V.structs.get(pr.id), d = Math.hypot(st.x - x, st.z - z) - st.r; if (d < 0.9 && d < bd) { bd = d; best = pr; } }
     return best;
   }
   function context() {
