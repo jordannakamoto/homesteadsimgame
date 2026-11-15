@@ -100,6 +100,7 @@ const BRACE = Object.freeze({
   solid: [50000, 2.0e7],               // masonry or logs, far stiffer than any wind asks
   earth: [5000, 2.0e6],                // daub or earth infill (NZS 4297 earth shear, about 0.05 MPa on 0.1 m)
 });
+const OPEN_FRAME = 0.2;                // share of a bare stud frame's face that the wind can push on (38 mm studs at 0.4 m, plates, headers)
 const BRACE_N = 2700;                  // one let-in diagonal brace, about 600 lbf (approximate)
 const POSTS_FD = Object.freeze({ spacing: 2, post: 0.22, pad: 0.4 });   // a raised floor's posts as build mode draws them, on pier pads
 
@@ -373,9 +374,20 @@ function memberWeight(p) {
 export function solveStructure(pieces, env) {
   const els = [], byId = new Map(), mem = new Map(), issues = [], members = {}, foundations = {}, racking = {};
   const totals = { appliedN: 0, groundN: 0, unsupportedN: 0 };
-  const live = (pieces || []).filter((p) => p && p.built !== false && p.id != null);
-  const ids = new Set(live.map((p) => p.id));
-  for (const p of live) if (p.parent != null && MEMBER_KINDS[p.kind] && ids.has(p.parent)) { if (!mem.has(p.parent)) mem.set(p.parent, []); mem.get(p.parent).push(p); }
+  // an assembly that lists members reports built only when all of them are: it stands as soon as any one is
+  const hasKids = (p) => Array.isArray(p.members) && p.members.length > 0;
+  const live = (pieces || []).filter((p) => p && p.id != null && (p.built !== false || hasKids(p)));
+  const ids = new Set(live.map((p) => p.id)), kidsOf = new Map(), skip = new Set(), ties = new Set();
+  for (const p of live) if (p.parent != null && !hasKids(p)) { if (!kidsOf.has(p.parent)) kidsOf.set(p.parent, []); kidsOf.get(p.parent).push(p); if (p.kind === 'joist' && p.type === 'ceiling' && p.roof != null) ties.add(p.roof); }
+  for (const p of live) if (p.parent != null && MEMBER_KINDS[p.kind] && ids.has(p.parent) && !hasKids(p)) { if (!mem.has(p.parent)) mem.set(p.parent, []); mem.get(p.parent).push(p); }
+  for (const p of live) {
+    if (!hasKids(p)) continue; const k = kidsOf.get(p.id) || [];
+    if (!k.length) { skip.add(p.id); continue; }                 // planned, nothing of it built yet
+    if (p.kind === 'foundation') {                                // a slab or plinth is one solid base; piers, skids and stem walls stand for themselves
+      if (p.type === 'plinth' || k.some((m) => m.kind === 'slab')) for (const m of k) { if (m.kind === 'slab' || m.kind === 'footing') skip.add(m.id); }
+      else skip.add(p.id);
+    }
+  }
   const issue = (id, severity, governs, utilisation, reason, fix) => issues.push({ pieceId: id, severity, governs, utilisation: r3(cap(utilisation)), reason, fix });
 
   // ---- elements
@@ -387,13 +399,13 @@ export function solveStructure(pieces, env) {
   };
   for (const p of live) {
     const k = p.kind;
-    if (MEMBER_KINDS[k] && p.parent != null && ids.has(p.parent)) continue;
+    if (skip.has(p.id) || (MEMBER_KINDS[k] && p.parent != null && ids.has(p.parent) && !hasKids(p))) continue;
     if (k === 'wall' || LINE_GROUND[k] || (k === 'footing' && !p.outline && plen(p) > 0.05)) {
       const e = mk(p, 'wall'); e.h = Math.max(0.05, e.y1 - e.y0); e.explicit = Array.isArray(p.members) && p.members.length > 0; e.ms = mem.get(p.id) || [];
       e.opens = (p.openings || []).map((o) => [num(o.offset, 0), num(o.offset, 0) + num(o.width, 0)]).filter((o) => o[1] > o[0]).sort((x, y) => x[0] - y[0]);
       let cut = 0; for (const o of e.opens) cut += o[1] - o[0]; e.net = Math.max(0, e.len - cut);
       const L = p.layers || [], solid = L.find((l) => l.role === 'structure'), bay = bayOf(L);
-      if (LINE_GROUND[k] || k === 'footing') { e.ground = true; const s = sec(p, num(p.thickness, 0.14), e.h); e.t = s.b; e.wm = { type: 'solid', t: s.b, mat: p.material }; e.own[0] = memberWeight(p) || s.b * e.h * e.len * ((material(p.material) || {}).densityKgM3 || 0) * G; }
+      if (LINE_GROUND[k] || k === 'footing') { e.ground = k !== 'stemwall'; e.viaGround = true; const s0 = sec(p, num(p.thickness, 0.14), e.h), s = { b: k === 'footing' ? Math.max(s0.b, s0.d) : Math.min(s0.b, s0.d) }; e.t = s.b; e.wm = { type: 'solid', t: s.b, mat: p.material }; e.own[0] = memberWeight(p) || s.b * e.h * e.len * ((material(p.material) || {}).densityKgM3 || 0) * G; }
       else if (e.explicit) {
         const studs = e.ms.filter((q) => q.kind === 'stud').map((q) => ({ s: (q.a.x - e.ax) * e.ux + (q.a.z - e.az) * e.uz, ...sec(q, B_IMPLIED, 0.089), mat: q.material, id: q.id })).sort((x, y) => x.s - y.s);
         const heads = e.ms.filter((q) => q.kind === 'header').map((q) => { const s0 = (q.a.x - e.ax) * e.ux + (q.a.z - e.az) * e.uz, s1 = (q.b.x - e.ax) * e.ux + (q.b.z - e.az) * e.uz; return { s0: Math.min(s0, s1), s1: Math.max(s0, s1), ...sec(q, B_IMPLIED, 0.14), mat: q.material, id: q.id }; });
@@ -403,6 +415,7 @@ export function solveStructure(pieces, env) {
         for (const kind of ['sheathing', 'cladding', 'lining']) { const q = e.ms.find((x) => x.kind === kind); if (!q) continue; const m = material(q.material); if (!m || m.class !== 'wood') continue; const t = /plywood|osb/.test(q.material) ? BRACE.panel : BRACE.boards; cu += t[0]; ga += t[1]; braced = true; }
         const nb = e.ms.filter((q) => q.kind === 'brace').length;
         e.rack = { cap: (cu || BRACE.bare[0]) * e.net + nb * BRACE_N, k: (ga || BRACE.bare[1]) * e.net + nb * 3e5, braced: braced || nb > 0, framed: true };
+        e.open = !braced;                                      // an open frame: the wind passes between the studs
       } else if (solid || (!bay && L.length)) {
         const mat = solid ? solid.material : p.material, t = solid ? solid.thickness : num(p.thickness, 0.1), dv = designValues(mat);
         e.t = t; e.wm = p.type === 'rail' ? { type: 'none' } : { type: 'solid', t, mat }; e.own[0] = layerPa(L) * num(p.netArea, num(p.area, e.len * e.h));
@@ -420,14 +433,15 @@ export function solveStructure(pieces, env) {
     } else if (k === 'beam' || k === 'joist' || k === 'rafter' || k === 'header' || k === 'plate') {
       const e = mk(p, 'beam'), s = sec(p, num(p.thickness, 0.1), num(p.height, Math.max(0.05, e.y1 - e.y0))); e.b = s.b; e.d = s.d; e.t = s.b;
       e.own[0] = s.b * s.d * e.len * ((material(p.material) || {}).densityKgM3 || 0) * G;
+      e.board = p.type === 'ridge' && s.b < 0.06;            // a ridge board only lines the rafters up: it cannot carry them
     } else if (k === 'post' || k === 'stud' || k === 'pier' || (k === 'footing' && !p.outline)) {
       const e = mk(p, 'post'), t = num(p.thickness, 0.1), s = sec(p, t, t); e.b = s.b; e.d = s.d; e.t = Math.min(s.b, s.d); e.h = Math.max(0.05, e.y1 - e.y0);
       e.solidity = p.type === 'chimney' ? 0.75 : 1;          // a chimney is a hollow stack: walls a quarter of its width
-      e.own[0] = s.b * s.d * e.h * e.solidity * ((material(p.material) || {}).densityKgM3 || 0) * G; if (k === 'pier' || k === 'footing') e.ground = true;
+      e.own[0] = s.b * s.d * e.h * e.solidity * ((material(p.material) || {}).densityKgM3 || 0) * G; if (k === 'footing') e.ground = true; e.viaGround = k === 'pier' || k === 'footing';
     } else if (k === 'floor') {
       const e = mk(p, 'floor'); e.P = p.outline && p.outline.length >= 3 ? p.outline : null; e.area = num(p.area, e.P ? polyArea(e.P) : 0);
       e.explicit = Array.isArray(p.members) && p.members.length > 0; e.ms = mem.get(p.id) || [];
-      if (e.explicit) { for (const q of e.ms) e.own[0] += memberWeight(q); e.joists = e.ms.filter((q) => q.kind === 'joist'); e.deck = e.ms.some((q) => q.kind === 'sheathing' || q.kind === 'lining' || q.kind === 'cladding'); }
+      if (e.explicit) { for (const q of e.ms) e.own[0] += memberWeight(q); e.joists = e.ms.filter((q) => q.kind === 'joist' && q.type !== 'rim' && q.type !== 'ceiling'); e.deck = e.ms.some((q) => q.kind === 'sheathing' || q.kind === 'lining' || q.kind === 'cladding'); }
       else {
         const bay = bayOf(p.layers), mat = woodOf(p, bay), d = bay ? bay.thickness : D_DEFAULT;
         e.fr = { b: B_IMPLIED, d, mat, s: JOIST_S, note: `${mm(B_IMPLIED)} x ${mm(d)} mm joists at ${JOIST_S} m assumed${bay ? `, from the ${mm(d)} mm joist bay` : ' (the build-up names none)'}` };
@@ -449,9 +463,10 @@ export function solveStructure(pieces, env) {
       e.mode = p.type === 'pyramid' || p.type === 'cone' || p.type === 'dome' ? 'radial' : fl > 0.5 && e.deg > 0.5 ? 'slope' : 'flat';
       if (e.mode === 'slope') { e.vx = -f.x / fl; e.vz = -f.z / fl; if (!(e.len > 0)) { e.ux = -e.vz; e.uz = e.vx; } }
     } else if (AREA_GROUND[k]) {
-      const e = mk(p, 'ground'); e.ground = true; e.P = p.outline && p.outline.length >= 3 ? p.outline : null; e.area = num(p.area, e.P ? polyArea(e.P) : 0); e.h = Math.max(0, e.y1 - e.y0);
+      const e = mk(p, 'ground'); e.ground = true; const kk = hasKids(p) ? kidsOf.get(p.id) || [] : null; e.P = p.outline && p.outline.length >= 3 ? p.outline : null; e.area = num(p.area, e.P ? polyArea(e.P) : 0); e.h = Math.max(0, e.y1 - e.y0);
       e.posts = p.type === 'posts'; const rho = (material(p.material) || {}).densityKgM3 || 0;
       if (e.posts) { let per = 0; if (e.P) for (let i = 0, j = e.P.length - 1; i < e.P.length; j = i++) per += Math.hypot(e.P[i].x - e.P[j].x, e.P[i].z - e.P[j].z); e.n = Math.max(1, Math.round(e.area / 4 + per / 4 + 1)); e.own[0] = e.n * POSTS_FD.post * POSTS_FD.post * e.h * rho * G; }
+      else if (kk && kk.some((m) => m.kind === 'slab')) { for (const m of kk) e.own[0] += m.kind === 'slab' ? num(m.area, e.area) * 0.1 * ((material(m.material) || {}).densityKgM3 || 0) * G : 0; e.h = 0.1; }
       else e.own[0] = e.area * e.h * rho * G;
       e.lines = [];
     } else if (k === 'stair') {
@@ -498,10 +513,10 @@ export function solveStructure(pieces, env) {
         const g = groundUnder(mx, mz, e.y0), f = g ? null : floorAt(mx, mz, e.y0);
         if (g) e.sup.push({ el: g, w: rest || e.len }); else if (f && f.gnd) e.sup.push({ el: f.gnd, w: rest || e.len }); else if (f) e.sup.push({ el: f, w: rest || e.len });
       }
-      if (!e.sup.length && p0(e) !== 'gable' && onGroundOk(e)) e.ground = true;
+      if (!e.sup.length && p0(e) !== 'gable' && (onGroundOk(e) || e.viaGround)) e.ground = true;
     } else if (e.cls === 'beam') {
       const pts = [];
-      for (const c of nearOf(e, true)) { if (c.y1 < e.y0 - TOLY || c.y0 > e.y0 - 0.25 || c.y1 > e.y1 + 0.6) continue; if (segDist(e.ax, e.az, e.bx, e.bz, c.ax, c.az) <= c.t / 2 + e.b / 2 + 0.12) pts.push({ el: c, t: Math.max(0, Math.min(e.len, (c.ax - e.ax) * e.ux + (c.az - e.az) * e.uz)), w: c.t }); }
+      for (const c of nearOf(e, true)) { if (c.y1 < e.y0 - TOLY || c.y0 > e.y0 - 0.05 || c.y1 > e.y1 + 0.6) continue; if (segDist(e.ax, e.az, e.bx, e.bz, c.ax, c.az) <= c.t / 2 + e.b / 2 + 0.12) pts.push({ el: c, t: Math.max(0, Math.min(e.len, (c.ax - e.ax) * e.ux + (c.az - e.az) * e.uz)), w: c.t }); }
       for (const c of nearOf(e)) {
         const under = c.cls === 'beam' ? c.y1 >= e.y0 - TOLY && c.y1 <= e.y0 + 0.12 : p0(c) === 'gable' ? e.y0 >= c.y0 - 0.1 && e.y0 <= c.y1 + TOLY : Math.abs(c.y1 - e.y0) <= TOLY || (c.y1 > e.y0 && c.y0 < e.y0 - 0.5);
         if (!under || c.y0 > e.y0 - 0.04) continue;
@@ -509,7 +524,7 @@ export function solveStructure(pieces, env) {
         if (o) { pts.push({ el: c, t: o[0], w: c.t, solid: o[1] }); pts.push({ el: c, t: o[1], w: c.t }); } else if (x) pts.push({ el: c, t: x[0], w: c.t, tc: x[1] });
       }
       for (const g of grounds) if (g.P && Math.abs(g.y1 - e.y0) <= TOLY && hit(e, g)) for (const t of [0, e.len]) if (nearPoly(g.P, e.ax + e.ux * t, e.az + e.uz * t, 0.3)) pts.push({ el: g, t, w: 0.3 });
-      pts.sort((a, b) => a.t - b.t);
+      pts.sort((a, b) => a.t - b.t || b.el.y1 - a.el.y1);
       for (const q of pts) if (!e.sup.length || q.t - e.sup[e.sup.length - 1].t > 0.08) e.sup.push(q);
     } else if (e.cls === 'post') {
       if (e.ground) continue;
@@ -517,7 +532,7 @@ export function solveStructure(pieces, env) {
       const c = nearOf(e, true).find((q) => q.y1 >= lo && q.y1 <= hi && Math.hypot(q.ax - e.ax, q.az - e.az) <= 0.25);
       const b = c ? null : nearOf(e).find((q) => q.y1 >= lo && q.y1 <= hi && segDist(q.ax, q.az, q.bx, q.bz, e.ax, e.az) <= 0.25);
       if (c) e.sup.push({ el: c }); else if (b) e.sup.push({ el: b, t: (e.ax - b.ax) * b.ux + (e.az - b.az) * b.uz });
-      else { const g = groundUnder(e.ax, e.az, e.y0), f = g ? null : floorAt(e.ax, e.az, e.y0); if (g) e.sup.push({ el: g }); else if (f && f.gnd) e.sup.push({ el: f.gnd }); else if (f) e.sup.push({ el: f }); else if (onGroundOk(e)) e.ground = true; }
+      else { const g = groundUnder(e.ax, e.az, e.y0), f = g ? null : floorAt(e.ax, e.az, e.y0); if (g) e.sup.push({ el: g }); else if (f && f.gnd) e.sup.push({ el: f.gnd }); else if (f) e.sup.push({ el: f }); else if (onGroundOk(e) || e.viaGround) e.ground = true; }
     } else if (e.cls === 'floor') {
       if (e.gnd) { e.sup.push({ el: e.gnd }); continue; }
       for (const c of nearOf(e)) if (c.y0 < e.y0 - 0.1 && (c.cls === 'beam' ? c.y1 >= e.y0 - 0.35 && c.y1 <= e.y0 + 0.15 : c.y1 >= e.y0 - 0.35)) e.sup.push({ el: c });
@@ -534,6 +549,7 @@ export function solveStructure(pieces, env) {
   const stable = (e) => {
     if (e.stable !== undefined) return e.stable;
     e.stable = false;                                              // guards against a loop
+    if (e.board) return false;
     let n = 0, solid = false; for (const s of e.sup) if (stable(s.el)) { n++; if (s.solid != null) solid = true; }
     return (e.stable = e.cls === 'ground' || e.ground || (e.cls === 'beam' ? n >= 2 || solid : n >= 1));
   };
@@ -575,12 +591,17 @@ export function solveStructure(pieces, env) {
     let unit = null, uLen = -1, uXs = null, uEI = 0, lastChk = null, lastUnit = null, lastW = 0, lastD = 0;
     const sameXs = (a, b) => { if (!b || a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (Math.abs(a[i] - b[i]) > 1e-9) return false; return true; };
     for (const s of strips) {
-      const xs = [], who = [], load = [q[0] * s.w * s.len * fa, q[1] * s.w * s.len * fa, q[2] * s.w * s.len * fa, q[3] * s.w * s.len * fa];
-      if (s.own) load[0] += s.own;
-      const cand = [];
+      const xs = [], who = [], cand = [];
       for (const el of cl) { const x = cross(s.ox, s.oz, s.dx, s.dz, s.len, el); if (x && okSup(el, x[0], s)) cand.push([x[0], el, x[1]]); }
       cand.sort((a, b) => a[0] - b[0]);
       for (const c of cand) if (!xs.length || c[0] - xs[xs.length - 1] > 0.08) { xs.push(c[0]); who.push(c); }
+      s.xs = xs; s.who = who; s.load = [q[0] * s.w * s.len * fa, q[1] * s.w * s.len * fa, q[2] * s.w * s.len * fa, q[3] * s.w * s.len * fa];
+    }
+    // an edge strip with nothing under it (the roof's overhang past the end wall) is carried by its neighbour, as lookouts and sheathing do
+    for (const dir of [1, -1]) { let wsum = 0; for (let i = dir > 0 ? 0 : strips.length - 1; i >= 0 && i < strips.length; i += dir) { const s = strips[i]; if (s.xs.length) { for (let j = i - dir; j >= 0 && j < strips.length; j -= dir) { add(s.load, strips[j].load); strips[j].gone = true; } break; } wsum += s.w; if (wsum > 0.7) break; } }
+    for (const s of strips) {
+      if (s.gone) continue;
+      const xs = s.xs, who = s.who, load = s.load;
       let virt = false;
       if (e.apex && xs.length && s.len - xs[xs.length - 1] > 0.6) { xs.push(s.len); virt = true; }
       const extra = s.pts || [];
@@ -591,20 +612,21 @@ export function solveStructure(pieces, env) {
       const eff = { M: [0, 0, 0, 0], V: [0, 0, 0, 0], dr: [0, 0, 0, 0] }, R = xs.map(() => [0, 0, 0, 0]);
       const kc = s.wc / (s.w * fa || 1);
       for (let k = 0; k < 4; k++) {
-        const w = load[k] / s.len; if (w > 0) { eff.M[k] += unit.M * w * kc; eff.V[k] += unit.V * w * kc; eff.dr[k] += unit.dr * w * kc; for (let i = 0; i < xs.length; i++) R[i][k] += unit.R[i] * w; }
+        const w = load[k] / s.len, wk = q[k] * s.w * fa * kc; if (w > 0) { eff.M[k] += unit.M * wk; eff.V[k] += unit.V * wk; eff.dr[k] += unit.dr * wk; for (let i = 0; i < xs.length; i++) R[i][k] += unit.R[i] * w; }
+        if (false) { eff.M[k] += unit.M * w * kc; eff.V[k] += unit.V * w * kc; eff.dr[k] += unit.dr * w * kc; for (let i = 0; i < xs.length; i++) R[i][k] += unit.R[i] * w; }
         const pk = extra.length ? extra.filter((pt) => pt.v[k] > 0).map((pt) => [pt.x, pt.v[k]]) : extra;
         if (pk.length) { const a = analyseBeam(s.len, xs, [], pk, EI || 1); eff.M[k] += a.M; eff.V[k] += a.V; eff.dr[k] += a.dr; for (let i = 0; i < xs.length; i++) R[i][k] += a.R[i]; }
       }
       if (virt) { thrust = true; add(R[xs.length - 2], R[xs.length - 1]); }
       for (let i = 0; i < who.length; i++) { for (let k = 0; k < 4; k++) if (R[i][k] < 0) R[i][k] = 0; send(who[i][1], R[i], { t: who[i][2] }, false, e.id); sup.add(who[i][1].id); conn++; }
       if (!dv || dv.kind !== 'wood') continue;
-      const same = lastChk && !extra.length && !s.id && lastUnit === unit && Math.abs(load[0] / s.len * kc - lastW) < 1e-9 && s.d === lastD;
+      const same = lastChk && !extra.length && !s.id && lastUnit === unit && Math.abs(q[0] * s.w * fa * kc - lastW) < 1e-9 && s.d === lastD;
       const chk = same ? lastChk : spanCheck(dv, s.b, s.d, eff, strips.length >= 3 && s.wc <= 0.61, limit, cosT);
-      if (!extra.length && !s.id) { lastChk = chk; lastUnit = unit; lastW = load[0] / s.len * kc; lastD = s.d; }
+      if (!extra.length && !s.id) { lastChk = chk; lastUnit = unit; lastW = q[0] * s.w * fa * kc; lastD = s.d; }
       if (s.id) { const an = { span: unit.span, over: unit.over, dShow: chk.ud / limit * Math.max(unit.span, 2 * unit.over) }; members[s.id] = { load: { deadN: r0(load[0]), liveN: r0(load[1] + load[2]), snowN: r0(load[3]), windN: 0 }, demand: r3(chk.demand), capacity: r3(chk.capacity), unit: chk.unit, utilisation: r3(cap(chk.u)), governs: chk.governs, supports: who.map((c) => c[1].id), ok: chk.u <= 1 }; s.chk = chk; s.an = an; }
       if (!worst || chk.u > worst.u) { worst = chk; ws = s; wan = { span: unit.span, over: unit.over, dShow: chk.ud / limit * Math.max(unit.span, 2 * unit.over) }; }
     }
-    return { worst, wan, ws, noSup, oneSup, n: strips.length, sup, conn, thrust };
+    return { worst, wan, ws, noSup, oneSup, n: strips.filter((s) => !s.gone).length, sup, conn, thrust };
   };
 
   // ---- carry the load down, top first
@@ -612,7 +634,7 @@ export function solveStructure(pieces, env) {
     const p = e.p;
     if (e.cls === 'roof') {
       const q = [e.plan > 0 ? e.own[0] / e.plan : 0, 0, e.plan > 0 ? e.own[2] / e.plan : 0, e.plan > 0 ? e.own[3] / e.plan : 0]; e.planA = e.plan;
-      const fr = e.fr, z = Math.max(0, e.y1 - groundY(e)); e.wind = upliftC(e.deg) * windQ(env, z) * e.plan;
+      const fr = e.fr, z = Math.max(0, e.y1 - groundY(e)); e.wind = upliftC(e.deg) * windQ(env, z) * e.plan * (e.deck ? 1 : OPEN_FRAME);
       let res = null, strips = [];
       const mkStrip = (ox, oz, dx, dz, len, w, r) => ({ ox, oz, dx, dz, len, w, wc: r ? w : fr.s, b: r ? sec(r, B_IMPLIED, D_DEFAULT).b : fr.b, d: r ? sec(r, B_IMPLIED, D_DEFAULT).d : fr.d, mat: r ? r.material : fr.mat, id: r ? r.id : null });
       if (e.explicit && !e.rafters.length) { rec(e, { u: 0, governs: 'bending', demand: 0, capacity: 0, unit: 'MPa' }, []); lost(e.own); continue; }
@@ -652,7 +674,7 @@ export function solveStructure(pieces, env) {
         const chk = uu > w.u ? { u: uu, governs: 'uplift', demand: e.wind, capacity: hold, unit: 'N' } : w; rec(e, chk, e.explicit ? e.rafters.map((r) => r.id) : sup, { note, spanM: r3(res.wan.span) });
         if (w.u > 1) { const c = w.st && w.st.u > 1 ? w.st : w, t = spanWords(e, 'This roof\'s rafters', c, res.wan, res.ws, 'the wall'); issue(res.ws.id || e.id, c.governs === 'deflection' ? 'warn' : 'fail', c.governs, c.u, t[0], c.governs === 'deflection' ? t[1] : 'Add a ridge beam on posts, a purlin, or a supporting wall mid-span, or use deeper rafters.'); }
         if (uu > 1) issue(e.id, 'warn', 'uplift', uu, `In a ${Math.round(env.gustMs)} m/s storm gust the wind would lift this roof with about ${kN(e.wind)} kN, more than its own weight and its nailed seats hold down (${kN(hold)} kN).`, 'Strap the rafters down to the walls, give them more supports, or use a heavier covering.');
-        if (res.thrust && p.type === 'gable') issue(e.id, 'warn', 'thrust', 0, 'This roof has no ridge beam held up at its ends, so its rafters lean on each other and push the tops of the walls outward.', 'Hold the ridge up with gable walls or posts, or tie each pair of rafters together at wall height.');
+        if (res.thrust && p.type === 'gable' && !ties.has(p.roof)) issue(e.id, 'warn', 'thrust', 0, 'This roof has no ridge beam held up at its ends, so its rafters lean on each other and push the tops of the walls outward.', 'Hold the ridge up with gable walls or posts, or tie each pair of rafters together at wall height.');
       }
     } else if (e.cls === 'floor') {
       if (e.gnd || e.ground) {
@@ -780,7 +802,7 @@ export function solveStructure(pieces, env) {
   }
   function doWall(e) {
     const p = e.p, wm = e.wm, v = [e.own[0] + e.got[0], e.got[1], e.got[2], e.got[3]], sup = e.sup.filter((s) => s.el.stable), what = p.type === 'gable' ? 'This gable wall' : p.kind === 'wall' ? 'This wall' : `This ${p.kind}`;
-    const z = Math.max(0, e.y1 - groundY(e)), qw = windQ(env, z) * C_WALL; e.wind = qw * e.len * e.h;
+    const z = Math.max(0, e.y1 - groundY(e)), qw = windQ(env, z) * C_WALL; e.wind = qw * e.len * e.h * (e.open ? OPEN_FRAME : 1);
     const line = [0, 0, 0, 0], conc = []; for (const it of e.inbox) { if (it.conc) conc.push(it); else add(line, it.v); }
     let chk = { u: 0, governs: 'compression', demand: 0, capacity: 0, unit: 'N' }, note = wm.note, why = null;
     const cdR = v[3] > 0 ? CD.snow : CD.roofLive, combos = [[0, 0, CD.dead], [1, 0, CD.live], [0, 1, cdR], [0.75, 0.75, cdR]];
@@ -874,8 +896,8 @@ export function solveStructure(pieces, env) {
       // wind blowing along (dx, dz): the walls and roof slopes that face it gather the force; the walls that run along it resist
       let face = 0, big = 0, roofA = 0, ext0 = Infinity, ext1 = -Infinity;
       for (const e of list) {
-        if (e.cls === 'wall' && e.p.type !== 'rail' && !LINE_GROUND[e.p.kind]) { const a = num(e.p.area, e.len * e.h) * Math.abs(-e.uz * dx + e.ux * dz) * (e.p.type === 'gable' ? 1 : 0.5); face += a; if (a > big) big = a; }
-        if (e.cls === 'roof' && e.mode === 'slope') roofA += Math.abs(e.vx * dx + e.vz * dz) * (e.y1 - e.eaveY) * Math.max(e.len, 0.1) * 0.8 * Math.max(0, Math.min(1, (e.deg - 10) / 20));
+        if (e.cls === 'wall' && e.p.type !== 'rail' && !LINE_GROUND[e.p.kind]) { const a = num(e.p.area, e.len * e.h) * Math.abs(-e.uz * dx + e.ux * dz) * (e.p.type === 'gable' ? 1 : 0.5) * (e.open ? OPEN_FRAME : 1); face += a; if (a > big) big = a; }
+        if (e.cls === 'roof' && e.mode === 'slope') roofA += Math.abs(e.vx * dx + e.vz * dz) * (e.y1 - e.eaveY) * Math.max(e.len, 0.1) * 0.8 * Math.max(0, Math.min(1, (e.deg - 10) / 20)) * (e.deck ? 1 : OPEN_FRAME);
         if (e.cls === 'wall' || e.cls === 'ground') for (const [x, zz] of [[e.ax, e.az], [e.bx, e.bz]]) { const s = x * dx + zz * dz; if (s < ext0) ext0 = s; if (s > ext1) ext1 = s; }
       }
       const F = q * (C_DRAG * Math.max(face / 2, big) + roofA / 2), along = walls.filter((w) => Math.abs(w.ux * dx + w.uz * dz) > 0.7);
@@ -883,16 +905,16 @@ export function solveStructure(pieces, env) {
       for (const w of along) {
         const f = K > 0 ? F * w.rack.k / K : 0, u = w.rack.cap > 0 ? f / w.rack.cap : UMAX, sway = Math.min(w.h / 20, w.rack.k > 0 ? f * w.h / w.rack.k : w.h / 20);
         const prev = racking[w.id]; if (prev && prev.utilisation >= r3(cap(u))) continue;
-        racking[w.id] = { demandN: r0(f), capacityN: r0(w.rack.cap), utilisation: r3(cap(u)), swayMm: r3(sway * 1000), braced: !!w.rack.braced, ok: u <= 1 };
+        racking[w.id] = { demandN: r0(f), capacityN: r0(w.rack.cap), utilisation: r3(cap(u)), swayMm: r3(sway * 1000), braced: !!w.rack.braced, ok: u <= 1 && !(w.rack.framed && !w.rack.braced) };   // nailed joints alone are never counted as bracing
       }
       const half = (ext1 - ext0) / 2, Mo = F * (top - base) / 2, Mr = 0.6 * dead * half, uo = Mr > 0 ? Mo / Mr : 0;
       if (uo > 1 && half > 0.3) { const g = list.find((e) => e.cls === 'ground') || walls[0]; if (!issues.some((i) => i.pieceId === g.id && i.governs === 'overturning')) issue(g.id, 'warn', 'overturning', uo, `This building is light for its height: a ${Math.round(env.gustMs)} m/s storm gust pushes on it with about ${kN(F)} kN, enough to tip it unless it is held down.`, 'Anchor it to its foundation, make it wider or lower, or add weight low down.'); }
     }
     for (const w of walls) {
       const r = racking[w.id]; if (!r) continue; const m = members[w.id];
-      if (r.utilisation > 1) {
+      if (!r.ok) {
         issue(w.id, 'warn', 'racking', r.utilisation, w.rack.framed && !w.rack.braced ? `This wall is a bare frame: studs and plates with nothing across them. Nothing stops it leaning over sideways like a folding parallelogram, and in a storm gust it would sway about ${Math.round(r.swayMm)} mm.` : `In a ${Math.round(env.gustMs)} m/s storm gust this wall line must resist about ${kN(r.demandN)} kN of sideways push along its length, and its ${w.rack.framed ? 'boarding' : 'fabric'} is good for ${kN(r.capacityN)} kN: it would lean (rack) about ${Math.round(r.swayMm)} mm.`, w.rack.framed && !w.rack.braced ? 'Nail sheathing sheets across the studs, or let in a diagonal brace.' : 'Sheathe it with plywood or OSB sheets, add a diagonal brace, or add a cross wall to share the wind.');
-        if (m && r.utilisation > m.utilisation) { m.utilisation = r.utilisation; m.governs = 'racking'; m.demand = r.demandN; m.capacity = r.capacityN; m.unit = 'N'; m.ok = false; }
+        if (m && r.utilisation > m.utilisation && r.utilisation > 1) { m.utilisation = r.utilisation; m.governs = 'racking'; m.demand = r.demandN; m.capacity = r.capacityN; m.unit = 'N'; m.ok = false; }
       }
     }
   }
