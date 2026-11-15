@@ -240,3 +240,39 @@ Water, electricity and room heat are merged and tested headlessly. They become p
 
 - Is the Home panel enough to understand what your power and water are doing, or do you want to see it in the world?
 - Is wiring by dragging between ports clear?
+
+## Wave D1 — Construction: the first shed, raised by hand (iteration 2c)
+
+**What is new**
+
+- **Build panel (N, or the Build button on the left).** The plan book offers the tool shed (the small cabin opens when the shed is finished). Choose it, and a ghost of the whole plan follows the pointer: the wheel or Q / E turns it, a click sets it down, red means the ground will not do.
+- **Stages in order**, each with what it is, why it exists, its materials in plain words with cost, its state, and one next action. A note on the left of the screen always says what to do next, and an arrow in the world points at it.
+- **Order one stage or everything.** A delivery takes about an hour of game time (under a minute; "Instant deliveries" is an option) and lands as stacks beside the building: lumber, sheets, pier blocks, rolls, bundles, boxes, the door leaning on a trestle.
+- **Carry (F).** Walk to a stack and press F for an armful by weight (about 30 kg: eight studs, one sheet, one pier block). It shows on the shoulder and you walk a little slower.
+- **Work (hold F).** At the building the pieces that can go in glow. Hold F and they go in one after another, each knocked home in three or four blows with a sound. Let go any time.
+- **Walls are framed flat on the deck and tilted up**: hold F to raise, it comes up heavy and lands with a thud, and gets a brace until the sheathing is on.
+- **Moments:** the deck, each wall up, framed, the first rafter, dried in, the door, finished.
+- **How hands-on** is a choice per building, any time: Guided (one press a stage), Hands-on, Piece by piece (click each glowing piece). "Work until done" keeps a stage going while you watch.
+- **The first project card, "Build your first shed"**, is ticked when it is finished; the cabin plan and drawing your own plans open.
+- **Sandbox** (in the Build panel, and a button in Plan mode) gives back instant building. Saves with buildings load as they were.
+- The tool bar's B is now labelled Plan. Start money is $4,000 (the shed's materials are about $2,850).
+
+**Try this**
+
+1. Press N, choose the tool shed, set it down on open ground near you.
+2. Order everything. While it is on its way, stand on the plan and hold F to level the ground.
+3. Follow the note on the left: pier blocks, beams, joists, the deck, four walls up, plates, rafters, the roof.
+4. Save or reload at any point: stacks, the load in your arms and a half-framed wall come back as they were.
+5. Switch a later stage to Guided, or tick "Work until done".
+
+**Measured** (the end-to-end test, a player who never hesitates): hands-on to a roof in about 4 to 5 minutes of play, the whole shed in about 7; Guided about 2. A person reading the notes should take about twice that.
+
+**Known gaps**
+
+- No delivery truck: the stacks drop in with a bump.
+- Stacks sit level on sloping ground and can land on things already there; they are not solid.
+- "Work until done" fetches from the stacks without walking: the character stays put and the armful appears.
+- A piece too heavy for one load (siding, roofing) goes in over several trips and only appears when the last load arrives.
+- The cabin has not been played through; drawn plans become buildings in progress but walls that are not stick-framed are not handled.
+- The nail gun and the wheelbarrow are in the content but not yet in the store.
+- After the roof is on, the view from above hides the walls being sheathed.

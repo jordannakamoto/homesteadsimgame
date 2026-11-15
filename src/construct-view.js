@@ -280,7 +280,7 @@
         if (pl.raise) return { kind: 'raise', id: pr.id, parent: pl.raise };
         const mine = usable(pr, pl, c);
         if (pr.level === 'guided' || s.options.auto) { if (pl.inst.length && !(stack && !c && pr.level !== 'guided' && !mine.length && false)) return { kind: 'auto', id: pr.id, q: pl.inst, stage: pr.members[pl.inst[0]].stage, guided: pr.level === 'guided' }; }
-        else if (mine.length) return { kind: pr.level === 'piece' ? 'piece' : 'work', id: pr.id, q: mine };
+        else if (mine.length) return { kind: pr.level === 'piece' && geom(pr.id).byId.has(mine[0]) ? 'piece' : 'work', id: pr.id, q: mine };
       }
     }
     if (stack) {
