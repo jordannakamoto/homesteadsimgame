@@ -1,4 +1,4 @@
-/* Touch controls: two thumb sticks, action buttons, and the extra build buttons a keyboard would give. */
+/* Touch controls: two thumb sticks and action buttons. Build mode needs no extra buttons: its bar holds every tool and option. */
 (() => {
   const G = window.__game,
     BL = window.__build;
@@ -27,28 +27,12 @@
     '<button type="button" id="tatk">Attack</button>';
   document.body.appendChild(ui);
 
-  // build-mode buttons for what the keyboard and mouse do
-  const extra = document.createElement("div");
-  extra.id = "btouch";
-  extra.innerHTML =
-    '<button type="button" id="tbrem" aria-pressed="false" title="Remove instead of build">Remove</button>' +
-    '<button type="button" id="tbcancel" title="Drop what you are drawing">Cancel</button>' +
-    '<button type="button" id="tblo" title="Lower the next floor">Floor &minus;</button>' +
-    '<button type="button" id="tbhi" title="Raise the next floor">Floor +</button>' +
-    '<button type="button" id="tbwing" aria-pressed="false" title="Start the next piece as a separate wing">Wing</button>' +
-    '<button type="button" id="tbpaint" aria-pressed="false" title="Tap pieces to paint them with the current material">Paint</button>' +
-    '<button type="button" id="tbpick" aria-pressed="false" title="Tap a piece to pick up its material">Pick</button>' +
-    '<button type="button" id="tbprev" title="Step the style back">Style &lsaquo;</button>';
-  const row = document.querySelector("#buildbar .row");
-  row && row.appendChild(extra);
-
   function enable() {
     if (on) return;
     on = true;
     document.body.classList.add("touch");
     ui.hidden = false;
-    const k = $("bkeys");
-    if (k) k.textContent = "One finger draws or places; lift to confirm. Two fingers pinch to zoom, twist to turn, slide up or down to tilt. The left stick walks, the right stick turns and zooms.";
+    B.uiVer++;
   }
   if (window.matchMedia && matchMedia("(pointer: coarse)").matches) enable();
   window.addEventListener("pointerdown", (e) => e.pointerType === "touch" && enable(), true);
@@ -159,21 +143,6 @@
   );
   hold($("tbow"), () => (M.right = !M.right));
 
-  const key = (code, shiftKey) => BL.key({ code, shiftKey: !!shiftKey, repeat: false, preventDefault() {} });
-  const tap = (id, fn) =>
-    $(id).addEventListener("click", () => {
-      fn();
-      B.key = "";
-    });
-  tap("tbrem", () => (B.alt = !B.alt));
-  tap("tbcancel", () => BL.cancel());
-  tap("tblo", () => key("Minus"));
-  tap("tbhi", () => key("Equal"));
-  tap("tbwing", () => (B.wingNext = !B.wingNext));
-  tap("tbpaint", () => (B.tapMode = B.tapMode === "paint" ? "" : "paint"));
-  tap("tbpick", () => (B.tapMode = B.tapMode === "pick" ? "" : "pick"));
-  tap("tbprev", () => key("KeyR", true));
-
   /* ---------- touches on the view, outside build mode ---------- */
   // Dragging turns the camera. With a terrain tool in hand, a touch works the ground there instead.
   const look = new Map();
@@ -230,7 +199,6 @@
   window.addEventListener("pointercancel", lift, true);
 
   /* ---------- every frame ---------- */
-  const press = (id, v) => $(id).setAttribute("aria-pressed", v ? "true" : "false");
   let last = performance.now(),
     n = 0,
     mode = "";
@@ -262,10 +230,6 @@
         const bar = B.on ? $("buildbar") : $("tools"),
           r = bar.getBoundingClientRect();
         ui.style.setProperty("--lift", Math.max(8, window.innerHeight - r.top + 8) + "px");
-        press("tbrem", B.alt);
-        press("tbwing", B.wingNext);
-        press("tbpaint", B.tapMode === "paint");
-        press("tbpick", B.tapMode === "pick");
         $("tbow").classList.toggle("lit", !!M.right);
         $("tatk").textContent = M.right ? "Loose" : "Attack";
       }

@@ -13,40 +13,28 @@
     EAVE = 2.84,
     HALF_T = 0.1;
   const COST = { wall: 2, floor: 1, roof: 1, door: 2, window: 1 };
+  const UNDO_DEPTH = 200;
+  // Top-level tools, in the groups the bar shows them in. "tower" (a round room) is reached from Room's shape
+  // option and "copy" from Select, so neither has a button of its own.
   const TOOLS = [
-    { id: "room", name: "Room", hint: "Drag a rectangle for a floor with walls. Drag a straight line for a single wall." },
-    { id: "wall", name: "Wall", hint: "Drag a wall at any angle, or click point to point to chain walls. R steps through wall, arches, fence, battlement and castle wall. Castle walls can be walked on: run stairs up beside them." },
-    { id: "floor", name: "Floor", hint: "Drag out floor tiles." },
-    { id: "door", name: "Door", hint: "Click a wall to hang a door, or a fence for a gate. It opens when you walk up. R switches to a double door or a castle gate." },
-    { id: "window", name: "Window", hint: "Click a wall to cut a window. R switches between square, arched, shuttered and arrow slit." },
-    { id: "roof", name: "Roof", hint: "Click inside a room or tower to roof it, or drag a rectangle. R changes the roof shape, or over a tower its top." },
-    { id: "tower", name: "Tower", hint: "Click a centre and drag outward for a round tower. R sets its height. Towers 4 m or wider get a spiral stair you can climb." },
-    { id: "stairs", name: "Stairs", hint: "Drag from the foot of the stairs in the direction they should climb. They reach the next storey." },
-    { id: "erase", name: "Remove", hint: "Click a piece to remove it, or drag a box to clear an area." },
+    { id: "select", name: "Select", key: "1", code: "Digit1", group: 0 },
+    { id: "room", name: "Room", key: "2", code: "Digit2", group: 1 },
+    { id: "wall", name: "Wall", key: "3", code: "Digit3", group: 1 },
+    { id: "floor", name: "Floor", key: "4", code: "Digit4", group: 1 },
+    { id: "roof", name: "Roof", key: "5", code: "Digit5", group: 1 },
+    { id: "door", name: "Door", key: "6", code: "Digit6", group: 2 },
+    { id: "window", name: "Window", key: "7", code: "Digit7", group: 2 },
+    { id: "stairs", name: "Stairs", key: "8", code: "Digit8", group: 2 },
+    { id: "pillar", name: "Pillar", key: "9", code: "Digit9", group: 2 },
+    { id: "path", name: "Path", key: "0", code: "Digit0", group: 3 },
+    { id: "decor", name: "Furnish", key: "F", code: "KeyF", group: 3 },
+    { id: "measure", name: "Measure", key: "U", code: "KeyU", group: 4 },
+    { id: "erase", name: "Remove", key: "X", code: "KeyX", group: 4 },
   ];
-  TOOLS.push({ id: "pillar", name: "Pillar", hint: "Click to stand a pillar. Pillars within 4 m of each other are joined by a beam. R switches to a chimney." });
-  TOOLS.push({ id: "path", key: "L", name: "Path", hint: "Drag a path or road over the ground, or click point to point. It follows the land. R sets the width, M the surface." });
-  TOOLS.push({ id: "decor", key: "F", name: "Furnish", hint: "Pick a piece below and click to place it. R turns it, M changes its colour, comma and full stop step through the pieces. Wall pieces snap to walls." });
-  TOOLS.push({ id: "copy", key: "K", name: "Copy", hint: "Click a building to pick it up, then click wherever you want copies. R turns the copy. Right-click or Esc puts it down." });
-  const ICONS = {
-    pillar: '<path d="M8 20h8M9 20V6M15 20V6M7 6h10M8 4h8"/>',
-    path: '<path d="M9 21c0-5 6-5 6-9s-5-4-5-9M14 21c0-4 6-4 6-9"/>',
-    copy: '<rect x="8" y="8" width="12" height="12"/><path d="M16 8V4H4v12h4"/>',
-    decor: '<path d="M5 20v-6h14v6M7 14V9h10v5M5 17h14M9 9V6h6v3"/>',
-    room: '<rect x="4" y="5" width="16" height="14"/><path d="M4 12h3M17 12h3" opacity=".5"/>',
-    wall: '<path d="M3 17h18M5 17V8M19 17V8M5 8h14M12 8v9"/>',
-    floor: '<path d="M4 6h16v12H4zM4 10h16M4 14h16M10 6v4M15 10v4M8 14v4"/>',
-    door: '<path d="M7 20V5h10v15M5 20h14"/><circle cx="14.2" cy="13" r=".9" fill="currentColor"/>',
-    window: '<rect x="5" y="6" width="14" height="12"/><path d="M12 6v12M5 12h14"/>',
-    roof: '<path d="M3 13l9-8 9 8M6 11v8h12v-8"/>',
-    tower: '<path d="M7 20V10M17 20V10M5 20h14M6 10l6-7 6 7zM11 20v-4h2v4"/>',
-    stairs: '<path d="M4 19h4v-4h4v-4h4V7h4"/>',
-    erase: '<path d="M6 6l12 12M18 6L6 18"/>',
-  };
 
   const B = {
     on: false,
-    tool: "room",
+    tool: "select",
     free: true,
     structs: [],
     drag: null,
@@ -54,7 +42,7 @@
     undo: [],
     redo: [],
     flip: false,
-    levels: 2,
+    levels: 1,
     level: 0,
     hs: 1,
     lift: 0,
@@ -90,6 +78,24 @@
     version: 0,
     nextId: 1,
     sheltered: false,
+    // piece identity
+    nextPid: 1,
+    claim: null,
+    // precision: snapping, typed values, measuring
+    snap: true,
+    ctrl: false,
+    typed: { a: null, b: null },
+    meas: [],
+    measA: null,
+    // remodeling
+    sel: null,
+    move: null,
+    showRoofs: false,
+    brush: "run",
+    // what the interface shows; the counters tell it when to redraw
+    uiVer: 1,
+    ovVer: 1,
+    hintText: "",
   };
 
   /* ---------- small helpers ---------- */
@@ -163,6 +169,47 @@
   const ROOFS = { thatch: { name: "Thatch", c: C.thatch }, slate: { name: "Slate", c: col(0x56616c) }, tile: { name: "Clay tile", c: col(0xa9573b) }, shingle: { name: "Wood shingle", c: col(0x6a4f37) }, copper: { name: "Green copper", c: col(0x5fa08a) }, redslate: { name: "Red slate", c: col(0x7b3b3b) } };
   let PAL = WALLS.timber,
     RPAL = C.thatch;
+
+  // What each appearance is taken to be built of: layers from the outside in (floors from the underside up),
+  // thickness in metres. The names are plain material names for the registry to map; a later iteration lets
+  // the player change a piece's layers (insulation in the stud bay, say), which is kept per piece.
+  const LY = (material, thickness, role) => Object.freeze({ material, thickness, role });
+  const FRAME_WALL = Object.freeze([LY("softwood-boards", 0.022, "cladding"), LY("air", 0.089, "cavity"), LY("softwood-boards", 0.019, "lining")]);
+  const DAUB_WALL = Object.freeze([LY("lime-plaster", 0.02, "cladding"), LY("wattle-and-daub", 0.1, "infill"), LY("lime-plaster", 0.02, "lining")]);
+  const solid = (m, t) => Object.freeze([LY(m, t, "structure")]);
+  const MASONRY = { stone: "fieldstone", mossy: "fieldstone", sandstone: "sandstone", whitestone: "limestone", brick: "brick" };
+  const ASSEMBLIES = {
+    wall: { timber: FRAME_WALL, dark: FRAME_WALL, plaster: DAUB_WALL, halftimber: DAUB_WALL, stone: solid("fieldstone", 0.2), mossy: solid("fieldstone", 0.2), sandstone: solid("sandstone", 0.2), whitestone: solid("limestone", 0.2), brick: solid("brick", 0.215), log: solid("softwood-log", 0.2) },
+    floor: {
+      planks: Object.freeze([LY("air", 0.095, "joist-bay"), LY("softwood-boards", 0.025, "deck")]),
+      dark: Object.freeze([LY("air", 0.095, "joist-bay"), LY("softwood-boards", 0.025, "deck")]),
+      flags: Object.freeze([LY("sand", 0.04, "bedding"), LY("flagstone", 0.08, "finish")]),
+      tile: Object.freeze([LY("lime-mortar", 0.09, "bedding"), LY("clay-tile", 0.03, "finish")]),
+      marble: Object.freeze([LY("lime-mortar", 0.09, "bedding"), LY("marble", 0.03, "finish")]),
+      cobble: Object.freeze([LY("sand", 0.04, "bedding"), LY("cobblestone", 0.08, "finish")]),
+      carpet: Object.freeze([LY("air", 0.085, "joist-bay"), LY("softwood-boards", 0.025, "deck"), LY("wool-carpet", 0.01, "finish")]),
+      moss: Object.freeze([LY("topsoil", 0.09, "bedding"), LY("turf", 0.03, "finish")]),
+    },
+    roof: {
+      thatch: Object.freeze([LY("thatch", 0.3, "covering")]),
+      slate: Object.freeze([LY("slate", 0.008, "covering"), LY("softwood-boards", 0.02, "deck"), LY("air", 0.14, "rafter-bay")]),
+      redslate: Object.freeze([LY("slate", 0.008, "covering"), LY("softwood-boards", 0.02, "deck"), LY("air", 0.14, "rafter-bay")]),
+      tile: Object.freeze([LY("clay-roof-tile", 0.015, "covering"), LY("softwood-boards", 0.02, "deck"), LY("air", 0.14, "rafter-bay")]),
+      shingle: Object.freeze([LY("wood-shingle", 0.02, "covering"), LY("softwood-boards", 0.02, "deck"), LY("air", 0.14, "rafter-bay")]),
+      copper: Object.freeze([LY("copper-sheet", 0.0007, "covering"), LY("softwood-boards", 0.02, "deck"), LY("air", 0.14, "rafter-bay")]),
+    },
+    fence: Object.freeze([LY("softwood-rails", 0.07, "fence")]),
+    leaf: Object.freeze([LY("softwood-boards", 0.045, "leaf")]),
+    glazing: Object.freeze([LY("glass", 0.004, "glazing")]),
+    grille: Object.freeze([LY("wrought-iron", 0.03, "grille")]),
+  };
+  const sumT = (layers) => layers.reduce((a, l) => a + l.thickness, 0);
+  function wallLayers(cls, mat) {
+    if (cls === "rail") return ASSEMBLIES.fence;
+    if (cls === "rampart") return solid(MASONRY[mat] || "fieldstone", 1);
+    if (cls === "parapet") return solid(MASONRY[mat] || "fieldstone", 0.26);
+    return ASSEMBLIES.wall[mat] || FRAME_WALL;
+  }
 
   /* ---------- geometry ---------- */
   class Geo {
@@ -2065,7 +2112,7 @@
     );
     tris.forEach((t, n) => {
       const v = t.map((k) => [p.pts[k][0], FLOOR_T + 0.004, p.pts[k][1]]);
-      g.tri(v[0], v[1], v[2], [0, 1, 0], shade(C.floor, 0.9 + 0.16 * hash(n, p.pts.length, 4)));
+      g.tri(v[0], v[1], v[2], [0, 1, 0], shade((FLOORS[p.fmat] || FLOORS.planks).c, 0.9 + 0.16 * hash(n, p.pts.length, 4)));
     });
     if (!p.roofed) return;
     const rise = clamp(p.inr * 1.2, 1.2, 5),
@@ -2301,6 +2348,12 @@
   const ghostOpts = { transparent: true, opacity: 0.5, depthTest: false, depthWrite: false, fog: false, side: T.DoubleSide };
   const ghostAdd = new T.Mesh(new T.BufferGeometry(), new T.MeshBasicMaterial({ color: 0xffe2a0, ...ghostOpts }));
   const ghostDel = new T.Mesh(new T.BufferGeometry(), new T.MeshBasicMaterial({ color: 0xe0563f, ...ghostOpts, opacity: 0.6 }));
+  // a ghost that cannot be placed is hatched as well as red, so it reads without relying on colour
+  ghostAdd.material.userData.hatch = { value: 0 };
+  ghostAdd.material.onBeforeCompile = (sh) => {
+    sh.uniforms.uHatch = ghostAdd.material.userData.hatch;
+    sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nuniform float uHatch;").replace("#include <dithering_fragment>", "#include <dithering_fragment>\ngl_FragColor.a *= mix( 1.0, 0.25 + 0.75 * step( 0.5, fract( ( gl_FragCoord.x + gl_FragCoord.y ) / 11.0 ) ), uHatch );");
+  };
   const ghostGroup = new T.Group();
   ghostAdd.renderOrder = 20;
   ghostDel.renderOrder = 21;
@@ -2352,8 +2405,22 @@
 
   /* ---------- structures ---------- */
   function newStruct(F) {
+    // a structure keeps its id through undo and saving; a copy or a new one takes the next free number
+    const id = F.id && !B.structs.some((O) => O.id === F.id) ? F.id : B.nextId++;
+    if (id >= B.nextId) B.nextId = id + 1;
     const S = {
-      id: B.nextId++,
+      id,
+      ver: 0,
+      wid: new Map(),
+      oid: new Map(),
+      fid: new Map(),
+      pids: [],
+      asm: {},
+      runs: [],
+      fruns: [],
+      regs: [],
+      pc: null,
+      ser: null,
       ox: F.ox,
       oz: F.oz,
       yaw: F.yaw,
@@ -2607,6 +2674,7 @@
     }
     S.b = { i0, i1, j0, j1 };
     S.polys = findPolys(S);
+    identify(S);
     const geo = buildGeo(S, S.depth);
     for (const key of ["main", "roof"]) {
       if (S[key]) {
@@ -2728,6 +2796,9 @@
     S.gapMesh.frustumCulled = false;
     S.gapMesh.visible = B.on;
     S.group.add(S.gapMesh);
+    S.ver++;
+    S.pc = null;
+    S.snapV = -1;
     B.version++;
   }
 
@@ -2819,7 +2890,8 @@
       op.setSegs.length * COST.door +
       op.setSides.filter((x) => x[2]).length * COST.door +
       op.ringRoofs.filter((x) => x[1]).reduce((a, x) => a + Math.round(Math.PI * F.rings[x[0]].r ** 2), 0);
-    op.adds = op.addFloors.length + op.addWalls.length + op.setTypes.length + op.addRoofs.length + op.addSegs.length + op.addRings.length + op.addPillars.length + op.addDecor.length + op.addPaths.length + op.addStairs.length + op.addPolyRoofs.length + op.setSegs.length + op.setSides.filter((x) => x[2]).length + op.ringRoofs.filter((x) => x[1]).length;
+    op.swaps = op.setMats.length + op.setFmats.length + op.setSegMats.length + op.setPillars.length;
+    op.adds = op.swaps + op.addFloors.length + op.addWalls.length + op.setTypes.length + op.addRoofs.length + op.addSegs.length + op.addRings.length + op.addPillars.length + op.addDecor.length + op.addPaths.length + op.addStairs.length + op.addPolyRoofs.length + op.setSegs.length + op.setSides.filter((x) => x[2]).length + op.ringRoofs.filter((x) => x[1]).length;
     op.dels = op.delFloors.length + op.delWalls.length + op.delRoofs.length + op.revert.length + op.delSegs.length + op.delRings.length + op.delPillars.length + op.delDecor.length + op.delPaths.length + op.delStairs.length + op.delPolyRoofs.length + op.setSides.filter((x) => !x[2]).length + op.ringRoofs.filter((x) => !x[1]).length;
     op.valid = true;
     op.reason = "";
@@ -2858,7 +2930,7 @@
   const STYLE_NAME = { wall: "Wall", arch: "Round arches", arch2: "Pointed arches", arch3: "Braced openings", rail: "Fence", parapet: "Battlement", rampart: "Castle wall" };
   const WIN_NAME = { window: "Square window", window2: "Arched window", window4: "Shuttered window", window3: "Arrow slit" };
   const DOOR_NAME = { door: "Door", door2: "Double door", gate: "Castle gate" };
-  const blankOp = (F) => ({ F, addFloors: [], addWalls: [], setTypes: [], addRoofs: [], delFloors: [], delWalls: [], delRoofs: [], revert: [], addSegs: [], addRings: [], delSegs: [], delRings: [], setSegs: [], setSides: [], ringRoofs: [], addStairs: [], delStairs: [], addPillars: [], delPillars: [], addPolyRoofs: [], delPolyRoofs: [], addPaths: [], delPaths: [], addDecor: [], delDecor: [], label: "", marker: null });
+  const blankOp = (F) => ({ F, addFloors: [], addWalls: [], setTypes: [], setMats: [], setFmats: [], setSegMats: [], setPillars: [], addRoofs: [], delFloors: [], delWalls: [], delRoofs: [], revert: [], addSegs: [], addRings: [], delSegs: [], delRings: [], setSegs: [], setSides: [], ringRoofs: [], addStairs: [], delStairs: [], addPillars: [], delPillars: [], addPolyRoofs: [], delPolyRoofs: [], addPaths: [], delPaths: [], addDecor: [], delDecor: [], label: "", marker: null, dims: [], guides: [] });
 
   function rectOps(op, S, i0, j0, i1, j1, withFloor, withWalls) {
     // cells i0..i1, j0..j1 inclusive
@@ -2931,25 +3003,77 @@
     return null;
   }
 
+  // numbers as the player reads them: up to two decimals, no trailing zeros
+  const fmt = (v) => String(Math.round(v * 100) / 100);
+  const fmtM = (v) => fmt(v) + " m";
+  const fmtA = (v) => String(Math.round(v * 10) / 10) + " m²";
+  const tidy = (v) => (Math.abs(v * 2 - Math.round(v * 2)) < 1e-6 ? Math.round(v * 2) / 2 : v);
+  const isInt = Number.isInteger;
+  const plural = (n, one, many) => n + " " + (n === 1 ? one : many || one + "s");
+  const baseType = (cls) => (cls === "rail" ? "rail" : cls === "parapet" ? "parapet" : cls === "rampart" ? "rampart" : "wall");
+  // a live dimension shown on the ghost; field says which typed value it stands for
+  const dim = (op, lx, lz, text, field, val, unit) => op.dims.push({ lx, lz, text, field: field || "", val: val === undefined ? null : val, unit: unit || "" });
+  // the wall under the cursor, found on the face you point at, else by its foot
+  function wallUnder(h) {
+    const pk = pickAt(WALLS_ONLY);
+    if (pk) return pk;
+    const S = h.F.isNew ? null : h.F;
+    if (!S) return null;
+    const e = nearestEdge(S, h.lx, h.lz, true),
+      fp = pickFree(S, h.lx, h.lz);
+    if (fp && fp.dist < 0.5 && (!e || fp.dist < e[3])) return fp.kind === "seg" ? { S, kind: "wall", free: true, idx: fp.idx, type: fp.type } : { S, kind: "ring", ri: fp.ri, side: fp.k, type: fp.type };
+    if (e && e[3] < 0.5) return { S, kind: "wall", i: e[0], j: e[1], d: e[2], type: S.walls.get(ek(e[0], e[1], e[2])) };
+    return null;
+  }
+
   function computeOp() {
     const h = B.hover;
     if (!h) return null;
-    const F = h.F,
+    let F = h.F,
       S = F.isNew ? null : F,
-      op = blankOp(F),
-      t = B.tool,
-      d = B.drag;
+      op = blankOp(F);
+    const t = B.tool,
+      d = B.drag,
+      ty = B.typed;
     const vtx = { i: Math.round(h.lx), j: Math.round(h.lz) },
-      cell = { i: Math.floor(h.lx), j: Math.floor(h.lz) };
+      cell = { i: Math.floor(h.lx), j: Math.floor(h.lz) },
+      pt = { i: h.sx, j: h.sz };
     const size = (w, l) => w + " × " + l + " m";
-    const hv = { i: Math.round(h.lx * 2) / 2, j: Math.round(h.lz * 2) / 2 };
-    const isInt = Number.isInteger;
+    op.snap = h.snap;
+    if (h.guides) for (const g of h.guides) op.guides.push(g);
+    if (t === "select" || t === "measure" || t === "copy") {
+      op.idle = true;
+      op.valid = false;
+      return op;
+    }
     if (t === "pillar") {
-      const near = S ? S.pillars.findIndex((p) => Math.hypot(p[0] - h.lx, p[1] - h.lz) < 0.4) : -1;
-      if (B.alt) near >= 0 && op.delPillars.push(near);
-      else if (near >= 0) op.note = "A pillar stands here";
-      else op.addPillars.push([hv.i, hv.j, B.wmat, B.pkind]);
-      op.label = B.pkind === "chimney" ? "Chimney" : "Pillar";
+      const pts = [],
+        name = B.pkind === "chimney" ? "chimney" : "pillar";
+      if (d && Math.hypot(pt.i - d.a.i, pt.j - d.a.j) > 0.45) {
+        // a drag stands a row of them, evenly spaced
+        let dx = pt.i - d.a.i,
+          dz = pt.j - d.a.j,
+          L = Math.hypot(dx, dz);
+        if (ty.a) ((dx *= ty.a / L), (dz *= ty.a / L), (L = ty.a));
+        const n = Math.max(1, Math.round(L / B.gap));
+        for (let m = 0; m <= n; m++) pts.push([tidy(d.a.i + (dx * m) / n), tidy(d.a.j + (dz * m) / n)]);
+        op.end = { i: d.a.i + dx, j: d.a.j + dz };
+        dim(op, d.a.i + dx / 2, d.a.j + dz / 2, fmtM(L), "a", L, "m");
+        op.label = plural(n + 1, name) + " · " + fmtM(L / n) + " apart";
+      } else pts.push(d ? [d.a.i, d.a.j] : [pt.i, pt.j]);
+      for (const [x, z] of pts) {
+        const near = S ? S.pillars.findIndex((p) => Math.hypot(p[0] - x, p[1] - z) < 0.4) : -1;
+        if (B.alt) near >= 0 && !op.delPillars.includes(near) && op.delPillars.push(near);
+        else if (near < 0) op.addPillars.push([x, z, B.wmat, B.pkind]);
+        else {
+          // one already stands here: a different kind or material replaces it, the same one is picked up
+          const p = S.pillars[near];
+          if ((p[2] || "timber") !== B.wmat || (p[3] || "pillar") !== B.pkind) op.setPillars.push([near, B.wmat, B.pkind]);
+          else if (pts.length === 1) ((op.note = "This " + name + " is already here"), (op.pick = p[4]));
+        }
+      }
+      op.label = op.label || (B.pkind === "chimney" ? "Chimney" : "Pillar");
+      op.marker = pts.length === 1 && !op.addPillars.length ? pts[0] : null;
       return finishOp(op);
     }
     if (t === "decor") {
@@ -2958,11 +3082,12 @@
         if (near >= 0) (op.delDecor.push(near), (op.label = "Remove the " + DECOR[S.decor[near][2]].name.toLowerCase()));
         return finishOp(op);
       }
-      const def = DECOR[B.dkind];
-      let x = Math.round(h.lx * 4) / 4,
-        z = Math.round(h.lz * 4) / 4,
+      const def = DECOR[B.dkind],
+        free = !snapOn();
+      let x = free ? h.lx : Math.round(h.lx * 4) / 4,
+        z = free ? h.lz : Math.round(h.lz * 4) / 4,
         rot = B.drot;
-      if (def.wall && S) {
+      if (def.wall && S && !free) {
         const e = nearestEdge(S, h.lx, h.lz, true);
         if (e && e[3] < 0.75 && !isLow(S.walls.get(ek(e[0], e[1], e[2])))) {
           if (e[2] === 0) {
@@ -2979,10 +3104,11 @@
           op.snapped = true;
         }
       }
+      const here = S ? S.decor.find((q) => Math.hypot(q[0] - x, q[1] - z) < (q[2] === B.dkind ? 0.2 : 0.02)) : null;
       if (F.level && !(S && onFloorAt(S, x, z))) op.note = "It needs a floor up here";
-      else if (S && S.decor.some((q) => q[2] === B.dkind && Math.hypot(q[0] - x, q[1] - z) < 0.2)) op.note = "One stands here already";
+      else if (here) ((op.note = "Click to select this " + DECOR[here[2]].name.toLowerCase()), (op.pick = here[5]));
       else op.addDecor.push([x, z, B.dkind, rot, B.dcol]);
-      op.label = def.name + (def.wall && !op.snapped ? " \u00b7 snaps to walls" : "");
+      op.label = def.name + (def.wall && !op.snapped ? " · snaps to walls" : "");
       return finishOp(op);
     }
     if (t === "path") {
@@ -2998,15 +3124,24 @@
             if (dist < p[4] / 2 + 0.3 && dist < bd) ((bd = dist), (best = idx));
           });
           best >= 0 && op.delPaths.push(best);
-        } else op.marker = [hv.i, hv.j];
+        } else op.marker = [pt.i, pt.j];
         return finishOp(op);
       }
-      const L = Math.hypot(hv.i - d.a.i, hv.j - d.a.j);
-      op.end = hv;
-      op.marker = [hv.i, hv.j];
+      let dx = pt.i - d.a.i,
+        dz = pt.j - d.a.j,
+        L = Math.hypot(dx, dz);
+      if (ty.b !== null && L > 1e-6) {
+        const an = (ty.b * Math.PI) / 180;
+        dx = Math.cos(an) * L * (dx < 0 ? -1 : 1);
+        dz = Math.sin(an) * L * (dz < 0 ? -1 : 1);
+      }
+      if (ty.a && L > 1e-6) ((dx *= ty.a / L), (dz *= ty.a / L), (L = ty.a));
+      const b = { i: tidy(d.a.i + dx), j: tidy(d.a.j + dz) };
+      op.end = b;
+      op.marker = [b.i, b.j];
       if (L > 0.4) {
-        op.addPaths.push([d.a.i, d.a.j, hv.i, hv.j, B.pwidth, B.pmat]);
-        op.label = PATHS[B.pmat].name + " " + Math.round(L * 10) / 10 + " m \u00b7 " + B.pwidth + " m wide";
+        op.addPaths.push([d.a.i, d.a.j, b.i, b.j, B.pwidth, B.pmat]);
+        dim(op, (d.a.i + b.i) / 2, (d.a.j + b.j) / 2, fmtM(L), "a", L, "m");
       }
       return finishOp(op);
     }
@@ -3014,79 +3149,120 @@
       const a0 = d ? d.a : cell;
       let dir = B.stairDir;
       if (d && (cell.i !== a0.i || cell.j !== a0.j)) dir = Math.abs(cell.i - a0.i) >= Math.abs(cell.j - a0.j) ? (cell.i > a0.i ? 0 : 2) : cell.j > a0.j ? 1 : 3;
+      const here = S ? S.stairs.find((st) => st.i === a0.i && st.j === a0.j && st.dir === dir) : null;
       if (!S) {
         op.marker = [vtx.i, vtx.j];
         op.note = "Stairs start on a floor";
-      } else if (S.stairs.some((st) => st.i === a0.i && st.j === a0.j && st.dir === dir)) op.note = "Stairs already here";
+      } else if (here) ((op.note = "Stairs are already here"), (op.pick = here.id));
       else {
         op.addStairs.push({ i: a0.i, j: a0.j, dir });
-        op.label = "Stairs up, " + stairLen(S.hs) + " m long";
+        op.label = "Stairs up " + fmtM(EAVE * S.hs) + " · " + stairLen(S.hs) + " m long";
       }
       return finishOp(op);
     }
     if (t === "tower") {
-      op.marker = d ? [d.a.i, d.a.j] : [hv.i, hv.j];
+      op.marker = d ? [d.a.i, d.a.j] : [pt.i, pt.j];
       if (d) {
-        const dist = Math.hypot(h.lx - d.a.i, h.lz - d.a.j);
+        const dist = ty.a ? ty.a / 2 : Math.hypot(h.lx - d.a.i, h.lz - d.a.j);
         if (dist > 0.8) {
-          const r = clamp(Math.round(dist * 2) / 2, 1.5, 9),
+          const r = ty.a ? clamp(dist, 1.5, 9) : clamp(snapOn() ? Math.round(dist * 2) / 2 : dist, 1.5, 9),
             n = clamp(Math.round((Math.PI * 2 * r) / 1.05 / 2) * 2, 8, 32);
           op.addRings.push({ cx: d.a.i, cz: d.a.j, r, n, rot: Math.PI / n, h: B.levels, sides: Array(n).fill("wall"), roof: false });
-          if (r >= 2 && B.levels > 1) op.label2 = " \u00b7 spiral stair inside";
-          op.label = "Tower " + r * 2 + " m wide \u00b7 " + n + " sides \u00b7 " + B.levels + (B.levels > 1 ? " storeys" : " storey") + (op.label2 || "");
+          dim(op, d.a.i, d.a.j, fmtM(r * 2) + " wide", "a", r * 2, "m wide");
+          dim(op, d.a.i, d.a.j + r * 0.55, fmtA(0.5 * n * r * r * Math.sin((2 * Math.PI) / n)));
+          op.label = n + " sides · " + plural(B.levels, "storey") + (r >= 2 && B.levels > 1 ? " · spiral stair inside" : "");
         }
       }
       return finishOp(op);
     }
     if (t === "wall") {
       if (!d) {
-        op.marker = [hv.i, hv.j];
+        op.marker = [pt.i, pt.j];
         return finishOp(op);
       }
-      const a = d.a,
-        b = hv;
-      if (!(isInt(a.i) && isInt(a.j) && isInt(b.i) && isInt(b.j) && (a.i === b.i || a.j === b.j))) {
-        const L = Math.hypot(b.i - a.i, b.j - a.j);
-        op.end = b;
-        op.marker = [b.i, b.j];
-        if (L > 0.4) {
-          if (B.alt) {
-            S &&
-              S.segs.forEach((sg, idx) => {
-                const near = (x, z) => {
-                  const tt = ((x - a.i) * (b.i - a.i) + (z - a.j) * (b.j - a.j)) / (L * L);
-                  return tt > -0.05 && tt < 1.05 && Math.hypot(x - a.i - (b.i - a.i) * tt, z - a.j - (b.j - a.j) * tt) < 0.2;
-                };
-                near(sg[0], sg[1]) && near(sg[2], sg[3]) && op.delSegs.push(idx);
-              });
-          } else {
-            const k = Math.max(1, Math.round(L));
-            for (let m = 0; m < k; m++) {
-              const p = [a.i + ((b.i - a.i) * m) / k, a.j + ((b.j - a.j) * m) / k, a.i + ((b.i - a.i) * (m + 1)) / k, a.j + ((b.j - a.j) * (m + 1)) / k];
-              const dup = S && S.segs.some((sg) => Math.abs(sg[0] - p[0]) + Math.abs(sg[1] - p[1]) + Math.abs(sg[2] - p[2]) + Math.abs(sg[3] - p[3]) < 0.05);
-              dup || op.addSegs.push([...p, B.style]);
+      const a = d.a;
+      let dx = pt.i - a.i,
+        dz = pt.j - a.j,
+        L = Math.hypot(dx, dz);
+      // typed values: an angle is measured from the grid, on the cursor's side; a length runs along it
+      if (ty.b !== null && L > 1e-6) {
+        const an = (ty.b * Math.PI) / 180;
+        dx = Math.cos(an) * L * (dx < 0 ? -1 : 1);
+        dz = Math.sin(an) * L * (dz < 0 ? -1 : 1);
+      }
+      if (ty.a && L > 1e-6) ((dx *= ty.a / L), (dz *= ty.a / L), (L = ty.a));
+      const b = { i: tidy(a.i + dx), j: tidy(a.j + dz) };
+      L = Math.hypot(b.i - a.i, b.j - a.j);
+      op.end = b;
+      op.marker = [b.i, b.j];
+      op.style = B.style;
+      if (L > 0.4) {
+        const onGrid = isInt(a.i) && isInt(a.j) && isInt(b.i) && isInt(b.j) && (a.i === b.i || a.j === b.j);
+        if (onGrid) {
+          const x = a.j === b.j,
+            lo = Math.min(x ? a.i : a.j, x ? b.i : b.j),
+            hi = Math.max(x ? a.i : a.j, x ? b.i : b.j);
+          for (let m = lo; m < hi; m++) {
+            const e = x ? [m, a.j, 0] : [a.i, m, 1],
+              k = ek(e[0], e[1], e[2]),
+              cur = S ? S.walls.get(k) : undefined;
+            if (B.alt) cur && op.delWalls.push(e);
+            else if (!cur) op.addWalls.push(e);
+            else {
+              // drawing over a wall restyles it: a new style or material takes the old one's place, doors and windows stay
+              if (cur !== B.style && !isDoor(cur) && !isWin(cur)) op.setTypes.push([e[0], e[1], e[2], B.style]);
+              if ((S.wmat.get(k) || "timber") !== B.wmat) op.setMats.push([e[0], e[1], e[2], B.wmat]);
             }
           }
-          let ang = Math.round((Math.atan2(Math.abs(b.j - a.j), Math.abs(b.i - a.i)) * 180) / Math.PI);
-          op.label = STYLE_NAME[B.style] + " " + Math.round(L * 10) / 10 + " m \u00b7 " + ang + "\u00b0";
+        } else if (B.alt) {
+          S &&
+            S.segs.forEach((sg, idx) => {
+              const near = (x, z) => {
+                const tt = ((x - a.i) * (b.i - a.i) + (z - a.j) * (b.j - a.j)) / (L * L);
+                return tt > -0.05 && tt < 1.05 && Math.hypot(x - a.i - (b.i - a.i) * tt, z - a.j - (b.j - a.j) * tt) < 0.2;
+              };
+              near(sg[0], sg[1]) && near(sg[2], sg[3]) && op.delSegs.push(idx);
+            });
+        } else {
+          const k = Math.max(1, Math.round(L));
+          for (let m = 0; m < k; m++) {
+            const p = [a.i + ((b.i - a.i) * m) / k, a.j + ((b.j - a.j) * m) / k, a.i + ((b.i - a.i) * (m + 1)) / k, a.j + ((b.j - a.j) * (m + 1)) / k];
+            const dup = S ? S.segs.findIndex((sg) => Math.min(Math.abs(sg[0] - p[0]) + Math.abs(sg[1] - p[1]) + Math.abs(sg[2] - p[2]) + Math.abs(sg[3] - p[3]), Math.abs(sg[0] - p[2]) + Math.abs(sg[1] - p[3]) + Math.abs(sg[2] - p[0]) + Math.abs(sg[3] - p[1])) < 0.05) : -1;
+            if (dup < 0) op.addSegs.push([...p, B.style]);
+            else {
+              const sg = S.segs[dup];
+              if (sg[4] !== B.style && !isDoor(sg[4]) && !isWin(sg[4])) op.setSegs.push([dup, B.style]);
+              if ((sg[5] || "timber") !== B.wmat) op.setSegMats.push([dup, B.wmat]);
+            }
+          }
         }
-        return finishOp(op);
+        const an = (Math.atan2(Math.abs(b.j - a.j), Math.abs(b.i - a.i)) * 180) / Math.PI,
+          square = an < 0.01 || an > 89.99;
+        dim(op, (a.i + b.i) / 2, (a.j + b.j) / 2, fmtM(L), "a", L, "m");
+        if (!square || ty.b !== null) dim(op, a.i + (b.i - a.i) * 0.14, a.j + (b.j - a.j) * 0.14, fmt(an) + "°", "b", an, "°");
+        else op.fieldB = { val: an, unit: "°" };
+        op.restyle = !op.addWalls.length && !op.addSegs.length && op.setTypes.length + op.setMats.length + op.setSegs.length + op.setSegMats.length > 0;
+        if (op.restyle) op.label = "Restyle as " + STYLE_NAME[B.style].toLowerCase() + ", " + WALLS[B.wmat].name.toLowerCase();
       }
+      return finishOp(op);
     }
-    if (t === "room" || t === "wall") {
+    if (t === "room") {
       if (!d) {
         op.marker = [vtx.i, vtx.j];
         return finishOp(op);
       }
-      let a = d.a,
-        b = vtx;
+      const a = d.a;
+      let b = { i: vtx.i, j: vtx.j };
+      // typed width and depth, in whole metres, on the cursor's side of the start corner
+      if (ty.a) b.i = a.i + Math.max(1, Math.round(ty.a)) * (h.lx < a.i ? -1 : 1);
+      if (ty.b) b.j = a.j + Math.max(1, Math.round(ty.b)) * (h.lz < a.j ? -1 : 1);
       const di = Math.abs(b.i - a.i),
         dj = Math.abs(b.j - a.j);
-      if (t === "wall" || di === 0 || dj === 0) {
-        b = di >= dj ? { i: b.i, j: a.j } : { i: a.i, j: b.j };
+      if (di === 0 || dj === 0) {
+        // a straight drag is a single wall
         op.end = b;
         op.marker = [b.i, b.j];
-        const len = Math.max(Math.abs(b.i - a.i), Math.abs(b.j - a.j));
+        const len = Math.max(di, dj);
         if (B.alt) {
           const lo = { i: Math.min(a.i, b.i), j: Math.min(a.j, b.j) },
             hi = { i: Math.max(a.i, b.i), j: Math.max(a.j, b.j) };
@@ -3096,8 +3272,7 @@
               if (a.j === b.j ? dd === 0 && j === a.j && i >= lo.i && i < hi.i : dd === 1 && i === a.i && j >= lo.j && j < hi.j) op.delWalls.push([i, j, dd]);
             }
         } else lineOps(op, S, a, b);
-        op.label = len ? (t === "wall" ? STYLE_NAME[B.style] : "Wall") + " " + len + " m" : "";
-        if (t === "wall") op.style = B.style;
+        if (len) dim(op, (a.i + b.i) / 2, (a.j + b.j) / 2, fmtM(len), di ? "a" : "b", len, "m");
       } else {
         const i0 = Math.min(a.i, b.i),
           i1 = Math.max(a.i, b.i) - 1,
@@ -3105,64 +3280,129 @@
           j1 = Math.max(a.j, b.j) - 1;
         if (B.alt) eraseRect(op, S, i0, j0, i1, j1);
         else rectOps(op, S, i0, j0, i1, j1, true, true);
-        op.label = "Room " + size(i1 - i0 + 1, j1 - j0 + 1);
         op.end = b;
+        dim(op, (a.i + b.i) / 2, a.j, fmtM(di), "a", di, "m");
+        dim(op, a.i, (a.j + b.j) / 2, fmtM(dj), "b", dj, "m");
+        dim(op, (a.i + b.i) / 2, (a.j + b.j) / 2, fmtA(di * dj));
+        if (B.alt) op.label = "Clear " + size(di, dj);
       }
-    } else if (t === "floor") {
+      return finishOp(op);
+    }
+    if (t === "floor") {
       const a = d ? d.a : cell;
-      const i0 = Math.min(a.i, cell.i),
-        i1 = Math.max(a.i, cell.i),
-        j0 = Math.min(a.j, cell.j),
-        j1 = Math.max(a.j, cell.j);
-      if (B.alt) {
-        if (S) for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) S.floors.has(ck(i, j)) && op.delFloors.push([i, j]);
-      } else rectOps(op, S, i0, j0, i1, j1, true, false);
-      op.label = d ? "Floor " + size(i1 - i0 + 1, j1 - j0 + 1) : "";
-    } else if (t === "door" || t === "window") {
-      let tt = t === "window" ? B.wstyle : B.dstyle;
-      const e = nearestEdge(S, h.lx, h.lz, true);
-      const fp = pickFree(S, h.lx, h.lz);
-      const lowGate = (cur) => (t === "door" && isLow(cur) ? "railgate" : tt);
-      op.label = t === "window" ? WIN_NAME[tt] : DOOR_NAME[tt];
-      if (fp && fp.dist < 0.5 && (!e || fp.dist < e[3])) {
-        tt = lowGate(fp.type);
-        if (fp.type === tt) op.note = "Already a " + t;
-        else if (fp.kind === "seg") op.setSegs.push([fp.idx, tt]);
-        else op.setSides.push([fp.ri, fp.k, tt]);
-      } else if (e) {
-        tt = lowGate(S.walls.get(ek(e[0], e[1], e[2])));
-        if (tt === "railgate") op.label = "Gate";
-        if (S.walls.get(ek(e[0], e[1], e[2])) !== tt) op.setTypes.push([e[0], e[1], e[2], tt]);
-        else op.note = "Already a " + t;
-      } else {
+      let ci = cell.i,
+        cj = cell.j;
+      if (d && ty.a) ci = a.i + (Math.max(1, Math.round(ty.a)) - 1) * (h.lx < a.i ? -1 : 1);
+      if (d && ty.b) cj = a.j + (Math.max(1, Math.round(ty.b)) - 1) * (h.lz < a.j ? -1 : 1);
+      const i0 = Math.min(a.i, ci),
+        i1 = Math.max(a.i, ci),
+        j0 = Math.min(a.j, cj),
+        j1 = Math.max(a.j, cj);
+      for (let j = j0; j <= j1; j++)
+        for (let i = i0; i <= i1; i++) {
+          const has = S && S.floors.has(ck(i, j));
+          if (B.alt) has && op.delFloors.push([i, j]);
+          else if (!has) op.addFloors.push([i, j]);
+          else if ((S.fmat.get(ck(i, j)) || "planks") !== B.fmat) op.setFmats.push([i, j, B.fmat]);   // laying a new surface over an old one replaces it
+        }
+      if (d) {
+        const w = i1 - i0 + 1,
+          l = j1 - j0 + 1,
+          ax = ci >= a.i ? i0 : i1 + 1,
+          az = cj >= a.j ? j0 : j1 + 1;
+        dim(op, (i0 + i1 + 1) / 2, az, fmtM(w), "a", w, "m");
+        dim(op, ax, (j0 + j1 + 1) / 2, fmtM(l), "b", l, "m");
+        dim(op, (i0 + i1 + 1) / 2, (j0 + j1 + 1) / 2, fmtA(w * l));
+        if (!op.addFloors.length && op.setFmats.length) op.label = "Relay as " + FLOORS[B.fmat].name.toLowerCase();
+      }
+      return finishOp(op);
+    }
+    if (t === "door" || t === "window") {
+      const want = t === "window" ? B.wstyle : B.dstyle,
+        names = t === "window" ? WIN_NAME : DOOR_NAME,
+        hit = wallUnder(h),
+        fit = (cur) => (t === "door" && isLow(cur) ? "railgate" : want);
+      op.label = names[want];
+      if (!hit) {
         op.marker = [vtx.i, vtx.j];
         op.note = t === "door" ? "Doors hang in walls" : "Windows go in walls";
+        return finishOp(op);
       }
-    } else if (t === "roof" && !(d && (d.a.i !== cell.i || d.a.j !== cell.j)) && S && ringAt(S, h.lx, h.lz) >= 0) {
-      const ri = ringAt(S, h.lx, h.lz),
-        r = S.rings[ri];
-      if (B.alt) r.roof && op.ringRoofs.push([ri, false]);
-      else if ((r.roof === true ? "cone" : r.roof) === B.tshape) op.note = "Already has this top. R changes it";
-      else op.ringRoofs.push([ri, B.tshape]);
-      op.label = TOP_NAME[B.tshape] + (B.tshape === "crenel" && climbLevels({ ...r, roof: "crenel" }) ? " \u00b7 you can climb up to them" : "");
-    } else if (t === "roof" && !(d && (d.a.i !== cell.i || d.a.j !== cell.j)) && S && polyAt(S, h.lx, h.lz) >= 0) {
-      const pi = polyAt(S, h.lx, h.lz),
-        p = S.polys[pi];
-      if (B.alt) p.roofed && op.delPolyRoofs.push(pi);
-      else if (p.roofed) op.note = "Already roofed";
-      else op.addPolyRoofs.push([p.cx, p.cz, p.area]);
-      op.label = "Roof";
-    } else if (t === "roof") {
+      F = S = hit.S;
+      op = blankOp(F);
+      op.label = names[want];
+      const one = (cur, put, id) => {
+        const tt = fit(cur);
+        if (tt === "railgate") op.label = "Gate";
+        if (cur === "parapet" || (isThick(cur) && t === "window")) op.note = "It does not fit this wall";
+        else if (cur !== tt) put(tt);
+        else if (!op.rowN) ((op.note = "Click to select this " + t), (op.pick = id));
+      };
+      const st = d && d.hit && d.hit.S === S ? d.hit : null;
+      if (hit.kind === "ring") one(S.rings[hit.ri].sides[hit.side], (tt) => op.setSides.push([hit.ri, hit.side, tt]), S.rings[hit.ri].id + ".s" + hit.side + ".o0");
+      else if (hit.free) {
+        // along an angled wall: a drag sets a row of them at even spacing
+        const run = S.fruns.find((g) => g.m.includes(hit.idx)),
+          from = st && st.free && run && run.m.includes(st.idx) ? run.m.indexOf(st.idx) : -1,
+          to = run ? run.m.indexOf(hit.idx) : -1;
+        if (from >= 0 && from !== to) {
+          op.rowN = 0;
+          for (let m = from; from < to ? m <= to : m >= to; m += from < to ? B.gap : -B.gap) (op.rowN++, one(S.segs[run.m[m]][4], (tt) => op.setSegs.push([run.m[m], tt])));
+        } else one(S.segs[hit.idx][4], (tt) => op.setSegs.push([hit.idx, tt]), S.segs[hit.idx][7]);
+      } else {
+        const sameLine = st && !st.free && st.kind === "wall" && st.d === hit.d && (hit.d === 0 ? st.j === hit.j : st.i === hit.i),
+          from = sameLine ? (hit.d === 0 ? st.i : st.j) : -1,
+          to = hit.d === 0 ? hit.i : hit.j;
+        if (sameLine && from !== to) {
+          op.rowN = 0;
+          for (let m = from; from < to ? m <= to : m >= to; m += from < to ? B.gap : -B.gap) {
+            const e = hit.d === 0 ? [m, hit.j, 0] : [hit.i, m, 1],
+              cur = S.walls.get(ek(e[0], e[1], e[2]));
+            if (!cur) continue;
+            op.rowN++;
+            one(cur, (tt) => op.setTypes.push([e[0], e[1], e[2], tt]));
+          }
+        } else one(S.walls.get(ek(hit.i, hit.j, hit.d)), (tt) => op.setTypes.push([hit.i, hit.j, hit.d, tt]), S.oid.get(ek(hit.i, hit.j, hit.d)));
+      }
+      if (op.rowN) op.label = plural(op.rowN, names[want].toLowerCase()) + (B.gap > 1 ? " · one every " + B.gap + " m" : " · side by side");
+      return finishOp(op);
+    }
+    if (t === "roof") {
+      const dragging = d && (d.a.i !== cell.i || d.a.j !== cell.j);
+      if (!dragging && S && ringAt(S, h.lx, h.lz) >= 0) {
+        const ri = ringAt(S, h.lx, h.lz),
+          r = S.rings[ri];
+        if (B.alt) r.roof && op.ringRoofs.push([ri, false]);
+        else if ((r.roof === true ? "cone" : r.roof) === B.tshape && (B.tshape === "crenel" || (r.rmat || "thatch") === B.rmat)) op.note = "It already has this top";
+        else op.ringRoofs.push([ri, B.tshape]);
+        op.label = TOP_NAME[B.tshape] + (B.tshape === "crenel" && climbLevels({ ...r, roof: "crenel" }) ? " · you can climb up to them" : "");
+        return finishOp(op);
+      }
+      if (!dragging && S && polyAt(S, h.lx, h.lz) >= 0) {
+        const pi = polyAt(S, h.lx, h.lz),
+          p = S.polys[pi];
+        if (B.alt) p.roofed && op.delPolyRoofs.push(pi);
+        else if (p.roofed && (p.rmat || "thatch") === B.rmat) ((op.note = "Click to select this roof"), (op.pick = p.roofId));
+        else {
+          p.roofed && op.delPolyRoofs.push(pi);
+          op.addPolyRoofs.push([p.cx, p.cz, p.area]);
+          op.replacing = p.roofed;
+        }
+        op.label = "Pointed roof · " + ROOFS[B.rmat].name.toLowerCase();
+        return finishOp(op);
+      }
       let rect = null;
-      if (d && (d.a.i !== cell.i || d.a.j !== cell.j))
-        rect = { i0: Math.min(d.a.i, cell.i), i1: Math.max(d.a.i, cell.i), j0: Math.min(d.a.j, cell.j), j1: Math.max(d.a.j, cell.j) };
+      if (dragging) rect = { i0: Math.min(d.a.i, cell.i), i1: Math.max(d.a.i, cell.i), j0: Math.min(d.a.j, cell.j), j1: Math.max(d.a.j, cell.j) };
       else if (S) {
-        const room = S.cellRoom.get(ck(cell.i, cell.j));
-        if (room) rect = { i0: room.i0, i1: room.i1, j0: room.j0, j1: room.j1 };
+        // over a roof that is already there, work on that roof; otherwise roof the room under the cursor
+        const ri = h.rlx === undefined ? -1 : S.roofs.findIndex((r) => h.rlx >= r.i0 - 0.4 && h.rlx <= r.i1 + 1.4 && h.rlz >= r.j0 - 0.4 && h.rlz <= r.j1 + 1.4),
+          room = S.cellRoom.get(ck(cell.i, cell.j));
+        if (ri >= 0) rect = { i0: S.roofs[ri].i0, i1: S.roofs[ri].i1, j0: S.roofs[ri].j0, j1: S.roofs[ri].j1 };
+        else if (room) rect = { i0: room.i0, i1: room.i1, j0: room.j0, j1: room.j1 };
       }
       if (rect) {
-        const wide = rect.i1 - rect.i0 >= rect.j1 - rect.j0;
-        const RS = RSHAPES[B.rshape];
+        const wide = rect.i1 - rect.i0 >= rect.j1 - rect.j0,
+          RS = RSHAPES[B.rshape];
         rect.axis = wide !== (RS[0] === "gable" && RS[1] === 1) ? "x" : "z";
         rect.shape = RS[0];
         rect.dir = RS[1];
@@ -3170,56 +3410,84 @@
         if (B.alt) {
           S && S.roofs.forEach((r, idx) => !(r.i1 < rect.i0 || r.i0 > rect.i1 || r.j1 < rect.j0 || r.j0 > rect.j1) && op.delRoofs.push(idx));
         } else {
-          const same = S ? S.roofs.findIndex((r) => r.i0 === rect.i0 && r.i1 === rect.i1 && r.j0 === rect.j0 && r.j1 === rect.j1) : -1;
-          if (same >= 0 && S.roofs[same].axis === rect.axis && (S.roofs[same].shape || "gable") === rect.shape && (S.roofs[same].dir || 0) === rect.dir && (S.roofs[same].pitch || 1) === rect.pitch) op.note = "Already roofed. R changes the roof shape";
+          const same = S ? S.roofs.findIndex((r) => r.i0 === rect.i0 && r.i1 === rect.i1 && r.j0 === rect.j0 && r.j1 === rect.j1) : -1,
+            old = same >= 0 ? S.roofs[same] : null;
+          if (old && old.axis === rect.axis && (old.shape || "gable") === rect.shape && (old.dir || 0) === rect.dir && (old.pitch || 1) === rect.pitch && (old.mat || "thatch") === B.rmat) ((op.note = "Click to select this roof"), (op.pick = old.id));
           else {
-            same >= 0 && op.delRoofs.push(same);
+            // a different shape or covering over an existing roof replaces it in place
+            old && (op.delRoofs.push(same), (rect.id = old.id));
             op.addRoofs.push(rect);
-            op.replacing = same >= 0;
+            op.replacing = !!old;
           }
         }
-        op.label = RSHAPES[B.rshape][2] + " " + size(rect.i1 - rect.i0 + 1, rect.j1 - rect.j0 + 1);
+        op.label = (op.replacing ? "Re-roof: " : "") + RSHAPES[B.rshape][2] + " " + size(rect.i1 - rect.i0 + 1, rect.j1 - rect.j0 + 1) + " · " + ROOFS[B.rmat].name.toLowerCase();
       } else {
         op.marker = [vtx.i, vtx.j];
         op.note = "Click inside a room, or drag a rectangle";
       }
-    } else if (t === "erase") {
+      return finishOp(op);
+    }
+    if (t === "erase") {
       if (d && (d.a.i !== cell.i || d.a.j !== cell.j)) {
         eraseRect(op, S, Math.min(d.a.i, cell.i), Math.min(d.a.j, cell.j), Math.max(d.a.i, cell.i), Math.max(d.a.j, cell.j));
         op.label = "Clear " + size(Math.abs(d.a.i - cell.i) + 1, Math.abs(d.a.j - cell.j) + 1);
-      } else if (S) {
-        const ri = h.rlx === undefined ? -1 : S.roofs.findIndex((r) => h.rlx >= r.i0 - 0.4 && h.rlx <= r.i1 + 1.4 && h.rlz >= r.j0 - 0.4 && h.rlz <= r.j1 + 1.4);
-        const e = nearestEdge(S, h.lx, h.lz, true);
-        const fp = pickFree(S, h.lx, h.lz);
-        const rr = h.rlx === undefined ? -1 : S.rings.findIndex((r) => r.roof && Math.hypot(h.rlx - r.cx, h.rlz - r.cz) < r.r + 0.5);
-        const pr = h.rlx === undefined ? -1 : S.polys.findIndex((p) => p.roofed && pip(p.pts, h.rlx, h.rlz));
-        const si = S.stairs.findIndex((st) => {
-          const [dx, dz] = DIRS[st.dir];
-          return [0, 1, 2].some((m) => st.i + dx * m === cell.i && st.j + dz * m === cell.j);
-        });
-        const pl = S.pillars.findIndex((p) => Math.hypot(p[0] - h.lx, p[1] - h.lz) < 0.4);
-        const dc = nearestDecor(S, h.lx, h.lz, 0.45);
-        if (ri >= 0) op.delRoofs.push(ri);
-        else if (dc >= 0) op.delDecor.push(dc);
-        else if (pl >= 0) op.delPillars.push(pl);
-        else if (rr >= 0) op.ringRoofs.push([rr, false]);
-        else if (pr >= 0) op.delPolyRoofs.push(pr);
-        else if (si >= 0) op.delStairs.push(si);
-        else if (fp && fp.dist < 0.32 && (!e || fp.dist < e[3])) {
-          if (isDoor(fp.type) || isWin(fp.type)) fp.kind === "seg" ? op.setSegs.push([fp.idx, fp.type === "railgate" ? "rail" : fp.type === "gate" ? "rampart" : "wall"]) : op.setSides.push([fp.ri, fp.k, "wall"]);
-          else fp.kind === "seg" ? op.delSegs.push(fp.idx) : op.setSides.push([fp.ri, fp.k, null]);
-        } else if (e && e[3] < 0.32) {
-          const ty = S.walls.get(ek(e[0], e[1], e[2]));
-          isDoor(ty) || isWin(ty) ? op.revert.push([e[0], e[1], e[2]]) : op.delWalls.push([e[0], e[1], e[2]]);
-        } else if (S.floors.has(ck(cell.i, cell.j))) op.delFloors.push([cell.i, cell.j]);
-        else if (ringAt(S, h.lx, h.lz) >= 0) op.delRings.push(ringAt(S, h.lx, h.lz));
+        return finishOp(op);
       }
+      const pk = pickAt(ANY_PIECE);
+      if (pk) {
+        F = S = pk.S;
+        op = blankOp(F);
+        eraseOne(op, pk, h);
+      }
+      return finishOp(op);
     }
     return finishOp(op);
   }
+  // what one click of Remove takes away: the piece you point at, or the 1 m of wall under the cursor
+  function eraseOne(op, pk, h) {
+    const S = pk.S;
+    if (pk.kind === "roof") op.delRoofs.push(S.roofs.indexOf(pk.r));
+    else if (pk.kind === "polyroof") op.delPolyRoofs.push(pk.pi);
+    else if (pk.kind === "ringroof") op.ringRoofs.push([pk.ri, false]);
+    else if (pk.kind === "decor") op.delDecor.push(pk.idx);
+    else if (pk.kind === "pillar") op.delPillars.push(pk.idx);
+    else if (pk.kind === "stair") op.delStairs.push(pk.idx);
+    else if (pk.kind === "path") op.delPaths.push(pk.idx);
+    else if (pk.kind === "ring") {
+      if (pk.side === undefined) op.delRings.push(pk.ri);
+      else if (isDoor(pk.type) || isWin(pk.type)) op.setSides.push([pk.ri, pk.side, "wall"]);
+      else op.setSides.push([pk.ri, pk.side, null]);
+    } else if (pk.kind === "wall" && pk.free) {
+      if (isDoor(pk.type) || isWin(pk.type)) op.setSegs.push([pk.idx, pk.type === "railgate" ? "rail" : pk.type === "gate" ? "rampart" : "wall"]);
+      else op.delSegs.push(pk.idx);
+    } else if (pk.kind === "wall") {
+      isDoor(pk.type) || isWin(pk.type) ? op.revert.push([pk.i, pk.j, pk.d]) : op.delWalls.push([pk.i, pk.j, pk.d]);
+    } else if (pk.kind === "floor") {
+      if (pk.poly !== undefined) op.note = "Remove one of its walls to open this floor";
+      else op.delFloors.push([pk.ci, pk.cj]);
+    }
+    op.label = "Remove";
+  }
 
-  const serial = (S) => ({ ox: S.ox, oz: S.oz, yaw: S.yaw, y0: S.y0, floors: [...S.floors], walls: [...S.walls], roofs: S.roofs.map((r) => ({ ...r })), level: S.level, hs: S.hs, lift: S.lift, po: S.po, pillars: S.pillars.map((x) => x.slice()), paths: S.paths.map((x) => x.slice()), decor: S.decor.map((x) => x.slice()), wmat: [...S.wmat], fmat: [...S.fmat], stairs: S.stairs.map((x) => ({ ...x })), polyRoofs: S.polyRoofs.map((x) => x.slice()), segs: S.segs.map((x) => x.slice()), rings: S.rings.map((r) => ({ ...r, sides: r.sides.slice() })) });
-  function fill(S, d) {
+  // A structure as plain data. The result is kept until the structure next changes, so undo steps share the
+  // structures they did not touch. Nothing may change it afterwards: fill() copies what it takes.
+  function serial(S) {
+    if (S.ser && S.ser.ver === S.ver) return S.ser.data;
+    const data = {
+      id: S.id, ox: S.ox, oz: S.oz, yaw: S.yaw, y0: S.y0, level: S.level, hs: S.hs, lift: S.lift, po: S.po,
+      floors: [...S.floors], walls: [...S.walls], wmat: [...S.wmat], fmat: [...S.fmat],
+      roofs: S.roofs.map((r) => ({ ...r })), segs: S.segs.map((x) => x.slice()), rings: S.rings.map((r) => ({ ...r, sides: r.sides.slice() })),
+      stairs: S.stairs.map((x) => ({ ...x })), pillars: S.pillars.map((x) => x.slice()), paths: S.paths.map((x) => x.slice()), decor: S.decor.map((x) => x.slice()),
+      polyRoofs: S.polyRoofs.map((x) => x.slice()),
+      // piece ids of walls and floors: one entry per run or area is enough to find the rest again
+      ids: { walls: S.runs.map((g) => [g.m[0].k, g.id]), open: [...S.oid], floors: S.regs.map((g) => [g.m[0], g.id]), polys: S.pids.map((x) => x.slice()) },
+    };
+    if (Object.keys(S.asm).length) data.asm = { ...S.asm };
+    S.ser = { ver: S.ver, data };
+    return data;
+  }
+  // fresh: the data is being copied, so every piece in it gets a new id
+  function fill(S, d, fresh) {
     S.floors = new Set(d.floors);
     S.walls = new Map(d.walls);
     S.roofs = d.roofs.map((r) => ({ ...r }));
@@ -3232,21 +3500,33 @@
     S.fmat = new Map(Array.isArray(d.fmat) ? d.fmat : []);
     S.polyRoofs = (d.polyRoofs || []).map((x) => x.slice());
     S.rings = (d.rings || []).map((r) => ({ ...r, sides: r.sides.slice() }));
+    const ids = d.ids || {};
+    S.wid = new Map(ids.walls || []);
+    S.oid = new Map(ids.open || []);
+    S.fid = new Map(ids.floors || []);
+    S.pids = (ids.polys || []).map((x) => x.slice());
+    S.asm = d.asm ? { ...d.asm } : {};
+    S.fresh = !!fresh;
+    return S;
   }
   function snapshot() {
     return { wood: W.wood, structs: B.structs.map(serial) };
   }
-  function restore(snap) {
+  // put back an undo step
+  function restoreSnap(snap) {
     for (const S of [...B.structs]) disposeStruct(S);
-    for (const d of snap.structs) {
-      const S = newStruct(d);
-      fill(S, d);
-    }
+    for (const d of snap.structs) fill(newStruct(d), d);
     // storeys look at each other for stairwells, so build once all are in place
     for (const S of B.structs) rebuild(S);
     W.wood = snap.wood;
     G.markStockDirty();
     B.version++;
+    selCheck();
+  }
+  function pushUndo() {
+    B.undo.push(snapshot());
+    B.undo.length > UNDO_DEPTH && B.undo.shift();
+    B.redo.length = 0;
   }
   // ground-level sample points of everything in a structure (local)
   function localSamples(S) {
@@ -3278,31 +3558,77 @@
     for (const S of list) rebuild(S);
   }
   /* ---------- saving: buildings are kept with the world seed ---------- */
-  const SAVE = "world-engine-build:1:";
+  // serialize() gives every building as plain JSON and restore() puts such data back exactly, piece ids
+  // included, so the world save can carry the buildings. Until it does, build mode keeps its own copy.
+  const SAVE = "world-engine-build:1:",
+    FORMAT = "homestead-buildings";
+  function serialize() {
+    return { format: FORMAT, v: 2, nextStruct: B.nextId, nextPiece: B.nextPid, structs: B.structs.map(serial) };
+  }
+  // the highest piece number used anywhere in saved data
+  function topPid(data) {
+    let top = 0;
+    const see = (id) => {
+      if (typeof id === "string" && id[0] === "p") top = Math.max(top, pidNum(id));
+    };
+    for (const d of data.structs) {
+      for (const r of d.roofs || []) see(r.id);
+      for (const r of d.rings || []) see(r.id);
+      for (const r of d.stairs || []) see(r.id);
+      for (const x of d.pillars || []) see(x[4]);
+      for (const x of d.paths || []) see(x[6]);
+      for (const x of d.decor || []) see(x[5]);
+      for (const x of d.polyRoofs || []) see(x[3]);
+      for (const x of d.segs || []) (see(x[6]), see(x[7]));
+      const ids = d.ids || {};
+      for (const x of ids.walls || []) see(x[1]);
+      for (const x of ids.open || []) see(x[1]);
+      for (const x of ids.floors || []) see(x[1]);
+      for (const x of ids.polys || []) see(x[2]);
+    }
+    return top;
+  }
+  // Replace every building with saved ones: what serialize() gave, or a version 1 save (which had no piece ids).
+  function restoreAll(data) {
+    if (!data || !Array.isArray(data.structs)) return false;
+    for (const S of [...B.structs]) disposeStruct(S);
+    B.undo.length = B.redo.length = 0;
+    B.drag = null;
+    B.nextId = 1;
+    const made = data.structs.map((d) => fill(newStruct(d), d));
+    B.nextId = Math.max(B.nextId, data.nextStruct || 1);
+    B.nextPid = Math.max(topPid(data) + 1, data.nextPiece || 1);
+    B.claim = new Set();
+    try {
+      settle(made);
+    } finally {
+      B.claim = null;
+    }
+    B.version++;
+    selCheck();
+    touchUi();
+    return true;
+  }
   function saveBuilds() {
     try {
-      localStorage.setItem(SAVE + B.seed, JSON.stringify({ v: 1, structs: B.structs.map(serial) }));
+      localStorage.setItem(SAVE + B.seed, JSON.stringify(serialize()));
     } catch {}
   }
   function loadBuilds() {
     try {
       const raw = localStorage.getItem(SAVE + B.seed);
       if (!raw || B.structs.length) return;
-      const made = [];
-      for (const d of JSON.parse(raw).structs) {
-        const S = newStruct(d);
-        fill(S, d);
-        made.push(S);
-      }
-      settle(made);
+      restoreAll(JSON.parse(raw));
     } catch {}
   }
   /* ---------- copy and stamp ---------- */
   function copyPick() {
     const h = B.hover;
     if (!h || h.F.isNew) return;
-    const S0 = h.F,
-      group = B.structs.filter((O) => sameGrid(O, S0) && !O.po),
+    copyFrom(h.F);
+  }
+  function copyFrom(S0) {
+    const group = B.structs.filter((O) => sameGrid(O, S0) && !O.po),
       base = group.reduce((a, O) => (O.level === 0 && (!a || O.y0 < a.y0) ? O : a), null) || S0;
     let i0 = 1e9,
       i1 = -1e9,
@@ -3321,6 +3647,7 @@
     B.clipb = { id: ++B.clipN, items: group.map(serial), y0: base.y0, cx: Math.round((i0 + i1) / 2), cz: Math.round((j0 + j1) / 2), yaw: S0.yaw, rot: 0, samples, step: Math.max(1, Math.ceil(samples.length / 60)), cost };
     B.key = "";
     hint();
+    touchUi();
   }
   function stampFrame(h) {
     const c = B.clipb,
@@ -3350,12 +3677,11 @@
     if (!h || !c) return;
     const f = stampFrame(h);
     if (stampCheck(f)) return;
-    B.undo.push(snapshot());
-    B.redo.length = 0;
+    pushUndo();
     const made = [];
     for (const it of c.items) {
-      const S = newStruct({ ox: f.ox, oz: f.oz, yaw: f.yaw, y0: f.y0 + it.y0 - c.y0, level: it.level, hs: it.hs, lift: it.lift });
-      fill(S, it);
+      const S = newStruct({ ox: f.ox, oz: f.oz, yaw: f.yaw, y0: f.y0 + it.y0 - c.y0, level: it.level, hs: it.hs, lift: it.lift, po: it.po });
+      fill(S, it, true);
       made.push(S);
     }
     settle(made);
@@ -3364,15 +3690,13 @@
       G.markStockDirty();
     }
     G.burst(h.wx, f.y0 + 1, h.wz, 18, 0xcdb48a, 3.5, 3, 0.11, 0.7);
-    syncButtons();
+    touchUi();
   }
   function copyPreview(h) {
     B.key = "";
     B.op = null;
     gridGroup.visible = false;
-    const lb = $("blabel");
-    lb.style.left = B.ptr.x + 18 + "px";
-    lb.style.top = B.ptr.y + 18 + "px";
+    if (B.ov.dims.length || B.ov.snap) ((B.ov.dims.length = 0), (B.ov.snap = null), B.ovVer++);
     const c = B.clipb;
     if (!c) {
       ghostGroup.visible = false;
@@ -3401,28 +3725,32 @@
     ghostGroup.visible = true;
     const why = stampCheck(f);
     ghostAdd.material.color.setHex(why ? 0xe0563f : 0xffe2a0);
-    label(why || "Click to place a copy \u00b7 R turns it" + (B.free ? "" : " \u00b7 " + c.cost + " wood"), !!why);
+    ghostAdd.material.userData.hatch.value = why ? 1 : 0;
+    label(why || "Click to place a copy" + (B.free ? "" : " \u00b7 " + c.cost + " wood"), !!why);
   }
   function undo() {
     if (!B.undo.length) return;
     B.redo.push(snapshot());
-    restore(B.undo.pop());
+    restoreSnap(B.undo.pop());
     B.drag = null;
-    syncButtons();
+    B.move = null;
+    B.key = "";
+    touchUi();
   }
   function redo() {
     if (!B.redo.length) return;
     B.undo.push(snapshot());
-    restore(B.redo.pop());
+    restoreSnap(B.redo.pop());
     B.drag = null;
-    syncButtons();
+    B.move = null;
+    B.key = "";
+    touchUi();
   }
 
-  function applyOp(op) {
+  // Carry out an operation as one undo step. Entries that bring an id along (a piece being moved) keep it.
+  function applyOp(op, noUndo) {
     if (!op || !op.valid) return null;
-    B.undo.push(snapshot());
-    B.undo.length > 60 && B.undo.shift();
-    B.redo.length = 0;
+    noUndo || pushUndo();
     let S = op.F.isNew ? newStruct({ ox: op.F.ox, oz: op.F.oz, yaw: op.F.yaw, y0: op.y0, level: op.F.level || 0, hs: op.F.hs || B.hs, lift: op.F.lift || 0, po: op.addPaths.length > 0 || op.addDecor.length > 0 }) : op.F;
     let refund = 0;
     for (const idx of [...op.delRoofs].sort((a, b) => b - a)) {
@@ -3432,6 +3760,7 @@
     for (const [i, j] of op.delFloors) (S.fmat.delete(ck(i, j)), S.floors.delete(ck(i, j)) && (refund += COST.floor));
     for (const idx of [...op.delPillars].sort((a, b) => b - a)) S.pillars.splice(idx, 1);
     for (const p of op.addPillars) S.pillars.push(p.slice());
+    for (const [idx, mat, kind] of op.setPillars) ((S.pillars[idx][2] = mat), (S.pillars[idx][3] = kind));
     for (const idx of [...op.delPaths].sort((a, b) => b - a)) S.paths.splice(idx, 1);
     for (const p of op.addPaths) S.paths.push(p.slice());
     for (const idx of [...op.delDecor].sort((a, b) => b - a)) S.decor.splice(idx, 1);
@@ -3447,7 +3776,12 @@
       const was = S.walls.get(ek(i, j, d));
       S.walls.set(ek(i, j, d), was === "railgate" ? "rail" : was === "gate" ? "rampart" : "wall");
     }
-    for (const [idx, ty] of op.setSegs) S.segs[idx][4] = ty;
+    // a door or window that changes kind is a new piece
+    for (const [idx, ty] of op.setSegs) {
+      if (S.segs[idx][4] !== ty) S.segs[idx][7] = null;
+      S.segs[idx][4] = ty;
+    }
+    for (const [idx, mat] of op.setSegMats) S.segs[idx][5] = mat;
     for (const [ri, k, ty] of op.setSides) S.rings[ri].sides[k] = ty;
     for (const [ri, on] of op.ringRoofs) ((S.rings[ri].roof = on), on && (S.rings[ri].rmat = B.rmat));
     for (const idx of [...op.delSegs].sort((a, b) => b - a)) (S.segs.splice(idx, 1), (refund += COST.wall));
@@ -3456,15 +3790,38 @@
       refund += r.n * r.h * COST.wall + Math.round(Math.PI * r.r * r.r);
     }
     for (const pi of op.delPolyRoofs) S.polyRoofs = S.polyRoofs.filter((p) => !pip(S.polys[pi].pts, p[0], p[1]));
-    for (const p of op.addPolyRoofs) S.polyRoofs.push([p[0], p[1], B.rmat]);
+    for (const p of op.addPolyRoofs) S.polyRoofs.push([p[0], p[1], B.rmat, null]);
     for (const idx of [...op.delStairs].sort((a, b) => b - a)) S.stairs.splice(idx, 1);
     for (const st of op.addStairs) S.stairs.push({ ...st });
-    for (const sg of op.addSegs) S.segs.push([...sg.slice(0, 5), B.wmat]);
-    for (const r of op.addRings) S.rings.push({ ...r, sides: r.sides.slice(), mat: B.wmat, rmat: B.rmat, fmat: B.fmat });
-    for (const [i, j] of op.addFloors) (S.floors.add(ck(i, j)), B.fmat !== "planks" && S.fmat.set(ck(i, j), B.fmat));
-    for (const [i, j, d] of op.addWalls) (S.walls.set(ek(i, j, d), op.style || "wall"), B.wmat !== "timber" && S.wmat.set(ek(i, j, d), B.wmat));
-    for (const [i, j, d, ty] of op.setTypes) S.walls.set(ek(i, j, d), ty);
-    for (const r of op.addRoofs) S.roofs.push({ i0: r.i0, i1: r.i1, j0: r.j0, j1: r.j1, axis: r.axis, shape: r.shape, dir: r.dir, pitch: r.pitch, mat: B.rmat });
+    for (const sg of op.addSegs) S.segs.push([sg[0], sg[1], sg[2], sg[3], sg[4], sg[5] || B.wmat, sg[6] || null, sg[7] || null]);
+    for (const r of op.addRings) S.rings.push({ ...r, sides: r.sides.slice(), mat: r.mat || B.wmat, rmat: r.rmat || B.rmat, fmat: r.fmat || B.fmat });
+    for (const [i, j, m] of op.addFloors) {
+      const mat = m || B.fmat;
+      S.floors.add(ck(i, j));
+      mat !== "planks" ? S.fmat.set(ck(i, j), mat) : S.fmat.delete(ck(i, j));
+    }
+    for (const [i, j, m] of op.setFmats) m !== "planks" ? S.fmat.set(ck(i, j), m) : S.fmat.delete(ck(i, j));
+    for (const [i, j, d, ty, m] of op.addWalls) {
+      const mat = m || B.wmat;
+      S.walls.set(ek(i, j, d), ty || op.style || "wall");
+      mat !== "timber" ? S.wmat.set(ek(i, j, d), mat) : S.wmat.delete(ek(i, j, d));
+    }
+    for (const [i, j, d, m] of op.setMats) m !== "timber" ? S.wmat.set(ek(i, j, d), m) : S.wmat.delete(ek(i, j, d));
+    for (const [i, j, d, ty] of op.setTypes) {
+      if (S.walls.get(ek(i, j, d)) !== ty) S.oid.delete(ek(i, j, d));
+      S.walls.set(ek(i, j, d), ty);
+    }
+    for (const r of op.addRoofs) {
+      const nr = { i0: r.i0, i1: r.i1, j0: r.j0, j1: r.j1, axis: r.axis, shape: r.shape, dir: r.dir, pitch: r.pitch, mat: r.mat || B.rmat };
+      if (r.id) nr.id = r.id;
+      S.roofs.push(nr);
+    }
+    // ids that travel with moved walls, openings and floors
+    if (op.ids) {
+      for (const [k, id] of op.ids.wid || []) S.wid.set(k, id);
+      for (const [k, id] of op.ids.oid || []) S.oid.set(k, id);
+      for (const [k, id] of op.ids.fid || []) S.fid.set(k, id);
+    }
     if (!B.free) {
       W.wood += refund - (op.replacing ? 0 : op.cost);
       G.markStockDirty();
@@ -3502,13 +3859,1214 @@
         G.burst(x, S.y0 + EAVE + 1, z, 14, 0xc9ae62, 3, 2, 0.1, 0.7);
       }
     B.key = "";
-    syncButtons();
+    selCheck();
+    touchUi();
     return S;
   }
 
-  /* ---------- hover and preview ---------- */
+  function touchUi() {
+    B.uiVer++;
+  }
+
+  /* ---------- snapping ---------- */
+  // Tools that work off the tile grid (walls at any angle, paths, pillars, round rooms, measuring) put their points
+  // through here. In order: the end, middle or centre of something already built; a point on a wall; a round
+  // angle from the start point, else the half-metre grid; and then lining up with a built corner, which slides
+  // the point onto that corner's line and shows the line. Ctrl held turns the whole thing off (or on, if it is off).
+  const SNAP = { x: 0, z: 0, type: "", g: [], ang: null, wx: 0, wz: 0 };
+  const POINT_TOOL = { wall: 1, path: 1, pillar: 1, tower: 1, measure: 1 };
+  const snapOn = () => B.snap !== (B.ctrl && !B.ctrlWheel);
+  const SNAP_NAME = { end: "End", mid: "Middle", centre: "Centre", point: "Measured point", edge: "On wall", angle: "", guide: "Lined up", grid: "", free: "" };
+  // the points and wall lines of a structure that others can snap to, in world metres
+  function snapData(S) {
+    if (S.snapV === S.ver) return S.snapD;
+    const pts = [],
+      lines = [];
+    const P = (lx, lz, kind) => {
+      const [x, z] = toWorld(S, lx, lz);
+      pts.push(x, z, kind);
+    };
+    const Ln = (ax, az, bx, bz) => {
+      const a = toWorld(S, ax, az),
+        b = toWorld(S, bx, bz);
+      lines.push(a[0], a[1], b[0], b[1]);
+      P(ax, az, 0);
+      P(bx, bz, 0);
+      P((ax + bx) / 2, (az + bz) / 2, 1);
+    };
+    for (const g of S.runs) g.d === 0 ? Ln(g.t0, g.line, g.t1, g.line) : Ln(g.line, g.t0, g.line, g.t1);
+    for (const g of S.fruns) Ln(g.x0, g.z0, g.x1, g.z1);
+    for (const r of S.rings) {
+      P(r.cx, r.cz, 2);
+      for (let k = 0; k < r.n; k++) {
+        const v = ringVert(r, k);
+        P(v[0], v[1], 0);
+      }
+    }
+    for (const p of S.pillars) P(p[0], p[1], 2);
+    S.snapV = S.ver;
+    return (S.snapD = { pts, lines });
+  }
+  // a: the point the stroke started from (for angles); rel: the direction of the wall before it in a chain
+  function snapPoint(F, rx, rz, a, rel) {
+    const o = SNAP,
+      c = Math.cos(F.yaw),
+      s = Math.sin(F.yaw);
+    o.x = rx;
+    o.z = rz;
+    o.type = "free";
+    o.g.length = 0;
+    o.ang = null;
+    if (!snapOn()) return o;
+    const wx = F.ox + rx * c + rz * s,
+      wz = F.oz - rx * s + rz * c;
+    const loc = (x, z) => {
+      const dx = x - F.ox,
+        dz = z - F.oz;
+      o.x = tidy(dx * c - dz * s);
+      o.z = tidy(dx * s + dz * c);
+    };
+    // 1. ends, middles and centres
+    let bd = 0.42,
+      bx = 0,
+      bz = 0,
+      bk = -1;
+    const near = SNAP.near || (SNAP.near = []);
+    near.length = 0;
+    for (const S of B.structs) {
+      if (S.po || S.cx === undefined || !S.group.visible || Math.hypot(wx - S.cx, wz - S.cz) > S.rad + 14) continue;
+      near.push(S);
+      const D = snapData(S).pts;
+      for (let n = 0; n < D.length; n += 3) {
+        const dd = Math.hypot(D[n] - wx, D[n + 1] - wz);
+        if (dd < bd) ((bd = dd), (bx = D[n]), (bz = D[n + 1]), (bk = D[n + 2]));
+      }
+    }
+    for (const m of B.meas)
+      for (const q of [m.a, m.b]) {
+        const dd = Math.hypot(q[0] - wx, q[2] - wz);
+        if (dd < bd) ((bd = dd), (bx = q[0]), (bz = q[2]), (bk = 3));
+      }
+    if (bk >= 0) {
+      loc(bx, bz);
+      o.type = bk === 0 ? "end" : bk === 1 ? "mid" : bk === 2 ? "centre" : "point";
+      return o;
+    }
+    // 2. on a wall: slide to the nearest half metre along it
+    let ed = 0.24,
+      hit = false;
+    for (const S of near) {
+      const D = snapData(S).lines;
+      for (let n = 0; n < D.length; n += 4) {
+        const ex = D[n + 2] - D[n],
+          ez = D[n + 3] - D[n + 1],
+          len = Math.hypot(ex, ez) || 1;
+        let t = clamp(((wx - D[n]) * ex + (wz - D[n + 1]) * ez) / (len * len), 0, 1);
+        const dd = Math.hypot(wx - D[n] - ex * t, wz - D[n + 1] - ez * t);
+        if (dd >= ed) continue;
+        const q = Math.round(t * len * 2) / 2;
+        if (q >= 0 && q <= len) t = q / len;
+        ed = dd;
+        bx = D[n] + ex * t;
+        bz = D[n + 1] + ez * t;
+        hit = true;
+      }
+    }
+    if (hit) {
+      loc(bx, bz);
+      o.type = "edge";
+      return o;
+    }
+    // 3. a round angle from where the stroke began, or the grid
+    let gx = Math.round(rx * 2) / 2,
+      gz = Math.round(rz * 2) / 2;
+    o.type = "grid";
+    if (a) {
+      const dx = rx - a.i,
+        dz = rz - a.j,
+        L = Math.hypot(dx, dz);
+      if (L > 0.35) {
+        const ang = Math.atan2(dz, dx),
+          st = Math.PI / 12;
+        let best = Math.round(ang / st) * st,
+          dev = Math.abs(ang - best);
+        if (rel !== null && rel !== undefined)
+          for (let k = 0; k < 4; k++) {
+            // square to, or in line with, the wall before
+            const cand = rel + (k * Math.PI) / 2,
+              df = Math.atan2(Math.sin(ang - cand), Math.cos(ang - cand));
+            if (Math.abs(df) < dev) ((dev = Math.abs(df)), (best = ang - df));
+          }
+        if (dev < 0.075) {
+          const Lq = Math.max(0.5, Math.round(L * 2) / 2),
+            px = a.i + Math.cos(best) * Lq,
+            pz = a.j + Math.sin(best) * Lq;
+          if (Math.hypot(px - rx, pz - rz) <= Math.hypot(gx - rx, gz - rz) + 0.06) {
+            if (Math.hypot(px - gx, pz - gz) > 1e-6) ((o.type = "angle"), (o.ang = best));
+            gx = px;
+            gz = pz;
+          }
+        }
+      }
+    }
+    // 4. lined up with a built corner or centre
+    let ax = null,
+      az = null,
+      adx = 1e9,
+      adz = 1e9;
+    for (const S of near) {
+      const D = snapData(S).pts;
+      for (let n = 0; n < D.length; n += 3) {
+        if (D[n + 2] === 1) continue;
+        const dx = D[n] - F.ox,
+          dz = D[n + 1] - F.oz,
+          px = dx * c - dz * s,
+          pz = dx * s + dz * c,
+          ex = Math.abs(px - gx),
+          ez = Math.abs(pz - gz);
+        if (ex < 0.22 && ez > 0.3 && ez < 24 && ez < adx) ((adx = ez), (ax = [px, pz]));
+        if (ez < 0.22 && ex > 0.3 && ex < 24 && ex < adz) ((adz = ex), (az = [px, pz]));
+      }
+    }
+    if (o.type === "angle") {
+      // along a round angle: stop where it crosses the line
+      const ux = Math.cos(o.ang),
+        uz = Math.sin(o.ang);
+      let k = null,
+        ref = null;
+      if (ax && Math.abs(ux) > 0.2) ((k = (ax[0] - a.i) / ux), (ref = ax));
+      else if (az && Math.abs(uz) > 0.2) ((k = (az[1] - a.j) / uz), (ref = az));
+      if (k !== null && k > 0.3 && Math.hypot(a.i + ux * k - gx, a.j + uz * k - gz) < 0.3) {
+        gx = a.i + ux * k;
+        gz = a.j + uz * k;
+        o.g.push([ref[0], ref[1], gx, gz]);
+      }
+    } else {
+      if (ax) gx = ax[0];
+      if (az) gz = az[1];
+      if (ax) o.g.push([ax[0], ax[1], gx, gz]);
+      if (az) o.g.push([az[0], az[1], gx, gz]);
+      if (ax || az) o.type = "guide";
+    }
+    o.x = tidy(gx);
+    o.z = tidy(gz);
+    return o;
+  }
+
+  /* ---------- picking ---------- */
+  // What is under the cursor, found by where the mouse ray first meets a piece: walls as upright faces, floors as
+  // their top, furniture, pillars and stairs as boxes. So you point at the wall you see, not at its foot.
   const ray = new T.Raycaster(),
     v2 = new T.Vector2();
+  const RL = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 },
+    HIT = { u: 0, y: 0 },
+    WALLS_ONLY = { walls: true },
+    ANY_PIECE = {};
+  function setRay() {
+    const rc = canvas.getBoundingClientRect();
+    ray.setFromCamera(v2.set(((B.ptr.x - rc.left) / rc.width) * 2 - 1, -(((B.ptr.y - rc.top) / rc.height) * 2 - 1)), G.camera);
+  }
+  // the mouse ray in a structure's own metres, heights above its base
+  function localRay(S) {
+    const o = ray.ray.origin,
+      d = ray.ray.direction,
+      c = Math.cos(S.yaw),
+      s = Math.sin(S.yaw),
+      x = o.x - S.ox,
+      z = o.z - S.oz;
+    RL.ox = x * c - z * s;
+    RL.oz = x * s + z * c;
+    RL.oy = o.y - S.y0;
+    RL.dx = d.x * c - d.z * s;
+    RL.dz = d.x * s + d.z * c;
+    RL.dy = d.y;
+    return RL;
+  }
+  // how far along the ray it meets an upright face standing on the line a-b between two heights, or -1
+  function hitWall(R, x0, z0, x1, z1, ya, yb) {
+    const ex = x1 - x0,
+      ez = z1 - z0,
+      den = R.dx * ez - R.dz * ex;
+    if (Math.abs(den) < 1e-9) return -1;
+    const t = ((x0 - R.ox) * ez - (z0 - R.oz) * ex) / den;
+    if (t <= 0) return -1;
+    const u = ((R.ox + R.dx * t - x0) * ex + (R.oz + R.dz * t - z0) * ez) / (ex * ex + ez * ez),
+      y = R.oy + R.dy * t;
+    if (u < 0 || u > 1 || y < ya || y > yb) return -1;
+    HIT.u = u;
+    HIT.y = y;
+    return t;
+  }
+  function hitBox(R, x0, y0, z0, x1, y1, z1) {
+    let t0 = 0,
+      t1 = 1e9;
+    for (let k = 0; k < 3; k++) {
+      const o = k === 0 ? R.ox : k === 1 ? R.oy : R.oz,
+        d = k === 0 ? R.dx : k === 1 ? R.dy : R.dz,
+        lo = k === 0 ? x0 : k === 1 ? y0 : z0,
+        hi = k === 0 ? x1 : k === 1 ? y1 : z1;
+      if (Math.abs(d) < 1e-9) {
+        if (o < lo || o > hi) return -1;
+        continue;
+      }
+      const ta = (lo - o) / d,
+        tb = (hi - o) / d;
+      t0 = Math.max(t0, Math.min(ta, tb));
+      t1 = Math.min(t1, Math.max(ta, tb));
+      if (t0 > t1) return -1;
+    }
+    return t0;
+  }
+  const roofsShown = () => B.tool === "roof" || B.tool === "erase" || (B.tool === "select" && B.showRoofs);
+  function pickAt(opt) {
+    if (!pick.valid) return null;
+    const wallsOnly = opt === WALLS_ONLY,
+      roofs = !wallsOnly && roofsShown();
+    let best = null,
+      bt = 1e9;
+    for (const S of B.structs) {
+      if (S.cx === undefined || !S.group.visible || (S.po ? wallsOnly : S.level !== B.level)) continue;
+      if (Math.hypot(pick.x - S.cx, pick.z - S.cz) > S.rad + 14) continue;
+      const R = localRay(S),
+        H = EAVE * S.hs;
+      for (const g of S.runs) {
+        const x = g.d === 0,
+          t = x ? hitWall(R, g.t0, g.line, g.t1, g.line, -0.4, g.cls === "rail" ? 1.1 : g.cls === "parapet" ? 1.5 : H) : hitWall(R, g.line, g.t0, g.line, g.t1, -0.4, g.cls === "rail" ? 1.1 : g.cls === "parapet" ? 1.5 : H);
+        if (t < 0 || t >= bt) continue;
+        const e = g.m[Math.min(g.m.length - 1, Math.floor(HIT.u * g.m.length))];
+        bt = t;
+        best = { S, kind: "wall", i: e.i, j: e.j, d: e.d, type: e.type, id: g.id, oid: S.oid.get(e.k) || null, run: g };
+      }
+      for (const g of S.fruns) {
+        const t = hitWall(R, g.x0, g.z0, g.x1, g.z1, -0.4, g.cls === "rail" ? 1.1 : g.cls === "parapet" ? 1.5 : H);
+        if (t < 0 || t >= bt) continue;
+        const along = HIT.u * g.len;
+        let q = g.mods[g.mods.length - 1];
+        for (const m of g.mods)
+          if (along <= m.s + m.len) {
+            q = m;
+            break;
+          }
+        bt = t;
+        best = { S, kind: "wall", free: true, idx: q.idx, type: q.type, id: g.id, oid: S.segs[q.idx][7] || null, run: g };
+      }
+      for (let ri = 0; ri < S.rings.length; ri++) {
+        const r = S.rings[ri];
+        for (let k = 0; k < r.n; k++) {
+          if (!r.sides[k]) continue;
+          const a = ringVert(r, k),
+            b = ringVert(r, k + 1),
+            t = hitWall(R, a[0], a[1], b[0], b[1], -0.4, r.h * H);
+          if (t < 0 || t >= bt) continue;
+          bt = t;
+          best = { S, kind: "ring", ri, side: k, type: r.sides[k], id: r.id };
+        }
+      }
+      if (wallsOnly) continue;
+      if (roofs && R.dy < -1e-4) {
+        // roofs are taken a little above the eave, as one slab over what they cover
+        const t = (H + 0.8 - R.oy) / R.dy,
+          x = R.ox + R.dx * t,
+          z = R.oz + R.dz * t;
+        if (t > 0 && t < bt) {
+          const r = S.roofs.find((q) => x >= q.i0 - 0.4 && x <= q.i1 + 1.4 && z >= q.j0 - 0.4 && z <= q.j1 + 1.4),
+            pi = r ? -1 : S.polys.findIndex((p) => p.roofed && pip(p.pts, x, z));
+          if (r) ((bt = t), (best = { S, kind: "roof", r, id: r.id }));
+          else if (pi >= 0) ((bt = t), (best = { S, kind: "polyroof", pi, id: S.polys[pi].roofId }));
+        }
+        for (let ri = 0; ri < S.rings.length; ri++) {
+          const r = S.rings[ri];
+          if (!r.roof) continue;
+          const tr = (r.h * H + 0.8 - R.oy) / R.dy;
+          if (tr > 0 && tr < bt && Math.hypot(R.ox + R.dx * tr - r.cx, R.oz + R.dz * tr - r.cz) < r.r + 0.5) ((bt = tr), (best = { S, kind: "ringroof", ri, id: r.id }));
+        }
+      }
+      if (R.dy < -1e-4 && !S.po) {
+        const t = (FLOOR_T - R.oy) / R.dy;
+        if (t > 0 && t < bt) {
+          const x = R.ox + R.dx * t,
+            z = R.oz + R.dz * t,
+            ci = Math.floor(x),
+            cj = Math.floor(z),
+            id = S.fid.get(ck(ci, cj));
+          if (id) ((bt = t), (best = { S, kind: "floor", ci, cj, id }));
+          else {
+            const ri = ringAt(S, x, z),
+              pi = ri >= 0 ? -1 : polyAt(S, x, z);
+            if (ri >= 0) ((bt = t), (best = { S, kind: "ring", ri, id: S.rings[ri].id }));
+            else if (pi >= 0) ((bt = t), (best = { S, kind: "floor", poly: pi, id: S.polys[pi].id }));
+          }
+        }
+      }
+      const sn = stairLen(S.hs);
+      for (let idx = 0; idx < S.stairs.length; idx++) {
+        const st = S.stairs[idx],
+          [dx, dz] = DIRS[st.dir];
+        for (let m = 0; m < sn; m++) {
+          const t = hitBox(R, st.i + dx * m, 0, st.j + dz * m, st.i + dx * m + 1, FLOOR_T + ((m + 1) / sn) * H, st.j + dz * m + 1);
+          if (t >= 0 && t < bt) ((bt = t), (best = { S, kind: "stair", idx, id: st.id }));
+        }
+      }
+      for (let idx = 0; idx < S.pillars.length; idx++) {
+        const p = S.pillars[idx],
+          ch = p[3] === "chimney",
+          w = ch ? 0.36 : 0.27,
+          t = hitBox(R, p[0] - w, -0.3, p[1] - w, p[0] + w, ch ? stretchY(5.8, S.hs) : H, p[1] + w);
+        if (t >= 0 && t < bt) ((bt = t), (best = { S, kind: "pillar", idx, id: p[4] }));
+      }
+      for (let idx = 0; idx < S.decor.length; idx++) {
+        const it = S.decor[idx],
+          y = decorY(S, it),
+          bb = decorBox(decorGeo(it[2], it[4] || 0, H - y)),
+          w = clamp(bb.r * 0.8, 0.28, 0.9),
+          t = hitBox(R, it[0] - w, y, it[1] - w, it[0] + w, y + Math.max(0.2, bb.h), it[1] + w);
+        if (t >= 0 && t < bt) ((bt = t), (best = { S, kind: "decor", idx, id: it[5] }));
+      }
+      if (S.paths.length) {
+        // paths lie on the ground: take the one the ray lands on
+        const [lx, lz] = toLocal(S, pick.x, pick.z),
+          o = ray.ray.origin,
+          t = Math.hypot(pick.x - o.x, pick.y - o.y, pick.z - o.z) - 0.02;
+        for (let idx = 0; idx < S.paths.length && t < bt; idx++) {
+          const p = S.paths[idx],
+            dx = p[2] - p[0],
+            dz = p[3] - p[1],
+            tt = clamp(((lx - p[0]) * dx + (lz - p[1]) * dz) / (dx * dx + dz * dz || 1), 0, 1);
+          if (Math.hypot(lx - p[0] - dx * tt, lz - p[1] - dz * tt) < p[4] / 2 + 0.15) ((bt = t), (best = { S, kind: "path", idx, id: p[6] }));
+        }
+      }
+    }
+    return best;
+  }
+  // the piece a pick stands for: a door or window is its own piece, a tower side belongs to its tower
+  const pickId = (pk) => (pk ? (pk.kind === "wall" && pk.oid ? pk.oid : pk.id) : null);
+
+  /* ---------- selection ---------- */
+  // Select is the home tool. What is selected is held as piece ids, so it survives any edit; everything done to a
+  // selection (restyle, resize, move, copy, delete) is one undo step.
+  const SEL = { refs: null, refV: -1, selV: -1, ver: -1, hov: null, meshes: [], hovMesh: null };
+  B.selV = 0;
+  B.sel = [];
+  const hlOpts = { transparent: true, depthTest: false, depthWrite: false, fog: false, side: T.DoubleSide };
+  const selMat = new T.MeshBasicMaterial({ color: 0xffc95e, opacity: 0.42, ...hlOpts }),
+    hovMat = new T.MeshBasicMaterial({ color: 0xffffff, opacity: 0.2, ...hlOpts });
+  const selGroup = new T.Group();
+  selGroup.visible = false;
+  G.scene.add(selGroup);
+  // where each selectable piece lives; rebuilt when anything changes
+  function refIndex() {
+    if (SEL.refV === B.version && SEL.refs) return SEL.refs;
+    const m = new Map();
+    for (const S of B.structs) {
+      for (const g of S.runs) m.set(g.id, { S, kind: "run", g, id: g.id });
+      for (const g of S.fruns) m.set(g.id, { S, kind: "frun", g, id: g.id });
+      for (const g of S.regs) m.set(g.id, { S, kind: "floor", g, id: g.id });
+      for (const p of S.polys) {
+        m.set(p.id, { S, kind: "poly", p, id: p.id });
+        p.roofed && p.roofId && m.set(p.roofId, { S, kind: "polyroof", p, id: p.roofId });
+      }
+      for (const r of S.roofs) m.set(r.id, { S, kind: "roof", r, id: r.id });
+      for (const r of S.rings) m.set(r.id, { S, kind: "ring", r, id: r.id });
+      for (const st of S.stairs) m.set(st.id, { S, kind: "stair", st, id: st.id });
+      for (const p of S.pillars) m.set(p[4], { S, kind: "pillar", p, id: p[4] });
+      for (const p of S.paths) m.set(p[6], { S, kind: "path", p, id: p[6] });
+      for (const it of S.decor) m.set(it[5], { S, kind: "decor", it, id: it[5] });
+      for (const [k, id] of S.oid) m.set(id, { S, kind: "open", k, id });
+      for (const sg of S.segs) sg[7] && m.set(sg[7], { S, kind: "sopen", sg, id: sg[7] });
+    }
+    SEL.refs = m;
+    SEL.refV = B.version;
+    return m;
+  }
+  const refOf = (id) => refIndex().get(id) || null;
+  const selRefs = () => B.sel.map(refOf).filter(Boolean);
+  // every piece of a structure that can be selected on its own
+  const elemIds = (S) => [...S.runs.map((g) => g.id), ...S.fruns.map((g) => g.id), ...S.regs.map((g) => g.id), ...S.roofs.map((r) => r.id), ...S.rings.map((r) => r.id), ...S.stairs.map((s) => s.id), ...S.pillars.map((p) => p[4]), ...S.paths.map((p) => p[6]), ...S.decor.map((d) => d[5]), ...S.polys.filter((p) => p.roofed && p.roofId).map((p) => p.roofId)];
+  const groupOf = (S) => (S.po ? [S] : B.structs.filter((O) => sameGrid(O, S) && !O.po));
+  function selSet(ids) {
+    B.sel = [...new Set(ids)].filter(refOf);
+    if (!B.sel.some((id) => /roof/.test(refOf(id).kind))) B.showRoofs = B.showRoofs && !B.selRoofAuto;
+    B.selV++;
+    B.key = "";
+    touchUi();
+  }
+  function selCheck() {
+    if (!B.sel.length) return;
+    const keep = B.sel.filter(refOf);
+    if (keep.length !== B.sel.length) B.sel = keep;
+    B.selV++;
+  }
+  // how to find a selected piece again after an edit that may merge or split it
+  function anchorOf(q) {
+    if (q.kind === "run") return ["w", q.S.id, q.g.m[0].k];
+    if (q.kind === "frun") return ["s", q.S.id, q.S.segs[q.g.m[0]]];
+    if (q.kind === "floor") return ["f", q.S.id, q.g.m[0]];
+    if (q.kind === "open") return ["o", q.S.id, q.k];
+    if (q.kind === "sopen") return ["so", q.S.id, q.sg];
+    return ["id", 0, q.id];
+  }
+  function fromAnchor(a) {
+    const S = B.structs.find((O) => O.id === a[1]);
+    if (a[0] === "id") return a[2];
+    if (!S) return null;
+    if (a[0] === "w") return S.wid.get(a[2]);
+    if (a[0] === "f") return S.fid.get(a[2]);
+    if (a[0] === "o") return S.oid.get(a[2]);
+    if (a[0] === "s") return S.segs.includes(a[2]) ? a[2][6] : null;
+    return S.segs.includes(a[2]) ? a[2][7] : null;
+  }
+  // the selected parts of one structure as data buildGeo can draw
+  function subset(S, refs) {
+    const D = { floors: new Set(), walls: new Map(), wmat: new Map(), fmat: new Map(), roofs: [], segs: [], rings: [], stairs: [], pillars: [], paths: [], decor: [], polys: [], hs: S.hs, lift: S.lift, frame: S, base: S };
+    for (const q of refs) {
+      if (q.kind === "run") for (const e of q.g.m) (D.walls.set(e.k, e.type), D.wmat.set(e.k, q.g.mat));
+      else if (q.kind === "frun") for (const n of q.g.m) D.segs.push(S.segs[n]);
+      else if (q.kind === "floor") for (const c of q.g.m) (D.floors.add(c), D.fmat.set(c, q.g.mat));
+      else if (q.kind === "poly") D.polys.push({ ...q.p, roofed: false });
+      else if (q.kind === "polyroof") D.polys.push({ ...q.p, roofed: true });
+      else if (q.kind === "roof") D.roofs.push(q.r);
+      else if (q.kind === "ring") D.rings.push(q.r);
+      else if (q.kind === "stair") D.stairs.push(q.st);
+      else if (q.kind === "pillar") D.pillars.push(q.p);
+      else if (q.kind === "path") D.paths.push(q.p);
+      else if (q.kind === "decor") D.decor.push(q.it);
+      else if (q.kind === "open") (D.walls.set(q.k, S.walls.get(q.k)), D.wmat.set(q.k, S.wmat.get(q.k) || "timber"));
+      else if (q.kind === "sopen") D.segs.push(q.sg);
+    }
+    return D;
+  }
+  function geoMesh(D, S, mat) {
+    const ga = buildGeo(D, S.depth || 0.5),
+      g = ga.main;
+    for (const q of [ga.roof, ga.glow]) (append(g.p, q.p), append(g.n, q.n), append(g.c, q.c));
+    const m = new T.Mesh(g.build(), mat);
+    m.position.set(S.ox, S.y0, S.oz);
+    m.rotation.y = S.yaw;
+    m.renderOrder = 22;
+    m.frustumCulled = false;
+    return m;
+  }
+  const byStruct = (refs) => {
+    const by = new Map();
+    for (const q of refs) (by.has(q.S) || by.set(q.S, []), by.get(q.S).push(q));
+    return by;
+  };
+  const dropMesh = (m) => {
+    m.parent && m.parent.remove(m);
+    m.geometry.dispose();
+  };
+  // end handles of the one selected wall: [x, y, z, end]
+  function handlesOf() {
+    const out = [];
+    if (B.tool !== "select" || B.sel.length !== 1 || B.move) return out;
+    const q = refOf(B.sel[0]);
+    if (!q || (q.kind !== "run" && q.kind !== "frun")) return out;
+    const g = q.g,
+      S = q.S,
+      a = q.kind === "run" ? (g.d === 0 ? [g.t0, g.line] : [g.line, g.t0]) : [g.x0, g.z0],
+      b = q.kind === "run" ? (g.d === 0 ? [g.t1, g.line] : [g.line, g.t1]) : [g.x1, g.z1];
+    [a, b].forEach((p, n) => {
+      const [x, z] = toWorld(S, p[0], p[1]);
+      out.push([x, S.y0 + FLOOR_T, z, n]);
+    });
+    return out;
+  }
+  // redraw the highlight when the selection or the buildings changed
+  function selDraw() {
+    const show = B.on && B.tool === "select";
+    selGroup.visible = show;
+    if (!show) return;
+    if (SEL.selV !== B.selV || SEL.ver !== B.version) {
+      SEL.selV = B.selV;
+      SEL.ver = B.version;
+      for (const m of SEL.meshes) dropMesh(m);
+      SEL.meshes = [];
+      for (const [S, refs] of byStruct(selRefs())) {
+        const m = geoMesh(subset(S, refs), S, selMat);
+        selGroup.add(m);
+        SEL.meshes.push(m);
+      }
+      B.ov.handles = handlesOf();
+      B.ovVer++;
+      SEL.hov = null;
+    }
+    const hid = B.move || B.marq ? null : B.hoverId || null;
+    if (hid !== SEL.hov) {
+      SEL.hov = hid;
+      SEL.hovMesh && dropMesh(SEL.hovMesh);
+      SEL.hovMesh = null;
+      const q = hid && !B.sel.includes(hid) ? refOf(hid) : null;
+      if (q) selGroup.add((SEL.hovMesh = geoMesh(subset(q.S, [q]), q.S, hovMat)));
+    }
+  }
+  // change the selection's own data as one undo step, then find the pieces again
+  function selEdit(fn) {
+    const refs = selRefs();
+    if (!refs.length) return;
+    const anchors = refs.map(anchorOf),
+      touched = new Set();
+    pushUndo();
+    for (const q of refs) fn(q) !== false && touched.add(q.S);
+    for (const S of touched) for (const O of groupOf(S)) rebuild(O);
+    B.sel = [...new Set(anchors.map(fromAnchor).filter(Boolean))];
+    B.selV++;
+    B.key = "";
+    touchUi();
+  }
+  const setW = (S, k, m) => (m !== "timber" ? S.wmat.set(k, m) : S.wmat.delete(k));
+  function selMaterial(cat, v) {
+    selEdit((q) => {
+      const S = q.S;
+      if (cat === "wmat") {
+        if (q.kind === "run") for (const e of q.g.m) setW(S, e.k, v);
+        else if (q.kind === "frun") for (const n of q.g.m) S.segs[n][5] = v;
+        else if (q.kind === "ring") q.r.mat = v;
+        else if (q.kind === "pillar") q.p[2] = v;
+        else return false;
+      } else if (cat === "fmat") {
+        if (q.kind === "floor") for (const c of q.g.m) v !== "planks" ? S.fmat.set(c, v) : S.fmat.delete(c);
+        else if (q.kind === "poly") S.pids.forEach((m) => m[2] === q.p.id && (m[3] = v));
+        else if (q.kind === "ring") q.r.fmat = v;
+        else return false;
+      } else if (cat === "rmat") {
+        if (q.kind === "roof") q.r.mat = v;
+        else if (q.kind === "polyroof") S.polyRoofs.forEach((m) => m[3] === q.id && (m[2] = v));
+        else if (q.kind === "ring") q.r.rmat = v;
+        else return false;
+      } else if (cat === "pmat" && q.kind === "path") q.p[5] = v;
+      else if (cat === "dcol" && q.kind === "decor") q.it[4] = v;
+      else return false;
+    });
+  }
+  // restyle whole walls: doors stay doors (as a gate in a fence or a castle wall), windows are walled up where they cannot stay
+  function selStyle(v) {
+    const cls = wallClass(v);
+    const conv = (cur) => (isDoor(cur) ? (cls === "rail" ? "railgate" : cls === "rampart" ? "gate" : cls === "parapet" ? "parapet" : cur === "railgate" || cur === "gate" ? "door" : cur) : isWin(cur) ? (cls === "wall" ? cur : baseType(cls)) : v);
+    selEdit((q) => {
+      if (q.kind === "run")
+        for (const e of q.g.m) {
+          const nt = conv(e.type);
+          if (nt !== e.type) (q.S.oid.delete(e.k), q.S.walls.set(e.k, nt));
+        }
+      else if (q.kind === "frun")
+        for (const n of q.g.m) {
+          const sg = q.S.segs[n],
+            nt = conv(sg[4]);
+          if (nt !== sg[4]) ((sg[7] = null), (sg[4] = nt));
+        }
+      else return false;
+    });
+  }
+  function selOpenType(v) {
+    selEdit((q) => {
+      if (q.kind === "open") (q.S.oid.delete(q.k), q.S.walls.set(q.k, v));
+      else if (q.kind === "sopen") ((q.sg[4] = v), (q.sg[7] = null));
+      else return false;
+    });
+  }
+  // a free-angle wall drawn again between two points, keeping its doors and windows near where they were
+  function redivide(S, g, x0, z0, x1, z1) {
+    const k0 = g.mods.length,
+      L = Math.hypot(x1 - x0, z1 - z0),
+      k1 = Math.max(1, Math.round(L)),
+      base = baseType(g.cls),
+      types = Array(k1).fill(base),
+      oids = Array(k1).fill(null),
+      old = new Set(g.m.map((n) => S.segs[n]));
+    g.mods.forEach((q, m) => {
+      if (q.type === base) return;
+      const m1 = Math.min(k1 - 1, Math.max(0, Math.round(((m + 0.5) / k0) * k1 - 0.5)));
+      if (types[m1] === base) ((types[m1] = q.type), (oids[m1] = S.segs[q.idx][7]));
+    });
+    S.segs = S.segs.filter((sg) => !old.has(sg));
+    const made = [];
+    for (let m = 0; m < k1; m++) made.push([x0 + ((x1 - x0) * m) / k1, z0 + ((z1 - z0) * m) / k1, x0 + ((x1 - x0) * (m + 1)) / k1, z0 + ((z1 - z0) * (m + 1)) / k1, types[m], g.mat, g.id, oids[m]]);
+    for (const sg of made) S.segs.push(sg);
+    return made;
+  }
+  // lengthen or shorten a straight grid wall at one end: an op, so it previews and undoes like any other
+  function endOp(S, g, which, m) {
+    const op = blankOp(S),
+      x = g.d === 0;
+    op.ids = { wid: [], oid: [], fid: [] };
+    op.move = true;
+    if (m > 0)
+      for (let s = 0; s < m; s++) {
+        const t = which ? g.t1 + s : g.t0 - 1 - s,
+          e = x ? [t, g.line, 0] : [g.line, t, 1],
+          k = ek(e[0], e[1], e[2]);
+        if (S.walls.has(k)) break;
+        op.addWalls.push([e[0], e[1], e[2], baseType(g.cls), g.mat]);
+        op.ids.wid.push([k, g.id]);
+      }
+    else
+      for (let s = 0; s < Math.min(-m, g.m.length - 1); s++) {
+        const e = which ? g.m[g.m.length - 1 - s] : g.m[s];
+        op.delWalls.push([e.i, e.j, e.d]);
+      }
+    const len = g.m.length + op.addWalls.length - op.delWalls.length,
+      mid = (g.t0 + g.t1) / 2;
+    dim(op, x ? mid : g.line, x ? g.line : mid, fmtM(len));
+    return finishOp(op);
+  }
+  // Push or pull a straight grid wall k metres across its line. Where it is the side of a floor, the floor, the
+  // walls that meet its ends and a roof that ends on it all follow: the room grows or shrinks with its wall.
+  function stretchOp(S, g, k) {
+    const op = blankOp(S),
+      x = g.d === 0,
+      L0 = g.line,
+      t0 = g.t0,
+      t1 = g.t1;
+    const tile = (t, row) => (x ? [t, row] : [row, t]),
+      has = (t, row) => S.floors.has(ck(...tile(t, row))),
+      along = (t, line) => (x ? [t, line, 0] : [line, t, 1]),
+      across = (t, row) => (x ? [t, row, 1] : [row, t, 0]),
+      wk = (e) => ek(e[0], e[1], e[2]);
+    let lo = 0,
+      hi = 0;
+    for (let t = t0; t < t1; t++) (has(t, L0 - 1) && lo++, has(t, L0) && hi++);
+    const out = lo && !hi ? 1 : hi && !lo ? -1 : 0,
+      grow = Math.sign(k) === out;
+    let n = Math.abs(k);
+    if (out && !grow) {
+      // it cannot be pulled in past the far side of its floor
+      let depth = 0;
+      for (let s = 0; s < 60; s++) {
+        const row = out > 0 ? L0 - 1 - s : L0 + s;
+        let any = false;
+        for (let t = t0; t < t1 && !any; t++) any = has(t, row);
+        if (!any) break;
+        depth++;
+      }
+      n = Math.min(n, depth - 1);
+    }
+    const L1 = L0 + Math.sign(k) * n;
+    op.ids = { wid: [], oid: [], fid: [] };
+    op.move = true;
+    if (!n) return finishOp(op);
+    for (const e of g.m) {
+      const ne = along(e.t, L1);
+      op.delWalls.push([e.i, e.j, e.d]);
+      op.addWalls.push([ne[0], ne[1], ne[2], e.type, g.mat]);
+      op.ids.wid.push([wk(ne), g.id]);
+      S.oid.get(e.k) && op.ids.oid.push([wk(ne), S.oid.get(e.k)]);
+    }
+    const mid = (t0 + t1) / 2;
+    dim(op, x ? mid : L1, x ? L1 : mid, (L1 > L0 === out > 0 || !out ? "+" : "−") + fmtM(n));
+    if (!out) return finishOp(op);
+    const inRow = out > 0 ? L0 - 1 : L0;
+    const sideOf = (tEnd) => {
+      const k2 = wk(across(tEnd, inRow));
+      return S.walls.has(k2) ? [baseType(wallClass(S.walls.get(k2))), S.wmat.get(k2) || "timber"] : [baseType(g.cls), g.mat];
+    };
+    for (let s = 0; s < n; s++) {
+      const row = grow ? (out > 0 ? L0 + s : L0 - 1 - s) : out > 0 ? L0 - 1 - s : L0 + s;
+      for (let t = t0; t < t1; t++) {
+        const c = tile(t, row);
+        if (grow) has(t, row) || op.addFloors.push([c[0], c[1], S.fmat.get(ck(...tile(t, inRow))) || "planks"]);
+        else has(t, row) && op.delFloors.push(c);
+      }
+      for (const tEnd of [t0, t1]) {
+        const e = across(tEnd, row),
+          beyond = has(tEnd === t0 ? t0 - 1 : t1, row);
+        if (grow) {
+          if (!S.walls.has(wk(e)) && !beyond) op.addWalls.push([e[0], e[1], e[2], ...sideOf(tEnd)]);
+        } else if (S.walls.has(wk(e)) && !beyond) op.delWalls.push(e);
+      }
+      if (!grow) {
+        // walls left inside the part that is cut away go with it
+        for (let t = t0 + 1; t < t1; t++) S.walls.has(wk(across(t, row))) && op.delWalls.push(across(t, row));
+        if (s < n - 1) {
+          const Lm = out > 0 ? L0 - 1 - s : L0 + 1 + s;
+          for (let t = t0; t < t1; t++) S.walls.has(wk(along(t, Lm))) && op.delWalls.push(along(t, Lm));
+        }
+      }
+    }
+    S.roofs.forEach((r, idx) => {
+      const a0 = x ? r.i0 : r.j0,
+        a1 = x ? r.i1 : r.j1,
+        b0 = x ? r.j0 : r.i0,
+        b1 = x ? r.j1 : r.i1;
+      if (a0 < t0 || a1 > t1 - 1 || !(out > 0 ? b1 + 1 === L0 : b0 === L0)) return;
+      const nb0 = out > 0 ? b0 : b0 + (L1 - L0),
+        nb1 = out > 0 ? b1 + (L1 - L0) : b1;
+      if (nb1 < nb0) return;
+      op.delRoofs.push(idx);
+      op.addRoofs.push({ ...r, i0: x ? r.i0 : nb0, i1: x ? r.i1 : nb1, j0: x ? nb0 : r.j0, j1: x ? nb1 : r.j1 });
+      op.replacing = true;
+    });
+    const room = S.cellRoom.get(ck(...tile(t0, inRow)));
+    if (room) {
+      const w = (x ? room.i1 - room.i0 : room.j1 - room.j0) + 1,
+        l = (x ? room.j1 - room.j0 : room.i1 - room.i0) + 1 + (grow ? n : -n);
+      op.label = "Room " + w + " × " + l + " m · " + fmtA(w * l);
+    }
+    return finishOp(op);
+  }
+  const stretchable = (q) => q.kind === "run" && stretchOp(q.S, q.g, 1).addFloors.length + stretchOp(q.S, q.g, -1).addFloors.length > 0;
+  // the grid wall that turns the corner at one end of another
+  function cornerRun(S, g, which) {
+    const t = which ? g.t1 : g.t0;
+    return S.runs.find((r) => r.d !== g.d && r.line === t && (r.t0 === g.line || r.t1 === g.line)) || null;
+  }
+
+  /* moving: B.move is a selection in the hand, a wall being pushed or pulled, or a wall end being dragged */
+  const moveGroup = new T.Group();
+  G.scene.add(moveGroup);
+  function moveEnd() {
+    for (const m of [...moveGroup.children]) dropMesh(m);
+    B.move = null;
+    B.key = "";
+    B.selV++;
+    touchUi();
+  }
+  // where the cursor is on the floor plane of a structure, in its own metres
+  function onPlane(S) {
+    const p = planeHit(S.y0 + FLOOR_T) || [pick.x, pick.z];
+    return toLocal(S, p[0], p[1]);
+  }
+  function moveBegin(copy, hand, end) {
+    const refs = selRefs();
+    if (!refs.length) return;
+    const lead = refs[0].S,
+      one = refs.length === 1 ? refs[0] : null,
+      M = { copy, hand, lead, sl: onPlane(lead), kind: "rigid", key: "" };
+    if (end && one) {
+      // a wall end: along the wall it lengthens it (or, at a corner, pushes the wall round the corner); a free-angle end goes anywhere
+      M.kind = one.kind === "run" ? "gridEnd" : "freeEnd";
+      M.q = one;
+      M.end = end.n;
+      const g = one.g;
+      M.sl = one.kind === "run" ? (g.d === 0 ? [end.n ? g.t1 : g.t0, g.line] : [g.line, end.n ? g.t1 : g.t0]) : end.n ? [g.x1, g.z1] : [g.x0, g.z0];
+    } else if (one && !copy && one.kind === "run" && stretchable(one)) ((M.kind = "stretch"), (M.q = one));
+    else {
+      const by = byStruct(refs);
+      M.by = by;
+      M.grid = refs.some((q) => q.kind === "run" || q.kind === "floor" || q.kind === "roof" || q.kind === "stair" || q.kind === "open");
+      for (const [S, list] of by) moveGroup.add(geoMesh(subset(S, list), S, ghostAdd.material));
+      if (hand) {
+        // a copy in the hand hangs from the cursor by the middle of what was copied
+        let x = 0,
+          z = 0,
+          n = 0;
+        for (const id of B.sel) {
+          const p = pieceById(id) || listPieces().find((q) => q.roof === id || q.tower === id);
+          if (p) ((x += (p.a.x + p.b.x) / 2), (z += (p.a.z + p.b.z) / 2), n++);
+        }
+        if (n) {
+          const c = toLocal(lead, x / n, z / n);
+          M.sl = M.grid ? [Math.round(c[0]), Math.round(c[1])] : c;
+        }
+      }
+    }
+    B.move = M;
+    B.key = "";
+    touchUi();
+  }
+  // the op or ghost for where the cursor is now
+  function moveUpdate() {
+    const M = B.move,
+      S = M.lead,
+      cur = onPlane(S);
+    let dx = cur[0] - M.sl[0],
+      dz = cur[1] - M.sl[1];
+    if (M.kind === "rigid") {
+      const st = M.grid ? 1 : snapOn() ? 0.25 : 0;
+      if (st) ((dx = Math.round(dx / st) * st), (dz = Math.round(dz / st) * st));
+      const key = dx + "," + dz;
+      if (key === M.key) return;
+      M.key = key;
+      M.d = [dx, dz];
+      const c = Math.cos(S.yaw),
+        s = Math.sin(S.yaw);
+      M.w = [dx * c + dz * s, -dx * s + dz * c];
+      moveGroup.position.set(M.w[0], 0, M.w[1]);
+      const L = Math.hypot(dx, dz);
+      B.label = L ? (M.copy ? "Copy " : "Move ") + fmtM(L) + (M.hand ? " · click to place" : "") : M.hand ? "Click to place a copy" : "";
+      B.labelBad = false;
+      B.ov.dims.length = 0;
+      B.ovVer++;
+      return;
+    }
+    const g = M.q.g,
+      x = g.d === 0;
+    let op = null,
+      key = "";
+    if (M.kind === "stretch") {
+      const k = Math.round(x ? dz : dx);
+      key = "s" + k;
+      if (key !== M.key) op = k ? stretchOp(S, g, k) : null;
+    } else if (M.kind === "gridEnd") {
+      const al = Math.round(x ? dx : dz),
+        ac = Math.round(x ? dz : dx),
+        corner = cornerRun(S, g, M.end);
+      key = "e" + al + "," + ac;
+      if (key !== M.key) op = Math.abs(al) >= Math.abs(ac) ? (al ? (corner ? stretchOp(S, corner, al) : endOp(S, g, M.end, M.end ? al : -al)) : null) : stretchOp(S, g, ac);
+    } else {
+      // free-angle end: snap it like a wall being drawn from its other end
+      const a = M.end ? { i: g.x0, j: g.z0 } : { i: g.x1, j: g.z1 },
+        sp = snapPoint(S, cur[0], cur[1], a, null);
+      key = "f" + sp.x + "," + sp.z + sp.type;
+      if (key !== M.key) {
+        op = blankOp(S);
+        const L = Math.hypot(sp.x - a.i, sp.z - a.j),
+          kk = Math.max(1, Math.round(L));
+        for (let m = 0; m < kk; m++) op.addSegs.push([a.i + ((sp.x - a.i) * m) / kk, a.j + ((sp.z - a.j) * m) / kk, a.i + ((sp.x - a.i) * (m + 1)) / kk, a.j + ((sp.z - a.j) * (m + 1)) / kk, baseType(g.cls), g.mat]);
+        dim(op, (a.i + sp.x) / 2, (a.j + sp.z) / 2, fmtM(L));
+        op.snap = sp.type;
+        op.marker = [sp.x, sp.z];
+        for (const q of sp.g) op.guides.push(q);
+        op.to = [sp.x, sp.z];
+        op.move = true;
+        finishOp(op);
+        if (L < 0.5) op.valid = false;
+      }
+    }
+    if (key === M.key) return;
+    M.key = key;
+    M.op = op;
+    B.op = op;
+    drawOp(op, S, false);
+  }
+  function translateIn(S, refs, di, dj, copy) {
+    const walls = [],
+      cells = [],
+      gone = new Set(),
+      open = [];
+    for (const q of refs) {
+      if (q.kind === "run") for (const e of q.g.m) walls.push([e.i, e.j, e.d, e.type, q.g.mat, q.id, S.oid.get(e.k)]);
+      else if (q.kind === "floor") for (const c of q.g.m) cells.push([c, q.g.mat, q.id]);
+      else if (q.kind === "open") open.push([q.k, S.walls.get(q.k), q.id]);
+    }
+    if (!copy) {
+      for (const w of walls) {
+        const k = ek(w[0], w[1], w[2]);
+        (S.walls.delete(k), S.wmat.delete(k), S.wid.delete(k), S.oid.delete(k));
+      }
+      for (const c of cells) (S.floors.delete(c[0]), S.fmat.delete(c[0]), S.fid.delete(c[0]));
+    }
+    for (const w of walls) {
+      const k = ek(w[0] + di, w[1] + dj, w[2]);
+      S.walls.set(k, w[3]);
+      setW(S, k, w[4]);
+      if (!copy) (S.wid.set(k, w[5]), w[6] && S.oid.set(k, w[6]));
+    }
+    for (const c of cells) {
+      const [i, j] = parse(c[0]),
+        k = ck(i + di, j + dj);
+      S.floors.add(k);
+      c[1] !== "planks" ? S.fmat.set(k, c[1]) : S.fmat.delete(k);
+      copy || S.fid.set(k, c[2]);
+    }
+    // a door or window on its own goes to the wall it lands on
+    for (const o of open) {
+      const [i, j, d] = parse(o[0]),
+        k = ek(i + di, j + dj, d),
+        cur = S.walls.get(k);
+      if (!cur || isDoor(cur) || isWin(cur) || isLow(cur)) continue;
+      if (!copy) (S.walls.set(o[0], isThick(o[1]) ? "rampart" : "wall"), S.oid.delete(o[0]), S.oid.set(k, o[2]));
+      S.walls.set(k, o[1]);
+    }
+    const moved = (arr, q, shift) => {
+      if (copy) arr.push(shift(Array.isArray(q) ? q.slice() : { ...q, sides: q.sides && q.sides.slice() }, true));
+      else shift(q, false);
+    };
+    for (const q of refs) {
+      if (q.kind === "frun") {
+        for (const sg of q.g.m.map((n) => S.segs[n])) moved(S.segs, sg, (v, fresh) => ((v[0] += di), (v[1] += dj), (v[2] += di), (v[3] += dj), fresh && (v[6] = v[7] = null), v));
+        gone.add(q);
+      } else if (q.kind === "roof") moved(S.roofs, q.r, (v, fresh) => ((v.i0 += di), (v.i1 += di), (v.j0 += dj), (v.j1 += dj), fresh && delete v.id, v));
+      else if (q.kind === "ring") moved(S.rings, q.r, (v, fresh) => ((v.cx += di), (v.cz += dj), fresh && delete v.id, v));
+      else if (q.kind === "stair") moved(S.stairs, q.st, (v, fresh) => ((v.i += di), (v.j += dj), fresh && delete v.id, v));
+      else if (q.kind === "pillar") moved(S.pillars, q.p, (v, fresh) => ((v[0] += di), (v[1] += dj), fresh && (v[4] = null), v));
+      else if (q.kind === "decor") moved(S.decor, q.it, (v, fresh) => ((v[0] += di), (v[1] += dj), fresh && (v[5] = null), v));
+      else if (q.kind === "path") moved(S.paths, q.p, (v, fresh) => ((v[0] += di), (v[1] += dj), (v[2] += di), (v[3] += dj), fresh && (v[6] = null), v));
+    }
+    // a closed shape whose walls all moved keeps its floor and roof
+    if (!copy && gone.size)
+      for (const m of [...S.pids, ...S.polyRoofs]) {
+        const p = S.polys.find((q) => pip(q.pts, m[0], m[1]));
+        if (p && p.pts.every((v) => [...gone].some((q) => q.g.m.some((n) => Math.min(Math.hypot(S.segs[n][0] - di - v[0], S.segs[n][1] - dj - v[1]), Math.hypot(S.segs[n][2] - di - v[0], S.segs[n][3] - dj - v[1])) < 0.05)))) ((m[0] += di), (m[1] += dj));
+      }
+  }
+  function moveCommit() {
+    const M = B.move;
+    if (!M) return;
+    if (M.kind !== "rigid") {
+      const op = M.op,
+        S = M.lead,
+        q = M.q,
+        anchor = q.kind === "run" ? null : null;
+      if (op && op.valid) {
+        if (M.kind === "freeEnd") {
+          pushUndo();
+          const g = q.g,
+            old = M.end ? [g.x1, g.z1] : [g.x0, g.z0],
+            to = op.to;
+          // walls that share this corner come with it
+          for (const o of S.fruns) {
+            if (o === g) continue;
+            const e0 = Math.hypot(o.x0 - old[0], o.z0 - old[1]) < 0.03,
+              e1 = Math.hypot(o.x1 - old[0], o.z1 - old[1]) < 0.03;
+            if (e0 || e1) redivide(S, o, e0 ? to[0] : o.x0, e0 ? to[1] : o.z0, e1 ? to[0] : o.x1, e1 ? to[1] : o.z1);
+          }
+          M.end ? redivide(S, g, g.x0, g.z0, to[0], to[1]) : redivide(S, g, to[0], to[1], g.x1, g.z1);
+          for (const O of groupOf(S)) rebuild(O);
+        } else applyOp(op);
+        settleFx();
+      }
+      selCheck();
+      return moveEnd();
+    }
+    if (!M.d || (!M.d[0] && !M.d[1])) return M.hand ? undefined : moveEnd();
+    pushUndo();
+    const sel = new Set(B.sel),
+      done = new Set(),
+      lifted = [];
+    for (const [S, refs] of M.by) {
+      const grp = groupOf(S),
+        whole = !M.copy && grp.every((O) => elemIds(O).every((id) => sel.has(id)));
+      if (whole) {
+        // a whole building moves as it stands, to wherever it is put, and sits on the ground there
+        const dy = grp[0].po ? 0 : G.heightAt(grp[0].cx + M.w[0], grp[0].cz + M.w[1]) - G.heightAt(grp[0].cx, grp[0].cz);
+        for (const O of grp) {
+          if (done.has(O)) continue;
+          done.add(O);
+          O.ox += M.w[0];
+          O.oz += M.w[1];
+          O.y0 += dy;
+          O.group.position.set(O.ox, O.y0, O.oz);
+          lifted.push(O);
+        }
+        continue;
+      }
+      // other pieces move within their structure, on its own grid
+      const c = Math.cos(S.yaw),
+        s = Math.sin(S.yaw);
+      let di = M.w[0] * c - M.w[1] * s,
+        dj = M.w[0] * s + M.w[1] * c;
+      if (refs.some((q) => q.kind === "run" || q.kind === "floor" || q.kind === "roof" || q.kind === "stair" || q.kind === "open")) ((di = Math.round(di)), (dj = Math.round(dj)));
+      translateIn(S, refs, di, dj, M.copy);
+      for (const O of groupOf(S)) done.has(O) || (done.add(O), lifted.push(O));
+    }
+    settle(lifted);
+    B.version++;
+    settleFx();
+    selCheck();
+    if (M.hand) {
+      M.key = "";
+      B.selV++;
+      return touchUi();
+    }
+    moveEnd();
+  }
+  function selDelete() {
+    const refs = selRefs();
+    if (!refs.length) return;
+    pushUndo();
+    for (const [S, list] of byStruct(refs)) {
+      const op = blankOp(S);
+      for (const q of list) {
+        if (q.kind === "run") for (const e of q.g.m) op.delWalls.push([e.i, e.j, e.d]);
+        else if (q.kind === "frun") for (const n of q.g.m) op.delSegs.push(n);
+        else if (q.kind === "floor") for (const c of q.g.m) op.delFloors.push(parse(c));
+        else if (q.kind === "roof") op.delRoofs.push(S.roofs.indexOf(q.r));
+        else if (q.kind === "polyroof") op.delPolyRoofs.push(S.polys.indexOf(q.p));
+        else if (q.kind === "ring") op.delRings.push(S.rings.indexOf(q.r));
+        else if (q.kind === "stair") op.delStairs.push(S.stairs.indexOf(q.st));
+        else if (q.kind === "pillar") op.delPillars.push(S.pillars.indexOf(q.p));
+        else if (q.kind === "path") op.delPaths.push(S.paths.indexOf(q.p));
+        else if (q.kind === "decor") op.delDecor.push(S.decor.indexOf(q.it));
+        else if (q.kind === "open") op.revert.push(parse(q.k));
+        else if (q.kind === "sopen") op.setSegs.push([S.segs.indexOf(q.sg), baseType(wallClass(q.sg[4]))]);
+      }
+      // a door in a wall that is going anyway needs no separate step
+      op.revert = op.revert.filter((r) => !op.delWalls.some((w) => w[0] === r[0] && w[1] === r[1] && w[2] === r[2]));
+      applyOp(finishOp(op), true);
+    }
+    selSet([]);
+  }
+  function selBuilding() {
+    const ids = [];
+    for (const S of new Set(selRefs().map((q) => q.S))) for (const O of groupOf(S)) ids.push(...elemIds(O));
+    selSet(ids);
+  }
+  // typed values from the inspector
+  function selField(name, v) {
+    const q = selRefs()[0];
+    if (!q || !isFinite(v)) return;
+    const S = q.S;
+    if (name === "len" && q.kind === "run") {
+      const m = clamp(Math.round(v), 1, 80) - q.g.m.length;
+      if (!m) return touchUi();
+      const op = endOp(S, q.g, 1, m),
+        k0 = q.g.m[0].k;
+      applyOp(op);
+      selSet([S.wid.get(k0)]);
+    } else if (name === "len" && q.kind === "frun") {
+      const g = q.g,
+        L = clamp(v, 0.5, 80);
+      pushUndo();
+      redivide(S, g, g.x0, g.z0, g.x0 + g.ux * L, g.z0 + g.uz * L);
+      for (const O of groupOf(S)) rebuild(O);
+      selSet([g.id]);
+    } else if (name === "hs") setStorey(S, clamp(v / EAVE, 0.7, 2.5));
+    else if (name === "x" || name === "z") {
+      const n = name === "x" ? 0 : 1;
+      selEdit((r) => {
+        if (r.kind === "decor") r.it[n] = v;
+        else if (r.kind === "pillar") r.p[n] = v;
+        else if (r.kind === "ring") r.r[n ? "cz" : "cx"] = v;
+        else return false;
+      });
+    } else if (name === "width" && q.kind === "ring") selEdit((r) => ((r.r.r = clamp(v / 2, 1.5, 9)), (r.r.n = clamp(Math.round((Math.PI * 2 * r.r.r) / 1.05 / 2) * 2, 8, 32)), (r.r.rot = Math.PI / r.r.n), (r.r.sides = Array(r.r.n).fill("wall"))));
+    touchUi();
+  }
+  // ceiling height of a storey; the storeys above ride up or down with it
+  function setStorey(S, hs) {
+    if (Math.abs(hs - S.hs) < 1e-6) return;
+    pushUndo();
+    const delta = EAVE * (hs - S.hs);
+    S.hs = hs;
+    for (const O of B.structs)
+      if (O !== S && sameGrid(O, S) && O.level > S.level && S.level >= 0) {
+        O.y0 += delta;
+        O.group.position.y = O.y0;
+      }
+    for (const O of B.structs) sameGrid(O, S) && rebuild(O);
+    B.key = "";
+    touchUi();
+  }
+  // take a piece's style and material in hand, with the tool that builds it
+  function pickUp(id) {
+    const q = refOf(id);
+    if (!q) return false;
+    const S = q.S;
+    if (q.kind === "run" || q.kind === "frun") {
+      const types = q.kind === "run" ? q.g.m.map((e) => e.type) : q.g.mods.map((m) => m.type),
+        plain = types.find((t) => !isDoor(t) && !isWin(t)) || "wall";
+      B.style = STYLE_NAME[plain] ? plain : "wall";
+      B.wmat = q.g.mat;
+      B.tool = "wall";
+    } else if (q.kind === "open" || q.kind === "sopen") {
+      const ty = q.kind === "open" ? S.walls.get(q.k) : q.sg[4];
+      if (isWin(ty)) ((B.wstyle = ty), (B.tool = "window"));
+      else ((B.dstyle = DOOR_NAME[ty] ? ty : "door"), (B.tool = "door"));
+    } else if (q.kind === "floor" || q.kind === "poly") ((B.fmat = q.kind === "floor" ? q.g.mat : q.p.fmat), (B.tool = "floor"));
+    else if (q.kind === "roof") {
+      const r = q.r,
+        n = RSHAPES.findIndex((R) => R[0] === (r.shape || "gable") && R[3] === (r.pitch || 1) && (R[0] === "shed" ? R[1] === (r.dir || 0) : R[0] !== "gable" || (R[1] === 1) === ((r.i1 - r.i0 >= r.j1 - r.j0) !== (r.axis === "x"))));
+      B.rshape = n < 0 ? 0 : n;
+      B.rmat = r.mat || "thatch";
+      B.tool = "roof";
+    } else if (q.kind === "polyroof") ((B.rmat = q.p.rmat || "thatch"), (B.tool = "roof"));
+    else if (q.kind === "ring") ((B.wmat = q.r.mat || "timber"), (B.fmat = q.r.fmat || "planks"), (B.levels = q.r.h), q.r.roof && ((B.tshape = q.r.roof === true ? "cone" : q.r.roof), (B.rmat = q.r.rmat || "thatch")), (B.tool = "tower"));
+    else if (q.kind === "pillar") ((B.wmat = q.p[2] || "timber"), (B.pkind = q.p[3] || "pillar"), (B.tool = "pillar"));
+    else if (q.kind === "path") ((B.pwidth = q.p[4]), (B.pmat = q.p[5] || "cobble"), (B.tool = "path"));
+    else if (q.kind === "decor") ((B.dkind = q.it[2]), (B.drot = q.it[3] || 0), (B.dcol = q.it[4] || 0), (B.tool = "decor"));
+    else if (q.kind === "stair") ((B.stairDir = q.st.dir), (B.tool = "stairs"));
+    B.tapMode = "";
+    B.drag = null;
+    B.key = "";
+    touchUi();
+    return true;
+  }
+  // everything whose middle falls inside a rectangle on the screen
+  function marqueeIds(x0, y0, x1, y1) {
+    const ids = [],
+      lo = [Math.min(x0, x1), Math.min(y0, y1)],
+      hi = [Math.max(x0, x1), Math.max(y0, y1)],
+      seen = new Set();
+    for (const p of listPieces()) {
+      const id = p.roof || p.tower || p.id,
+        q = refOf(id);
+      if (!q || seen.has(id) || q.S.level !== B.level || (/roof/.test(q.kind) && !roofsShown()) || q.kind === "open" || q.kind === "sopen") continue;
+      const s = toScreen((p.a.x + p.b.x) / 2, p.y0, (p.a.z + p.b.z) / 2);
+      if (s[0] >= lo[0] && s[0] <= hi[0] && s[1] >= lo[1] && s[1] <= hi[1]) (seen.add(id), ids.push(id));
+    }
+    return ids;
+  }
+  const _v3 = new T.Vector3();
+  const SCR = [0, 0];
+  function toScreen(x, y, z) {
+    const rc = canvas.getBoundingClientRect();
+    _v3.set(x, y, z).project(G.camera);
+    SCR[0] = rc.left + (_v3.x * 0.5 + 0.5) * rc.width;
+    SCR[1] = rc.top + (-_v3.y * 0.5 + 0.5) * rc.height;
+    return SCR;
+  }
+
+  /* ---------- measuring ---------- */
+  // Click two points to keep a measurement on the ground until it is dismissed. Its ends can be snapped to.
+  const measMesh = new T.Mesh(new T.BufferGeometry(), new T.MeshBasicMaterial({ color: 0x9fe3ff, transparent: true, opacity: 0.95, depthTest: false, depthWrite: false, fog: false, side: T.DoubleSide }));
+  measMesh.renderOrder = 23;
+  measMesh.frustumCulled = false;
+  measMesh.visible = false;
+  G.scene.add(measMesh);
+  function measPoint(h) {
+    const [x, z] = toWorld(h.F, h.sx, h.sz);
+    return [x, h.F.isNew || h.F.po ? G.heightAt(x, z) : h.F.y0 + FLOOR_T, z, h.F.yaw];
+  }
+  function measText(a, b) {
+    const dx = b[0] - a[0],
+      dz = b[2] - a[2],
+      L = Math.hypot(dx, dz),
+      rise = b[1] - a[1],
+      c = Math.cos(a[3] || 0),
+      s = Math.sin(a[3] || 0),
+      an = (Math.atan2(Math.abs(dx * s + dz * c), Math.abs(dx * c - dz * s)) * 180) / Math.PI;
+    return { len: L, rise, direct: Math.hypot(L, rise), angle: an, text: fmtM(L) + (Math.abs(rise) > 0.02 ? " · " + (rise > 0 ? "up " : "down ") + fmtM(Math.abs(rise)) : " · level") + " · " + Math.round(an) + "°" };
+  }
+  function measDraw(live) {
+    const g = new Geo(),
+      w = Math.max(0.03, G.cam.dist * 0.0022),
+      lines = B.meas.map((m) => [m.a, m.b]);
+    live && lines.push(live);
+    for (const [a, b] of lines) {
+      const dx = b[0] - a[0],
+        dz = b[2] - a[2],
+        L = Math.hypot(dx, dz) || 1,
+        nx = (-dz / L) * w,
+        nz = (dx / L) * w,
+        ya = a[1] + 0.06,
+        yb = b[1] + 0.06;
+      g.tri([a[0] - nx, ya, a[2] - nz], [a[0] + nx, ya, a[2] + nz], [b[0] + nx, yb, b[2] + nz], [0, 1, 0], [1, 1, 1]);
+      g.tri([a[0] - nx, ya, a[2] - nz], [b[0] + nx, yb, b[2] + nz], [b[0] - nx, yb, b[2] - nz], [0, 1, 0], [1, 1, 1]);
+      for (const p of [a, b]) g.abox(p[0] - w * 2.5, p[1] + 0.02, p[2] - w * 2.5, p[0] + w * 2.5, p[1] + 0.1, p[2] + w * 2.5, [1, 1, 1]);
+    }
+    setGeo(measMesh, g);
+    measMesh.visible = B.on && lines.length > 0;
+    B.ov.meas = lines.map(([a, b], n) => ({ x: (a[0] + b[0]) / 2, y: (a[1] + b[1]) / 2 + 0.1, z: (a[2] + b[2]) / 2, text: measText(a, b).text, n: n < B.meas.length ? n : -1 }));
+    B.ovVer++;
+  }
+  function measClick() {
+    const h = B.hover;
+    if (!h) return;
+    const p = measPoint(h);
+    if (!B.measA) B.measA = p;
+    else {
+      if (Math.hypot(p[0] - B.measA[0], p[2] - B.measA[2]) > 0.05) (B.meas.push({ a: B.measA, b: p }), B.meas.length > 8 && B.meas.shift());
+      B.measA = null;
+    }
+    B.key = "";
+    measDraw(null);
+    touchUi();
+  }
+  function measClear(n) {
+    if (n === undefined || n < 0) B.meas.length = 0;
+    else B.meas.splice(n, 1);
+    B.measA = null;
+    B.key = "";
+    measDraw(null);
+    touchUi();
+  }
+
+  /* ---------- hover and preview ---------- */
+  // what the interface draws over the view: live dimensions, the snap marker, wall handles, measurements, the marquee
+  B.ov = { dims: [], snap: null, handles: [], meas: [], marq: null };
+  B.label = "";
+  B.labelBad = false;
+  B.gap = 2;
   function planeHit(y) {
     const o = ray.ray.origin,
       d = ray.ray.direction;
@@ -3552,35 +5110,36 @@
   }
   function updateHover() {
     const c = pick;
+    B.hoverId = null;
     if (!B.ptr.inside) {
       B.hover = null;
       return;
     }
-    const rc = canvas.getBoundingClientRect();
-    ray.setFromCamera(v2.set(((B.ptr.x - rc.left) / rc.width) * 2 - 1, -(((B.ptr.y - rc.top) / rc.height) * 2 - 1)), G.camera);
+    setRay();
     terrainHit();
     if (!c.valid) {
       B.hover = null;
       return;
     }
+    const tool = B.tool;
     let F = null;
     if (B.drag) F = B.drag.F;
     else {
       let best = 1e9;
       for (const S of B.structs) {
-        // paths and loose decorations live in their own structures, which only those tools see
-        if (S.level !== B.level || (S.po ? B.tool !== "path" && B.tool !== "decor" : B.tool === "path")) continue;
+        // paths and loose furniture live in their own structures, which only those tools draw into
+        if (S.level !== B.level || (S.po ? tool !== "path" && tool !== "decor" : tool === "path")) continue;
         const hit = (S.po ? null : planeHit(S.y0 + FLOOR_T)) || [c.x, c.z];
         const [lx, lz] = toLocal(S, hit[0], hit[1]);
         const dx = Math.max(S.b.i0 - lx, 0, lx - S.b.i1),
           dz = Math.max(S.b.j0 - lz, 0, lz - S.b.j1),
           dist = Math.hypot(dx, dz);
-        if (dist < (B.tool === "decor" && !S.po ? 0.6 : 3.5) && (dist < best || (dist === best && !S.po))) {
+        if (dist < (tool === "decor" && !S.po ? 0.6 : 3.5) && (dist < best || (dist === best && !S.po))) {
           best = dist;
           F = S;
         }
       }
-      if (!F && B.level !== 0 && B.tool !== "path" && B.tool !== "copy" && B.tool !== "decor") {
+      if (!F && B.level !== 0 && tool !== "path" && tool !== "copy" && tool !== "decor" && tool !== "select" && tool !== "measure") {
         const below = B.level > 0 ? B.level - 1 : 0;
         for (const S of B.structs) {
           if (S.level !== below || S.po) continue;
@@ -3596,12 +5155,34 @@
         }
       }
       if (!F) {
-        const p = B.pending,
-          yaw = snapYaw(G.cam.yaw);
-        if (p.yaw !== yaw || Math.hypot(c.x - p.ox, c.z - p.oz) > 60) {
-          p.yaw = yaw;
-          p.ox = Math.round(c.x);
-          p.oz = Math.round(c.z);
+        const p = B.pending;
+        if (!snapOn()) {
+          // free placement: the new grid starts exactly under the cursor and faces the way the view does
+          p.yaw = ((G.cam.yaw % (Math.PI / 2)) + Math.PI / 2) % (Math.PI / 2);
+          p.ox = c.x;
+          p.oz = c.z;
+          p.free = true;
+        } else {
+          const yaw = snapYaw(G.cam.yaw);
+          if (p.free || p.yaw !== yaw || Math.hypot(c.x - p.ox, c.z - p.oz) > 60) {
+            p.free = false;
+            p.yaw = yaw;
+            p.ox = Math.round(c.x);
+            p.oz = Math.round(c.z);
+            // a new building beside one that faces the same way shares its grid, so the two line up
+            let near = null,
+              nd = 40;
+            for (const S of B.structs) {
+              if (S.po || S.cx === undefined || Math.abs(((S.yaw - yaw + Math.PI / 4) % (Math.PI / 2)) - Math.PI / 4) > 1e-6) continue;
+              const dd = Math.hypot(S.cx - c.x, S.cz - c.z) - S.rad;
+              if (dd < nd) ((nd = dd), (near = S));
+            }
+            if (near) {
+              const [lx, lz] = toLocal(near, c.x, c.z);
+              [p.ox, p.oz] = toWorld(near, Math.round(lx), Math.round(lz));
+              p.yaw = near.yaw;
+            }
+          }
         }
         p.y0 = c.y + B.lift;
         p.lift = B.lift;
@@ -3609,162 +5190,265 @@
       }
     }
     // existing buildings and drags in progress work on a flat plane, like the grid that is drawn
-    const hit = (B.tool === "path" || F.po ? null : F.isNew ? (B.drag || F.level ? planeHit(F.y0) : null) : planeHit(F.y0 + FLOOR_T)) || [c.x, c.z];
+    const hit = (tool === "path" || F.po ? null : F.isNew ? (B.drag || F.level ? planeHit(F.y0) : null) : planeHit(F.y0 + FLOOR_T)) || [c.x, c.z];
     const [lx, lz] = toLocal(F, hit[0], hit[1]);
-    B.hover = { F, lx, lz, wx: c.x, wz: c.z, wy: c.y };
+    const h = (B.hover = { F, lx, lz, wx: c.x, wz: c.z, wy: c.y, sx: lx, sz: lz, snap: "", guides: null });
     if (!F.isNew && F.roofs && F.roofs.length) {
-      const rh = planeHit(F.y0 + EAVE + 0.8);
-      if (rh) [B.hover.rlx, B.hover.rlz] = toLocal(F, rh[0], rh[1]);
+      const rh = planeHit(F.y0 + EAVE * F.hs + 0.8);
+      if (rh) [h.rlx, h.rlz] = toLocal(F, rh[0], rh[1]);
     }
+    if (POINT_TOOL[tool]) {
+      const d = B.drag,
+        a = d && d.a && tool !== "tower" ? d.a : tool === "measure" && B.measA ? null : null,
+        sp = snapPoint(F, lx, lz, a, d ? d.rel : null);
+      h.sx = sp.x;
+      h.sz = sp.z;
+      h.snap = sp.type;
+      h.ang = sp.ang;
+      h.guides = sp.g.length ? sp.g.map((q) => q.slice()) : null;
+    }
+    if (tool === "select" || B.tapMode) B.hoverId = pickId(pickAt(ANY_PIECE));
   }
 
   function setGeo(mesh, geo) {
     mesh.geometry.dispose();
     mesh.geometry = geo.build();
   }
+  // the ghost of an operation: what it adds (cream, or hatched red where it cannot go), what it takes away (red),
+  // guide lines, the snap marker and the live dimensions
+  function drawOp(op, F, d) {
+    B.ghostIs = "op";
+    if (!op) {
+      ghostGroup.visible = gridGroup.visible = false;
+      B.ov.dims.length = 0;
+      B.ov.snap = null;
+      B.ovVer++;
+      label("");
+      return;
+    }
+    ghostGroup.position.set(F.ox, F.y0, F.oz);
+    ghostGroup.rotation.y = F.yaw;
+    gridGroup.position.copy(ghostGroup.position);
+    gridGroup.rotation.y = F.yaw;
+    const depth = F.isNew ? 1.2 : F.depth || 0.5,
+      Sx = F.isNew ? null : F;
+    const A = { floors: new Set(op.addFloors.map(([i, j]) => ck(i, j))), walls: new Map(), wmat: new Map(), fmat: new Map(), roofs: op.addRoofs, segs: op.addSegs.slice(), rings: op.addRings.slice(), stairs: op.addStairs, pillars: op.addPillars.slice(), hs: F.hs || B.hs, paths: op.addPaths, frame: F, lift: F.lift || 0, decor: op.addDecor, base: Sx };
+    A.polys = op.addPolyRoofs.length && Sx ? [{ ...Sx.polys[polyAt(Sx, op.addPolyRoofs[0][0], op.addPolyRoofs[0][1])], roofed: true }] : [];
+    const sideSeg = (ri, k, ty) => [...ringVert(Sx.rings[ri], k), ...ringVert(Sx.rings[ri], k + 1), ty];
+    for (const [idx, ty] of op.setSegs) A.segs.push([...Sx.segs[idx].slice(0, 4), ty]);
+    for (const [idx] of op.setSegMats) A.segs.push(Sx.segs[idx].slice(0, 5));
+    for (const [ri, k, ty] of op.setSides) ty && A.segs.push(sideSeg(ri, k, ty));
+    for (const [ri, on] of op.ringRoofs) on && A.rings.push({ ...Sx.rings[ri], sides: [], roof: on, floor: false });
+    for (const [i, j, dd, ty] of op.addWalls) A.walls.set(ek(i, j, dd), ty || op.style || "wall");
+    for (const [i, j, dd, ty] of op.setTypes) A.walls.set(ek(i, j, dd), ty);
+    for (const [i, j, dd] of op.setMats) A.walls.has(ek(i, j, dd)) || A.walls.set(ek(i, j, dd), Sx.walls.get(ek(i, j, dd)));
+    for (const [i, j] of op.setFmats) A.floors.add(ck(i, j));
+    for (const [idx, m, kind] of op.setPillars) A.pillars.push([Sx.pillars[idx][0], Sx.pillars[idx][1], m, kind]);
+    const ga = buildGeo(A, depth),
+      merged = ga.main;
+    for (const q of [ga.roof, ga.glow]) (append(merged.p, q.p), append(merged.n, q.n), append(merged.c, q.c));
+    if (op.marker) merged.abox(op.marker[0] - 0.14, 0, op.marker[1] - 0.14, op.marker[0] + 0.14, d ? EAVE : 0.5, op.marker[1] + 0.14, [1, 1, 1]);
+    if (d && d.a && (B.tool === "room" || B.tool === "wall")) merged.abox(d.a.i - 0.14, 0, d.a.j - 0.14, d.a.i + 0.14, EAVE, d.a.j + 0.14, [1, 1, 1]);
+    setGeo(ghostAdd, merged);
+    const bad = !(op.valid || op.idle);
+    ghostAdd.material.color.setHex(bad ? 0xe0563f : 0xffe2a0);
+    ghostAdd.material.userData.hatch.value = bad ? 1 : 0;
+    const S = Sx;
+    const Dl = { floors: new Set(op.delFloors.map(([i, j]) => ck(i, j))), walls: new Map(), roofs: S && !op.replacing ? op.delRoofs.map((i) => S.roofs[i]) : [] };
+    if (!op.move) for (const [i, j, dd] of op.delWalls.concat(op.revert)) Dl.walls.set(ek(i, j, dd), S.walls.get(ek(i, j, dd)) || "wall");
+    else Dl.floors = new Set(op.delFloors.map(([i, j]) => ck(i, j)));
+    Dl.segs = op.delSegs.map((idx) => S.segs[idx]);
+    Dl.rings = op.delRings.map((idx) => S.rings[idx]);
+    Dl.stairs = op.delStairs.map((idx) => S.stairs[idx]);
+    Dl.pillars = op.delPillars.map((idx) => S.pillars[idx]);
+    Dl.paths = op.delPaths.map((idx) => S.paths[idx]);
+    Dl.decor = op.delDecor.map((idx) => S.decor[idx]);
+    Dl.base = S;
+    Dl.frame = F;
+    Dl.hs = S ? S.hs : 1;
+    Dl.polys = op.replacing ? [] : op.delPolyRoofs.map((pi) => S.polys[pi]);
+    for (const [ri, k, ty] of op.setSides) ty || Dl.segs.push(sideSeg(ri, k, S.rings[ri].sides[k]));
+    for (const [ri, on] of op.ringRoofs) on || Dl.rings.push({ ...S.rings[ri], sides: [], roof: true, floor: false });
+    const gd = buildGeo(Dl, depth);
+    append(gd.main.p, gd.roof.p);
+    append(gd.main.n, gd.roof.n);
+    append(gd.main.c, gd.roof.c);
+    setGeo(ghostDel, gd.main);
+    // guide lines: from the snapping, and for rooms where the corner lines up with one already built
+    const gg = new Geo(),
+      gw = Math.max(0.02, G.cam.dist * 0.0013),
+      tip = op.end || (op.marker ? { i: op.marker[0], j: op.marker[1] } : null);
+    const line = (x0, z0, x1, z1) => {
+      const dx = x1 - x0,
+        dz = z1 - z0,
+        L = Math.hypot(dx, dz) || 1;
+      gg.obox([(x0 + x1) / 2, FLOOR_T + 0.05, (z0 + z1) / 2], [dx / 2, 0, dz / 2], [0, 0.01, 0], [(-dz / L) * gw, 0, (dx / L) * gw], [1, 1, 1]);
+    };
+    for (const q of op.guides) line(q[0], q[1], q[2], q[3]);
+    if (S && tip && B.tool === "room" && snapOn()) {
+      let gi = null,
+        gj = null;
+      for (const [ci, cj] of S.corners) {
+        if (ci === tip.i && cj !== tip.j && (!gi || Math.abs(cj - tip.j) < Math.abs(gi[1] - tip.j))) gi = [ci, cj];
+        if (cj === tip.j && ci !== tip.i && (!gj || Math.abs(ci - tip.i) < Math.abs(gj[0] - tip.i))) gj = [ci, cj];
+      }
+      gi && line(gi[0], gi[1], tip.i, tip.j);
+      gj && line(gj[0], gj[1], tip.i, tip.j);
+      if (gi || gj) op.snap = "guide";
+    }
+    setGeo(guideMesh, gg);
+    // the snap marker and live dimensions, for the interface to draw
+    const ov = B.ov,
+      up = F.y0 + (F.isNew ? 0.1 : FLOOR_T + 0.05);
+    ov.snap = null;
+    if (tip && op.snap && SNAP_NAME[op.snap] !== undefined && op.snap !== "free") {
+      const [x, z] = toWorld(F, tip.i, tip.j);
+      ov.snap = { x, y: up, z, type: op.snap, text: op.snap === "angle" ? Math.round((Math.atan2(Math.abs(Math.sin(B.hover ? B.hover.ang || 0 : 0)), Math.abs(Math.cos(B.hover ? B.hover.ang || 0 : 0))) * 180) / Math.PI) + "°" : SNAP_NAME[op.snap] };
+    }
+    ov.dims.length = 0;
+    for (const q of op.dims) {
+      const [x, z] = toWorld(F, q.lx, q.lz);
+      ov.dims.push({ x, y: up, z, text: q.text, field: q.field, val: q.val, unit: q.unit });
+    }
+    ov.fieldB = op.fieldB || null;
+    B.ovVer++;
+    let text = op.label || "";
+    if (!op.valid && op.reason) text = op.reason;
+    else if (op.note) text = op.note;
+    else if (op.adds && !B.free && op.cost && !op.move) text += (text ? " · " : "") + op.cost + " wood";
+    else if (op.dels && !op.adds) text = text || "Remove";
+    label(text, !op.valid && !!op.reason);
+    ghostGroup.visible = true;
+  }
   function updatePreview() {
     const h = B.hover;
-    if (!h) {
+    if (B.move) {
+      gridGroup.visible = false;
+      if (h) moveUpdate();
+      ghostGroup.visible = B.move.kind !== "rigid" && !!B.move.op;
+      return;
+    }
+    if (!h || B.tool === "select") {
       ghostGroup.visible = gridGroup.visible = false;
-      label(B.level !== 0 && B.ptr.inside ? (B.level > 0 ? "Upper storeys go above the storey below" : "Cellars go under an existing building") : "");
-      $("blabel").style.left = B.ptr.x + 18 + "px";
-      $("blabel").style.top = B.ptr.y + 18 + "px";
+      if (B.op || B.ov.dims.length || B.ov.snap) ((B.ov.dims.length = 0), (B.ov.snap = null), B.ovVer++);
+      label(!h && B.level !== 0 && B.ptr.inside && B.tool !== "select" ? (B.level > 0 ? "Upper storeys go above the storey below" : "Cellars go under an existing building") : "");
       B.op = null;
-      B.key = "";
+      B.key = "x";
+      if (B.tool === "select") hint();
       return;
     }
     if (B.tool === "copy") return copyPreview(h);
     const F = h.F,
-      d = B.drag;
+      d = B.drag,
+      ty = B.typed;
     const fine = B.tool === "door" || B.tool === "window" || B.tool === "erase" || B.tool === "decor";
-    const key = [B.tool, F.isNew ? "n" + F.ox + "," + F.oz + "," + F.yaw : F.id, d ? d.a.i + "," + d.a.j : "-", fine ? Math.round(h.lx * 4) + "," + Math.round(h.lz * 4) : Math.round(h.lx * 2) + "," + Math.round(h.lz * 2), fine && h.rlx !== undefined ? Math.round(h.rlx * 2) + "," + Math.round(h.rlz * 2) : "", B.alt, B.flip, B.levels, B.level, B.hs, B.lift, B.style, B.wstyle, B.dstyle, B.rshape, B.tshape, B.pwidth, B.pmat, B.dkind, B.drot, B.dcol, B.pkind, B.wmat, B.stairDir, B.free, B.version, W.wood].join("|");
+    const key = [B.tool, F.isNew ? "n" + F.ox + "," + F.oz + "," + F.yaw : F.id, d ? d.a.i + "," + d.a.j : "-", POINT_TOOL[B.tool] ? h.sx + "," + h.sz + h.snap : fine ? Math.round(h.lx * 6) + "," + Math.round(h.lz * 6) : Math.round(h.lx * 2) + "," + Math.round(h.lz * 2), fine && h.rlx !== undefined ? Math.round(h.rlx * 2) + "," + Math.round(h.rlz * 2) : "", B.alt, B.levels, B.level, B.hs, B.lift, B.style, B.wstyle, B.dstyle, B.rshape, B.tshape, B.pwidth, B.pmat, B.dkind, B.drot, B.dcol, B.pkind, B.wmat, B.fmat, B.rmat, B.stairDir, B.free, B.version, W.wood, ty.a, ty.b, B.gap, snapOn(), B.tapMode, B.measA ? 1 : 0].join("|");
     if (key !== B.key) {
       B.key = key;
-      B.ghostIs = "op";
-      const op = (B.op = computeOp());
-      const y0 = F.y0;
-      ghostGroup.position.set(F.ox, y0, F.oz);
-      ghostGroup.rotation.y = F.yaw;
-      gridGroup.position.copy(ghostGroup.position);
-      gridGroup.rotation.y = F.yaw;
-      const depth = F.isNew ? 1.2 : F.depth || 0.5;
-      const A = { floors: new Set(op.addFloors.map(([i, j]) => ck(i, j))), walls: new Map(), roofs: op.addRoofs, segs: op.addSegs.slice(), rings: op.addRings.slice(), stairs: op.addStairs, pillars: op.addPillars, hs: F.hs || B.hs, paths: op.addPaths, frame: F, lift: F.lift || 0, decor: op.addDecor, base: F.isNew ? null : F };
-      A.polys = op.addPolyRoofs.length && !F.isNew ? [{ ...F.polys[polyAt(F, op.addPolyRoofs[0][0], op.addPolyRoofs[0][1])], roofed: true }] : [];
-      const Sx = F.isNew ? null : F;
-      const sideSeg = (ri, k, ty) => [...ringVert(Sx.rings[ri], k), ...ringVert(Sx.rings[ri], k + 1), ty];
-      for (const [idx, ty] of op.setSegs) A.segs.push([...Sx.segs[idx].slice(0, 4), ty]);
-      for (const [ri, k, ty] of op.setSides) ty && A.segs.push(sideSeg(ri, k, ty));
-      for (const [ri, on] of op.ringRoofs) on && A.rings.push({ ...Sx.rings[ri], sides: [], roof: true, floor: false });
-      for (const [i, j, dd] of op.addWalls) A.walls.set(ek(i, j, dd), op.style || "wall");
-      for (const [i, j, dd, ty] of op.setTypes) A.walls.set(ek(i, j, dd), ty);
-      const ga = buildGeo(A, depth);
-      const merged = ga.main;
-      append(merged.p, ga.roof.p);
-      append(merged.n, ga.roof.n);
-      append(merged.c, ga.roof.c);
-      append(merged.p, ga.glow.p);
-      append(merged.n, ga.glow.n);
-      append(merged.c, ga.glow.c);
-      if (op.marker) merged.abox(op.marker[0] - 0.14, 0, op.marker[1] - 0.14, op.marker[0] + 0.14, d ? EAVE : 0.5, op.marker[1] + 0.14, [1, 1, 1]);
-      if (d && (B.tool === "room" || B.tool === "wall")) merged.abox(d.a.i - 0.14, 0, d.a.j - 0.14, d.a.i + 0.14, EAVE, d.a.j + 0.14, [1, 1, 1]);
-      setGeo(ghostAdd, merged);
-      ghostAdd.material.color.setHex(op.valid || op.idle ? 0xffe2a0 : 0xe0563f);
-      const S = F.isNew ? null : F;
-      const Dl = { floors: new Set(op.delFloors.map(([i, j]) => ck(i, j))), walls: new Map(), roofs: S && !op.replacing ? op.delRoofs.map((i) => S.roofs[i]) : [] };
-      for (const [i, j, dd] of op.delWalls.concat(op.revert)) Dl.walls.set(ek(i, j, dd), S.walls.get(ek(i, j, dd)) || "wall");
-      Dl.segs = op.delSegs.map((idx) => S.segs[idx]);
-      Dl.rings = op.delRings.map((idx) => S.rings[idx]);
-      Dl.stairs = op.delStairs.map((idx) => S.stairs[idx]);
-      Dl.pillars = op.delPillars.map((idx) => S.pillars[idx]);
-      Dl.paths = op.delPaths.map((idx) => S.paths[idx]);
-      Dl.decor = op.delDecor.map((idx) => S.decor[idx]);
-      Dl.base = S;
-      Dl.frame = F;
-      Dl.hs = S ? S.hs : 1;
-      Dl.polys = op.delPolyRoofs.map((pi) => S.polys[pi]);
-      for (const [ri, k, ty] of op.setSides) ty || Dl.segs.push(sideSeg(ri, k, S.rings[ri].sides[k]));
-      for (const [ri, on] of op.ringRoofs) on || Dl.rings.push({ ...S.rings[ri], sides: [], roof: true, floor: false });
-      const gd = buildGeo(Dl, depth);
-      append(gd.main.p, gd.roof.p);
-      append(gd.main.n, gd.roof.n);
-      append(gd.main.c, gd.roof.c);
-      setGeo(ghostDel, gd.main);
-      // alignment guides to existing corners
-      const gg = new Geo();
-      const tip = op.end || (op.marker ? { i: op.marker[0], j: op.marker[1] } : null);
-      if (S && tip && (B.tool === "room" || B.tool === "wall")) {
-        let gi = null,
-          gj = null;
-        for (const [ci, cj] of S.corners) {
-          if (ci === tip.i && cj !== tip.j && (!gi || Math.abs(cj - tip.j) < Math.abs(gi[1] - tip.j))) gi = [ci, cj];
-          if (cj === tip.j && ci !== tip.i && (!gj || Math.abs(ci - tip.i) < Math.abs(gj[0] - tip.i))) gj = [ci, cj];
-        }
-        if (gi) gg.abox(tip.i - 0.025, FLOOR_T + 0.03, Math.min(gi[1], tip.j), tip.i + 0.025, FLOOR_T + 0.05, Math.max(gi[1], tip.j), [1, 1, 1]);
-        if (gj) gg.abox(Math.min(gj[0], tip.i), FLOOR_T + 0.03, tip.j - 0.025, Math.max(gj[0], tip.i), FLOOR_T + 0.05, tip.j + 0.025, [1, 1, 1]);
-      }
-      setGeo(guideMesh, gg);
-      // label
-      let text = op.label || "";
-      if (!op.valid && op.reason) text = op.reason;
-      else if (op.note) text = op.note;
-      else if (op.adds && !B.free && op.cost) text += (text ? " · " : "") + op.cost + " wood";
-      else if (op.dels && !op.adds) text = text || "Remove";
-      label(text, !op.valid && !!op.reason);
+      if (B.tool === "measure" || B.tapMode) {
+        // measuring and the eyedropper only point: a marker where the click will land
+        const op = blankOp(F);
+        op.idle = true;
+        op.snap = h.snap;
+        op.marker = B.tapMode ? null : [h.sx, h.sz];
+        if (h.guides) for (const g of h.guides) op.guides.push(g);
+        B.op = op;
+        drawOp(op, F, null);
+        if (B.tool === "measure" && !B.tapMode) measDraw(B.measA ? [B.measA, measPoint(h)] : null);
+        label(B.tapMode === "pick" ? (B.hoverId ? "Take this in hand" : "") : B.tapMode === "paint" ? (B.hoverId ? "Paint" : "") : "");
+      } else drawOp((B.op = computeOp()), F, d);
       hint();
     }
     gridGroup.userData.lines.position.set(Math.round(h.lx), FLOOR_T + 0.03, Math.round(h.lz));
-    ghostGroup.visible = gridGroup.visible = true;
-    const lb = $("blabel");
-    if (!lb.hidden) {
-      lb.style.left = B.ptr.x + 18 + "px";
-      lb.style.top = B.ptr.y + 18 + "px";
-    }
+    gridGroup.visible = B.tool !== "measure" && !B.tapMode;
   }
   function label(text, bad) {
-    const lb = $("blabel");
-    lb.hidden = !text;
-    lb.textContent = text;
-    lb.classList.toggle("bad", !!bad);
+    if (B.label === text && B.labelBad === !!bad) return;
+    B.label = text;
+    B.labelBad = !!bad;
+    B.ovVer++;
   }
+  const TOUCH = () => document.body.classList.contains("touch");
+  const HINTS = {
+    select: "Click a piece to select it. Shift-click adds, drag on open ground selects an area, drag a piece to move it.",
+    room: "Drag out a room: floor and walls in one go. Or click corner to corner.",
+    tower: "Drag outward from the middle of a round room.",
+    wall: "Drag a wall at any angle, or click point to point. Drawing over a wall restyles it.",
+    floor: "Drag out floor. Laying it over an old floor replaces the surface.",
+    roof: "Click a room to roof it, or drag a rectangle. Click a roof to change it to this one.",
+    door: "Click a wall to hang a door. Drag along the wall for a row.",
+    window: "Click a wall for a window. Drag along the wall for an evenly spaced row.",
+    stairs: "Drag from the foot of the stairs the way they should climb.",
+    pillar: "Click to stand a pillar, or drag for an evenly spaced row. Pillars close together are joined by a beam.",
+    path: "Drag a path over the ground, or click point to point.",
+    decor: "Pick a piece, then click to place it. Wall pieces snap to walls.",
+    measure: "Click two points to measure between them. Measurements stay until you clear them.",
+    erase: "Click a piece to remove it, or drag a box to clear an area.",
+    copy: "Click where you want a copy.",
+  };
   function hint() {
-    const tool = TOOLS.find((t) => t.id === B.tool);
-    let text = tool.hint;
-    const h = B.hover;
-    if (B.drag && B.drag.mode === "click") text = "Click to finish. Right-click or Esc to stop.";
-    else if (B.drag) text = "Release to place. Right-click or Esc cancels.";
-    else if (h && !h.F.isNew) {
+    let text = HINTS[B.tool] || "";
+    const h = B.hover,
+      d = B.drag;
+    if (B.tapMode === "pick") text = "Click any piece to take its style and material in hand.";
+    else if (B.tapMode === "paint") text = "Click or drag across pieces to give them the material in hand.";
+    else if (B.move) text = B.move.hand ? "Click to place a copy. Esc puts it down." : "Release to place. Esc cancels.";
+    else if (B.tool === "measure" && B.measA) text = "Click the second point.";
+    else if (d && d.mode === "click") text = "Click to place. Type a number for an exact size. Esc stops.";
+    else if (d && (B.tool === "wall" || B.tool === "room" || B.tool === "floor" || B.tool === "path" || B.tool === "tower")) text = "Release to place. Type a number for an exact size. Esc cancels.";
+    else if (d) text = "Release to place. Esc cancels.";
+    else if (B.tool === "copy" && !B.clipb) text = "Click a building to pick it up.";
+    else if (B.tool === "select" && B.sel.length) text = B.sel.length === 1 ? "Drag it to move it, or change it below. Delete removes it." : "Drag to move them together, or change them below. Delete removes them.";
+    else if (h && !h.F.isNew && B.tool !== "select" && B.tool !== "measure") {
+      // over a room: what it measures and whether it is closed in, without being asked
       const room = h.F.cellRoom.get(ck(Math.floor(h.lx), Math.floor(h.lz)));
       if (room && room.cells.length > 1) {
-        const dims = room.i1 - room.i0 + 1 + " × " + (room.j1 - room.j0 + 1);
-        text =
-          "Room " +
-          dims +
-          ": " +
-          (room.enclosed ? (room.roofed ? "walled and roofed. You are sheltered in here." : "walled in. Add a roof to make it a shelter.") : room.gaps.length + " open " + (room.gaps.length === 1 ? "edge" : "edges") + " marked in amber.");
+        const w = room.i1 - room.i0 + 1,
+          l = room.j1 - room.j0 + 1;
+        text = "Room " + w + " × " + l + " m · " + fmtA(room.cells.length) + " · " + (room.enclosed ? (room.roofed ? "walled and roofed" : "walled in, no roof yet") : plural(room.gaps.length, "open edge") + " marked in amber");
       }
     }
-    if (B.tool === "copy" && B.clipb) text = "Click to place a copy. R turns it. Right-click or Esc puts it down.";
-    if (!B.drag && B.tool !== "door" && B.tool !== "window" && B.tool !== "erase" && B.tool !== "tower" && B.tool !== "stairs" && B.tool !== "copy") text += " Hold Alt to remove instead.";
-    if (document.body.classList.contains("touch"))
-      text = text
-        .replace(" Hold Alt to remove instead.", " Remove takes pieces away.")
-        .replace("Right-click or Esc cancels.", "Cancel drops it.")
-        .replace("Right-click or Esc puts it down.", "Cancel puts it down.")
-        .replace(/\bClick\b/g, "Tap")
-        .replace(/\bclick\b/g, "tap")
-        .replace(/, comma and full stop step through the pieces/, "")
-        .replace(/\bM\b(?= (changes|the))/g, "Material")
-        .replace(/\bR\b(?= (turns|changes|switches|steps|sets))/g, "Style");
-    $("bhint").textContent = text;
+    if (TOUCH()) text = text.replace(/\bShift-click adds, /, "").replace(/\bClick\b/g, "Tap").replace(/\bclick\b/g, "tap").replace(/ Esc (stops|cancels|puts it down)\./, "").replace(/ Type a number for an exact size\./, " Tap the size to type it.").replace(" Delete removes it.", "").replace(" Delete removes them.", "");
+    if (text !== B.hintText) ((B.hintText = text), B.uiVer++);
   }
 
   /* ---------- input ---------- */
   function anchorFor(h) {
-    if (B.tool === "wall" || B.tool === "tower" || B.tool === "pillar" || B.tool === "path") return { i: Math.round(h.lx * 2) / 2, j: Math.round(h.lz * 2) / 2 };
+    if (POINT_TOOL[B.tool]) return { i: h.sx, j: h.sz };
     return B.tool === "room" ? { i: Math.round(h.lx), j: Math.round(h.lz) } : { i: Math.floor(h.lx), j: Math.floor(h.lz) };
   }
   function freeze(F) {
     return F.isNew ? { ...F } : F;
+  }
+  // a soft settle where something was just placed: the ghost flashes and sinks into place
+  const settleMesh = new T.Mesh(new T.BufferGeometry(), new T.MeshBasicMaterial({ color: 0xfff1c9, transparent: true, opacity: 0, depthWrite: false, fog: false, side: T.DoubleSide }));
+  settleMesh.visible = false;
+  settleMesh.frustumCulled = false;
+  settleMesh.renderOrder = 19;
+  G.scene.add(settleMesh);
+  let settleT = 0;
+  function settleFx() {
+    if (!ghostAdd.geometry.attributes.position || B.ghostIs !== "op") return;
+    settleMesh.geometry.dispose();
+    settleMesh.geometry = ghostAdd.geometry.clone();
+    settleMesh.position.copy(ghostGroup.position);
+    settleMesh.rotation.y = ghostGroup.rotation.y;
+    settleMesh.visible = true;
+    settleT = 0.26;
+  }
+  function settleTick(dt) {
+    if (settleT <= 0) return;
+    settleT -= dt;
+    const k = Math.max(0, settleT / 0.26);
+    settleMesh.material.opacity = 0.5 * k * k;
+    settleMesh.position.y = ghostGroup.position.y + 0.18 * k * k;
+    if (settleT <= 0) settleMesh.visible = false;
+  }
+  function typedClear() {
+    if (B.typed.a === null && B.typed.b === null) return;
+    B.typed.a = B.typed.b = null;
+    B.typedV = (B.typedV || 0) + 1;
+    B.key = "";
   }
   function commit() {
     B.key = "";
@@ -3772,17 +5456,27 @@
     const op = computeOp();
     const d = B.drag;
     B.drag = null;
+    if (op && !op.valid && op.pick) {
+      // nothing to build here because the piece is already there: select it instead
+      typedClear();
+      setTool("select");
+      if (/roof/.test((refOf(op.pick) || {}).kind || "")) B.showRoofs = B.selRoofAuto = true;
+      return selSet([op.pick]);
+    }
     if (!op || !op.valid) {
-      if (op && op.reason) flash(op.reason);
       B.key = "";
+      touchUi();
       return;
     }
-    const end = op.end;
+    const end = op.end,
+      a = d && d.a;
+    drawOp(op, op.F, d);
     const S = applyOp(op);
-    if (S && d && d.mode === "click" && (B.tool === "wall" || B.tool === "path") && end) B.drag = { F: S, a: end, t: performance.now(), mode: "click" };
-  }
-  function flash() {
-    B.key = ""; // the preview label already shows the reason in red
+    settleFx();
+    typedClear();
+    // point to point: the next wall or stretch of path starts where this one ended
+    if (S && d && d.mode === "click" && (B.tool === "wall" || B.tool === "path") && end) B.drag = { F: S, a: end, t: performance.now(), mode: "click", rel: Math.atan2(end.j - a.j, end.i - a.i) };
+    touchUi();
   }
   // Touch: the aim point sits a little above the finger so the piece is not hidden under it.
   // One finger draws or places (lift to confirm), two fingers pinch, twist and tilt the view.
@@ -3798,6 +5492,7 @@
     B.ptr.x = e.clientX;
     B.ptr.y = e.clientY - (touch && B.on ? AIM_UP : 0);
     B.ptr.inside = inside;
+    B.ptr.touch = touch;
     aimDot.hidden = !(touch && B.on && inside);
     aimDot.style.left = B.ptr.x + "px";
     aimDot.style.top = B.ptr.y + "px";
@@ -3807,16 +5502,24 @@
     return { d: Math.hypot(q.x - p.x, q.y - p.y) || 1, ang: Math.atan2(q.y - p.y, q.x - p.x), my: (p.y + q.y) / 2 };
   };
   // the tools that act on a single click
-  const tapTool = () => B.tool === "copy" || (B.drag && B.drag.mode === "click") || (B.tool === "path" && B.alt) || B.tool === "decor" || B.tool === "door" || B.tool === "window" || B.tool === "pillar";
+  const tapTool = () => B.tool === "copy" || B.tool === "measure" || (B.drag && B.drag.mode === "click") || (B.move && B.move.hand) || (B.tool === "path" && B.alt) || B.tool === "decor";
   function tapAct() {
-    if (B.tapMode) {
+    if (B.move && B.move.hand) return moveCommit();
+    if (B.tapMode === "pick") {
       updateHover();
-      B.tapMode === "paint" ? paint(true) : eyedrop();
-      if (B.tapMode === "pick") B.tapMode = "";
-      return;
+      return void (B.hoverId && pickUp(B.hoverId));
     }
+    if (B.tool === "measure") return measClick();
     if (B.tool === "copy") return void (B.clipb ? stamp() : copyPick());
     commit();
+  }
+  // which end handle of the selected wall the pointer is on
+  function handleAt() {
+    for (const p of B.ov.handles) {
+      const s = toScreen(p[0], p[1], p[2]);
+      if (Math.hypot(s[0] - B.ptr.x, s[1] - B.ptr.y) < (B.ptr.touch ? 22 : 13)) return { n: p[3] };
+    }
+    return null;
   }
   canvas.addEventListener("pointermove", (e) => {
     if (e.pointerType === "touch" && fingers.has(e.pointerId)) {
@@ -3839,8 +5542,26 @@
       G.cam.pitch = clamp(G.cam.pitch + e.movementY * 0.004, 0.5, 1.35);
       B.camT = 0;
     }
+    const pr = B.press;
+    if (B.on && pr && e.buttons & 1) {
+      if (!pr.go && Math.hypot(e.clientX - pr.x, e.clientY - pr.y) > 6) {
+        // a press that turns into a drag: an end handle, the piece under it, or a marquee over open ground
+        pr.go = true;
+        updateHover();
+        if (pr.hd) moveBegin(false, false, pr.hd);
+        else if (pr.id) {
+          if (!B.sel.includes(pr.id)) selSet(pr.shift ? [...B.sel, pr.id] : [pr.id]);
+          setRay();
+          ray.ray.origin.copy(pr.o);
+          ray.ray.direction.copy(pr.dir);
+          moveBegin(false, false, null);
+        } else B.marq = B.ov.marq = { x0: pr.x, y0: B.ptr.y + pr.y - e.clientY, x1: B.ptr.x, y1: B.ptr.y };
+      }
+      if (B.marq) ((B.marq.x1 = B.ptr.x), (B.marq.y1 = B.ptr.y), B.ovVer++);
+    }
+    if (B.on && B.painting && e.buttons & 1) (updateHover(), paint(B.painting));
   });
-  canvas.addEventListener("pointerleave", (e) => e.pointerType !== "touch" && (B.ptr.inside = false));
+  canvas.addEventListener("pointerleave", (e) => e.pointerType !== "touch" && ((B.ptr.inside = false), (B.key = "")));
   canvas.addEventListener("pointerdown", (e) => {
     const touch = e.pointerType === "touch";
     if (touch && B.on) {
@@ -3850,6 +5571,8 @@
         if (!gest) gest = { ...pair(), dist: G.cam.dist, yaw: G.cam.yaw, pitch: G.cam.pitch };
         B.aim = false;
         if (B.drag && B.drag.mode === "drag") B.drag = null;
+        if (B.move && !B.move.hand) moveEnd();
+        B.press = B.marq = B.ov.marq = null;
         B.key = "";
         setPtr(e, false);
         return;
@@ -3862,19 +5585,35 @@
       return;
     }
     if (!B.on || e.button !== 0) return;
+    B.ctrl = e.ctrlKey || e.metaKey;
     updateHover();
     const h = B.hover;
-    if (!h) return;
+    if (B.tapMode === "paint") {
+      B.painting = { fresh: true };
+      return paint(B.painting);
+    }
     if (B.tapMode || tapTool()) {
+      if (!h) return;
       // a finger aims first and acts when it lifts; a mouse acts at once
       if (touch) return void ((B.aim = true), (B.key = ""));
       return tapAct();
     }
+    if (B.tool === "select") {
+      const now = performance.now(),
+        id = B.hoverId,
+        hd = handleAt();
+      B.press = { x: e.clientX, y: e.clientY, id: hd ? B.sel[0] : id, hd, shift: e.shiftKey, o: ray.ray.origin.clone(), dir: ray.ray.direction.clone() };
+      B.press.dbl = !!(id && !hd && B.lastClick && B.lastClick.id === id && now - B.lastClick.t < 380);
+      B.lastClick = { id, t: now };
+      return;
+    }
+    if (!h) return;
     // Shift starts a separate wing on the same grid, with its own height
     const wing = (e.shiftKey || B.wingNext) && !h.F.isNew ? { ox: h.F.ox, oz: h.F.oz, yaw: h.F.yaw, y0: h.F.y0 + B.lift, isNew: true, level: h.F.level, hs: B.hs, lift: B.lift } : null;
-    B.wingNext = false;
-    B.drag = { F: wing || freeze(h.F), a: anchorFor(h), t: performance.now(), mode: "drag" };
+    if (B.wingNext) ((B.wingNext = false), touchUi());
+    B.drag = { F: wing || freeze(h.F), a: anchorFor(h), t: performance.now(), mode: "drag", hit: B.tool === "door" || B.tool === "window" ? wallUnder(h) : null, x: e.clientX, y: e.clientY };
     B.key = "";
+    hint();
   });
   const liftFinger = (e, act) => {
     const touch = e.pointerType === "touch";
@@ -3896,82 +5635,135 @@
   };
   canvas.addEventListener("pointercancel", (e) => {
     liftFinger(e, false);
+    B.painting = B.press = B.marq = B.ov.marq = null;
     if (e.pointerType === "touch") {
       if (B.drag && B.drag.mode === "drag") B.drag = null;
+      if (B.move && !B.move.hand) moveEnd();
       setPtr(e, false);
     }
   });
   canvas.addEventListener("pointerup", (e) => {
     if (liftFinger(e, true)) return;
+    const touch = e.pointerType === "touch";
     if (e.button === 2) {
-      if (B.on && Math.hypot(e.clientX - B.ptr.rx, e.clientY - B.ptr.ry) < 6) {
-        if (B.tool === "copy" && B.clipb) ((B.clipb = null), hint());
-        B.drag = null;
-        B.key = "";
-      }
+      if (B.on && Math.hypot(e.clientX - B.ptr.rx, e.clientY - B.ptr.ry) < 6) putDown(true);
       return;
     }
-    const touch = e.pointerType === "touch";
-    if (!B.on || e.button !== 0 || !B.drag || B.drag.mode !== "drag") return void (touch && setPtr(e, false));
+    if (!B.on || e.button !== 0) return;
+    if (B.painting) {
+      B.painting = null;
+      return void (touch && setPtr(e, false));
+    }
+    const pr = B.press;
+    if (pr) {
+      B.press = null;
+      setPtr(e);
+      updateHover();
+      if (B.move) moveCommit();
+      else if (B.marq) {
+        const m = B.marq,
+          ids = marqueeIds(m.x0, m.y0, m.x1, m.y1);
+        B.marq = B.ov.marq = null;
+        B.ovVer++;
+        selSet(pr.shift ? [...B.sel, ...ids] : ids);
+      } else if (!pr.go) {
+        // a plain click: select, add to or drop from the selection, or clear it on open ground
+        if (pr.hd) {
+        } else if (pr.dbl) (selSet([pr.id]), selBuilding());   // a double click takes the whole building
+        else if (!pr.id) pr.shift || selSet([]);
+        else if (pr.shift) selSet(B.sel.includes(pr.id) ? B.sel.filter((x) => x !== pr.id) : [...B.sel, pr.id]);
+        else {
+          const q = refOf(pr.id);
+          if (q && /roof/.test(q.kind)) B.selRoofAuto = false;
+          selSet([pr.id]);
+        }
+      }
+      if (touch) setPtr(e, false);
+      return;
+    }
+    if (!B.drag || B.drag.mode !== "drag") return void (touch && setPtr(e, false));
     setPtr(e);
     updateHover();
-    const h = B.hover,
-      d = B.drag;
-    const same = !h || (anchorFor(h).i === d.a.i && anchorFor(h).j === d.a.j);
-    if (same && (B.tool === "room" || B.tool === "wall" || B.tool === "path")) {
+    const d = B.drag,
+      still = Math.hypot(e.clientX - d.x, e.clientY - d.y) < 5;
+    if (still && (B.tool === "room" || B.tool === "wall" || B.tool === "path" || B.tool === "tower")) {
       // a plain click: switch to click-to-click drawing
       if (performance.now() - d.t < 350) d.mode = "click";
       else B.drag = null;
       B.key = "";
+      hint();
       if (touch) setPtr(e, false);
       return;
     }
     commit();
     if (touch) setPtr(e, false);
   });
-
-  function setTool(id) {
-    B.tool = id;
-    $("bmat") && (showMat(), showStyle());
-    $("bdecor") && ($("bdecor").hidden = id !== "decor");
-    B.drag = null;
-    B.key = "";
-    syncButtons();
-    hint();
+  // put down what is in hand: a stroke, a copy, a measurement half taken. With nothing in hand, go home to Select.
+  function putDown(home) {
+    if (B.typed.a !== null || B.typed.b !== null) return (typedClear(), true);
+    if (B.move) return (moveEnd(), true);
+    if (B.marq) return ((B.marq = B.ov.marq = B.press = null), B.ovVer++, true);
+    if (B.drag) return ((B.drag = null), (B.key = ""), hint(), touchUi(), true);
+    if (B.tapMode) return ((B.tapMode = ""), (B.key = ""), touchUi(), true);
+    if (B.measA) return ((B.measA = null), (B.key = ""), measDraw(null), touchUi(), true);
+    if (B.tool === "copy" && B.clipb) return ((B.clipb = null), setTool("select"), true);
+    if (home && B.tool !== "select") return (setTool("select"), true);
+    if (B.tool === "select" && B.sel.length) return (selSet([]), true);
+    return false;
   }
+  // Shift and the wheel swaps the style in hand, Ctrl and the wheel the material, without leaving the view
+  window.addEventListener(
+    "wheel",
+    (e) => {
+      if (!B.on || e.target !== canvas || !(e.shiftKey || e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const back = (e.deltaY || e.deltaX) < 0;
+      if (e.shiftKey) cycleStyle(back);
+      else ((B.ctrlWheel = true), cycleMat(back));
+    },
+    { capture: true, passive: false },
+  );
+
+  /* ---------- tools and their options ---------- */
+  // The interface (src/buildui.js) draws what view() describes and reports clicks through choose(). With a drawing
+  // tool the options are those of the NEXT piece; with a selection they are the selected pieces' own properties.
+  function setTool(id) {
+    if (B.tool !== id && (B.tool === "select" || id !== "select")) B.showRoofs = B.selRoofAuto = false;
+    B.tool = id;
+    B.drag = null;
+    B.tapMode = "";
+    B.measA = null;
+    B.move && moveEnd();
+    typedClear();
+    B.key = "";
+    hint();
+    touchUi();
+  }
+  const LEVEL_NAME = (l) => (l > 0 ? "Storey " + (l + 1) : l < 0 ? "Cellar" : "Ground");
   function setLevel(l) {
     B.level = clamp(l, -1, 3);
     B.drag = null;
     B.key = "";
-    $("blname").textContent = (B.level > 0 ? "Storey " + (B.level + 1) : B.level < 0 ? "Cellar" : "Ground") + (B.lift ? " " + (B.lift > 0 ? "+" : "") + B.lift + " m" : "");
+    selSet([]);
+    touchUi();
   }
-  // V changes the ceiling height: of the storey under the cursor, or of what you build next
-  function cycleHeight() {
+  // the ceiling height of the storey under the cursor, or of what is built next
+  function cycleHeight(back) {
     const h = B.hover,
       S = h && !h.F.isNew ? h.F : null,
       cur = S ? S.hs : B.hs,
-      next = HEIGHTS[(HEIGHTS.findIndex((x) => x[0] === cur) + 1) % HEIGHTS.length];
+      n = HEIGHTS.findIndex((x) => x[0] === cur),
+      next = HEIGHTS[(n + (back ? HEIGHTS.length - 1 : 1)) % HEIGHTS.length];
     B.hs = next[0];
-    if (S) {
-      B.undo.push(snapshot());
-      B.redo.length = 0;
-      const delta = EAVE * (next[0] - S.hs);
-      S.hs = next[0];
-      for (const O of B.structs)
-        if (O !== S && sameGrid(O, S) && O.level > S.level && S.level >= 0) {
-          O.y0 += delta;
-          O.group.position.y = O.y0;
-        }
-      for (const O of B.structs) sameGrid(O, S) && rebuild(O);
-      syncButtons();
-    }
-    $("bheight").textContent = "Height: " + next[1];
+    S && setStorey(S, next[0]);
     B.key = "";
+    touchUi();
   }
   const matCat = () => (B.tool === "roof" ? ["rmat", ROOFS] : B.tool === "floor" ? ["fmat", FLOORS] : B.tool === "path" ? ["pmat", PATHS] : ["wmat", WALLS]);
   const cyc = (list, cur, back) => list[(list.indexOf(cur) + (back ? list.length - 1 : 1)) % list.length];
   const overTower = () => !!B.hover && !B.hover.F.isNew && ringAt(B.hover.F, B.hover.lx, B.hover.lz) >= 0;
-  // R steps through the styles of the current tool
+  // step through the styles of the tool in hand
   function cycleStyle(back) {
     const t = B.tool;
     if (t === "tower") B.levels = back ? ((B.levels + 2) % 4) + 1 : (B.levels % 4) + 1;
@@ -3986,132 +5778,62 @@
     else if (t === "roof") {
       if (overTower()) B.tshape = cyc(Object.keys(TOP_NAME), B.tshape, back);
       else B.rshape = (B.rshape + (back ? RSHAPES.length - 1 : 1)) % RSHAPES.length;
+    } else if (t === "select" && B.sel.length) selEdit((q) => (q.kind === "decor" ? ((q.it[3] = ((q.it[3] || 0) + (back ? 7 : 1)) % 8), true) : false));
+    B.key = "";
+    touchUi();
+  }
+  function cycleMat(back) {
+    if (B.tool === "decor") B.dcol = (B.dcol + (back ? DYES.length - 1 : 1)) % DYES.length;
+    else {
+      const [k, set] = matCat();
+      B[k] = cyc(Object.keys(set), B[k], back);
     }
     B.key = "";
-    showStyle();
+    touchUi();
   }
-  function showStyle() {
-    const t = B.tool,
-      text =
-        t === "wall"
-          ? STYLE_NAME[B.style]
-          : t === "window"
-            ? WIN_NAME[B.wstyle]
-            : t === "door"
-              ? DOOR_NAME[B.dstyle]
-              : t === "pillar"
-                ? B.pkind === "chimney"
-                  ? "Chimney"
-                  : "Pillar"
-                : t === "tower"
-                  ? B.levels + (B.levels > 1 ? " storeys" : " storey")
-                  : t === "roof"
-                    ? RSHAPES[B.rshape][2].replace(" roof", "") + " \u00b7 tower: " + TOP_NAME[B.tshape].toLowerCase().replace(" roof", "")
-                    : t === "path"
-                      ? B.pwidth + " m wide"
-                      : t === "decor"
-                        ? "Turned " + B.drot * 45 + "\u00b0"
-                        : t === "copy"
-                          ? "Turn the copy"
-                        : "";
-    const b = $("bstyle");
-    b.textContent = text ? "Style: " + text : "Style";
-    b.disabled = !text;
-  }
-  function showMat() {
-    if (B.tool === "decor") return void ($("bmat").textContent = "Colour: " + DYES[B.dcol][0]);
-    const [k, set] = matCat();
-    $("bmat").textContent = "Material: " + set[B[k]].name;
-  }
-  function pickDecor(kind) {
-    B.dkind = kind;
-    B.key = "";
-    const cat = DECOR[kind].cat;
-    for (const b of document.querySelectorAll("#bdcats button")) b.setAttribute("aria-pressed", +b.dataset.cat === cat ? "true" : "false");
-    const wrap = $("bditems");
-    wrap.textContent = "";
-    for (const k of DKEYS) {
-      if (DECOR[k].cat !== cat) continue;
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = DECOR[k].name;
-      b.setAttribute("aria-pressed", k === kind ? "true" : "false");
-      b.addEventListener("click", () => (pickDecor(k), canvas.focus()));
-      wrap.appendChild(b);
-    }
-  }
-  function cycleMat() {
-    if (B.tool === "decor") {
-      B.dcol = (B.dcol + 1) % DYES.length;
-      B.key = "";
-      return showMat();
-    }
-    const [k, set] = matCat(),
-      ids = Object.keys(set);
-    B[k] = ids[(ids.indexOf(B[k]) + 1) % ids.length];
-    showMat();
-    B.key = "";
-  }
-  // the piece under the cursor, for painting and for picking up its material
+  // the piece under the cursor, for painting with the material in hand
   function targetAt() {
-    const h = B.hover;
-    if (!h || h.F.isNew) return null;
-    const S = h.F,
-      cell = ck(Math.floor(h.lx), Math.floor(h.lz));
-    if (B.tool === "decor") {
-      const n = nearestDecor(S, h.lx, h.lz, 0.6);
-      return n < 0 ? null : { S, cat: "dcol", get: () => S.decor[n][4] || 0, set: (m) => (S.decor[n][4] = m), item: S.decor[n] };
-    }
-    if (B.tool === "roof" && h.rlx !== undefined) {
-      const gi = S.roofs.findIndex((r) => h.rlx >= r.i0 - 0.4 && h.rlx <= r.i1 + 1.4 && h.rlz >= r.j0 - 0.4 && h.rlz <= r.j1 + 1.4);
-      if (gi >= 0) return { S, cat: "rmat", get: () => S.roofs[gi].mat || "thatch", set: (m) => (S.roofs[gi].mat = m) };
-      const ri = S.rings.findIndex((r) => r.roof && Math.hypot(h.rlx - r.cx, h.rlz - r.cz) < r.r + 0.5);
-      if (ri >= 0) return { S, cat: "rmat", get: () => S.rings[ri].rmat || "thatch", set: (m) => (S.rings[ri].rmat = m) };
-    }
-    const e = nearestEdge(S, h.lx, h.lz, true),
-      fp = pickFree(S, h.lx, h.lz);
-    if (fp && fp.dist < 0.35 && (!e || fp.dist < e[3]))
-      return fp.kind === "seg" ? { S, cat: "wmat", get: () => S.segs[fp.idx][5] || "timber", set: (m) => (S.segs[fp.idx][5] = m) } : { S, cat: "wmat", get: () => S.rings[fp.ri].mat || "timber", set: (m) => (S.rings[fp.ri].mat = m) };
-    if (e && e[3] < 0.35) {
-      const k = ek(e[0], e[1], e[2]);
-      return { S, cat: "wmat", get: () => S.wmat.get(k) || "timber", set: (m) => S.wmat.set(k, m) };
-    }
-    if (S.floors.has(cell)) return { S, cat: "fmat", get: () => S.fmat.get(cell) || "planks", set: (m) => S.fmat.set(cell, m) };
-    const ri = ringAt(S, h.lx, h.lz);
-    if (ri >= 0) return { S, cat: "fmat", get: () => S.rings[ri].fmat || "planks", set: (m) => (S.rings[ri].fmat = m) };
-    return null;
+    const pk = pickAt(ANY_PIECE);
+    if (!pk) return null;
+    const S = pk.S,
+      strip = B.tool === "room" || B.tool === "tower" ? ["wmat", "fmat"] : B.tool === "decor" ? ["dcol"] : [matCat()[0]];
+    let t = null;
+    if (pk.kind === "wall" && pk.free) {
+      const segs = B.brush === "run" ? pk.run.m.map((n) => S.segs[n]) : [S.segs[pk.idx]];
+      t = { cat: "wmat", get: () => segs[0][5] || "timber", set: (m) => segs.forEach((sg) => (sg[5] = m)) };
+    } else if (pk.kind === "wall") {
+      const keys = B.brush === "run" ? pk.run.m.map((e) => e.k) : [ek(pk.i, pk.j, pk.d)];
+      t = { cat: "wmat", get: () => S.wmat.get(ek(pk.i, pk.j, pk.d)) || "timber", set: (m) => keys.forEach((k) => setW(S, k, m)) };
+    } else if (pk.kind === "ring" && pk.side !== undefined) t = { cat: "wmat", get: () => S.rings[pk.ri].mat || "timber", set: (m) => (S.rings[pk.ri].mat = m) };
+    else if (pk.kind === "ring") t = { cat: "fmat", get: () => S.rings[pk.ri].fmat || "planks", set: (m) => (S.rings[pk.ri].fmat = m) };
+    else if (pk.kind === "pillar") t = { cat: "wmat", get: () => S.pillars[pk.idx][2] || "timber", set: (m) => (S.pillars[pk.idx][2] = m) };
+    else if (pk.kind === "floor" && pk.poly !== undefined) t = { cat: "fmat", get: () => S.polys[pk.poly].fmat || "planks", set: (m) => S.pids.forEach((q) => q[2] === pk.id && (q[3] = m)) };
+    else if (pk.kind === "floor") {
+      const cells = B.brush === "run" ? S.regs.find((g) => g.id === pk.id).m : [ck(pk.ci, pk.cj)];
+      t = { cat: "fmat", get: () => S.fmat.get(ck(pk.ci, pk.cj)) || "planks", set: (m) => cells.forEach((c) => (m !== "planks" ? S.fmat.set(c, m) : S.fmat.delete(c))) };
+    } else if (pk.kind === "roof") t = { cat: "rmat", get: () => pk.r.mat || "thatch", set: (m) => (pk.r.mat = m) };
+    else if (pk.kind === "ringroof") t = { cat: "rmat", get: () => S.rings[pk.ri].rmat || "thatch", set: (m) => (S.rings[pk.ri].rmat = m) };
+    else if (pk.kind === "polyroof") t = { cat: "rmat", get: () => S.polys[pk.pi].rmat || "thatch", set: (m) => S.polyRoofs.forEach((q) => q[3] === pk.id && (q[2] = m)) };
+    else if (pk.kind === "path") t = { cat: "pmat", get: () => S.paths[pk.idx][5] || "cobble", set: (m) => (S.paths[pk.idx][5] = m) };
+    else if (pk.kind === "decor") t = { cat: "dcol", get: () => S.decor[pk.idx][4] || 0, set: (m) => (S.decor[pk.idx][4] = m) };
+    if (!t || !strip.includes(t.cat)) return null;
+    t.S = S;
+    return t;
   }
-  function paint(fresh) {
+  // paint the piece under the cursor; a drag across several pieces is one undo step
+  function paint(st) {
     const t = targetAt();
     if (!t || t.get() === B[t.cat]) return;
-    if (fresh) {
-      B.undo.push(snapshot());
-      B.redo.length = 0;
-    }
+    if (st.fresh) (pushUndo(), (st.fresh = false));
     t.set(B[t.cat]);
     rebuild(t.S);
-    syncButtons();
-  }
-  function eyedrop() {
-    const t = targetAt();
-    if (!t) return;
-    if (t.item) ((B.drot = t.item[3] || 0), pickDecor(t.item[2]), showStyle());
-    B[t.cat] = t.get();
-    showMat();
-    B.key = "";
+    touchUi();
   }
   function toggle() {
     if (P.tool !== "build") {
       B.prevTool = P.tool;
       G.setTool("build");
     } else G.setTool(B.prevTool === "build" ? "axe" : B.prevTool);
-  }
-  function syncButtons() {
-    for (const b of document.querySelectorAll("#bpieces button")) b.setAttribute("aria-pressed", b.dataset.piece === B.tool ? "true" : "false");
-    $("bundo").disabled = !B.undo.length;
-    $("bredo").disabled = !B.redo.length;
-    $("bfree").setAttribute("aria-pressed", B.free ? "true" : "false");
-    $("bfree").textContent = B.free ? "Free: on" : "Free: off";
   }
   function enter() {
     B.on = true;
@@ -4125,8 +5847,10 @@
     document.body.classList.add("building");
     $("buildbar").hidden = false;
     for (const S of B.structs) S.gapMesh && (S.gapMesh.visible = true);
-    syncButtons();
+    B.key = "";
+    measDraw(null);
     hint();
+    touchUi();
   }
   function exit() {
     B.on = false;
@@ -4137,70 +5861,337 @@
     }
     G.refreshLock && G.refreshLock();
     B.drag = null;
+    B.tapMode = "";
+    B.press = B.marq = B.ov.marq = null;
+    B.move && moveEnd();
     document.body.classList.remove("building");
     $("buildbar").hidden = true;
-    ghostGroup.visible = gridGroup.visible = false;
+    ghostGroup.visible = gridGroup.visible = selGroup.visible = measMesh.visible = false;
+    B.ov.dims.length = 0;
+    B.ov.snap = null;
     label("");
+    B.ovVer++;
     for (const S of B.structs) S.gapMesh && (S.gapMesh.visible = false);
+    touchUi();
   }
 
-  // UI
-  {
-    const wrap = $("bpieces");
-    TOOLS.forEach((t, n) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.dataset.piece = t.id;
-      b.title = t.hint;
-      b.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICONS[t.id] + '</svg><span class="name">' + t.name + '</span><span class="key">' + (t.key || (n + 1) % 10) + "</span>";
-      b.addEventListener("click", () => {
-        setTool(t.id);
-        canvas.focus();
-      });
-      wrap.appendChild(b);
+  // colours as the page writes them
+  const hexOf = (c) => "#" + new T.Color(c[0], c[1], c[2]).getHexString();
+  const swatches = (set, kind) =>
+    Object.keys(set).map((k) => {
+      const m = set[k];
+      return { v: k, name: m.name, sw: kind === "wall" ? [m.courses ? "courses" : m.brace ? "brace" : m.flat ? "flat" : "planks", hexOf(m.plank), hexOf(m.beam)] : [kind === "floor" ? (m.c2 ? "check" : k === "planks" || k === "dark" ? "boards" : "plain") : kind, hexOf(m.c), hexOf(m.c2 || shade(m.c, 0.72))] };
     });
-    const lv = document.createElement("div");
-    lv.id = "blevel";
-    lv.innerHTML = '<button id="blup" type="button" title="Build one storey up (Page Up)">Up</button><span id="blname">Ground</span><button id="bldn" type="button" title="Build one storey down (Page Down)">Down</button><button id="bmat" type="button" title="Material for what you build next (M). P paints the piece under the cursor, I picks its material up">Material: Timber</button><button id="bheight" type="button" title="Ceiling height of the storey under the cursor, or of what you build next (V)">Height: Normal</button><button id="bstyle" type="button" title="Style of the current tool (R, or Shift+R to step back)">Style</button>';
-    lv.style.gridTemplateColumns = "auto auto";
-    lv.style.columnGap = "4px";
-    lv.insertBefore($("bmat") || lv.querySelector("#bmat"), lv.querySelector("#blname"));
-    lv.insertBefore(lv.querySelector("#bheight"), lv.querySelector("#bldn"));
-    $("buildbar").querySelector(".row").insertBefore(lv, $("buildbar").querySelector(".sep"));
-    $("blup").addEventListener("click", () => (setLevel(B.level + 1), canvas.focus()));
-    $("bldn").addEventListener("click", () => (setLevel(B.level - 1), canvas.focus()));
-    $("bmat").addEventListener("click", () => (cycleMat(), canvas.focus()));
-    $("bheight").addEventListener("click", () => (cycleHeight(), canvas.focus()));
-    $("bstyle").addEventListener("click", (e) => (cycleStyle(e.shiftKey), canvas.focus()));
-    const dp = document.createElement("div");
-    dp.id = "bdecor";
-    dp.hidden = true;
-    dp.innerHTML = '<div id="bdcats" role="group" aria-label="Kinds of decoration"></div><div id="bditems" role="group" aria-label="Decorations"></div>';
-    $("buildbar").insertBefore(dp, $("buildbar").querySelector(".row"));
-    DCATS.forEach((name, n) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.dataset.cat = n;
-      b.textContent = name;
-      b.addEventListener("click", () => (pickDecor(DKEYS.find((k) => DECOR[k].cat === n)), canvas.focus()));
-      $("bdcats").appendChild(b);
-    });
-    pickDecor(B.dkind);
-    showStyle();
-    $("bundo").addEventListener("click", () => (undo(), canvas.focus()));
-    $("bredo").addEventListener("click", () => (redo(), canvas.focus()));
-    $("bfree").addEventListener("click", () => {
-      B.free = !B.free;
-      B.key = "";
-      syncButtons();
-      canvas.focus();
-    });
-    $("bdone").addEventListener("click", () => (toggle(), canvas.focus()));
+  const SW = { wall: swatches(WALLS, "wall"), floor: swatches(FLOORS, "floor"), roof: swatches(ROOFS, "roof"), path: swatches(PATHS, "path"), dye: DYES.map((d, n) => ({ v: n, name: d[0], sw: ["dye", hexOf(d[1]), hexOf(d[1])] })) };
+  const tiles = (names, pre) => Object.keys(names).map((k) => ({ v: k, name: names[k], icon: pre + k }));
+  const STYLE_SHORT = { wall: "Wall", arch: "Arch", arch2: "Pointed", arch3: "Braced", rail: "Fence", parapet: "Battlement", rampart: "Castle" };
+  const WIN_SHORT = { window: "Square", window2: "Arched", window4: "Shuttered", window3: "Arrow slit" };
+  const DOOR_SHORT = { door: "Door", door2: "Double", gate: "Castle gate" };
+  const TOP_SHORT = { cone: "Pointed", dome: "Dome", crenel: "Battlements" };
+  const ROOF_SHAPES = { gable: "Gable", hip: "Hip", shed: "Lean-to", flat: "Flat" };
+  const roofIndex = (shape, steep, turn) => (shape === "gable" ? (turn & 1) + (steep ? 2 : 0) : shape === "hip" ? (steep ? 5 : 4) : shape === "shed" ? 6 + (turn & 3) : 10);
+  const G_ = {
+    sw: (id, label, items, value, key) => ({ type: "swatches", id, label, items, value, key }),
+    tiles: (id, label, items, value, key) => ({ type: "tiles", id, label, items, value, key }),
+    chips: (id, label, items, value, key) => ({ type: "chips", id, label, items, value, key }),
+    toggle: (id, name, on, icon, title) => ({ type: "toggle", id, name, on, icon, title }),
+    act: (id, name, icon, key, danger) => ({ type: "action", id, name, icon, key, danger }),
+    step: (id, label, text, key) => ({ type: "stepper", id, label, text, key }),
+    field: (id, label, value, unit, title) => ({ type: "field", id, label, value, unit, title }),
+    info: (title, text) => ({ type: "info", title, text }),
+  };
+  const hsItems = () => HEIGHTS.map((x) => ({ v: x[0], name: x[1], note: fmtM(EAVE * x[0]) }));
+  const gapItems = (unit) => [1, 2, 3, 4].map((v) => ({ v, name: v + " m", note: unit }));
+  const PAINT = () => [G_.toggle("paint", "Paint", B.tapMode === "paint", "paint", "Paint pieces already built with this material: click or drag across them (K)"), G_.toggle("pick", "Pick", B.tapMode === "pick", "pick", "Take the style and material of any piece in hand (I)")];
+  // what the selection adds up to, from the piece list
+  function selPieces() {
+    const sel = new Set(B.sel);
+    return listPieces().filter((p) => sel.has(p.id) || sel.has(p.roof) || sel.has(p.tower) || (p.wall && sel.has(p.wall)));
+  }
+  function quantText(q) {
+    const out = [];
+    q.wallLength && out.push("walls " + fmtM(q.wallLength));
+    q.floorArea && out.push("floor " + fmtA(q.floorArea));
+    q.roofArea && out.push("roof " + fmtA(q.roofArea));
+    q.doors && out.push(plural(q.doors, "door"));
+    q.windows && out.push(plural(q.windows, "window"));
+    q.posts && out.push(plural(q.posts, "pillar"));
+    q.fixtures && out.push(plural(q.fixtures, "furnishing"));
+    q.pathLength && out.push("path " + fmtM(q.pathLength));
+    return out.join(" · ");
+  }
+  function selGroups(g) {
+    const refs = selRefs(),
+      one = refs.length === 1 ? refs[0] : null,
+      kinds = new Set(refs.map((q) => q.kind)),
+      has = (...k) => k.some((x) => kinds.has(x)),
+      common = (vals) => (vals.length && vals.every((v) => v === vals[0]) ? vals[0] : null),
+      ps = selPieces();
+    // what it is and what it measures, without being asked
+    let title = plural(refs.length, "piece"),
+      text = quantText(quantities(ps));
+    if (one) {
+      const p = pieceById(one.id) || ps[0],
+        S = one.S;
+      if (one.kind === "run" || one.kind === "frun") ((title = WALLS[one.g.mat].name + " " + STYLE_SHORT[baseType(one.g.cls)].toLowerCase()), (text = fmtM(p.length) + " long · " + fmtM(p.height) + " high · " + fmtA(p.netArea) + (p.openings.length ? " · " + plural(p.openings.length, "opening") : "")));
+      else if (one.kind === "open" || one.kind === "sopen") ((title = (WIN_NAME[p.type] || DOOR_NAME[p.type] || "Gate")), (text = fmtM(p.length) + " wide · " + fmtM(p.height) + " high"));
+      else if (one.kind === "floor" || one.kind === "poly") ((title = FLOORS[p.material].name + " floor"), (text = fmtA(p.area) + " · " + fmtM(p.perimeter) + " around"));
+      else if (one.kind === "roof" || one.kind === "polyroof") ((title = ROOFS[ps[0].material].name + " " + (ROOF_SHAPES[ps[0].type] || "pointed").toLowerCase() + " roof"), (text = fmtA(ps.reduce((a, q) => a + (q.kind === "roof" ? q.area : 0), 0)) + " · pitch " + Math.round(ps[0].pitchDeg) + "°"));
+      else if (one.kind === "ring") ((title = "Round room"), (text = fmtM(one.r.r * 2) + " wide · " + plural(one.r.h, "storey") + " · " + fmtA(p.area)));
+      else if (one.kind === "stair") ((title = "Stairs"), (text = fmtM(p.length) + " long · rises " + fmtM(p.height)));
+      else if (one.kind === "pillar") ((title = one.p[3] === "chimney" ? "Chimney" : "Pillar"), (text = fmtM(p.height) + " high"));
+      else if (one.kind === "path") ((title = PATHS[p.material].name + " path"), (text = fmtM(p.length) + " long · " + fmtM(p.width) + " wide"));
+      else if (one.kind === "decor") ((title = p.name), (text = fmt(p.width) + " × " + fmt(p.depth) + " m · " + fmtM(p.height) + " high"));
+      void S;
+    } else if (kinds.size === 1 && has("run", "frun")) title = plural(refs.length, "wall");
+    g.push(G_.info(title, text));
+    const walls = refs.filter((q) => q.kind === "run" || q.kind === "frun");
+    if (walls.length) {
+      const st = common(walls.map((q) => { const ty = (q.kind === "run" ? q.g.m.map((e) => e.type) : q.g.mods.map((m) => m.type)).filter((t) => !isDoor(t) && !isWin(t)); return ty.length && ty.every((t) => t === ty[0]) ? ty[0] : baseType(q.g.cls); }));
+      g.push(G_.tiles("s:style", "Style", tiles(STYLE_SHORT, "w-"), st));
+    }
+    if (has("run", "frun", "ring", "pillar")) g.push(G_.sw("s:wmat", has("ring") && !walls.length ? "Walls" : "Material", SW.wall, common(refs.filter((q) => /^(run|frun|ring|pillar)$/.test(q.kind)).map((q) => (q.g ? q.g.mat : q.r ? q.r.mat || "timber" : q.p[2] || "timber")))));
+    if (one && (one.kind === "open" || one.kind === "sopen")) {
+      const ty = one.kind === "open" ? one.S.walls.get(one.k) : one.sg[4];
+      if (ty !== "railgate") g.push(G_.tiles("s:otype", "Type", [...tiles(DOOR_SHORT, "d-"), ...tiles(WIN_SHORT, "n-")], ty));
+    }
+    if (has("floor", "poly", "ring")) g.push(G_.sw("s:fmat", "Floor", SW.floor, common(refs.filter((q) => /^(floor|poly|ring)$/.test(q.kind)).map((q) => (q.g ? q.g.mat : q.p ? q.p.fmat || "planks" : q.r.fmat || "planks")))));
+    if (one && one.kind === "roof") {
+      const r = one.r,
+        turn = r.shape === "shed" ? r.dir || 0 : (r.i1 - r.i0 >= r.j1 - r.j0) !== (r.axis === "x") ? 1 : 0;
+      g.push(G_.tiles("s:rshape", "Shape", tiles(ROOF_SHAPES, "r-"), r.shape || "gable"));
+      if (r.shape !== "flat" && r.shape !== "shed") g.push(G_.toggle("s:steep", "Steep", (r.pitch || 1) > 1, "r-steep"));
+      if (r.shape === "gable" || r.shape === "shed") g.push(G_.act("s:rturn", "Turn", "turn"));
+      void turn;
+    }
+    if (one && one.kind === "ring") {
+      g.push(G_.chips("s:levels", "Storeys", [1, 2, 3, 4].map((v) => ({ v, name: String(v) })), one.r.h));
+      g.push(G_.tiles("s:top", "Top", [{ v: "", name: "Open", icon: "t-none" }, ...tiles(TOP_SHORT, "t-")], one.r.roof === true ? "cone" : one.r.roof || ""));
+    }
+    if (has("roof", "polyroof") || (one && one.kind === "ring" && one.r.roof && one.r.roof !== "crenel")) g.push(G_.sw("s:rmat", "Roofing", SW.roof, common(refs.filter((q) => /roof|ring/.test(q.kind)).map((q) => (q.kind === "roof" ? q.r.mat || "thatch" : q.kind === "ring" ? q.r.rmat || "thatch" : q.p.rmat || "thatch")))));
+    if (one && one.kind === "pillar") g.push(G_.tiles("s:pkind", "Kind", [{ v: "pillar", name: "Pillar", icon: "p-pillar" }, { v: "chimney", name: "Chimney", icon: "p-chimney" }], one.p[3] || "pillar"));
+    if (has("path")) {
+      g.push(G_.chips("s:pwidth", "Width", [1, 2, 3].map((v) => ({ v, name: v + " m" })), common(refs.filter((q) => q.kind === "path").map((q) => q.p[4]))));
+      g.push(G_.sw("s:pmat", "Surface", SW.path, common(refs.filter((q) => q.kind === "path").map((q) => q.p[5] || "cobble"))));
+    }
+    if (has("decor")) {
+      g.push(G_.sw("s:dcol", "Colour", SW.dye, common(refs.filter((q) => q.kind === "decor").map((q) => q.it[4] || 0))));
+      g.push(G_.act("s:turn", "Turn", "turn"));
+    }
+    if (one) {
+      const S = one.S;
+      if (one.kind === "run") g.push(G_.field("s:len", "Length", fmt(one.g.m.length), "m", "Whole metres on the grid"));
+      else if (one.kind === "frun") g.push(G_.field("s:len", "Length", fmt(one.g.len), "m", "Any length"));
+      if (one.kind === "ring") g.push(G_.field("s:width", "Width", fmt(one.r.r * 2), "m"));
+      if (/^(run|frun|floor|ring|pillar)$/.test(one.kind) && !(one.g && (one.g.cls === "rail" || one.g.cls === "parapet"))) g.push(G_.field("s:hs", "Ceiling", fmt(EAVE * S.hs), "m", "The height of this whole storey"));
+      if (one.kind === "decor" || one.kind === "pillar" || one.kind === "ring") {
+        const at = one.kind === "decor" ? one.it : one.kind === "pillar" ? one.p : [one.r.cx, one.r.cz];
+        g.push(G_.field("s:x", "Across", fmt(at[0]), "m", "Position on the building's grid"));
+        g.push(G_.field("s:z", "Along", fmt(at[1]), "m", "Position on the building's grid"));
+      }
+    }
+    g.push(G_.act("s:all", "Whole building", "building"));
+    if (one) g.push(G_.act("s:pick", "More like this", "pick", "I"));
+    g.push(G_.act("s:dup", "Copy", "copy", "Ctrl D"));
+    g.push(G_.act("s:del", "Delete", "bin", "Del", true));
+  }
+  function view() {
+    const t = B.tool,
+      g = [],
+      RS = RSHAPES[B.rshape];
+    const lift = () => g.push(G_.step("lift", "Raise", (B.lift > 0 ? "+" : "") + fmt(B.lift) + " m", "+ −"));
+    const ceil = (label) => g.push(G_.chips("hs", label || "Ceiling", hsItems(), B.hs, "{ }"));
+    const wing = () => g.push(G_.toggle("wing", "Split level", !!B.wingNext, "wing", "Start the next piece as its own level beside the floor under the cursor, at the raised height (or hold Shift)"));
+    if (t === "select") {
+      if (B.sel.length) selGroups(g);
+      else {
+        g.push(G_.toggle("roofs", "Show roofs", B.showRoofs, "roofs", "Roofs are lifted away so you can reach inside. Show them to select one."));
+        const q = quantities();
+        if (q.pieces) g.push(G_.info("Everything built", quantText(q)));
+      }
+    } else if (t === "room" || t === "tower") {
+      g.push(G_.tiles("shape", "Shape", [{ v: "room", name: "Box", icon: "s-box" }, { v: "tower", name: "Round", icon: "s-round" }], t, "R"));
+      if (t === "tower") g.push(G_.chips("levels", "Storeys", [1, 2, 3, 4].map((v) => ({ v, name: String(v) })), B.levels, "Shift wheel"));
+      g.push(G_.sw("wmat", "Walls", SW.wall, B.wmat, "M"));
+      g.push(G_.sw("fmat", "Floor", SW.floor, B.fmat));
+      g.push(...PAINT());
+      ceil();
+      lift();
+      t === "room" && wing();
+    } else if (t === "wall") {
+      g.push(G_.tiles("style", "Style", tiles(STYLE_SHORT, "w-"), B.style, "Shift wheel"));
+      g.push(G_.sw("wmat", "Material", SW.wall, B.wmat, "M"));
+      g.push(...PAINT());
+      ceil("Height");
+      lift();
+      wing();
+    } else if (t === "floor") {
+      g.push(G_.sw("fmat", "Surface", SW.floor, B.fmat, "M"));
+      g.push(...PAINT());
+      lift();
+      wing();
+    } else if (t === "roof") {
+      g.push(G_.tiles("rshape", "Shape", tiles(ROOF_SHAPES, "r-"), RS[0], "Shift wheel"));
+      if (RS[0] === "gable" || RS[0] === "hip") g.push(G_.toggle("steep", "Steep", RS[3] > 1, "r-steep"));
+      if (RS[0] === "gable" || RS[0] === "shed") g.push(G_.act("rturn", "Turn", "turn"));
+      g.push(G_.sw("rmat", "Roofing", SW.roof, B.rmat, "M"));
+      g.push(...PAINT());
+      g.push(G_.tiles("tshape", "On a round room", tiles(TOP_SHORT, "t-"), B.tshape));
+    } else if (t === "door") {
+      g.push(G_.tiles("dstyle", "Type", tiles(DOOR_SHORT, "d-"), B.dstyle, "Shift wheel"));
+      g.push(G_.chips("gap", "In a row, one every", gapItems(), B.gap));
+      g.push(...PAINT().slice(1));
+    } else if (t === "window") {
+      g.push(G_.tiles("wstyle", "Type", tiles(WIN_SHORT, "n-"), B.wstyle, "Shift wheel"));
+      g.push(G_.chips("gap", "In a row, one every", gapItems(), B.gap));
+      g.push(...PAINT().slice(1));
+    } else if (t === "stairs") g.push(G_.act("turn", "Turn", "turn", "Shift wheel"));
+    else if (t === "pillar") {
+      g.push(G_.tiles("pkind", "Kind", [{ v: "pillar", name: "Pillar", icon: "p-pillar" }, { v: "chimney", name: "Chimney", icon: "p-chimney" }], B.pkind, "Shift wheel"));
+      g.push(G_.sw("wmat", "Material", SW.wall, B.wmat, "M"));
+      g.push(...PAINT());
+      g.push(G_.chips("gap", "In a row, one every", gapItems(), B.gap));
+      lift();
+    } else if (t === "path") {
+      g.push(G_.chips("pwidth", "Width", [1, 2, 3].map((v) => ({ v, name: v + " m" })), B.pwidth, "Shift wheel"));
+      g.push(G_.sw("pmat", "Surface", SW.path, B.pmat, "M"));
+      g.push(...PAINT());
+    } else if (t === "decor") {
+      const cat = DECOR[B.dkind].cat;
+      g.push(G_.chips("dcat", "", DCATS.map((name, n) => ({ v: n, name })), cat));
+      g.push(G_.sw("dcol", "Colour", SW.dye, B.dcol, "M"));
+      g.push(G_.act("turn", "Turn " + B.drot * 45 + "°", "turn", "Shift wheel"));
+      g.push(...PAINT());
+      g.push({ ...G_.chips("dkind", "", DKEYS.filter((k) => DECOR[k].cat === cat).map((k) => ({ v: k, name: DECOR[k].name })), B.dkind), row: 2 });
+    } else if (t === "measure") {
+      if (B.meas.length) {
+        const m = measText(B.meas[B.meas.length - 1].a, B.meas[B.meas.length - 1].b);
+        g.push(G_.info("Last measured", fmtM(m.len) + " across · " + (Math.abs(m.rise) > 0.02 ? (m.rise > 0 ? "up " : "down ") + fmtM(Math.abs(m.rise)) : "level") + " · " + Math.round(m.angle) + "° from the grid" + (Math.abs(m.rise) > 0.02 ? " · " + fmtM(m.direct) + " direct" : "")));
+        g.push(G_.act("mclear", "Clear all", "bin"));
+      }
+    } else if (t === "copy") g.push(G_.act("turn", "Turn", "turn", "Shift wheel"));
+    const busy = B.move ? "move" : B.drag && B.drag.mode === "click" ? "chain" : B.tapMode ? B.tapMode : B.measA ? "measure" : t === "copy" ? "copy" : "";
+    return { tool: t, top: t === "tower" ? "room" : t === "copy" ? "select" : t, tools: TOOLS, groups: g, hint: B.hintText, undo: B.undo.length, redo: B.redo.length, snap: B.snap, free: B.free, level: B.level, levelName: LEVEL_NAME(B.level), busy, sel: B.sel.length };
+  }
+  function choose(id, v) {
+    const RS = RSHAPES[B.rshape],
+      turnOf = RS[0] === "gable" || RS[0] === "shed" ? RS[1] : 0;
+    if (id === "shape") return setTool(v);
+    if (id === "wmat" || id === "fmat" || id === "rmat" || id === "pmat" || id === "dcol" || id === "style" || id === "wstyle" || id === "dstyle" || id === "pkind" || id === "pwidth" || id === "levels" || id === "tshape" || id === "gap" || id === "hs") B[id] = v;
+    else if (id === "lift") B.lift = clamp(B.lift + v * 0.5, -3, 6);
+    else if (id === "wing") B.wingNext = !B.wingNext;
+    else if (id === "roofs") B.showRoofs = !B.showRoofs;
+    else if (id === "paint") B.tapMode = B.tapMode === "paint" ? "" : "paint";
+    else if (id === "pick") B.tapMode = B.tapMode === "pick" ? "" : "pick";
+    else if (id === "rshape") B.rshape = roofIndex(v, RS[3] > 1, turnOf);
+    else if (id === "steep") B.rshape = roofIndex(RS[0], !(RS[3] > 1), turnOf);
+    else if (id === "rturn") B.rshape = roofIndex(RS[0], RS[3] > 1, turnOf + 1);
+    else if (id === "turn") cycleStyle(false);
+    else if (id === "dcat") B.dkind = DKEYS.find((k) => DECOR[k].cat === v);
+    else if (id === "dkind") B.dkind = v;
+    else if (id === "mclear") measClear();
+    else if (id === "s:wmat" || id === "s:fmat" || id === "s:rmat" || id === "s:pmat" || id === "s:dcol") selMaterial(id.slice(2), v);
+    else if (id === "s:style") selStyle(v);
+    else if (id === "s:otype") selOpenType(v);
+    else if (id === "s:rshape") selEdit((q) => q.kind === "roof" && ((q.r.shape = v), (q.r.pitch = v === "hip" || v === "gable" ? q.r.pitch || 1 : 1), (q.r.dir = q.r.dir || 0), true));
+    else if (id === "s:steep") selEdit((q) => q.kind === "roof" && ((q.r.pitch = (q.r.pitch || 1) > 1 ? 1 : q.r.shape === "hip" ? 2.2 : 1.7), true));
+    else if (id === "s:rturn") selEdit((q) => q.kind === "roof" && (q.r.shape === "shed" ? (q.r.dir = ((q.r.dir || 0) + 1) % 4) : (q.r.axis = q.r.axis === "x" ? "z" : "x"), true));
+    else if (id === "s:levels") selEdit((q) => q.kind === "ring" && ((q.r.h = v), true));
+    else if (id === "s:top") selEdit((q) => q.kind === "ring" && ((q.r.roof = v || false), (q.r.rmat = q.r.rmat || B.rmat), true));
+    else if (id === "s:pkind") selEdit((q) => q.kind === "pillar" && ((q.p[3] = v), true));
+    else if (id === "s:pwidth") selEdit((q) => q.kind === "path" && ((q.p[4] = v), true));
+    else if (id === "s:turn") selEdit((q) => q.kind === "decor" && ((q.it[3] = ((q.it[3] || 0) + 1) % 8), true));
+    else if (id === "s:len" || id === "s:hs" || id === "s:x" || id === "s:z" || id === "s:width") selField(id.slice(2), +v);
+    else if (id === "s:all") selBuilding();
+    else if (id === "s:pick") pickUp(B.sel[0]);
+    else if (id === "s:del") selDelete();
+    else if (id === "s:dup") duplicate();
+    else if (id === "snap") B.snap = !B.snap;
+    else if (id === "free") B.free = !B.free;
+    else if (id === "level") return setLevel(B.level + v);
+    else if (id === "undo") return undo();
+    else if (id === "redo") return redo();
+    else if (id === "stop") putDown(false);
+    else if (id === "done") return toggle();
+    B.key = "";
+    hint();
+    touchUi();
+  }
+  // a copy of the selection in the hand: a whole building is stamped as a new one, parts are copied where they stand
+  function duplicate() {
+    const refs = selRefs();
+    if (!refs.length) return;
+    const sel = new Set(B.sel),
+      S0 = refs[0].S,
+      grp = groupOf(S0);
+    if (!S0.po && refs.every((q) => grp.includes(q.S)) && grp.every((O) => elemIds(O).every((id) => sel.has(id)))) {
+      B.tool = "copy";
+      copyFrom(S0);
+      return touchUi();
+    }
+    moveBegin(true, true, null);
+  }
+  // typed sizes while drawing: a for the first value (length or width), b for the second (angle or depth)
+  function typedSet(a, b) {
+    const n = (v) => (v === null || v === "" || !isFinite(+v) || +v <= 0 ? null : +v);
+    B.typed.a = n(a);
+    B.typed.b = b === null || b === "" || !isFinite(+b) ? null : B.tool === "wall" || B.tool === "path" ? clamp(Math.abs(+b), 0, 90) : n(b);
+    B.key = "";
   }
   window.addEventListener("keyup", (e) => {
-    if (e.code === "AltLeft" || e.code === "AltRight") B.alt = false;
+    if (e.code === "AltLeft" || e.code === "AltRight") ((B.alt = false), (B.key = ""));
+    if (e.code === "ControlLeft" || e.code === "ControlRight" || e.code === "MetaLeft" || e.code === "MetaRight") ((B.ctrl = B.ctrlWheel = false), (B.key = ""));
   });
-  window.addEventListener("blur", () => (B.alt = false));
+  window.addEventListener("blur", () => (B.alt = B.ctrl = B.ctrlWheel = false));
+  const TOOL_KEY = { KeyV: "select", KeyR: "room", KeyN: "wall", KeyF: "floor", KeyO: "roof", KeyJ: "door", KeyU: "window", KeyZ: "stairs", KeyP: "pillar", KeyL: "path", KeyC: "decor", KeyY: "measure", KeyX: "erase" };
+  const TOOL_LETTER = {};
+  for (const k in TOOL_KEY) TOOL_LETTER[TOOL_KEY[k]] = k.slice(3);
+  function onKey(e) {
+    if (e.code === "AltLeft" || e.code === "AltRight") ((B.alt = true), (B.key = ""));
+    if (e.code === "ControlLeft" || e.code === "ControlRight" || e.code === "MetaLeft" || e.code === "MetaRight") ((B.ctrl = true), (B.key = ""));
+    if (e.code === "KeyB" && !e.repeat && !(e.ctrlKey || e.metaKey)) return (toggle(), true);
+    if (!B.on) return false;
+    const cmd = e.ctrlKey || e.metaKey;
+    if (cmd && e.code === "KeyZ") return (e.preventDefault(), e.shiftKey ? redo() : undo(), true);
+    if (cmd && e.code === "KeyY") return (e.preventDefault(), redo(), true);
+    if (cmd && e.code === "KeyD") return (e.preventDefault(), B.tool === "select" && duplicate(), true);
+    if (cmd && e.code === "KeyA") return (e.preventDefault(), setTool("select"), selSet(B.structs.filter((S) => S.level === B.level).flatMap(elemIds)), true);
+    if (cmd) return false;
+    // while a stroke is in hand, digits are an exact size for it
+    const digit = /^(Digit|Numpad)([0-9])$/.exec(e.code),
+      sized = B.drag && (B.tool === "wall" || B.tool === "room" || B.tool === "floor" || B.tool === "path" || B.tool === "tower" || B.tool === "pillar");
+    if (sized && (digit || e.code === "Period" || e.code === "NumpadDecimal" || e.code === "Tab" || e.code === "Comma")) {
+      e.preventDefault();
+      B.typeHook && B.typeHook(digit ? digit[2] : e.code === "Tab" || e.code === "Comma" ? "next" : ".");
+      return true;
+    }
+    if (sized && e.code === "Enter") return (commit(), true);
+    if (e.code === "PageUp" || e.code === "BracketRight") return (e.preventDefault(), e.shiftKey ? cycleHeight(false) : setLevel(B.level + 1), true);
+    if (e.code === "PageDown" || e.code === "BracketLeft") return (e.preventDefault(), e.shiftKey ? cycleHeight(true) : setLevel(B.level - 1), true);
+    if (e.code === "Equal" || e.code === "Minus" || e.code === "NumpadAdd" || e.code === "NumpadSubtract") return (choose("lift", e.code === "Equal" || e.code === "NumpadAdd" ? 1 : -1), true);
+    if (e.code === "Comma" || e.code === "Period") return (cycleStyle(e.code === "Comma"), true);
+    if (e.code === "Slash" && !e.repeat) return (choose("snap"), true);
+    if (e.code === "KeyM" && !e.repeat) return (cycleMat(e.shiftKey), true);
+    if (e.code === "KeyK" && !e.repeat) return (choose("paint"), true);
+    if (e.code === "KeyI" && !e.repeat) return (B.tool === "select" && B.sel.length === 1 ? pickUp(B.sel[0]) : choose("pick"), true);
+    if (e.code === "Escape") return (putDown(true) || toggle(), true);
+    if ((e.code === "Delete" || e.code === "Backspace") && !e.repeat) return (B.tool === "select" && B.sel.length ? selDelete() : setTool("erase"), true);
+    if (digit && !e.repeat) {
+      const tl = TOOLS.find((x) => x.code === e.code);
+      tl && setTool(tl.id);
+      return true;
+    }
+    const id = !e.repeat && TOOL_KEY[e.code];
+    if (id) {
+      // a tool's letter picks it up; pressed again it steps through its styles
+      const cur = B.tool === "tower" ? "room" : B.tool;
+      if (cur !== id) setTool(id);
+      else if (id === "room") setTool(B.tool === "room" ? "tower" : "room");
+      else cycleStyle(e.shiftKey);
+      return true;
+    }
+    return false;
+  }
 
   /* ---------- hooks called by the engine ---------- */
   function collideOnce(e, r, isPlayer, S) {
@@ -4304,88 +6295,856 @@
     if (moved) [e.x, e.z] = toWorld(S, lx, lz);
     e.__bp = { id: S.id, lx, lz };
   }
-  // The piece interface, version 0 (see ARCHITECTURE.md). Every built element as plain data:
-  // what it is, what it is made of, and its size and place in world metres. Simulation systems
-  // (structure, heat, salvage) read buildings only through this list, never through build mode's internals.
-  function listPieces() {
-    const out = [];
-    for (const S of B.structs) {
-      const h = WALL_H * S.hs;
-      const at = (lx, lz) => { const [x, z] = toWorld(S, lx, lz); return { x, z }; };
-      const add = (kind, type, material, a, b, y0, y1, extra) => out.push({ id: S.id + ":" + kind + ":" + out.length, struct: S.id, kind, type, material, a, b, y0: S.y0 + y0, y1: S.y0 + y1, ...extra });
-      for (const k of S.floors) {
-        const [i, j] = parse(k);
-        add("floor", "floor", S.fmat.get(k) || "planks", at(i, j), at(i + 1, j + 1), -FLOOR_T, 0, { area: 1, thickness: FLOOR_T });
+  /* ---------- piece identity ---------- */
+  // Every built element keeps one id for life: through edits, undo and saving, and whatever is built or removed
+  // around it. Roofs, towers, stairs, pillars, paths and furniture carry theirs. Walls and floors are stored as
+  // 1 m edges and tiles, so a wall piece is a straight run of edges of one kind and material and a floor piece is
+  // a connected area of one surface. Each run or area keeps the id most of its parts already had; a part that is
+  // split off gets a new one.
+  const newPid = () => "p" + B.nextPid++;
+  const pidNum = (id) => +String(id).slice(1) || 0;
+  const wallClass = (t) => (t === "rail" || t === "railgate" ? "rail" : t === "parapet" ? "parapet" : isThick(t) ? "rampart" : "wall");
+  // straight runs of grid wall edges, in a fixed order
+  function gridRuns(S) {
+    const lines = new Map();
+    for (const [k, type] of S.walls) {
+      if (S.hid.has(k)) continue;
+      const [i, j, d] = parse(k),
+        lk = d + "|" + (d === 0 ? j : i);
+      let L = lines.get(lk);
+      if (!L) lines.set(lk, (L = []));
+      L.push({ k, t: d === 0 ? i : j, i, j, d, type, cls: wallClass(type), mat: S.wmat.get(k) || "timber" });
+    }
+    const runs = [];
+    for (const lk of [...lines.keys()].sort()) {
+      let cur = null;
+      for (const e of lines.get(lk).sort((p, q) => p.t - q.t)) {
+        if (cur && e.t === cur.t1 && e.cls === cur.cls && e.mat === cur.mat) {
+          cur.m.push(e);
+          cur.t1 = e.t + 1;
+        } else runs.push((cur = { d: e.d, line: e.d === 0 ? e.j : e.i, t0: e.t, t1: e.t + 1, cls: e.cls, mat: e.mat, m: [e] }));
       }
-      for (const [k, type] of S.walls) {
-        const [i, j, d] = parse(k);
-        const low = isLow(type);
-        add(isDoor(type) ? "door" : isWin(type) ? "window" : "wall", type, S.wmat.get(k) || "timber", at(i, j), d === 0 ? at(i + 1, j) : at(i, j + 1), 0, low ? 1 : h, { length: 1, height: low ? 1 : h, thickness: isThick(type) ? 1 : HALF_T * 2 });
+    }
+    return runs;
+  }
+  // straight runs of free-angle wall pieces: pieces that meet end to end in one line, of one kind and material
+  function freeRuns(S) {
+    const segs = S.segs,
+      par = segs.map((_, n) => n),
+      find = (a) => {
+        while (par[a] !== a) a = par[a] = par[par[a]];
+        return a;
+      },
+      ends = new Map(),
+      at = (x, z) => Math.round(x * 50) + "," + Math.round(z * 50),
+      shown = segs.map((sg) => !(S.rings.length && inRings(S, (sg[0] + sg[2]) / 2, (sg[1] + sg[3]) / 2)));
+    segs.forEach((sg, n) => {
+      if (!shown[n]) return;
+      for (const k of [at(sg[0], sg[1]), at(sg[2], sg[3])]) {
+        let L = ends.get(k);
+        if (!L) ends.set(k, (L = []));
+        L.push(n);
       }
-      for (const sg of S.segs) {
-        const len = Math.hypot(sg[2] - sg[0], sg[3] - sg[1]);
-        add("wall", String(sg[4] || "wall"), "timber", at(sg[0], sg[1]), at(sg[2], sg[3]), 0, h, { length: len, height: h, thickness: HALF_T * 2, free: true });
+    });
+    for (const L of ends.values())
+      for (let a = 0; a < L.length; a++)
+        for (let b = a + 1; b < L.length; b++) {
+          const p = segs[L[a]],
+            q = segs[L[b]];
+          if (wallClass(p[4]) !== wallClass(q[4]) || (p[5] || "timber") !== (q[5] || "timber")) continue;
+          const ux = p[2] - p[0],
+            uz = p[3] - p[1],
+            vx = q[2] - q[0],
+            vz = q[3] - q[1];
+          if (Math.abs(ux * vz - uz * vx) < 0.01 * Math.hypot(ux, uz) * Math.hypot(vx, vz)) par[find(L[a])] = find(L[b]);
+        }
+    const groups = new Map(),
+      runs = [];
+    segs.forEach((sg, n) => {
+      if (!shown[n]) return;
+      const r = find(n);
+      let g = groups.get(r);
+      if (!g) (groups.set(r, (g = { free: true, m: [] })), runs.push(g));
+      g.m.push(n);
+    });
+    for (const g of runs) {
+      const f = segs[g.m[0]],
+        fl = Math.hypot(f[2] - f[0], f[3] - f[1]) || 1,
+        ux = (f[2] - f[0]) / fl,
+        uz = (f[3] - f[1]) / fl,
+        tOf = (x, z) => (x - f[0]) * ux + (z - f[1]) * uz;
+      let lo = 1e9,
+        hi = -1e9;
+      g.mods = g.m.map((n) => {
+        const sg = segs[n],
+          ta = tOf(sg[0], sg[1]),
+          tb = tOf(sg[2], sg[3]);
+        lo = Math.min(lo, ta, tb);
+        hi = Math.max(hi, ta, tb);
+        return { idx: n, s: Math.min(ta, tb), len: Math.abs(tb - ta), type: sg[4] };
+      });
+      g.mods.sort((p, q) => p.s - q.s);
+      for (const q of g.mods) q.s -= lo;
+      g.m = g.mods.map((q) => q.idx);
+      g.cls = wallClass(f[4]);
+      g.mat = f[5] || "timber";
+      g.ux = ux;
+      g.uz = uz;
+      g.x0 = f[0] + ux * lo;
+      g.z0 = f[1] + uz * lo;
+      g.x1 = f[0] + ux * hi;
+      g.z1 = f[1] + uz * hi;
+      g.len = hi - lo;
+    }
+    return runs;
+  }
+  // connected areas of floor tiles of one surface (stairwells are not floor)
+  function floorAreas(S) {
+    const seen = new Set(),
+      out = [],
+      well = new Map(),
+      isWell = (k) => {
+        let w = well.get(k);
+        if (w === undefined) {
+          const [i, j] = parse(k);
+          well.set(k, (w = wellOver(S, i, j)));
+        }
+        return w;
+      };
+    for (const k of S.floors) {
+      if (seen.has(k) || isWell(k)) continue;
+      const mat = S.fmat.get(k) || "planks",
+        g = { mat, m: [], i0: 1e9, i1: -1e9, j0: 1e9, j1: -1e9 },
+        stack = [k];
+      seen.add(k);
+      while (stack.length) {
+        const c = stack.pop(),
+          [i, j] = parse(c);
+        g.m.push(c);
+        g.i0 = Math.min(g.i0, i);
+        g.i1 = Math.max(g.i1, i);
+        g.j0 = Math.min(g.j0, j);
+        g.j1 = Math.max(g.j1, j);
+        for (const nk of [ck(i - 1, j), ck(i + 1, j), ck(i, j - 1), ck(i, j + 1)]) {
+          if (seen.has(nk) || !S.floors.has(nk) || (S.fmat.get(nk) || "planks") !== mat || isWell(nk)) continue;
+          seen.add(nk);
+          stack.push(nk);
+        }
       }
-      for (const p of S.pillars) add("post", "pillar", "timber", at(p[0], p[1]), at(p[0], p[1]), 0, h, { height: h });
-      for (const r of S.roofs) out.push({ id: S.id + ":roof:" + out.length, struct: S.id, kind: "roof", type: "roof", material: "thatch", raw: { ...r } });
-      for (const r of S.rings) out.push({ id: S.id + ":tower:" + out.length, struct: S.id, kind: "tower", type: "tower", material: "stone", raw: { ...r, sides: r.sides.slice() } });
+      g.m.sort();
+      out.push(g);
     }
     return out;
   }
-  window.__build = {
-    pieces: listPieces,
-    get version() { return B.version; },
-    _t: { copyPick: () => copyPick(), stamp: () => stamp(), topWalk, rebuild },
-    key(e) {
-      if (e.code === "AltLeft" || e.code === "AltRight") B.alt = true;
-      if (e.code === "KeyB" && !e.repeat) {
-        toggle();
-        return true;
+  // Each group takes the id most of its members already carry. Where two groups want the same id the larger
+  // keeps it and the other is a new piece (g.from says which piece it was split from).
+  function vote(groups, idOf, taken) {
+    for (const g of groups) {
+      const tally = new Map();
+      g.want = null;
+      g.votes = 0;
+      for (const m of g.m) {
+        const id = idOf(m);
+        if (!id) continue;
+        const n = (tally.get(id) || 0) + 1;
+        tally.set(id, n);
+        if (n > g.votes || (n === g.votes && pidNum(id) < pidNum(g.want))) ((g.want = id), (g.votes = n));
       }
-      if (!B.on) {
-        if (e.code === "Digit5" && !e.repeat) {
-          toggle();
-          return true;
+    }
+    const order = groups.map((_, n) => n).sort((a, b) => groups[b].votes - groups[a].votes || a - b);
+    for (const n of order) {
+      const g = groups[n];
+      g.id = g.want && !taken.has(g.want) ? g.want : null;
+      g.id && taken.add(g.id);
+    }
+    for (const g of groups) g.from = g.id ? null : g.want;
+  }
+  // a point inside a closed shape, to remember it by
+  function insidePoint(p) {
+    if (pip(p.pts, p.cx, p.cz)) return [p.cx, p.cz];
+    const tris = T.ShapeUtils.triangulateShape(
+      p.pts.map((q) => new T.Vector2(q[0], q[1])),
+      [],
+    );
+    if (!tris.length) return [p.cx, p.cz];
+    const t = tris[0].map((k) => p.pts[k]);
+    return [(t[0][0] + t[1][0] + t[2][0]) / 3, (t[0][1] + t[1][1] + t[2][1]) / 3];
+  }
+  // Give every piece of a structure its id. Runs on every rebuild; it changes nothing that is already settled.
+  function identify(S) {
+    const re = S.fresh ? new Map() : null,
+      claim = B.claim,
+      taken = new Set();
+    // an id of our own: a copy gets new ones throughout, and no two pieces in a loaded save may share one
+    const own = (id) => {
+      if (re) {
+        if (!id) return newPid();
+        let n = re.get(id);
+        n || re.set(id, (n = newPid()));
+        return n;
+      }
+      if (!id || (claim && claim.has(id))) id = newPid();
+      claim && claim.add(id);
+      return id;
+    };
+    const settle = (g) => {
+      const id = own(g.id || (re ? g.want : null));
+      if (g.from && S.asm[g.from] && !S.asm[id]) S.asm[id] = S.asm[g.from];
+      return (g.id = id);
+    };
+    for (const r of S.roofs) r.id = own(r.id);
+    for (const r of S.rings) r.id = own(r.id);
+    for (const st of S.stairs) st.id = own(st.id);
+    for (const p of S.pillars) ((p[2] = p[2] || "timber"), (p[3] = p[3] || "pillar"), (p[4] = own(p[4])));
+    for (const p of S.paths) ((p[5] = p[5] || "cobble"), (p[6] = own(p[6])));
+    for (const it of S.decor) ((it[3] = it[3] || 0), (it[4] = it[4] || 0), (it[5] = own(it[5])));
+    for (const p of S.polyRoofs) ((p[2] = p[2] || "thatch"), (p[3] = own(p[3])));
+    // grid walls, and the doors and windows in them
+    const runs = gridRuns(S),
+      oid = new Map();
+    vote(runs, (e) => S.wid.get(e.k), taken);
+    S.wid = new Map();
+    for (const g of runs) {
+      settle(g);
+      for (const e of g.m) {
+        S.wid.set(e.k, g.id);
+        if (isDoor(e.type) || isWin(e.type)) oid.set(e.k, own(S.oid.get(e.k)));
+      }
+    }
+    S.oid = oid;
+    S.runs = runs;
+    // free-angle walls
+    const fr = freeRuns(S);
+    vote(fr, (n) => S.segs[n][6], taken);
+    for (const sg of S.segs) ((sg[5] = sg[5] || "timber"), (sg[6] = sg[6] || null), (sg[7] = sg[7] || null));
+    for (const g of fr) {
+      settle(g);
+      for (const n of g.m) {
+        const sg = S.segs[n];
+        sg[6] = g.id;
+        sg[7] = isDoor(sg[4]) || isWin(sg[4]) ? own(sg[7]) : null;
+      }
+    }
+    S.fruns = fr;
+    // floors
+    const regs = floorAreas(S);
+    vote(regs, (c) => S.fid.get(c), taken);
+    S.fid = new Map();
+    for (const g of regs) {
+      settle(g);
+      for (const c of g.m) S.fid.set(c, g.id);
+    }
+    S.regs = regs;
+    // closed shapes of angled walls: remembered by a point inside them, with their floor surface
+    const marks = [],
+      used = new Set();
+    for (const p of S.polys) {
+      let m = S.pids.find((q) => !used.has(q) && pip(p.pts, q[0], q[1]));
+      if (m) used.add(m);
+      const [x, z] = m || insidePoint(p);
+      p.id = own(m && m[2]);
+      p.fmat = (m && m[3]) || "planks";
+      marks.push([x, z, p.id, p.fmat]);
+      const pr = S.polyRoofs.find((q) => pip(p.pts, q[0], q[1]));
+      p.roofId = pr ? pr[3] : null;
+      p.rmat = pr ? pr[2] : p.rmat;
+    }
+    S.pids = marks;
+    // layer choices follow their pieces: a copy carries them over, and those of pieces that are gone are dropped
+    const root = (id) => String(id).split(".")[0];
+    if (re) {
+      const asm = {};
+      for (const k in S.asm) {
+        const r = root(k);
+        if (re.has(r)) asm[re.get(r) + k.slice(r.length)] = S.asm[k];
+      }
+      S.asm = asm;
+      S.fresh = false;
+    }
+    let any = false;
+    for (const k in S.asm) {
+      any = true;
+      break;
+    }
+    if (any) {
+      const live = new Set();
+      for (const g of runs) live.add(g.id);
+      for (const g of fr) live.add(g.id);
+      for (const g of regs) live.add(g.id);
+      for (const p of S.polys) live.add(p.id);
+      for (const r of S.roofs) live.add(r.id);
+      for (const r of S.rings) live.add(r.id);
+      for (const p of S.polyRoofs) live.add(p[3]);
+      for (const k in S.asm) live.has(root(k)) || delete S.asm[k];
+    }
+  }
+
+  /* ---------- the piece interface ---------- */
+  // Every built element as plain data (see ARCHITECTURE.md): what it is, what it is made of, and its size and
+  // place in world metres. Structure, heat, salvage and the rest read buildings only through this list.
+  const meanOf = (fn) => {
+    let a = 0;
+    for (let k = 0; k < 32; k++) a += fn((k + 0.5) / 32);
+    return a / 32;
+  };
+  // An opening in a 1 m wall module: its clear width as a share of the module, its sill and head in a normal
+  // storey (top: a curved head, across the width), and what fills it. These follow wallPieces() above.
+  const OPEN = {
+    door: { kind: "door", t0: 0.09, t1: 0.91, y0: 0.05, y1: 2.04, fill: "leaf" },
+    door2: { kind: "door", t0: 0.05, t1: 0.95, y0: 0.05, y1: 2.24, fill: "leaf" },
+    gate: { kind: "door", t0: 0.1, t1: 0.9, y0: 0.03, y1: 2.35, fill: "grille" },
+    railgate: { kind: "door", t0: 0.09, t1: 0.91, y0: 0.04, y1: 1.14, fill: "leaf" },
+    window: { kind: "window", t0: 0.1, t1: 0.9, y0: 1.11, y1: 1.89, fill: "glazing" },
+    window2: { kind: "window", t0: 0.26, t1: 0.74, y0: 0.86, top: (u) => 1.71 + 0.42 * Math.sin(Math.PI * u), fill: "glazing" },
+    window3: { kind: "window", t0: 0.43, t1: 0.57, y0: 0.96, y1: 2.14, fill: "none" },
+    window4: { kind: "window", t0: 0.33, t1: 0.67, y0: 1.11, y1: 1.89, fill: "shutters" },
+    arch: { kind: "opening", t0: 0.11, t1: 0.89, y0: 0.05, top: (u) => 1.63 + 0.62 * Math.sin(Math.PI * u), fill: "none" },
+    arch2: { kind: "opening", t0: 0.11, t1: 0.89, y0: 0.05, top: (u) => 1.41 + (1 - Math.abs(2 * u - 1)) ** 0.8, fill: "none" },
+    arch3: { kind: "opening", t0: 0.11, t1: 0.89, y0: 0.05, top: (u) => 1.71 + 0.35 * Math.min(1, Math.min(u, 1 - u) / 0.2), fill: "none" },
+  };
+  for (const k in OPEN) {
+    const o = OPEN[k];
+    if (o.top) o.y1 = o.top(0.5);
+    o.mean = o.top ? meanOf(o.top) : o.y1;
+  }
+  const polyArea = (pts) => {
+    let a = 0;
+    for (let n = 0; n < pts.length; n++) {
+      const p = pts[n],
+        q = pts[(n + 1) % pts.length];
+      a += p[0] * q[1] - q[0] * p[1];
+    }
+    return Math.abs(a) / 2;
+  };
+  const polyLen = (pts) => {
+    let a = 0;
+    for (let n = 0; n < pts.length; n++) {
+      const p = pts[n],
+        q = pts[(n + 1) % pts.length];
+      a += Math.hypot(q[0] - p[0], q[1] - p[1]);
+    }
+    return a;
+  };
+  const tri3 = (a, b, c) => {
+    const ux = b[0] - a[0],
+      uy = b[1] - a[1],
+      uz = b[2] - a[2],
+      vx = c[0] - a[0],
+      vy = c[1] - a[1],
+      vz = c[2] - a[2];
+    return Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) / 2;
+  };
+  // The outline of a set of floor tiles as loops of corners, the outer edge first, then any holes.
+  function outlineOf(cells) {
+    const set = new Set(cells),
+      next = new Map(),
+      add = (x0, z0, x1, z1) => {
+        const k = x0 + "," + z0;
+        let L = next.get(k);
+        if (!L) next.set(k, (L = []));
+        L.push([x1, z1]);
+      };
+    // walk each open edge with the floor on the right
+    for (const c of cells) {
+      const [i, j] = parse(c);
+      set.has(ck(i, j - 1)) || add(i, j, i + 1, j);
+      set.has(ck(i + 1, j)) || add(i + 1, j, i + 1, j + 1);
+      set.has(ck(i, j + 1)) || add(i + 1, j + 1, i, j + 1);
+      set.has(ck(i - 1, j)) || add(i, j + 1, i, j);
+    }
+    const loops = [];
+    for (const [k0, L0] of next)
+      while (L0.length) {
+        let [x, z] = parse(k0),
+          dx = 0,
+          dz = 0;
+        const pts = [];
+        for (let guard = 0; guard < 200000; guard++) {
+          const L = next.get(x + "," + z);
+          if (!L || !L.length) break;
+          // where tiles meet corner to corner, keep to the tile we are walking round
+          let pick = 0,
+            best = -9;
+          if (L.length > 1)
+            L.forEach((e, n) => {
+              const turn = dx * (e[1] - z) - dz * (e[0] - x);
+              if (turn > best) ((best = turn), (pick = n));
+            });
+          const e = L.splice(pick, 1)[0];
+          pts.push([x, z]);
+          dx = e[0] - x;
+          dz = e[1] - z;
+          x = e[0];
+          z = e[1];
+          if (x + "," + z === k0) break;
         }
-        return false;
+        // drop the points along straight edges
+        const out = [];
+        for (let n = 0; n < pts.length; n++) {
+          const a = pts[(n + pts.length - 1) % pts.length],
+            b = pts[n],
+            c = pts[(n + 1) % pts.length];
+          if ((b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]) !== 0) out.push(b);
+        }
+        out.length >= 4 && loops.push(out);
       }
-      if (e.code === "PageUp" || e.code === "BracketRight") return (setLevel(B.level + 1), e.preventDefault(), true);
-      if (e.code === "PageDown" || e.code === "BracketLeft") return (setLevel(B.level - 1), e.preventDefault(), true);
-      if (e.code === "KeyV" && !e.repeat) return (cycleHeight(), true);
-      if (e.code === "KeyL" && !e.repeat) return (setTool("path"), true);
-      if (e.code === "KeyF" && !e.repeat) return (setTool("decor"), true);
-      if ((e.code === "Comma" || e.code === "Period") && B.tool === "decor") return (pickDecor(cyc(DKEYS, B.dkind, e.code === "Comma")), true);
-      if (e.code === "KeyK" && !e.repeat) return (setTool("copy"), true);
-      if (e.code === "KeyM" && !e.repeat) return (cycleMat(), true);
-      if (e.code === "KeyP") return (paint(!e.repeat), true);
-      if (e.code === "KeyI" && !e.repeat) return (eyedrop(), true);
-      if (e.code === "Equal" || e.code === "Minus" || e.code === "NumpadAdd" || e.code === "NumpadSubtract") {
-        B.lift = clamp(B.lift + (e.code === "Equal" || e.code === "NumpadAdd" ? 0.5 : -0.5), -3, 6);
-        setLevel(B.level);
-        return true;
+    return loops.sort((p, q) => polyArea(q) - polyArea(p));
+  }
+  // The parts of a rectangular roof, in the structure's own metres, heights as in a normal storey: each sloping
+  // plane with its eave edge, the wall infill under gables and lean-tos, and the ridge beam. Follows roofPieces().
+  function roofParts(r) {
+    const x0 = r.i0,
+      x1 = r.i1 + 1,
+      z0 = r.j0,
+      z1 = r.j1 + 1,
+      ov = 0.45,
+      shape = r.shape || "gable",
+      out = [];
+    const plane = (pts, eaveY, ridgeY, run, facing) => out.push({ part: "plane", pts, eaveY, ridgeY, run, facing });
+    if (shape === "flat") {
+      plane([[x0 - 0.14, z0 - 0.14], [x1 + 0.14, z0 - 0.14], [x1 + 0.14, z1 + 0.14], [x0 - 0.14, z1 + 0.14]], EAVE + 0.1, EAVE + 0.1, 0, [0, 0]);
+    } else if (shape === "gable") {
+      const ax = r.axis === "x",
+        a0 = (ax ? r.i0 : r.j0) - ov,
+        a1 = (ax ? r.i1 : r.j1) + 1 + ov,
+        b0 = ax ? r.j0 : r.i0,
+        b1 = (ax ? r.j1 : r.i1) + 1,
+        half = (b1 - b0) / 2,
+        bc = (b0 + b1) / 2,
+        rise = clamp(half * 0.85, 0.7, 2.9) * (r.pitch || 1),
+        sl = rise / half,
+        run = half + ov,
+        P = (a, b) => (ax ? [a, b] : [b, a]);
+      for (const side of [-1, 1]) plane([P(a0, bc + side * run), P(a1, bc + side * run), P(a1, bc), P(a0, bc)], EAVE - sl * ov, EAVE + rise, run, P(0, side));
+      for (const a of [a0 + ov, a1 - ov]) out.push({ part: "infill", a: P(a, b0), b: P(a, b1), y0: EAVE - 0.02, y1: EAVE + rise, area: ((b1 - b0) * (rise + 0.02)) / 2, shape: "triangle" });
+      out.push({ part: "ridge", a: P(a0 - 0.06, bc), b: P(a1 + 0.06, bc), y0: EAVE + rise, y1: EAVE + rise + 0.2 });
+    } else if (shape === "hip") {
+      const w = x1 - x0,
+        l = z1 - z0,
+        half = Math.min(w, l) / 2,
+        rise = clamp(half * 0.85, 0.7, 2.9) * (r.pitch || 1),
+        ye = EAVE - (rise / half) * ov,
+        yt = EAVE + rise,
+        run = half + ov,
+        c00 = [x0 - ov, z0 - ov],
+        c10 = [x1 + ov, z0 - ov],
+        c11 = [x1 + ov, z1 + ov],
+        c01 = [x0 - ov, z1 + ov],
+        r0 = w >= l ? [x0 + half, (z0 + z1) / 2] : [(x0 + x1) / 2, z0 + half],
+        r1 = w >= l ? [x1 - half, (z0 + z1) / 2] : [(x0 + x1) / 2, z1 - half],
+        ridge = Math.hypot(r1[0] - r0[0], r1[1] - r0[1]);
+      // eave edge first; a square plan has no ridge, so the long faces are triangles too
+      const face = (e0, e1, p0, p1, facing) => plane(ridge > 1e-6 && p0 !== p1 ? [e0, e1, p1, p0] : [e0, e1, p0], ye, yt, run, facing);
+      if (w >= l) {
+        face(c00, c10, r0, r1, [0, -1]);
+        face(c11, c01, r1, r0, [0, 1]);
+        face(c10, c11, r1, r1, [1, 0]);
+        face(c01, c00, r0, r0, [-1, 0]);
+      } else {
+        face(c01, c00, r1, r0, [-1, 0]);
+        face(c10, c11, r0, r1, [1, 0]);
+        face(c00, c10, r0, r0, [0, -1]);
+        face(c11, c01, r1, r1, [0, 1]);
       }
-      const m = /^Digit([0-9])$/.exec(e.code);
-      if (m) {
-        setTool(TOOLS[m[1] === "0" ? 9 : +m[1] - 1].id);
-        return true;
+      if (ridge > 1e-6) out.push({ part: "ridge", a: r0, b: r1, y0: yt - 0.03, y1: yt + 0.15 });
+    } else {
+      // lean-to: one slope, running down in direction r.dir
+      const [dx, dz] = DIRS[r.dir || 0],
+        ax = dx !== 0,
+        sgn = dx + dz,
+        a0 = ax ? x0 : z0,
+        a1 = ax ? x1 : z1,
+        b0 = ax ? z0 : x0,
+        b1 = ax ? z1 : x1,
+        hi = sgn > 0 ? a0 : a1,
+        lo = sgn > 0 ? a1 : a0,
+        span = a1 - a0,
+        rise = clamp(span * 0.45, 0.6, 2.6),
+        sl = rise / span,
+        P = (a, b) => (ax ? [a, b] : [b, a]),
+        eA = lo + sgn * ov,
+        tA = hi - sgn * 0.25;
+      plane([P(eA, b0 - ov), P(eA, b1 + ov), P(tA, b1 + ov), P(tA, b0 - ov)], EAVE - sl * ov, EAVE + rise + sl * 0.25, span + ov + 0.25, P(sgn, 0));
+      for (const b of [b0, b1]) out.push({ part: "infill", a: P(a0, b), b: P(a1, b), y0: EAVE - 0.02, y1: EAVE + rise, area: (span * (rise + 0.02)) / 2, shape: "triangle" });
+      out.push({ part: "infill", a: P(hi, b0), b: P(hi, b1), y0: EAVE - 0.02, y1: EAVE + rise, area: (b1 - b0) * (rise + 0.02), shape: "rectangle" });
+    }
+    return out;
+  }
+  function decorBox(src) {
+    if (src.bb) return src.bb;
+    let x0 = 1e9,
+      x1 = -1e9,
+      y1 = 0,
+      z0 = 1e9,
+      z1 = -1e9;
+    for (const q of [src.m.p, src.gl.p])
+      for (let n = 0; n < q.length; n += 3) {
+        x0 = Math.min(x0, q[n]);
+        x1 = Math.max(x1, q[n]);
+        y1 = Math.max(y1, q[n + 1]);
+        z0 = Math.min(z0, q[n + 2]);
+        z1 = Math.max(z1, q[n + 2]);
       }
-      if (e.code === "KeyR" && !e.repeat) {
-        cycleStyle(e.shiftKey);
-      } else if (e.code === "Escape") {
-        if (B.tool === "copy" && B.clipb) ((B.clipb = null), hint());
-        else if (B.drag) {
-          B.drag = null;
-          B.key = "";
-        } else toggle();
-      } else if ((e.ctrlKey || e.metaKey) && e.code === "KeyZ") {
-        e.preventDefault();
-        e.shiftKey ? redo() : undo();
-      } else if ((e.ctrlKey || e.metaKey) && e.code === "KeyY") {
-        e.preventDefault();
-        redo();
-      } else if ((e.code === "Delete" || e.code === "Backspace" || e.code === "KeyX") && !e.repeat) setTool("erase");
-      return /^Digit/.test(e.code);
+    return (src.bb = { w: Math.max(0, x1 - x0), d: Math.max(0, z1 - z0), h: y1, r: Math.max(0.3, Math.hypot(x1 - x0, z1 - z0) / 2) });
+  }
+  function structPieces(S) {
+    const out = [],
+      pend = [],
+      H = EAVE * S.hs,
+      y0 = S.y0,
+      kS = (H - 0.3) / (EAVE - 0.3),
+      cy = Math.cos(S.yaw),
+      sy = Math.sin(S.yaw);
+    const W2 = (lx, lz) => {
+      const [x, z] = toWorld(S, lx, lz);
+      return { x, z };
+    };
+    const loop = (pts) => pts.map((q) => W2(q[0], q[1]));
+    const head = (id, kind, type, material) => ({ id, struct: S.id, storey: S.level, kind, type, material });
+    const lay = (id, def) => S.asm[id] || def;
+    // height above the structure's base of a point y up a wall module that starts lvl storeys up (low walls are not stretched)
+    const up = (y, lvl, fixed) => (fixed ? y : (lvl || 0) * H + (y <= 0.3 ? y : 0.3 + (y - 0.3) * kS));
+    // one opening: its module starts s0 metres along the wall from (ax, az) and is mlen long
+    const opening = (list, wallId, mat, ax, az, ux, uz, s0, mlen, type, id, lvl, fixed) => {
+      const sp = OPEN[type];
+      if (!sp) return;
+      const w = (sp.t1 - sp.t0) * mlen,
+        off = s0 + sp.t0 * mlen,
+        b0 = up(sp.y0, lvl, fixed),
+        b1 = up(sp.y1, lvl, fixed),
+        area = w * (up(sp.mean, lvl, fixed) - b0);
+      list.push({ id: sp.kind === "opening" ? null : id, kind: sp.kind, type, offset: off, width: w, sill: b0, height: b1 - b0, y0: y0 + b0, y1: y0 + b1, area, fill: sp.fill });
+      if (sp.kind === "opening") return;
+      const L = sp.fill === "leaf" ? ASSEMBLIES.leaf : sp.fill === "grille" ? ASSEMBLIES.grille : sp.fill === "none" ? [] : ASSEMBLIES.glazing;
+      pend.push({ ...head(id, sp.kind, type, mat), a: W2(ax + ux * off, az + uz * off), b: W2(ax + ux * (off + w), az + uz * (off + w)), y0: y0 + b0, y1: y0 + b1, length: w, height: b1 - b0, thickness: sumT(L), area, layers: L, fill: sp.fill, wall: wallId });
+    };
+    const wall = (id, cls, mat, ax, az, bx, bz, len, opens, storeys, extra) => {
+      const hgt = cls === "rail" ? 1.02 : cls === "parapet" ? 1.5 : H * (storeys || 1),
+        L = lay(id, wallLayers(cls, mat)),
+        gross = len * hgt;
+      let cut = 0;
+      for (const o of opens) cut += o.area;
+      out.push({ ...head(id, "wall", cls, mat), a: W2(ax, az), b: W2(bx, bz), y0: y0 + (extra && extra.base ? extra.base : 0), y1: y0 + (extra && extra.base ? extra.base : 0) + hgt, length: len, height: hgt, thickness: sumT(L), area: gross, netArea: gross - cut, layers: L, openings: opens, ...(extra && extra.more) });
+      for (const p of pend) out.push(p);
+      pend.length = 0;
+    };
+    const floorLay = (id, mat) => lay(id, ASSEMBLIES.floor[mat] || ASSEMBLIES.floor.planks);
+    // the ground floor stands on a stone plinth, or on posts where it is raised well clear of the ground
+    const footing = (id, a, b, area, outline, holes) => {
+      if (S.level !== 0 || S.po) return;
+      const posts = S.lift > 0 && S.depth > 1.6;
+      out.push({ ...head(id + ".fd", "foundation", posts ? "posts" : "plinth", posts ? "timber" : "stone"), a, b, y0: y0 - S.depth, y1: y0, height: S.depth, area, outline, holes, floor: id });
+    };
+
+    for (const g of S.runs) {
+      const opens = [],
+        x = g.d === 0,
+        ax = x ? g.t0 : g.line,
+        az = x ? g.line : g.t0,
+        len = g.t1 - g.t0;
+      for (const e of g.m) OPEN[e.type] && opening(opens, g.id, g.mat, ax, az, x ? 1 : 0, x ? 0 : 1, e.t - g.t0, 1, e.type, S.oid.get(e.k), 0, g.cls === "rail");
+      wall(g.id, g.cls, g.mat, ax, az, x ? g.t1 : g.line, x ? g.line : g.t1, len, opens, 1);
+    }
+    for (const g of S.fruns) {
+      const opens = [];
+      for (const q of g.mods) OPEN[q.type] && opening(opens, g.id, g.mat, g.x0, g.z0, g.ux, g.uz, q.s, q.len, q.type, S.segs[q.idx][7], 0, g.cls === "rail");
+      wall(g.id, g.cls, g.mat, g.x0, g.z0, g.x1, g.z1, g.len, opens, 1, { more: { free: true } });
+    }
+    for (const g of S.regs) {
+      const loops = outlineOf(g.m),
+        L = floorLay(g.id, g.mat),
+        a = W2(g.i0, g.j0),
+        b = W2(g.i1 + 1, g.j1 + 1),
+        outline = loop(loops[0] || []),
+        holes = loops.slice(1).map(loop);
+      out.push({ ...head(g.id, "floor", "floor", g.mat), a, b, y0, y1: y0 + FLOOR_T, thickness: sumT(L), area: g.m.length, perimeter: loops.reduce((s, q) => s + polyLen(q), 0), outline, holes, layers: L });
+      footing(g.id, a, b, g.m.length, outline, holes);
+    }
+    for (const p of S.polys) {
+      let ax = 1e9,
+        az = 1e9,
+        bx = -1e9,
+        bz = -1e9;
+      for (const q of p.pts) ((ax = Math.min(ax, q[0])), (az = Math.min(az, q[1])), (bx = Math.max(bx, q[0])), (bz = Math.max(bz, q[1])));
+      const L = floorLay(p.id, p.fmat),
+        a = W2(ax, az),
+        b = W2(bx, bz),
+        outline = loop(p.pts);
+      out.push({ ...head(p.id, "floor", "floor", p.fmat || "planks"), a, b, y0, y1: y0 + FLOOR_T, thickness: sumT(L), area: p.area, perimeter: polyLen(p.pts), outline, holes: [], layers: L });
+      footing(p.id, a, b, p.area, outline, []);
+      if (!p.roofed || !p.roofId) continue;
+      // a pointed roof over the shape, its eave pushed out a little
+      const rise = clamp(p.inr * 1.2, 1.2, 5),
+        k = 1 + 0.55 / Math.max(p.rad, 1),
+        eave = p.pts.map((q) => [p.cx + (q[0] - p.cx) * k, p.cz + (q[1] - p.cz) * k]),
+        base = H - 0.12,
+        RL = lay(p.roofId, ASSEMBLIES.roof[p.rmat] || ASSEMBLIES.roof.thatch),
+        plan = polyArea(eave);
+      let area = 0;
+      for (let n = 0; n < eave.length; n++) {
+        const e0 = eave[n],
+          e1 = eave[(n + 1) % eave.length];
+        area += tri3([e0[0], 0, e0[1]], [e1[0], 0, e1[1]], [p.cx, rise, p.cz]);
+      }
+      out.push({ ...head(p.roofId, "roof", "pyramid", p.rmat || "thatch"), a: W2(p.cx, p.cz), b: W2(p.cx, p.cz), y0: y0 + base, y1: y0 + base + rise, eaveY: y0 + base, ridgeY: y0 + base + rise, pitchDeg: (Math.acos(clamp(plan / area, 0, 1)) * 180) / Math.PI, area, planArea: plan, thickness: sumT(RL), footprint: loop(eave), facets: eave.length, layers: RL, over: p.id });
+    }
+    for (const r of S.roofs) {
+      const mat = r.mat || "thatch",
+        L = lay(r.id, ASSEMBLIES.roof[mat] || ASSEMBLIES.roof.thatch),
+        base = y0 + H - EAVE;
+      let n = 0,
+        gi = 0;
+      for (const q of roofParts(r)) {
+        if (q.part === "plane") {
+          const plan = polyArea(q.pts),
+            pitch = q.run ? Math.atan2(q.ridgeY - q.eaveY, q.run) : 0,
+            e0 = q.pts[0],
+            e1 = q.pts[1];
+          const pid = r.id + "." + n++;
+          out.push({ ...head(pid, "roof", r.shape || "gable", mat), roof: r.id, a: W2(e0[0], e0[1]), b: W2(e1[0], e1[1]), y0: base + q.eaveY, y1: base + q.ridgeY, eaveY: base + q.eaveY, ridgeY: base + q.ridgeY, pitchDeg: (pitch * 180) / Math.PI, length: Math.hypot(e1[0] - e0[0], e1[1] - e0[1]), area: plan / Math.cos(pitch), planArea: plan, thickness: sumT(L), footprint: loop(q.pts), facing: { x: q.facing[0] * cy + q.facing[1] * sy, z: -q.facing[0] * sy + q.facing[1] * cy }, layers: S.asm[pid] || L });
+        } else if (q.part === "infill") {
+          out.push({ ...head(r.id + ".g" + gi++, "wall", "gable", "timber"), roof: r.id, a: W2(q.a[0], q.a[1]), b: W2(q.b[0], q.b[1]), y0: base + q.y0, y1: base + q.y1, length: Math.hypot(q.b[0] - q.a[0], q.b[1] - q.a[1]), height: q.y1 - q.y0, thickness: sumT(FRAME_WALL), area: q.area, netArea: q.area, shape: q.shape, layers: FRAME_WALL, openings: [] });
+        } else out.push({ ...head(r.id + ".rb", "beam", "ridge", "timber"), roof: r.id, a: W2(q.a[0], q.a[1]), b: W2(q.b[0], q.b[1]), y0: base + q.y0, y1: base + q.y1, length: Math.hypot(q.b[0] - q.a[0], q.b[1] - q.a[1]), height: q.y1 - q.y0, thickness: 0.2 });
+      }
+    }
+    S.rings.forEach((r, ni) => {
+      const portals = S.portals[ni],
+        ri = ringInner(r),
+        climb = r.floor !== false ? climbLevels(r) : 0,
+        side = 2 * r.r * Math.sin(Math.PI / r.n),
+        top = r.h * H,
+        mat = r.mat || "timber",
+        fm = r.fmat || "planks",
+        courses = !!(WALLS[mat] || WALLS.timber).courses,
+        c = W2(r.cx, r.cz),
+        ngon = (rad) => 0.5 * r.n * rad * rad * Math.sin((2 * Math.PI) / r.n),
+        ringLoop = (rad) => loop(Array.from({ length: r.n }, (_, k) => ringVert({ ...r, r: rad }, k))),
+        parts = [],
+        ph = ringPhase(r, portals);
+      out.push({ ...head(r.id, "tower", "round", mat), a: c, b: c, radius: r.r, sides: r.n, storeys: r.h, y0, y1: y0 + top, height: top, area: ngon(r.r), parts });
+      for (let k = 0; k < r.n; k++) {
+        const ty = r.sides[k];
+        if (!ty) continue;
+        const a = ringVert(r, k),
+          b = ringVert(r, k + 1),
+          ux = (b[0] - a[0]) / side,
+          uz = (b[1] - a[1]) / side,
+          id = r.id + ".s" + k,
+          opens = [];
+        for (let l = 0; l < r.h; l++) {
+          const t = l === 0 ? ty : l === 1 && portals && portals.has(k) ? "arch" : k % 3 === 1 ? (courses ? "window3" : "window") : "wall";
+          opening(opens, id, mat, a[0], a[1], ux, uz, 0, side, t, id + ".o" + l, l, false);
+        }
+        wall(id, "wall", mat, a[0], a[1], b[0], b[1], side, opens, r.h, { more: { tower: r.id } });
+        parts.push(id);
+      }
+      // floors: the ground floor, and in a tower you can climb a landing on each storey round the stair
+      const landing = (band) => {
+        let nb = 0;
+        for (let k = 0; k < r.n; k++) {
+          const tk = (k + 0.5) / r.n - ph,
+            tf = tk - Math.floor(tk);
+          if (band === true ? tf < 0.4 : band === "gallery" && tf >= 0.2 && tf < 0.75) nb++;
+        }
+        return (nb * (ngon(r.r) - ngon(ri - 1.05))) / r.n;
+      };
+      const deck = (id, lvl, rad, extra, m) => {
+        const L = floorLay(id, m);
+        out.push({ ...head(id, "floor", "floor", m), tower: r.id, a: c, b: c, radius: rad, y0: y0 + lvl * H, y1: y0 + lvl * H + FLOOR_T, thickness: sumT(L), area: ngon(rad) + extra, landingArea: extra, perimeter: 2 * r.n * rad * Math.sin(Math.PI / r.n), outline: ringLoop(rad), holes: [], layers: L });
+        parts.push(id);
+      };
+      if (r.floor !== false) {
+        deck(r.id + ".f0", 0, r.r, 0, fm);
+        footing(r.id + ".f0", c, c, ngon(r.r), ringLoop(r.r), []);
+      }
+      if (climb) {
+        for (let l = 1; l < r.h; l++) deck(r.id + ".f" + l, l, ri - 1.05, landing(l === climb ? true : l === 1 && portals && portals.size ? "gallery" : null), fm);
+        const rm = ri - 0.55;
+        out.push({ ...head(r.id + ".st", "stair", "spiral", fm), tower: r.id, a: c, b: c, radius: rm, width: 0.92, turns: climb, steps: climb * 16, y0: y0 + FLOOR_T, y1: y0 + climb * H + FLOOR_T, height: climb * H, length: climb * 2 * Math.PI * rm });
+        parts.push(r.id + ".st");
+      }
+      const shape = r.roof === true ? "cone" : r.roof;
+      if (!shape) return;
+      if (shape === "crenel") {
+        // battlements: a deck you can stand on where the tower can be climbed, and a parapet on every side
+        const id = r.id + ".r",
+          stone = MASONRY[mat] ? mat : "stone",
+          rad = climb ? ri - 1.05 : r.r,
+          extra = climb ? landing(true) : 0,
+          L = lay(id, solid(MASONRY[mat] || "fieldstone", FLOOR_T));
+        out.push({ ...head(id, "roof", "flat", stone), tower: r.id, a: c, b: c, radius: rad, y0: y0 + top, y1: y0 + top + FLOOR_T, eaveY: y0 + top + FLOOR_T, ridgeY: y0 + top + FLOOR_T, pitchDeg: 0, area: ngon(rad) + extra, planArea: ngon(rad) + extra, thickness: sumT(L), footprint: ringLoop(rad), layers: L });
+        parts.push(id);
+        for (let k = 0; k < r.n; k++) {
+          const a = ringVert(r, k),
+            b = ringVert(r, k + 1);
+          wall(r.id + ".p" + k, "parapet", mat, a[0], a[1], b[0], b[1], side, [], 1, { base: top, more: { tower: r.id } });
+          parts.push(r.id + ".p" + k);
+        }
+        return;
+      }
+      const dome = shape === "dome",
+        re = r.r + (dome ? 0.3 : 0.55),
+        rise = dome ? r.r * 0.95 : clamp(r.r * 1.35, 1.6, 6),
+        base = top - (dome ? 0.1 : 0.12),
+        rm = r.rmat || "thatch",
+        id = r.id + ".r",
+        L = lay(id, ASSEMBLIES.roof[rm] || ASSEMBLIES.roof.thatch),
+        plan = ngon(re);
+      let area = 0;
+      if (dome) {
+        const a1 = (2 * Math.PI) / r.n,
+          P = (ang, f) => [Math.cos(ang) * re * Math.cos(f), rise * Math.sin(f), Math.sin(ang) * re * Math.cos(f)];
+        for (let b = 0; b < 5; b++) {
+          const f0 = ((b / 5) * Math.PI) / 2,
+            f1 = (((b + 1) / 5) * Math.PI) / 2;
+          area += tri3(P(0, f0), P(a1, f0), P(a1, f1)) + (b < 4 ? tri3(P(0, f0), P(a1, f1), P(0, f1)) : 0);
+        }
+        area *= r.n;
+      } else area = (r.n * 2 * re * Math.sin(Math.PI / r.n) * Math.hypot(rise, re * Math.cos(Math.PI / r.n))) / 2;
+      out.push({ ...head(id, "roof", shape, rm), tower: r.id, a: c, b: c, radius: re, y0: y0 + base, y1: y0 + base + rise, eaveY: y0 + base, ridgeY: y0 + base + rise, pitchDeg: (Math.acos(clamp(plan / area, 0, 1)) * 180) / Math.PI, area, planArea: plan, thickness: sumT(L), footprint: ringLoop(re), facets: r.n, layers: L });
+      parts.push(id);
+    });
+    const sn = stairLen(S.hs);
+    for (const st of S.stairs) {
+      const [dx, dz] = DIRS[st.dir],
+        sx = st.i + 0.5 - dx * 0.5,
+        sz = st.j + 0.5 - dz * 0.5;
+      out.push({ ...head(st.id, "stair", "straight", "timber"), a: W2(sx, sz), b: W2(sx + dx * sn, sz + dz * sn), y0: y0 + FLOOR_T, y1: y0 + FLOOR_T + H, length: sn, height: H, width: 0.92, steps: sn * 4 });
+    }
+    const pil = S.pillars;
+    for (const p of pil) {
+      const ch = p[3] === "chimney",
+        topY = ch ? stretchY(5.78, S.hs) : H,
+        c = W2(p[0], p[1]);
+      out.push({ ...head(p[4], "post", ch ? "chimney" : "pillar", p[2] || "timber"), a: c, b: c, y0: y0 - (S.level ? 0 : S.depth), y1: y0 + topY, height: topY + (S.level ? 0 : S.depth), thickness: ch ? 0.64 : 0.34 });
+    }
+    // a beam joins any two pillars that stand within 4 m of each other
+    for (let n = 0; n < pil.length; n++) {
+      if (pil[n][3] === "chimney") continue;
+      for (let m = n + 1; m < pil.length; m++) {
+        const len = Math.hypot(pil[m][0] - pil[n][0], pil[m][1] - pil[n][1]);
+        if (len > 4.01 || len < 0.4 || pil[m][3] === "chimney") continue;
+        const lo = pidNum(pil[n][4]) < pidNum(pil[m][4]) ? pil[n] : pil[m],
+          hi = lo === pil[n] ? pil[m] : pil[n];
+        out.push({ ...head(lo[4] + "+" + hi[4], "beam", "beam", pil[n][2] || "timber"), a: W2(lo[0], lo[1]), b: W2(hi[0], hi[1]), y0: y0 + up(WALL_H + 0.02), y1: y0 + up(EAVE - 0.01), length: len, height: up(EAVE - 0.01) - up(WALL_H + 0.02), thickness: 0.2, posts: [lo[4], hi[4]] });
+      }
+    }
+    for (const p of S.paths) {
+      const len = Math.hypot(p[2] - p[0], p[3] - p[1]),
+        a = W2(p[0], p[1]),
+        b = W2(p[2], p[3]),
+        h0 = G.heightAt(a.x, a.z),
+        h1 = G.heightAt(b.x, b.z);
+      out.push({ ...head(p[6], "path", "path", p[5] || "cobble"), a, b, y0: Math.min(h0, h1), y1: Math.max(h0, h1) + 0.05, length: len, width: p[4], thickness: 0.05, area: (len + 0.7 * p[4]) * p[4] });
+    }
+    for (const it of S.decor) {
+      const def = DECOR[it[2]],
+        y = decorY(S, it),
+        bb = decorBox(decorGeo(it[2], it[4] || 0, H - y)),
+        c = W2(it[0], it[1]);
+      out.push({ ...head(it[5], "fixture", it[2], "mixed"), name: def.name, a: c, b: c, y0: y0 + y, y1: y0 + y + bb.h, height: bb.h, width: bb.w, depth: bb.d, rotationRad: S.yaw + ((it[3] || 0) * Math.PI) / 4, colour: DYES[it[4] || 0][0], light: !!def.light, cosy: def.cosy || 0 });
+    }
+    return out;
+  }
+  const PC = { v: -1, list: [], byId: null };
+  // The list is kept until something changes. Treat it as read only: copy what you want to keep or alter.
+  function listPieces() {
+    if (PC.v === B.version) return PC.list;
+    const out = [];
+    for (const S of B.structs) {
+      if (!S.pc) S.pc = structPieces(S);
+      for (const p of S.pc) out.push(p);
+    }
+    PC.v = B.version;
+    PC.list = out;
+    PC.byId = null;
+    return out;
+  }
+  function pieceById(id) {
+    listPieces();
+    if (!PC.byId) {
+      PC.byId = new Map();
+      for (const p of PC.list) PC.byId.set(p.id, p);
+    }
+    return PC.byId.get(id) || null;
+  }
+  // Totals for a set of pieces (all of them if none is given): the start of a bill of materials.
+  function quantities(list) {
+    const q = { pieces: 0, wallLength: 0, wallArea: 0, floorArea: 0, roofArea: 0, roofPlanArea: 0, doors: 0, windows: 0, posts: 0, beams: 0, stairs: 0, fixtures: 0, pathLength: 0 };
+    for (const p of list || listPieces()) {
+      q.pieces++;
+      if (p.kind === "wall" && p.type !== "gable") ((q.wallLength += p.length), (q.wallArea += p.netArea));
+      else if (p.kind === "floor") q.floorArea += p.area;
+      else if (p.kind === "roof") ((q.roofArea += p.area), (q.roofPlanArea += p.planArea));
+      else if (p.kind === "door") q.doors++;
+      else if (p.kind === "window") q.windows++;
+      else if (p.kind === "post") q.posts++;
+      else if (p.kind === "beam") q.beams++;
+      else if (p.kind === "stair") q.stairs++;
+      else if (p.kind === "fixture") q.fixtures++;
+      else if (p.kind === "path") q.pathLength += p.length;
+    }
+    return q;
+  }
+  // A later iteration lets the player choose what a wall, floor or roof is built up of. The choice is kept with
+  // the piece; null goes back to what its appearance implies.
+  function setLayers(id, layers) {
+    const key = String(id),
+      rootId = key.split(".")[0];
+    for (const S of B.structs) {
+      if (!S.pc) S.pc = structPieces(S);
+      if (!S.pc.some((p) => p.id === key || p.id === rootId || p.roof === key)) continue;
+      if (layers) S.asm[key] = Object.freeze(layers.map((l) => Object.freeze({ ...l })));
+      else delete S.asm[key];
+      S.ver++;
+      S.pc = null;
+      B.version++;
+      return true;
+    }
+    return false;
+  }
+  const changeFns = [];
+  let changeV = 0;
+  window.__build = {
+    // the piece interface (ARCHITECTURE.md)
+    pieces: listPieces,
+    piece: pieceById,
+    quantities,
+    get version() { return B.version; },
+    // fn(version) is called when any piece has changed, at most once a frame; returns a function that stops it
+    onChange(fn) {
+      changeFns.push(fn);
+      return () => {
+        const n = changeFns.indexOf(fn);
+        n >= 0 && changeFns.splice(n, 1);
+      };
     },
+    serialize,
+    restore: restoreAll,
+    setLayers,
+    ASSEMBLIES,
+    get LAYER_MATERIALS() {
+      const names = new Set();
+      const walk = (v) => (Array.isArray(v) ? v.forEach((l) => names.add(l.material)) : Object.values(v).forEach(walk));
+      walk(ASSEMBLIES);
+      for (const m of Object.values(MASONRY)) names.add(m);
+      return [...names].sort();
+    },
+    _t: { copyPick: () => copyPick(), stamp: () => stamp(), topWalk, rebuild, pickAt: () => pickAt(ANY_PIECE), refOf, stretchOp, snapPoint },
+    key: onKey,
+    // for the interface (src/buildui.js) and the touch controls
+    view,
+    choose,
+    typed: typedSet,
+    typedCommit: () => B.drag && commit(),
+    typedClear,
+    setType(fn) {
+      B.typeHook = fn;
+    },
+    measClear,
+    selection: () => B.sel.slice(),
+    select: selSet,
+    TOOL_LETTER,
     collide(e, r, isPlayer) {
       let near = null;
       for (const S of B.structs) {
@@ -4434,6 +7193,16 @@
     },
     update(dt) {
       flushCover(dt);
+      if (changeV !== B.version) {
+        changeV = B.version;
+        for (const fn of changeFns.slice()) {
+          try {
+            fn(changeV);
+          } catch (err) {
+            console.error(err);
+          }
+        }
+      }
       const on = P.tool === "build" && !(P.dead > 0);
       if (on !== B.on) on ? enter() : exit();
       {
@@ -4526,7 +7295,7 @@
         const inRing = ri >= 0 && Math.abs(P.y - S.y0) < headroom;
         const underAny = under || inPoly || (inRing && S.rings[ri].roof) || inTower || (sameHome && homeUnder);
         if (inRing && S.rings[ri].roof && S.rings[ri].sides.every((t) => t) && Math.abs(P.y - (S.y0 + FLOOR_T)) < 0.5) ((sheltered = true), (cosy = Math.max(cosy, S.ringCosy[ri] || 0)));
-        const target = B.on ? (B.tool === "roof" || B.tool === "erase" ? 1 : 0) : underAny ? 0 : 1;
+        const target = B.on ? (roofsShown() ? 1 : 0) : underAny ? 0 : 1;
         if (S.roofOp !== target) {
           S.roofOp = clamp(S.roofOp + Math.sign(target - S.roofOp) * dt * 4, 0, 1);
           S.roofMat.opacity = S.roofOp;
@@ -4593,8 +7362,19 @@
       }
       const turn = (G.keys.KeyQ ? 1 : 0) - (G.keys.KeyE ? 1 : 0);
       if (turn) G.cam.yaw += turn * 1.9 * dt;
-      updateHover();
-      updatePreview();
+      // the hover is worked out again only when the pointer, the view or something built has moved
+      const m = G.camera.matrixWorld.elements,
+        sig = B.ptr.x * 7 + B.ptr.y * 13 + m[12] * 3 + m[13] * 5 + m[14] * 11 + m[0] * 17 + m[5] * 19 + m[10] * 23 + (B.ptr.inside ? 1 : 0) + B.version * 0.37 + B.selV * 0.11;
+      if (sig !== B.sig || B.key === "" || B.move) {
+        B.sig = sig;
+        updateHover();
+        updatePreview();
+      }
+      selDraw();
+      settleTick(dt);
+      if (ghostAdd.material.userData.hatch.value) ghostAdd.material.opacity = 0.5 + 0.12 * Math.sin(performance.now() * 0.008);
+      else if (ghostAdd.material.opacity !== 0.5) ghostAdd.material.opacity = 0.5;
+      B.frameHook && B.frameHook(dt);
     },
     reset() {
       for (const S of [...B.structs]) disposeStruct(S);
@@ -4603,7 +7383,11 @@
       B.drag = null;
       B.key = "";
       B.version++;
-      $("bundo") && syncButtons();
+      B.sel = [];
+      B.selV++;
+      B.meas.length = 0;
+      B.measA = null;
+      touchUi();
     },
     state: B,
     Geo,
@@ -4614,11 +7398,8 @@
     save: saveBuilds,
     // for on-screen buttons
     cancel() {
-      if (B.tool === "copy" && B.clipb) ((B.clipb = null), hint());
-      B.drag = null;
+      putDown(false);
       B.aim = false;
-      B.tapMode = "";
-      B.key = "";
     },
     applyOp,
     computeOp,
