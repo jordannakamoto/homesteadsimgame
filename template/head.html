@@ -285,6 +285,44 @@ body.touch #tools button .name { font-size: 14px; }
   #help { display: none; }
   #tools button { min-width: 58px; }
 }
+/* chickens panel (iteration 13) */
+#ckbar { top: 150px; left: 16px; padding: 5px 6px; }
+#ckbar button { padding: 3px 10px; font-family: var(--font-display); font-size: 15px; white-space: nowrap; }
+#ckbar .key { font-family: var(--font-body); font-size: 11px; color: var(--ink-dim); margin-left: 2px; }
+#ck { top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(760px, calc(100vw - 24px)); height: min(660px, calc(100vh - 24px)); display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 14px; z-index: 30; background: rgba(22, 28, 30, 0.94); font-size: 16px; }
+#ck[hidden] { display: none; }
+#ck .ckhead { display: flex; align-items: center; gap: 12px; }
+#ck .ckhead h2 { font-family: var(--font-display); font-weight: 400; font-size: 24px; margin: 0; color: var(--accent); }
+#ck #ckmoney { margin-left: auto; font-family: var(--font-display); font-size: 22px; color: var(--accent); }
+#ck .cknote { min-height: 20px; font-size: 15px; color: var(--ink-dim); }
+#ck .cknote.good { color: #b8e08a; } #ck .cknote.bad { color: var(--danger); }
+#ck .ckbody { overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; }
+#ck .ckstats { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--ink-dim); font-size: 15px; }
+#ck .ckstats b { color: var(--ink); font-variant-numeric: tabular-nums; }
+#ck .ckchores, #ck .ckrow { display: flex; flex-wrap: wrap; gap: 8px; }
+#ck .ckchores button, #ck .ckrow button { font-family: var(--font-display); font-size: 18px; padding: 9px 14px; line-height: 1.1; }
+#ck button small { display: block; font-family: var(--font-body); font-size: 12px; color: var(--ink-dim); }
+#ck button.hot { border-color: var(--accent); background: rgba(226, 182, 90, 0.2); }
+#ck button:disabled { opacity: 0.45; }
+#ck h3 { font-family: var(--font-display); font-weight: 400; font-size: 19px; margin: 6px 0 0; color: var(--accent); }
+#ck .ckissue { padding: 6px 10px; border-radius: 6px; background: rgba(255, 255, 255, 0.05); border-left: 3px solid var(--panel-edge); font-size: 15px; }
+#ck .ckissue.warn { border-left-color: var(--accent); } #ck .ckissue.bad { border-left-color: var(--danger); }
+#ck .ckissue small { color: var(--ink-dim); font-size: 13px; }
+#ck .ckissues { display: flex; flex-direction: column; gap: 4px; }
+#ck .ckbird { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 6px; background: rgba(255, 255, 255, 0.05); }
+#ck .ckbird .dot { width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.3); }
+#ck .ckbird .name { flex: 1; min-width: 0; font-size: 17px; }
+#ck .ckbird small { display: block; color: var(--ink-dim); font-size: 13px; }
+#ck .ckbird .st { display: block; font-size: 14px; margin-top: 2px; }
+#ck .mood { font-size: 12px; padding: 2px 8px; border-radius: 9px; border: 1px solid var(--panel-edge); white-space: nowrap; }
+#ck .mood.happy, #ck .mood.proud { color: #b8e08a; border-color: #7fa860; }
+#ck .mood.hungry, #ck .mood.thirsty, #ck .mood.miserable, #ck .mood.unwell { color: var(--danger); border-color: var(--danger); }
+#ck .ckbuy { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+#ck .ckbuy select { font: inherit; font-size: 15px; color: var(--ink); background: rgba(0, 0, 0, 0.35); border: 1px solid var(--panel-edge); border-radius: 6px; padding: 6px; }
+#ck .ckbuy .n { min-width: 22px; text-align: center; font-weight: 700; }
+#ck .ckbuy .go { font-family: var(--font-display); font-size: 17px; border-color: var(--accent); background: rgba(226, 182, 90, 0.2); }
+#ck .ckblurb { color: var(--ink-dim); font-size: 14px; }
+@media (max-width: 700px) { #ckbar { top: 112px; left: 6px; } #ckbar .key { display: none; } }
 </style>
 </head>
 <body>
@@ -314,6 +352,13 @@ body.touch #tools button .name { font-size: 14px; }
   </div>
   <div class="svnote" id="svnote" aria-live="polite"></div>
   <div class="svbody" id="svbody"></div>
+</div>
+
+<div id="ckbar" class="panel" role="group" aria-label="Chickens"><button type="button" id="ckb" title="Your hens, the coop and the morning chores (K)">Chickens <span class="key">K</span></button></div>
+<div id="ck" class="panel" role="dialog" aria-label="Chickens" hidden>
+  <div class="ckhead"><h2>Chickens</h2><span id="ckmoney"></span><button type="button" id="ckclose" title="Close (Esc)">Close</button></div>
+  <div class="cknote" id="cknote" aria-live="polite"></div>
+  <div class="ckbody" id="ckbody"></div>
 </div>
 
 <div id="vitals" class="panel">

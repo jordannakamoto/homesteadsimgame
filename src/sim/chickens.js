@@ -447,7 +447,7 @@ function step(c) {
   const rngLay = c.rng('lay');
   for (const k in homeLoad) delete homeLoad[k];
   for (const id in s.birds) { const h = s.birds[id].home; if (h) homeLoad[h] = (homeLoad[h] || 0) + 1; }
-  let feedTotal = 0, waterTotal = 0, laying = 0, count = 0;
+  let laying = 0, count = 0;
   for (const id in s.birds) {
     const b = s.birds[id];
     count++;
@@ -456,19 +456,33 @@ function step(c) {
     stepBird(c, s, b, home, ld, idx, hour, T, W, dt, dtD, t, today, rngLay, coverage);
     if (b.eggs.nextT !== null) laying++;
   }
-  for (const e of idx.feeders) feedTotal += s.fx[e.id].feedKg;
-  for (const e of idx.waterers) waterTotal += s.fx[e.id].waterL;
-  s.flock.feedKg = round4(feedTotal); s.flock.waterL = round4(waterTotal);
-  s.flock.count = count; s.flock.laying = laying; s.flock.eggsWaiting = s.eggs.length;
-  for (const e of idx.feeders) { const f = s.fx[e.id]; if (f.feedKg <= 1e-6) { s.totals.feederWastedKg += f.feedKg; f.feedKg = 0; if (f.emptySinceT === null) f.emptySinceT = t; } else f.emptySinceT = null; }
-  for (const e of idx.waterers) { const f = s.fx[e.id]; if (f.waterL - f.iceL <= 1e-6) { if (f.dryT === null) f.dryT = t; } else f.dryT = null; }
+  s.flock.count = count; s.flock.laying = laying;
+  tidy(s, idx, t);
   // the words (issues and each bird's status) are refreshed every half hour, and at once after any command
-  if (s.wordsDirty || (c.tick / EVERY) % 3 === 0) {
-    s.issues = computeIssues(s, idx, t, W, days, wild);
-    for (const id in s.birds) s.birds[id].status = statusLine(s, s.birds[id], idx, t, days, wild);
-    s.wordsDirty = false;
-  }
+  if (s.wordsDirty || (c.tick / EVERY) % 3 === 0) words(s, idx, t, W, days, wild);
   s.lastStepT = t;
+}
+
+// flock totals and empty-since marks
+function tidy(s, idx, t) {
+  let feedTotal = 0, waterTotal = 0;
+  for (const e of idx.feeders) { const f = s.fx[e.id]; if (f.feedKg <= 1e-6) { s.totals.feederWastedKg += f.feedKg; f.feedKg = 0; if (f.emptySinceT === null) f.emptySinceT = t; } else f.emptySinceT = null; feedTotal += f.feedKg; }
+  for (const e of idx.waterers) { const f = s.fx[e.id]; if (f.waterL - f.iceL <= 1e-6) { if (f.dryT === null) f.dryT = t; } else f.dryT = null; waterTotal += f.waterL; }
+  s.flock.feedKg = round4(feedTotal); s.flock.waterL = round4(waterTotal); s.flock.eggsWaiting = s.eggs.length;
+}
+function words(s, idx, t, W, days, wild) {
+  s.issues = computeIssues(s, idx, t, W, days, wild);
+  for (const id in s.birds) s.birds[id].status = statusLine(s, s.birds[id], idx, t, days, wild);
+  s.wordsDirty = false;
+}
+// after a command the panel should read true at once, even while time is paused
+function refreshNow(c) {
+  const s = c.s, W = c.get('weather');
+  if (!s || !W) return;
+  const idx = fixtureIndex(c), sun = sunTimes(c.t, W.site || { latitudeDeg: 45 }), days = {};
+  for (const co of idx.coops) days[co.id] = lightDay(sun, s.fx[co.id].light, !!(s.fx[co.id].light && s.fx[co.id].light.on));
+  tidy(s, idx, c.t);
+  words(s, idx, c.t, W, days, lightDay(sun, null, false));
 }
 
 const homeLoad = {};                    // scratch: birds per shelter in the current step (derived, not state)
@@ -1142,7 +1156,7 @@ export function overlayData(state) {
   };
 }
 
-for (const k of Object.keys(commands)) { const fn = commands[k]; commands[k] = (c, p) => { const r = fn(c, p); if (c.s) c.s.wordsDirty = true; return r; }; }
+for (const k of Object.keys(commands)) { const fn = commands[k]; commands[k] = (c, p) => { const r = fn(c, p); if (c.s && r && r.ok) refreshNow(c); return r; }; }
 
 export const chickensSystem = () => ({
   name: 'chickens',
