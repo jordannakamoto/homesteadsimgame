@@ -183,6 +183,8 @@ Build: The game can begin with the player arriving on bare land with a tent and 
 A build journal that records every project automatically: dated snapshots from fixed viewpoints, materials used, money spent and simulated hours worked. It feeds the before-and-after views and the timelapse replay later.
 Playtest: Arrive in autumn, camp, and get a small cabin closed in before the snow. Open the journal and see the build recorded.
 
+Iterations 8, 9 and 10 are now designed together in `docs/FARMING.md` ("Harvest Moon, if it were real") and built as one farming pillar, starting early, at the owner's request.
+
 ### 8. Soil moisture and irrigation — `mid`
 Needs: 1, 7.
 Build: Per-plot soil water balance (rain, evaporation, plant uptake, drainage) by soil type. Drip and sprinkler irrigation drawing from the water network. A soil overlay.

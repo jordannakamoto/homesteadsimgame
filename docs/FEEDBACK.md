@@ -11,5 +11,9 @@ Write anything here, as roughly as you like. It is read before each wave starts.
 
 ## Answered
 
+- **15 Nov, owner.** Farming is a big system to playtest: "Harvest Moon if it were realistic". Done: `docs/FARMING.md` written; farming promoted to run alongside construction.
+- **15 Nov, owner.** Make mechanisms such as vehicles game-agnostic so the engine can be reused. Done: rule and table in `ARCHITECTURE.md`.
+- **14 Nov, owner.** Digging and laying pipes for sewage, water and power; renting excavators and similar machines. Done: designed in `docs/CONSTRUCTION.md`; iterations 7a and 7b added.
+
 - **14 Nov, owner, after wave B.** Build mode feels like a design mode; wants it to feel like building with lumber, with realistic foundations and walls, deliveries dropped near the player, and assembly by hand. The supplier is overwhelming; wants something like an in-game hardware store that teaches what to buy, with unlocks. Weather needs to be readable visually.
   Done: recorded as a direction change in `docs/V1_PLAN.md` with three new iterations (2c construction, 2d store and plan book, 1a weather you can see). The build mode agent in wave C was redirected to produce real framing, foundations, build stages and the materials list that construction needs. These three iterations lead wave D.
