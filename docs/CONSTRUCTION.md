@@ -125,6 +125,31 @@ Water and power can share a trench. Sewage gets its own.
 
 **Kept simple on purpose.** No pipe fittings, glue or individual joints; no vent stacks; no percolation test beyond a soil class. A run is one piece with a length, a diameter and a depth.
 
+## Renting machines
+
+Requested by the owner: the machines people commonly rent when building a house. Renting is how real owner-builders do the heavy jobs, and it gives the game a pleasant kind of planning: you have the machine for the day, so line the work up.
+
+**How renting works.** A Rentals aisle in the store. Pick a machine and a number of days; it is delivered on a trailer with the next delivery and collected when the rental ends. A day's rate is a real one. Nothing bad happens if you waste the day; you just paid for it. Everything a machine does can also be done by hand, slowly, so renting is always a choice.
+
+**The machines for V1**
+
+| Machine | What it does in the game | By hand instead |
+|---|---|---|
+| Mini excavator | Digs trenches, footings, a cellar or a pond many times faster; pulls stumps | Shovel |
+| Skid steer, with bucket, forks and auger | Levels and grades a building pad, moves pallets and whole stacks, drills post and pier holes | Shovel, rake, carrying, post-hole digger |
+| Walk-behind trencher | Cuts a narrow utility trench at a set depth in one pass | Shovel |
+| Plate compactor | Firms gravel and soil under a slab, pad or path so it does not settle | Hand tamper |
+| Concrete mixer | Mixes bags for piers, footings and small slabs; a ready-mix truck delivery for big pours | Wheelbarrow and hoe |
+| Scaffolding | Lets you work on upper walls and roofs safely and faster | Ladder, slower |
+| Portable sawmill | Turns your own logs into boards and beams | Buy lumber |
+| Stump grinder and wood chipper | Clears a site; chips become mulch for the garden | Dig stumps, burn or pile brush |
+
+Later, not V1: telehandler, crane for timber frames, well-drilling rig, road grader.
+
+**Operating them.** The two ride-on machines are driven: climb in, drive, and hold the same work button, which now digs a bucket at a time or grades a strip. Simple, readable controls, not a machine simulator. The excavator's bucket and the skid steer's blade really move earth using the engine's terrain editing, so a pad you grade is a pad you can build on. Walk-behind machines are carried like tools and make the work action faster.
+
+**What they teach.** Why ground is compacted before a slab (an uncompacted pad settles and the structure model shows it), why a pad is graded to shed water away from the house, and how much faster a machine is than a shovel, which is why people rent them.
+
 ## The store
 
 - Organised by job: Foundation, Framing, Roof, Weatherproofing, Insulation, Windows and doors, Power, Water, Animals, Tools.

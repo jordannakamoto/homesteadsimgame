@@ -17,7 +17,7 @@ The single place to see where the V1 run stands. Updated by the orchestrator at 
 | A | 0 simulation spine | Merged, live | `68c7226` |
 | B | 1 weather, 2 materials, 2a build mode (first half) | Merged, live | see `git log` for "Wave B complete" |
 | C | 3 structure, 4 thermal, 6 electrical, 7 water, 13 chickens, 2a build mode (second half) | In progress | |
-| D | **2c construction, 2d store and plan book, 1a weather you can see, 7a groundworks** (from owner feedback), then 5 heating and moisture, 5a interiors, 5b camp and journal, 8 soil and irrigation, 14 chicken lifecycle, 18 salvage and renovation | Not started | |
+| D | **2c construction, 2d store and plan book, 1a weather you can see, 7a groundworks, 7b rented machines** (from owner feedback), then 5 heating and moisture, 5a interiors, 5b camp and journal, 8 soil and irrigation, 14 chicken lifecycle, 18 salvage and renovation | Not started | |
 | E | 9 crops, 19 contractors, 20 automation | Not started | |
 | F | 10 soil and compost, 11 greenhouse, 12 hydroponics, 15 goats, 16 kitchen | Not started | |
 | G | 17 dairy and workshop, 21 inspector and blueprints | Not started | |
