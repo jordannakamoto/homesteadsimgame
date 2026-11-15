@@ -26,7 +26,9 @@
 //                times the glazing's solar heat gain coefficient (EN 410 / ASHRAE typical values).
 //                On opaque surfaces: sol-air temperature (ASHRAE), including long-wave loss to a clear
 //                sky (63 W/m2 on a horizontal surface, fading with cloud and tilt).
-//   Gains        thermal.setGain({ roomId, source, watts, heating? }): people, stoves, appliances.
+//   Gains        thermal.setGain({ roomId, source, watts, heating?, radiant? }): people, stoves, appliances.
+//                The radiant share and the sun through the glass land on the room's surfaces, so a little of
+//                them is conducted away without warming the air (air temperature is below operative).
 //   Moisture     the room's vapour content follows the outside air through infiltration (no sources,
 //                storage or condensation yet: the next iteration adds them).
 //
@@ -299,12 +301,15 @@ function bound(M, k, e) {
 
 // ---------------------------------------------------------------------------------------- state
 const freshRoom = (T, rh, dew) => ({ tempC: T, massTempC: T, humidity: rh, dewPointC: dew, enclosed: false, uaWK: 0, infiltrationAch: 0,
-  solarGainW: 0, internalGainW: 0, heatingW: 0, lossW: { walls: 0, roof: 0, floor: 0, windows: 0, infiltration: 0 }, toRoomsW: 0, ventM2: 0 });
-const fresh = () => ({ v: STATE_V, version: -1, rooms: {}, gains: {}, heat: {}, vents: {} });
+  solarGainW: 0, internalGainW: 0, heatingW: 0, lossW: { walls: 0, roof: 0, floor: 0, windows: 0, infiltration: 0 }, toRoomsW: 0, ventM2: 0, radiantW: 0 });
+const fresh = () => ({ v: STATE_V, version: -1, rooms: {}, gains: {}, heat: {}, vents: {}, radiant: {} });
 const sumOf = (o) => { let s = 0; if (o) for (const k in o) s += o[k]; return s; };
 function tally(s, id) {
   const r = s.rooms[id]; if (!r) return;
   r.internalGainW = sumOf(s.gains[id]); r.heatingW = sumOf(s.heat[id]); r.ventM2 = sumOf(s.vents[id]);
+  let rad = 0; const f = s.radiant[id];
+  for (const m of [s.gains[id], s.heat[id]]) if (m) for (const k in m) rad += m[k] * (f && f[k] !== undefined ? f[k] : RADIANT_SHARE);
+  r.radiantW = rad;
 }
 // Bring the room list in line with what is built. A room that is still there keeps its temperatures; a room
 // split off another starts at that room's; a new one starts at the outside air.
@@ -316,7 +321,7 @@ function reconcile(s, M, w) {
     r.enclosed = M.enclosed[i]; next[id] = r;
   }
   s.rooms = next;
-  for (const k of ['gains', 'heat', 'vents']) for (const id in s[k]) if (!next[id]) delete s[k][id];
+  for (const k of ['gains', 'heat', 'vents', 'radiant']) for (const id in s[k]) if (!next[id]) delete s[k][id];
   for (const id in next) tally(s, id);
 }
 
@@ -344,7 +349,7 @@ function step(ctx) {
     if (!r.enclosed) { Ta[i] = To; continue; }
     const leak = M.leak[i] + HOLE_CD * r.ventM2 * 1e4, dT = r.tempC - To;
     const Hinf = AIR_J_M3K * 0.001 * leak * Math.sqrt(M.cs[i] * Math.abs(dT) + M.cw[i] * e.v * e.v);
-    const Qr = (r.internalGainW + r.heatingW) * RADIANT_SHARE + tmp[o + 4], Qint = (r.internalGainW + r.heatingW) * (1 - RADIANT_SHARE);
+    const Qr = r.radiantW + tmp[o + 4], Qint = r.internalGainW + r.heatingW - r.radiantW;
     const Qa = Qint + Qr * M.phi[i], Qm = Qr * (1 - M.phi[i]);
     const mr = (M.Cm[i] / dt) * r.massTempC + Hmb * Tbb + Qm;
     tmp[o + 5] = Hinf; tmp[o + 9] = mr;
@@ -403,9 +408,11 @@ function setter(key, field) {
     const { roomId, source = 'gain' } = p, v = p[field];
     if (typeof roomId !== 'string' || !roomId) throw new Error('thermal: roomId is required');
     if (v !== undefined && v !== null && !Number.isFinite(v)) throw new Error('thermal: ' + field + ' must be a number');
-    const maps = key === 'vents' ? ['vents'] : ['gains', 'heat'], into = key === 'vents' ? 'vents' : p.heating ? 'heat' : 'gains';
+    if (p.radiant !== undefined && !(p.radiant >= 0 && p.radiant <= 1)) throw new Error('thermal: radiant is a share from 0 to 1');
+    const maps = key === 'vents' ? ['vents'] : ['gains', 'heat', 'radiant'], into = key === 'vents' ? 'vents' : p.heating ? 'heat' : 'gains';
     for (const k of maps) if (s[k][roomId]) { delete s[k][roomId][source]; if (!Object.keys(s[k][roomId]).length) delete s[k][roomId]; }
     if (v) (s[into][roomId] = s[into][roomId] || {})[source] = v;
+    if (v && key !== 'vents' && p.radiant !== undefined && p.radiant !== RADIANT_SHARE) (s.radiant[roomId] = s.radiant[roomId] || {})[source] = p.radiant;
     tally(s, roomId);
   };
 }
@@ -417,6 +424,7 @@ export const thermal = {
   step,
   commands: {
     // heat given off in a room, W, kept per source; 0 removes it. heating: true counts it as heatingW.
+    // radiant: the share (0..1, default a half) that lands on the room's surfaces instead of warming the air directly.
     'thermal.setGain': setter('gains', 'watts'),
     // a hole to the outside air in a room (an open window, a vent), m2 of clear opening, kept per source.
     'thermal.setVent': setter('vents', 'areaM2'),
