@@ -7,7 +7,7 @@
   const T = G.THREE, R = G.renderer, scene = G.scene, cam = G.camera, dt = G.cam;
   const sun = scene.children.find((o) => o.isDirectionalLight);
   const H = { get nt() { return G.player; }, get Nt() { return G.world; }, get ji() { return G.composer(); } };
-  const cfg = { dof: 1, shafts: 1, glow: 1, vignette: 0.3, saturation: 1.1, ao: 1, bounce: 1 };
+  const cfg = { dof: 1, shafts: 1, glow: 1, vignette: 0.3, saturation: 1.1, ao: 1, bounce: 1, relight: 1 };
   const FX = { cfg, err: null, installed: false };
   const sm = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
   const phases = () => { const t = Math.sin((H.Nt.time - 0.25) * Math.PI * 2), day = sm(0.02, 0.4, t), night = 1 - sm(-0.22, 0.06, t); return { day, night, gold: Math.min(1, Math.max(0, 1 - day - night)) }; };
@@ -112,12 +112,12 @@
       c += (texture2D(tMap, vUv + uDir * 3.2307692308).rgb + texture2D(tMap, vUv - uDir * 3.2307692308).rgb) * 0.0702702703;
       gl_FragColor = vec4(c, 1.0);
     }`);
-  const compMat = mat({ tColor: { value: null }, tBlur: { value: null }, tShaft: { value: null }, tDepth: { value: null }, uNear: { value: 0.5 }, uFar: { value: 400 }, uFocus: { value: 24 }, uDofFar: { value: 1 }, uDofNear: { value: 1 }, uShaftK: { value: 0 }, uGlowK: { value: 0 }, uSunCol: { value: new T.Color() }, uVig: { value: 0.3 }, uSat: { value: 1.1 }, tAO: { value: null }, uAOTexel: { value: new T.Vector2() }, uAOOn: { value: 0 }, uProjInv: { value: new T.Matrix4() }, uSunV: { value: new T.Vector3(0, 1, 0) }, uSunTint: { value: new T.Color(1, 1, 1) }, uSky: { value: new T.Color(0.7, 0.8, 0.9) }, uDay: { value: 1 } }, `
+  const compMat = mat({ tColor: { value: null }, tBlur: { value: null }, tShaft: { value: null }, tDepth: { value: null }, uNear: { value: 0.5 }, uFar: { value: 400 }, uFocus: { value: 24 }, uDofFar: { value: 1 }, uDofNear: { value: 1 }, uShaftK: { value: 0 }, uGlowK: { value: 0 }, uSunCol: { value: new T.Color() }, uVig: { value: 0.3 }, uSat: { value: 1.1 }, tAO: { value: null }, uAOTexel: { value: new T.Vector2() }, uAOOn: { value: 0 }, uRelight: { value: 1 }, uProjInv: { value: new T.Matrix4() }, uSunV: { value: new T.Vector3(0, 1, 0) }, uSunTint: { value: new T.Color(1, 1, 1) }, uSky: { value: new T.Color(0.7, 0.8, 0.9) }, uDay: { value: 1 } }, `
     precision highp float;
     uniform sampler2D tColor; uniform sampler2D tBlur; uniform sampler2D tShaft; uniform sampler2D tDepth;
     uniform float uNear; uniform float uFar; uniform float uFocus; uniform float uDofFar; uniform float uDofNear; uniform float uShaftK; uniform float uGlowK; uniform float uVig; uniform float uSat;
     uniform vec3 uSunCol; varying vec2 vUv;
-    uniform sampler2D tAO; uniform vec2 uAOTexel; uniform float uAOOn; uniform mat4 uProjInv; uniform vec3 uSunV; uniform vec3 uSunTint; uniform vec3 uSky; uniform float uDay;
+    uniform sampler2D tAO; uniform vec2 uAOTexel; uniform float uAOOn; uniform float uRelight; uniform mat4 uProjInv; uniform vec3 uSunV; uniform vec3 uSunTint; uniform vec3 uSky; uniform float uDay;
     float linZ(float d) { float zn = d * 2.0 - 1.0; return 2.0 * uNear * uFar / (uFar + uNear - zn * (uFar - uNear)); }
     vec3 grade(vec3 c) {
       float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -157,13 +157,15 @@
           col = col * mix(1.0, keep, 0.9) + acc.rgb;
         }
         // haze thickens with distance and warms toward the sun; a thin veil of air even close up
+        if (uRelight > 0.5) {
         vec4 vp = uProjInv * vec4(vUv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
         vec3 vd = normalize(vp.xyz / vp.w);
         float haze = 1.0 - exp(-max(0.0, z - 18.0) * 0.006);
         col += uSunTint * (0.02 + 0.1 * pow(max(dot(vd, uSunV), 0.0), 6.0)) * haze * uDay;
         col = mix(col, uSky, (1.0 - exp(-max(0.0, z - 8.0) * 0.004)) * 0.064);
+        }
       }
-      col = grade(col);
+      if (uRelight > 0.5) col = grade(col);
       vec4 s = texture2D(tShaft, vUv);
       float cosT = max(s.g * 2.0 - 1.0, 0.0);
       col += uSunCol * s.r * (0.4 + 0.6 * cosT * cosT) * uShaftK;
@@ -204,7 +206,7 @@
         draw(shaftMat, rtShaftA);
         shaftBlurMat.uniforms.tMap.value = rtShaftA.texture; draw(shaftBlurMat, rtShaftB);
       }
-      const aoOn = cfg.ao > 0;
+      const aoOn = cfg.ao > 0 && cfg.relight > 0;
       if (aoOn) {
         const u = aoMat.uniforms;
         u.tColor.value = read.texture; u.tDepth.value = depth;
@@ -227,7 +229,7 @@
       c.uShaftK.value = shaftsOn ? cfg.shafts * (0.035 * ph.day + 0.055 * ph.gold + 0.015 * ph.night) : 0;
       c.uGlowK.value = cfg.glow * (0.06 * ph.day + 0.15 * ph.gold + 0.03 * ph.night);
       c.uVig.value = cfg.vignette; c.uSat.value = cfg.saturation;
-      c.tAO.value = rtAO.texture; c.uAOOn.value = aoOn ? 1 : 0;
+      c.tAO.value = rtAO.texture; c.uAOOn.value = aoOn ? 1 : 0; c.uRelight.value = cfg.relight > 0 ? 1 : 0;
       c.uProjInv.value.copy(cam.projectionMatrixInverse);
       c.uSunV.value.copy(sunDir).transformDirection(cam.matrixWorldInverse);
       c.uSunTint.value.copy(sun.color);
@@ -248,6 +250,21 @@
     c.insertPass(pass, c.passes.length - 1);
     FX.installed = true;
   }
+  // A button to compare the cost and the look: full lighting, the same without the relight part (ambient occlusion,
+  // bounce light, haze and grade), or the whole pass off (bloom only). The choice is remembered.
+  const MODES = ['full', 'no relight', 'off'];
+  let mode = 0;
+  try { mode = Math.max(0, MODES.indexOf(localStorage.getItem('fx-lighting') || 'full')); } catch (e) {}
+  const applyMode = () => { cfg.relight = mode === 0 ? 1 : 0; pass.enabled = mode !== 2 && !FX.err; if (btn) btn.textContent = 'Lighting: ' + MODES[mode]; };
+  let btn = null;
+  const host = document.getElementById('status');
+  if (host) {
+    btn = document.createElement('button'); btn.type = 'button'; btn.title = 'Compare lighting cost: full, without relight (occlusion, bounce, haze, grade), or the effects pass off. High quality only';
+    btn.addEventListener('click', () => { mode = (mode + 1) % MODES.length; try { localStorage.setItem('fx-lighting', MODES[mode]); } catch (e) {} applyMode(); const v = document.getElementById('view'); v && v.focus(); });
+    host.insertBefore(btn, document.getElementById('newworld'));
+  }
+  applyMode();
+  FX.setLighting = (m) => { mode = Math.max(0, MODES.indexOf(m)); applyMode(); };
   G.fx = FX;
   window.__fxInfo = () => ({ installed: FX.installed, err: FX.err && String(FX.err), pass: pass.enabled });
   const tick = () => { install(); requestAnimationFrame(tick); };
