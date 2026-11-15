@@ -26,6 +26,7 @@
     pillar: '<path d="M7.5 20h9M9.5 20V7M14.5 20V7M7 7h10M8.5 4.5h7"/>',
     path: '<path d="M8.5 21c0-5 6.5-5 6.5-9s-5.5-4-5.5-9M14.5 21c0-4 6-4 6-9"/>',
     decor: '<path d="M6 11V8.5A2.5 2.5 0 0 1 8.500 6h7A2.500 2.500 0 0 1 18 8.500V11"/><path d="M4 13.200a2 2 0 0 1 4 0V15h8v-1.800a2 2 0 0 1 4 0V18H4zM7 18v2M17 18v2"/>',
+    equip: '<path d="M9 3.500v4.500M15 3.500v4.500M6.500 8h11v3.500a5.500 5.500 0 0 1-11 0zM12 17v3.500"/>',
     measure: '<path d="M3.500 15.500l12-12 5 5-12 12zM7.500 13.500l1.600 1.600M10 11l2.400 2.400M12.500 8.500l1.600 1.600M15 6l2.400 2.400"/>',
     erase: '<path d="M5 7h14M10 7V4.500h4V7M6.500 7l1 13h9l1-13M10 11v5.500M14 11v5.500"/>',
     undo: '<path d="M8.500 5L4 9.500 8.500 14"/><path d="M4 9.500h10a5 5 0 0 1 0 10h-3"/>',
@@ -90,22 +91,26 @@
   }
 
   /* ---------- the bar ---------- */
+  // Three slim rows: a hint line (with what can be done to the selection), the options strip, the tools. The
+  // options strip folds away (`) for an even lower bar; build mode shifts the view up by half the bar's height.
   bar.innerHTML =
-    '<div id="bhead"><span id="bhint" aria-live="polite"></span><button id="bstop" type="button" hidden>' + svg(I.stop, 16) + '<span>Stop</span><kbd>Esc</kbd></button><span class="grow"></span><div id="bacts" role="group" aria-label="Selection"></div>' +
-    '<button id="bundo" type="button" title="Undo (Ctrl+Z)">' + svg(I.undo, 20) + '<span>Undo</span></button><button id="bredo" type="button" title="Redo (Ctrl+Shift+Z)">' + svg(I.redo, 20) + "<span>Redo</span></button></div>" +
+    '<div id="bhead"><span id="bhint" aria-live="polite"></span><button id="bstop" type="button" hidden>' + svg(I.stop, 14) + '<span>Stop</span><kbd>Esc</kbd></button><span class="grow"></span><div id="bacts" role="group" aria-label="Selection"></div>' +
+    '<button id="bfold" type="button" title="Hide or show the options ( ` )" aria-expanded="true"><span>Options</span>' + svg(I.down, 14) + "</button></div>" +
     '<div id="bopts" role="group" aria-label="Options"></div><div id="bdecor" role="group" aria-label="Pieces" hidden></div>' +
     '<div id="bmain"><div id="bpieces" role="group" aria-label="Build tools"></div><div id="baids">' +
-    '<button id="bsnap" type="button" aria-pressed="true" title="Snap to the grid, to ends, middles and walls, and to round angles ( / ). Hold Ctrl to place freely.">' + svg(I.snap, 22) + '<span class="name">Snap</span><span class="key">/</span></button>' +
-    '<div id="blevel" title="The storey you are working on (Page Up, Page Down)"><button id="blup" type="button" aria-label="Storey up">' + svg(I.up, 18) + '</button><span id="blname">Ground</span><button id="bldn" type="button" aria-label="Storey down">' + svg(I.down, 18) + "</button></div>" +
+    '<button id="bsnap" type="button" aria-pressed="true" title="Snap to the grid, to ends, middles and walls, and to round angles ( / ). Hold Ctrl to place freely.">' + svg(I.snap, 20) + '<span class="name">Snap</span><span class="key">/</span></button>' +
+    '<div id="blevel" title="The storey you are working on (Page Up, Page Down)"><button id="bldn" type="button" aria-label="Storey down">' + svg(I.down, 16) + '</button><span id="blname">Ground</span><button id="blup" type="button" aria-label="Storey up">' + svg(I.up, 16) + "</button></div>" +
+    '<button id="bsched" type="button" aria-pressed="false" title="The schedule: what this building needs, stage by stage">' + svg('<path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4"/>', 20) + '<span class="name">List</span></button>' +
     '<button id="bfree" type="button" aria-pressed="true" title="When off, pieces cost wood and removing them refunds it">Free</button>' +
-    '<button id="bdone" type="button" title="Leave build mode (B)">' + svg(I.done, 22) + '<span class="name">Done</span><span class="key">B</span></button></div></div>';
+    '<button id="bundo" type="button" title="Undo (Ctrl+Z)" aria-label="Undo">' + svg(I.undo, 18) + '<span>Undo</span></button><button id="bredo" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">' + svg(I.redo, 18) + "<span>Redo</span></button>" +
+    '<button id="bdone" type="button" title="Leave build mode (B)">' + svg(I.done, 20) + '<span class="name">Done</span><span class="key">B</span></button></div></div>';
   const pieces = $("bpieces");
   let grp = -1;
   for (const t of BL.view().tools) {
     if (t.group !== grp && grp >= 0) pieces.insertAdjacentHTML("beforeend", '<span class="sep"></span>');
     grp = t.group;
     const letter = BL.TOOL_LETTER[t.id] || "";
-    pieces.insertAdjacentHTML("beforeend", '<button type="button" data-piece="' + t.id + '" title="' + t.name + " (" + letter + " or " + t.key + ')" aria-pressed="false">' + svg(I[t.id], 26) + '<span class="name">' + t.name + '</span><span class="key">' + letter + "</span></button>");
+    pieces.insertAdjacentHTML("beforeend", '<button type="button" data-piece="' + t.id + '" title="' + t.name + " (" + letter + (t.key === letter ? "" : " or " + t.key) + ')" aria-pressed="false">' + svg(I[t.id], 19) + '<span class="name">' + t.name + '</span><span class="key">' + letter + "</span></button>");
   }
   const back = () => canvas.focus();
   pieces.addEventListener("click", (e) => {
@@ -121,6 +126,28 @@
   press("bstop", "stop");
   press("blup", "level", 1);
   press("bldn", "level", -1);
+  press("bfold", "fold");
+  press("bsched", "sched");
+  // the schedule: the bill of materials by stage, in a panel at the side
+  const sched = document.createElement("div");
+  sched.id = "bschedp";
+  sched.className = "panel";
+  sched.hidden = true;
+  document.body.appendChild(sched);
+  const money = (v) => "$" + Math.round(v).toLocaleString("en-US");
+  function renderSched(d) {
+    sched.hidden = !d;
+    $("bsched").setAttribute("aria-pressed", d ? "true" : "false");
+    if (!d) return;
+    sched.style.bottom = (B.barH || 130) + 10 + "px";
+    sched.innerHTML =
+      "<h2>Schedule<small>" + esc(d.title) + "</small></h2>" +
+      (d.stages.length
+        ? d.stages
+            .map((st) => '<section><h3><span>' + esc(st.name) + "</span><small>" + (st.built === st.of ? "built" : st.built ? st.built + " of " + st.of + " built" : "planned") + "</small><b>" + money(st.cost) + "</b></h3>" + st.lines.map((ln) => '<div class="ln" title="' + esc(ln.why) + '"><span>' + esc(ln.label) + "</span><i>" + esc(ln.qty) + "</i><b>" + (ln.missing ? "not sold yet" : money(ln.cost)) + "</b><em>" + esc(ln.why) + "</em></div>").join("") + "</section>")
+            .join("") + '<div class="tot"><span>Total</span><b>' + money(d.total) + "</b></div>"
+        : '<p class="none">Nothing to list yet. Draw a room, or set down a plan.</p>');
+  }
 
   /* ---------- the options strip and inspector ---------- */
   const opts = $("bopts"),
@@ -128,26 +155,28 @@
   let groups = [];
   const keyHint = (k) => (k ? "<kbd>" + esc(k) + "</kbd>" : "");
   function groupHtml(g, n) {
-    const lab = (extra) => '<span class="blab">' + esc(g.label || "") + (extra ? ' <b class="bval">' + esc(extra) + "</b>" : "") + keyHint(g.key) + "</span>";
+    const lab = (extra) => '<span class="blab">' + esc(g.label || "") + (extra !== undefined ? ' <b class="bval">' + esc(extra) + "</b>" : "") + keyHint(g.key) + "</span>";
     const cur = g.items ? g.items.find((x) => x.v === g.value) : null;
     if (g.type === "info") return '<div class="bgroup binfo"><span class="btitle">' + esc(g.title) + '</span><span class="bnum">' + esc(g.text) + "</span></div>";
     if (g.type === "swatches") return '<div class="bgroup">' + lab(cur ? cur.name : g.value === null ? "mixed" : "") + '<div class="bitems">' + g.items.map((x, m) => '<button type="button" class="bsw" data-g="' + n + '" data-i="' + m + '" title="' + esc(x.name) + '" aria-label="' + esc(x.name) + '" aria-pressed="' + (x.v === g.value) + '">' + swatch(x.sw) + "</button>").join("") + "</div></div>";
-    if (g.type === "tiles") return '<div class="bgroup">' + lab() + '<div class="bitems">' + g.items.map((x, m) => '<button type="button" class="btile" data-g="' + n + '" data-i="' + m + '" aria-pressed="' + (x.v === g.value) + '">' + svg(I[x.icon], 22) + "<span>" + esc(x.name) + "</span></button>").join("") + "</div></div>";
-    if (g.type === "chips") return '<div class="bgroup">' + (g.label ? lab(cur && cur.note ? cur.note : "") : "") + '<div class="bitems">' + g.items.map((x, m) => '<button type="button" class="bchip" data-g="' + n + '" data-i="' + m + '" aria-pressed="' + (x.v === g.value) + '"' + (x.note ? ' title="' + esc(x.note) + '"' : "") + ">" + esc(x.name) + "</button>").join("") + "</div></div>";
-    if (g.type === "stepper") return '<div class="bgroup">' + lab() + '<div class="bitems bstep"><button type="button" class="bchip" data-g="' + n + '" data-i="-1" aria-label="Less">' + svg(I.minus, 16) + '</button><span class="bnum">' + esc(g.text) + '</span><button type="button" class="bchip" data-g="' + n + '" data-i="1" aria-label="More">' + svg(I.plus, 16) + "</button></div></div>";
-    if (g.type === "toggle") return '<div class="bgroup"><span class="blab">&nbsp;</span><div class="bitems"><button type="button" class="btile" data-g="' + n + '" aria-pressed="' + !!g.on + '" title="' + esc(g.title || g.name) + '">' + svg(I[g.icon], 20) + "<span>" + esc(g.name) + "</span></button></div></div>";
-    if (g.type === "action") return '<div class="bgroup"><span class="blab">' + (g.key ? keyHint(g.key) : "&nbsp;") + '</span><div class="bitems"><button type="button" class="btile' + (g.danger ? " danger" : "") + '" data-g="' + n + '">' + svg(I[g.icon], 20) + "<span>" + esc(g.name) + "</span></button></div></div>";
-    if (g.type === "field") return '<div class="bgroup">' + lab() + '<div class="bitems bfield" title="' + esc(g.title || "") + '"><input type="text" inputmode="decimal" autocomplete="off" data-g="' + n + '" value="' + esc(g.value) + '" aria-label="' + esc(g.label) + '"><span>' + esc(g.unit) + "</span></div></div>";
+    // tiles are icons; the label above names the one that is chosen (or the one under the pointer)
+    if (g.type === "tiles") return '<div class="bgroup">' + lab(cur ? cur.name : g.value === null ? "mixed" : "") + '<div class="bitems">' + g.items.map((x, m) => '<button type="button" class="btile" data-g="' + n + '" data-i="' + m + '" title="' + esc(x.name) + '" aria-label="' + esc(x.name) + '" aria-pressed="' + (x.v === g.value) + '">' + svg(I[x.icon], 19) + "</button>").join("") + "</div></div>";
+    if (g.type === "chips") return '<div class="bgroup">' + (g.label ? lab(cur && cur.note ? cur.note : undefined) : "") + '<div class="bitems">' + g.items.map((x, m) => '<button type="button" class="bchip" data-g="' + n + '" data-i="' + m + '" aria-pressed="' + (x.v === g.value) + '"' + (x.note ? ' title="' + esc(x.note) + '"' : "") + ">" + esc(x.name) + "</button>").join("") + "</div></div>";
+    if (g.type === "stepper") return '<div class="bgroup">' + lab() + '<div class="bitems bstep"><button type="button" class="bchip" data-g="' + n + '" data-i="-1" aria-label="Less">' + svg(I.minus, 14) + '</button><span class="bnum">' + esc(g.text) + '</span><button type="button" class="bchip" data-g="' + n + '" data-i="1" aria-label="More">' + svg(I.plus, 14) + "</button></div></div>";
+    if (g.type === "toggle") return '<div class="bgroup"><span class="blab">&nbsp;</span><div class="bitems"><button type="button" class="btile" data-g="' + n + '" aria-pressed="' + !!g.on + '" title="' + esc(g.title || g.name) + '">' + svg(I[g.icon], 17) + "<span>" + esc(g.name) + "</span></button></div></div>";
+    if (g.type === "action") return '<div class="bgroup"><span class="blab">' + (g.key ? keyHint(g.key) : "&nbsp;") + '</span><div class="bitems"><button type="button" class="btile' + (g.danger ? " danger" : "") + '" data-g="' + n + '"' + (g.title ? ' title="' + esc(g.title) + '"' : "") + ">" + svg(I[g.icon], 17) + "<span>" + esc(g.name) + "</span></button></div></div>";
+    if (g.type === "field") return '<div class="bgroup">' + lab() + '<div class="bitems bfield" title="' + esc(g.title || "") + '"><input type="text" inputmode="decimal" autocomplete="off" data-g="' + n + '" value="' + esc(g.value) + '" aria-label="' + esc(g.label) + '"' + (g.locked ? " disabled" : "") + "><span>" + esc(g.unit) + "</span></div></div>";
+    if (g.type === "select") return '<div class="bgroup">' + lab() + '<div class="bitems bfield" title="' + esc(g.title || "") + '"><select data-g="' + n + '" aria-label="' + esc(g.label) + '">' + g.items.map((x, m) => '<option value="' + m + '"' + (x.v === g.value ? " selected" : "") + ">" + esc(x.name) + "</option>").join("") + "</select></div></div>";
     return "";
   }
   function renderOpts(v) {
     groups = v.groups;
     const first = [],
       second = [];
-    // what can be done with the selection sits in the top row, beside undo
+    // what can be done with the selection sits in the top row
     const acts = [];
     groups.forEach((g, n) => {
-      if (g.type === "action" && g.id.startsWith("s:")) acts.push('<button type="button" class="bchip' + (g.danger ? " danger" : "") + '" data-g="' + n + '" title="' + esc(g.name) + (g.key ? " (" + esc(g.key) + ")" : "") + '">' + svg(I[g.icon], 17) + "<span>" + esc(g.name) + "</span></button>");
+      if (g.type === "action" && g.id.startsWith("s:")) acts.push('<button type="button" class="bchip' + (g.danger ? " danger" : "") + '" data-g="' + n + '" title="' + esc(g.title || g.name) + (g.key ? " (" + esc(g.key) + ")" : "") + '">' + svg(I[g.icon], 15) + "<span>" + esc(g.name) + "</span></button>");
       else (g.row === 2 ? second : first).push(groupHtml(g, n));
     });
     $("bacts").innerHTML = acts.join("");
@@ -166,20 +195,21 @@
   opts.addEventListener("click", onPick);
   $("bacts").addEventListener("click", onPick);
   row2.addEventListener("click", onPick);
-  // hovering a swatch names it in the group's label
+  // pointing at a swatch or an icon names it in the group's label
+  const named = (e) => e.target.closest(".bsw, .btile[data-i]");
   opts.addEventListener("pointerover", (e) => {
-    const b = e.target.closest(".bsw");
+    const b = named(e);
     if (!b) return;
     const val = b.closest(".bgroup").querySelector(".bval");
     if (val) val.textContent = b.title;
   });
   opts.addEventListener("pointerout", (e) => {
-    const b = e.target.closest(".bsw");
+    const b = named(e);
     if (!b) return;
     const g = groups[+b.dataset.g],
       cur = g.items.find((x) => x.v === g.value),
       val = b.closest(".bgroup").querySelector(".bval");
-    if (val) val.textContent = cur ? cur.name : "";
+    if (val) val.textContent = cur ? cur.name : g.value === null ? "mixed" : "";
   });
   // typed properties of the selection
   opts.addEventListener("keydown", (e) => {
@@ -189,9 +219,11 @@
     else if (e.key === "Escape") ((e.target.value = e.target.defaultValue), e.target.blur(), back());
   });
   opts.addEventListener("change", (e) => {
+    const g = groups[+e.target.dataset.g];
+    if (e.target.tagName === "SELECT") return (BL.choose(g.id, g.items[+e.target.value].v), back());
     if (e.target.tagName !== "INPUT") return;
-    const g = groups[+e.target.dataset.g],
-      v = parseFloat(e.target.value.replace(",", "."));
+    if (g.text) return (BL.choose(g.id, e.target.value), back());
+    const v = parseFloat(e.target.value.replace(",", "."));
     isFinite(v) ? BL.choose(g.id, v) : (e.target.value = e.target.defaultValue);
     back();
   });
@@ -216,6 +248,23 @@
   const dimEls = pool("bdim", 4, '<input type="text" inputmode="decimal" autocomplete="off" size="4" aria-label="Exact size"><span class="u"></span><span class="t"></span><em></em>'),
     handleEls = pool("bhandle", 2),
     measEls = pool("bmeas", 9, '<span></span><button type="button" aria-label="Clear this measurement">' + svg('<path d="M7 7l10 10M17 7L7 17"/>', 12) + "</button>");
+  // port dots on equipment (drag or click from one to another to run a wire or pipe) and a tag on each run
+  const portEls = pool("bport", 48, "<span></span>");
+  for (const d of portEls) {
+    d.addEventListener("pointerdown", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const q = d._q;
+      if (!q) return;
+      q.lid ? BL.choose("fx:sel", q.lid) : BL.port(q.fid, q.pid, false);
+    });
+    d.addEventListener("pointerup", (e) => {
+      e.stopPropagation();
+      const q = d._q;
+      q && !q.lid && !q.from && BL.port(q.fid, q.pid, true);
+      back();
+    });
+  }
   const v3 = new G.THREE.Vector3();
   let rc = canvas.getBoundingClientRect();
   window.addEventListener("resize", () => ((rc = canvas.getBoundingClientRect()), (lastCam = NaN)));
@@ -273,7 +322,8 @@
   });
   for (const m of measEls) m.lastChild.addEventListener("click", () => (BL.measClear(m._n), back()));
 
-  let uiV = -1,
+  let barKey = "",
+    uiV = -1,
     ovV = -1,
     lastCam = NaN,
     typedV = -1,
@@ -281,7 +331,7 @@
     py = -1,
     cursor = "";
   function frame() {
-    if (!B.on) return;
+    if (!B.on) return void (sched.hidden || (sched.hidden = true), (uiV = -1));
     if (uiV !== B.uiVer) {
       uiV = B.uiVer;
       const v = BL.view();
@@ -295,6 +345,17 @@
       text($("blname"), v.levelName);
       $("bstop").hidden = !v.busy;
       $("bstop").children[1].textContent = v.busy === "chain" ? "Finish" : v.busy === "copy" || v.busy === "move" ? "Put down" : "Stop";
+      renderSched(v.sched);
+      bar.classList.toggle("fold", !!v.fold);
+      $("bfold").setAttribute("aria-expanded", v.fold ? "false" : "true");
+      // how much of the view the bar covers: build mode frames the site in what is left above it
+      // (a steady figure: the bar with one row of options, whatever tool is in hand, so the view does not bob about)
+      const k = (v.fold ? "f" : "o") + window.innerWidth + "x" + window.innerHeight;
+      if (barKey !== k) {
+        barKey = k;
+        const r = bar.getBoundingClientRect();
+        B.barH = window.innerHeight - r.bottom + $("bhead").offsetHeight + $("bmain").offsetHeight + (v.fold ? 22 : 66);
+      }
     }
     if ((B.typedV || 0) !== typedV) ((typedV = B.typedV || 0), (typed.a = typed.b = ""));
     const m = G.camera.matrixWorld.elements,
@@ -344,6 +405,16 @@
         text(d.firstChild, q.text);
         show(d.lastChild, q.n >= 0);
         place(d, q.x, q.y, q.z, 0, -14);
+      });
+      portEls.forEach((d, n) => {
+        const q = ov.ports[n];
+        show(d, !!q);
+        d._q = q || null;
+        if (!q) return;
+        const cls = "bport t-" + q.type + (q.from ? " on" : "") + (q.sel ? " sel" : "");
+        if (d._c !== cls) ((d._c = cls), (d.className = cls));
+        text(d.firstChild, q.text || "");
+        place(d, q.p[0], q.p[1], q.p[2]);
       });
       show(marq, !!ov.marq);
       if (ov.marq) {

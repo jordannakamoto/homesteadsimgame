@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createCookingView } from './cooking/view.js';
 import { createChunkStream } from './world/chunk-stream.js';
-import { createGameSim, mapPieces, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead } from './sim/index.js';
+import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -2044,6 +2044,8 @@ for (const b of document.querySelectorAll('#speed button')) b.addEventListener('
 const NEW_WORLD_YEAR_DAYS = 20;          // five days a season. The player can change it in the weather panel.
 const SAVE_KEY = 'homestead:save:', LAST_KEY = 'homestead:last-seed';
 function syncSite() {
+  // hand build mode the real equipment catalog once it has loaded
+  if (!simCtl.catalogSet && window.__build && window.__build.setFixtureCatalog) { window.__build.setFixtureCatalog(PLACEABLE_FIXTURES); simCtl.catalogSet = true; }
   const build = window.__build;
   if (!build) return;
   build.ensureLoaded();

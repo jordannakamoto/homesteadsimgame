@@ -13,6 +13,7 @@ export const LAYER_MATERIAL = Object.freeze({
   'softwood-boards': 'spf_seasoned', 'softwood-log': 'pine_seasoned', 'softwood-rails': 'spf_seasoned',
   'thatch': 'thatch', 'topsoil': 'soil_moist', 'turf': 'soil_moist', 'wattle-and-daub': 'cob',
   'wood-shingle': 'cedar_shake', 'wool-carpet': 'carpet', 'wrought-iron': 'steel',
+  'earth': 'soil_moist', 'underlayment': 'housewrap',
 });
 
 const KIND_OF = { wall: 'wall', door: 'wall', window: 'wall', post: 'wall', beam: 'wall', stair: 'wall', tower: 'wall', foundation: 'wall', floor: 'floor', roof: 'roof', path: 'path' };
