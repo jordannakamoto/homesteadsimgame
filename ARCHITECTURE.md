@@ -116,6 +116,7 @@ Owns `src/sim/calendar.js`, `src/sim/weather.js`, `src/weather-view.js` (add-on)
   `{ site: { latitudeDeg, climate }, tempC, humidity (relative, 0..1), dewPointC, windMs, windDirRad, cloud (0..1), rainMmH, snowMmH (water equivalent), snowDepthM, pressureHPa, solar: { directNormalWm2, diffuseWm2, globalHorizontalWm2 }, groundTempC (deep soil, slow), ...internal generator state }`
   Other systems read these fields with `ctx.get('weather')`. Field names and units are fixed from here on.
 - Engine world +x is east and +z is south for sun azimuth.
+- Delivered (iteration 1): `windDirRad` is the direction the wind blows *from*, clockwise from north (meteorological). Extra calendar exports: `sunTimes(t, site)` -> `{ sunriseH, sunsetH, solarNoonH, dayLengthH }`, `solarDeclinationRad`, `monthOf`, `dayOfMonth`, `dailyInsolationTOA`. Weather extras: `CLIMATES` presets (`temperate` default at 45 N, `mediterranean-coast`, `cold-continental`), command `weather.setSite { climate?, latitudeDeg? }`, internal `gen`, `snowSweMm`, `snowDensityKgM3`, `totals`.
 
 ### Iteration 2: materials, items and inventory
 
@@ -191,6 +192,7 @@ Add-ons and tests reach the game only through these. Add a name here rather than
 - `window.__game`: engine. New in wave A: `sim` (the live simulation), `saveGame()`, `saveData()`, `setSpeed(n)`, `speed`.
 - `window.__build`: build mode. New in wave A: `pieces()`, `version`.
 - `window.__nature`: ground cover and wildlife.
+- `window.__game.calendar` (iteration 1): the pure calendar and sun functions of `src/sim/calendar.js`, for add-ons. `window.__weatherView`: the weather add-on's test hooks (`info`, `bench`, `settle`, `open`).
 
 ## Module layout and ownership for the waves
 

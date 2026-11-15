@@ -3,6 +3,7 @@
 
 import { createSim } from './sim.js';
 import { stockSystem } from './stock.js';
+import { weather } from './weather.js';
 
 export * from './sim.js';
 export * from './time.js';
@@ -11,9 +12,11 @@ export { stream, hashString } from './rng.js';
 export * from './materials.js';
 export * from './items.js';
 export * from './stock.js';
+export * as calendar from './calendar.js';
+export { weather, CLIMATES, conditionWord } from './weather.js';
 
-// Systems are added here, in dependency order, as the iterations land (weather, thermal, power...).
-export const GAME_SYSTEMS = [stockSystem()];
+// Systems are added here, in dependency order, as the iterations land (thermal, power...).
+export const GAME_SYSTEMS = [weather, stockSystem()];
 
 export function createGameSim(seed, opts = {}) {
   return createSim({ seed, systems: GAME_SYSTEMS, ...opts });

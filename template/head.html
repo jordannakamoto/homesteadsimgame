@@ -170,6 +170,22 @@ body.building #view { cursor: default; }
   #sv .row.shop .buy { width: 100%; justify-content: space-between; }
   #sv .card { flex-wrap: wrap; }
 }
+/* ---------- weather readout (src/weather-view.js) ---------- */
+#wx { position: relative; }
+#wxbtn { display: grid; grid-template-columns: auto auto; column-gap: 5px; align-items: baseline; justify-content: start; padding: 1px 7px; line-height: 1.12; text-align: left; font-variant-numeric: tabular-nums; min-width: 76px; margin: -4px -9px; }
+#wxbtn #wxdate { grid-column: 1 / 3; color: var(--ink-dim); font-size: 11px; }
+#wxbtn #wxtemp { font-weight: 700; font-size: 12px; }
+#wxbtn #wxcond { font-size: 12px; }
+#wxbtn[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+#wxpanel { position: absolute; top: calc(100% + 16px); left: 0; z-index: 4; width: 310px; background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 8px; padding: 10px 14px; backdrop-filter: blur(6px); }
+#wxpanel[hidden] { display: none; }
+#wxpanel h2 { font-family: var(--font-display); font-weight: 400; font-size: 15px; margin: 0 0 8px; }
+#wxpanel dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 13px; }
+#wxpanel dt { color: var(--ink-dim); white-space: nowrap; }
+#wxpanel dd { margin: 0; font-variant-numeric: tabular-nums; }
+#wxpanel select { font: inherit; font-size: 12px; color: var(--ink); background: rgba(255, 255, 255, 0.06); border: 1px solid var(--panel-edge); border-radius: 5px; padding: 1px 4px; }
+#wxpanel .site { display: flex; gap: 8px; align-items: center; margin-top: 8px; font-size: 12px; color: var(--ink-dim); }
+body.touch #wxbtn { min-width: 0; margin: 0; }
 /* ---------- touch controls ---------- */
 /* combat-only parts of the HUD are hidden while the game runs as a peaceful homestead builder */
 body.peaceful .cb, body.peaceful #stance, body.peaceful #combo { display: none !important; }
@@ -275,6 +291,25 @@ body.touch #bdecor button { padding: 4px 10px; }
 <div id="status" class="panel">
   <div class="pair"><span class="label">Day</span><span class="val" id="day">1</span></div>
   <div class="pair"><span class="label">Time</span><span class="val" id="clock">08:00</span></div>
+  <div class="pair" id="wx">
+    <button id="wxbtn" type="button" aria-expanded="false" aria-controls="wxpanel" title="Weather (Y)"><span id="wxdate"></span><span id="wxtemp"></span><span id="wxcond"></span></button>
+    <div id="wxpanel" hidden>
+      <h2 id="wxd-date"></h2>
+      <dl>
+        <dt>Temperature</dt><dd id="wxd-temp"></dd>
+        <dt>Humidity</dt><dd id="wxd-hum"></dd>
+        <dt>Wind</dt><dd id="wxd-wind"></dd>
+        <dt>Cloud</dt><dd id="wxd-cloud"></dd>
+        <dt>Rain</dt><dd id="wxd-rain"></dd>
+        <dt>Snow on ground</dt><dd id="wxd-snow"></dd>
+        <dt>Sunrise, sunset</dt><dd id="wxd-sun"></dd>
+        <dt>Day length</dt><dd id="wxd-len"></dd>
+        <dt>Sunlight</dt><dd id="wxd-sol"></dd>
+        <dt>Soil, 1 m down</dt><dd id="wxd-soil"></dd>
+      </dl>
+      <div class="site"><label for="wxclimate">Climate</label><select id="wxclimate"><option value="temperate">Temperate</option><option value="mediterranean-coast">Mediterranean coast</option><option value="cold-continental">Cold continental</option></select><span id="wxd-lat"></span></div>
+    </div>
+  </div>
   <div id="speed" role="group" aria-label="Game speed">
     <button type="button" data-speed="0" aria-pressed="false" title="Pause time. You can still build and walk about (` key)">Pause</button>
     <button type="button" data-speed="1" aria-pressed="true" title="Normal speed: a day takes 20 minutes">1&times;</button>

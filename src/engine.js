@@ -1963,15 +1963,31 @@ function updateMotes() {
   }
   motes.geometry.attributes.position.needsUpdate = true;
 }
+// The sun follows the calendar (sim/calendar.js): its height and path change with the date and the
+// site's latitude. Weather from the simulation greys and dims the light.
+import * as calendar from './sim/calendar.js';
 const SKY = {
   day: { sun: col(0xffe8c2), si: 3.0, sky: col(0xb5d5ff), gnd: col(0x66733f), hi: 1.12, fog: col(0xa9c6d8), zen: col(0x4d86c8) },
   gold: { sun: col(0xffa25e), si: 3.3, sky: col(0xf3c0a6), gnd: col(0x6a5644), hi: 1.25, fog: col(0xe6a888), zen: col(0x6f74ad) },
   night: { sun: col(0x8fa8ff), si: 1.15, sky: col(0x4a62a8), gnd: col(0x1c2434), hi: 1.0, fog: col(0x1b2742), zen: col(0x0b1228) },
+  // an overcast sky: the colours each light is pulled toward as cloud thickens (scaled by its own brightness)
+  overcast: { sun: col(0xe4e6e6), sky: col(0xc3cad0), gnd: col(0x5f6656), fog: col(0xaab3ba), zen: col(0x8c98a3), snowGnd: col(0xdfe6ee) },
+  minElevation: 0.3,      // radians: the light never comes in lower than this, so shadows stay readable
+  site: { latitudeDeg: 45 },
 };
-const _fogC = new THREE.Color();
+const _fogC = new THREE.Color(), _ovC = new THREE.Color();
+// pull a colour toward a target hue while keeping its own brightness
+function towardOvercast(c, target, k) {
+  if (k <= 0) return;
+  const l = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b, lt = 0.2126 * target.r + 0.7152 * target.g + 0.0722 * target.b;
+  _ovC.copy(target).multiplyScalar(l / Math.max(lt, 1e-4));
+  c.lerp(_ovC, k);
+}
 function updateSky() {
-  const a = (world.time - 0.25) * Math.PI * 2;
-  const e = Math.sin(a);
+  if (window.__game && !window.__game.calendar) window.__game.calendar = calendar;
+  const wx = sim.state.sys.weather, site = (wx && wx.site) || SKY.site;
+  const sp = calendar.sunPosition(sim.state.t + sim.acc, site);
+  const e = Math.sin(sp.elevationRad);
   const dayF = smoothstep(0.02, 0.4, e), nightF = 1 - smoothstep(-0.22, 0.06, e);
   const goldF = clamp(1 - dayF - nightF, 0, 1);
   const mix3 = (k) => SKY.day[k] * dayF + SKY.gold[k] * goldF + SKY.night[k] * nightF;
@@ -1979,23 +1995,35 @@ function updateSky() {
     SKY.day[k].r * dayF + SKY.gold[k].r * goldF + SKY.night[k].r * nightF,
     SKY.day[k].g * dayF + SKY.gold[k].g * goldF + SKY.night[k].g * nightF,
     SKY.day[k].b * dayF + SKY.gold[k].b * goldF + SKY.night[k].b * nightF);
-  mixC(sun.color, 'sun'); sun.intensity = mix3('si');
-  mixC(hemi.color, 'sky'); mixC(hemi.groundColor, 'gnd'); hemi.intensity = mix3('hi');
-  mixC(_fogC, 'fog'); scene.fog.color.copy(_fogC); scene.background.copy(_fogC);
-  // below the horizon the same light plays the moon, from the opposite side
-  const s = e >= -0.05 ? 1 : -1;
-  const el = Math.max(Math.abs(e), 0.36);
+  // weather: cloud cuts the direct beam far more than the sky light, and greys everything
+  const cloud = wx ? wx.cloud : 0, ov = smoothstep(0.3, 1, cloud);
+  const wet = wx ? clamp((wx.rainMmH + wx.snowMmH * 3) / 4, 0, 1) : 0;
+  const snowK = wx ? smoothstep(0.01, 0.08, wx.snowDepthM) : 0;
+  const O = SKY.overcast, grey = ov * (0.75 - 0.35 * nightF);
+  mixC(sun.color, 'sun'); sun.intensity = mix3('si') * (1 - 0.8 * Math.pow(ov, 1.4));
+  towardOvercast(sun.color, O.sun, grey);
+  mixC(hemi.color, 'sky'); mixC(hemi.groundColor, 'gnd'); hemi.intensity = mix3('hi') * (1 + 0.4 * ov * (1 - nightF) - 0.1 * wet);   // the whole sky glows under cloud
+  towardOvercast(hemi.color, O.sky, grey); towardOvercast(hemi.groundColor, O.gnd, grey);
+  if (snowK > 0) towardOvercast(hemi.groundColor, O.snowGnd, 0.45 * snowK * (1 - nightF * 0.5));   // light bounced off snow
+  mixC(_fogC, 'fog'); towardOvercast(_fogC, O.fog, grey); _fogC.multiplyScalar(1 - 0.1 * ov - 0.08 * wet);
+  scene.fog.color.copy(_fogC); scene.background.copy(_fogC);
+  // falling rain and snow close the distance in (updateCamera sets the clear-air distances each frame)
+  scene.fog.near *= 1 - 0.45 * wet; scene.fog.far *= 1 - 0.4 * wet;
+  // the sun comes from its true azimuth (world +x east, +z south); below the horizon the same light
+  // plays the moon, from the opposite side of the sky
+  const up = e >= -0.05, el = Math.max(up ? sp.elevationRad : -sp.elevationRad, SKY.minElevation);
+  const hx = Math.sin(sp.azimuthRad) * (up ? 1 : -1), hz = -Math.cos(sp.azimuthRad) * (up ? 1 : -1);
   const tx = Math.round(player.x), tz = Math.round(player.z);
   sun.target.position.set(tx, player.y, tz);
-  sun.position.set(tx + s * Math.cos(a) * 80, player.y + el * 95, tz + 42);
+  sun.position.set(tx + hx * Math.cos(el) * 120, player.y + Math.sin(el) * 120, tz + hz * Math.cos(el) * 120);
   waterUniforms.uSunDir.value.subVectors(sun.position, sun.target.position).normalize();
   waterUniforms.uSunCol.value.copy(sun.color).multiplyScalar(sun.intensity * 0.32);
   waterUniforms.uAmb.value.copy(hemi.color).multiplyScalar(hemi.intensity * 0.3);
-  waterUniforms.uSky.value.copy(_fogC); mixC(waterUniforms.uZenith.value, 'zen');
-  motes.material.opacity = 0.22 + 0.7 * nightF + 0.25 * goldF;
+  waterUniforms.uSky.value.copy(_fogC); mixC(waterUniforms.uZenith.value, 'zen'); towardOvercast(waterUniforms.uZenith.value, O.zen, grey);
+  motes.material.opacity = (0.22 + 0.7 * nightF + 0.25 * goldF) * (1 - 0.8 * wet);
   motes.material.color.setHex(nightF > 0.5 ? 0xd9ff8a : 0xfff6c8);
   motes.material.size = 0.13 + 0.09 * nightF;
-  if (bloom) bloom.strength = 0.28 + 0.3 * nightF + 0.12 * goldF;
+  if (bloom) bloom.strength = (0.28 + 0.3 * nightF + 0.12 * goldF) * (1 - 0.4 * ov);
 }
 
 // ============================================================ HUD
