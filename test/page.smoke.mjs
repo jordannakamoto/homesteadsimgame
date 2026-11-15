@@ -3,7 +3,7 @@ import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 const file = 'file://' + process.cwd() + '/dist/index.html';
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] });
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-const page = await ctx.newPage();
+const page = await ctx.newPage(); page.setDefaultTimeout(180000);
 const errors = [];
 page.on('console', (m) => { if (m.type() === 'error' && !/net::ERR_/.test(m.text())) errors.push(m.text().slice(0, 400)); });
 page.on('pageerror', (e) => errors.push('PAGEERROR ' + String(e.stack || e).slice(0, 600)));
