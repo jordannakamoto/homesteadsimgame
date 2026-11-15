@@ -410,8 +410,10 @@
             vy = d[1] - c[1],
             vz = d[2] - c[2];
           let n = [vy * uz - vz * uy, vz * ux - vx * uz, vx * uy - vy * ux];
-          const nl = Math.hypot(n[0], n[1], n[2]) || 1;
-          N[i].push([n[0] / nl, n[1] / nl, n[2] / nl]);
+          const nl = Math.hypot(n[0], n[1], n[2]);
+          // where the surface pinches to a point there is no normal to compute: face it upward. (A zero normal
+          // lights as "not a number", and the bloom pass then smears that one pixel over the whole screen.)
+          N[i].push(nl > 1e-9 ? [n[0] / nl, n[1] / nl, n[2] / nl] : [0, 1, 0]);
         }
       }
       for (let i = 0; i < nu; i++)
