@@ -46,7 +46,7 @@ async function open(opts) {
   const move = async (p) => { await page.mouse.move(p[0], p[1]); await step(2); };
   const click = async (p) => { await move(p); await page.mouse.down(); await page.mouse.up(); await step(2); };
   const drag = async (a, b) => { await move(a); await page.mouse.down(); await step(1); await page.mouse.move((a[0] + b[0]) / 2, (a[1] + b[1]) / 2); await step(1); await move(b); await page.mouse.up(); await step(3); };
-  const pieces = (f) => G((f) => __build.pieces().filter((p) => !f || p.kind === f).map((p) => ({ id: p.id, kind: p.kind, type: p.type, material: p.material, length: p.length, height: p.height, area: p.area, netArea: p.netArea, y0: p.y0, y1: p.y1, wall: p.wall, free: p.free, layers: p.layers, pitchDeg: p.pitchDeg, planArea: p.planArea, openings: (p.openings || []).map((o) => ({ id: o.id, kind: o.kind, offset: o.offset, width: o.width })) })), f);
+  const pieces = (f) => G((f) => __build.pieces().filter((p) => (!f && !p.parent) || (p.kind === f && (!p.parent || f === 'door' || f === 'window'))).map((p) => ({ id: p.id, kind: p.kind, type: p.type, material: p.material, length: p.length, height: p.height, area: p.area, netArea: p.netArea, y0: p.y0, y1: p.y1, wall: p.wall, free: p.free, layers: p.layers, pitchDeg: p.pitchDeg, planArea: p.planArea, openings: (p.openings || []).map((o) => ({ id: o.id, kind: o.kind, offset: o.offset, width: o.width })) })), f);
 
   // the new building's grid: ahead of the player, clear of the bar, facing the way the view does
   await G(() => { __game.cam.dist = 44; }); await step(30);
@@ -64,8 +64,8 @@ async function open(opts) {
   await page.mouse.up(); await step(3);
   let walls = await pieces('wall'), floors = await pieces('floor');
   check('one drag makes a room: four walls and a floor', walls.length === 4 && floors.length === 1, walls.map((w) => w.length).join(','));
-  check('wall lengths, heights and areas are right', walls.map((w) => w.length).sort().join() === '4,4,5,5' && walls.every((w) => near(w.height, 2.84) && near(w.y1 - w.y0, 2.84) && near(w.area, w.length * 2.84) && w.layers.length === 3), JSON.stringify(walls[0].layers));
-  check('floor is 20 square metres with a layered build-up', near(floors[0].area, 20) && near(floors[0].y1 - floors[0].y0, 0.12) && floors[0].layers.length === 2);
+  check('wall lengths, heights and areas are right', walls.map((w) => w.length).sort().join() === '4,4,5,5' && walls.every((w) => near(w.height, 2.84) && near(w.y1 - w.y0, 2.84) && near(w.area, w.length * 2.84) && w.layers.length === 5 && w.layers[3].material === 'air'), JSON.stringify(walls[0].layers));
+  check('floor is 20 square metres with a layered build-up', near(floors[0].area, 20) && near(floors[0].y1 - floors[0].y0, 0.12) && floors[0].layers.length === 3);
   check('the floor sits at the foot of the walls', near(floors[0].y0, walls[0].y0));
   const ids0 = (await pieces()).map((p) => p.id);
 

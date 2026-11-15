@@ -98,6 +98,13 @@
     hintText: "",
     fold: false,
     barH: 0,
+    // construction: what new buildings stand on and are filled with, and whether plans start unbuilt
+    found: "pier-blocks",
+    ins: null,
+    lining: "boards",
+    cmode: false,
+    gstage: null,
+    dirty: new Set(),
   };
   try {
     B.fold = localStorage.getItem("build:fold") === "1";
@@ -2161,16 +2168,19 @@
       rg = new Geo();
     const hs = D.hs || 1;
     // floors raised well clear of the ground stand on posts instead of a solid plinth
-    const open = D.lift > 0 && depth > 1.6,
+    // a building on a real foundation has no stone skirt: its floor frame shows, and the piers stand under it
+    const raised = !!D.found && D.found !== "plinth" && !D.level,
+      open = !raised && D.lift > 0 && depth > 1.6,
       full = depth;
     if (open) depth = 0.2;
+    if (raised) depth = D.found === "slab" ? 0.06 : 0.085;
     for (const k of D.floors) {
       const [i, j] = parse(k);
       if (D.id && wellOver(D, i, j)) continue;
       const fm = FLOORS[(D.fmat && D.fmat.get(k)) || "planks"],
         fcol = fm.c2 && (i + j) & 1 ? fm.c2 : fm.c;
       for (let p = 0; p < 2; p++) g.abox(i, 0, j + p * 0.5, i + 1, FLOOR_T - (p ? 0.006 : 0), j + p * 0.5 + 0.5, shade(fcol, 0.9 + 0.2 * hash(i, j, p)));
-      const st = open ? C.beam : shade(C.stone, 0.85);
+      const st = raised ? (D.found === "slab" ? CONCRETE : shade(C.beam, 1.2)) : open ? C.beam : shade(C.stone, 0.85);
       if (!D.floors.has(ck(i, j - 1))) g.abox(i, -depth, j, i + 1, 0.04, j + 0.12, st);
       if (!D.floors.has(ck(i, j + 1))) g.abox(i, -depth, j + 0.88, i + 1, 0.04, j + 1, st);
       if (!D.floors.has(ck(i - 1, j))) g.abox(i, -depth, j, i + 0.12, 0.04, j + 1, st);
@@ -2198,7 +2208,7 @@
       const [i, j, d] = parse(k);
       if (D.hid && D.hid.has(k)) continue;
       const wm = (D.wmat && D.wmat.get(k)) || "timber";
-      PAL = WALLS[wm];
+      PAL = raised ? woodFoot(wm) : WALLS[wm];
       wallPieces(isLow(type) ? late : g, i, j, d, type, depth);
       if (isThick(type)) (thick.add(ck(i, j)), thick.add(d === 0 ? ck(i + 1, j) : ck(i, j + 1)));
       for (const vk of [ck(i, j), d === 0 ? ck(i + 1, j) : ck(i, j + 1)]) vmat.has(vk) || vmat.set(vk, wm);
@@ -2233,7 +2243,7 @@
     (D.segs || []).forEach((sg, n) => {
       const low = isLow(sg[4]);
       if (D.id && inRings(D, (sg[0] + sg[2]) / 2, (sg[1] + sg[3]) / 2)) return;
-      PAL = WALLS[sg[5] || "timber"];
+      PAL = raised ? woodFoot(sg[5] || "timber") : WALLS[sg[5] || "timber"];
       freePiece(low ? late : g, sg[0], sg[1], sg[2], sg[3], sg[4], depth, n);
       for (const [x, z] of [
         [sg[0], sg[1]],
@@ -2475,6 +2485,14 @@
       cellRoom: new Map(),
       corners: [],
       b: null,
+      found: F.found || "plinth",
+      ins: F.ins || null,
+      lining: F.lining === undefined ? "boards" : F.lining,
+      plan: new Set(),
+      known: F.fresh ? new Set() : null,
+      sitePlanned: !!F.fresh && B.cmode,
+      mem: null,
+      memMeshes: [],
     };
     S.wallMat = makeWallMat(S.clip, S.near, S.sideA, S.sideB);
     S.group.position.set(S.ox, S.y0, S.oz);
@@ -2490,6 +2508,7 @@
     S.wallMat.dispose();
     S.glow && S.glow.geometry.dispose();
     S.glowMat.dispose();
+    dropMembers(S);
     const i = B.structs.indexOf(S);
     i >= 0 && B.structs.splice(i, 1);
   }
@@ -2700,8 +2719,10 @@
     }
     S.b = { i0, i1, j0, j1 };
     S.polys = findPolys(S);
+    for (const p of S.polys) p.cov = p.roofed || S.roofs.some((r) => p.cx >= r.i0 && p.cx <= r.i1 + 1 && p.cz >= r.j0 && p.cz <= r.j1 + 1);
     identify(S);
-    const geo = buildGeo(S, S.depth);
+    const st = memberState(S),
+      geo = buildGeo(st.all ? S : st.built, S.depth);
     for (const key of ["main", "roof"]) {
       if (S[key]) {
         S.group.remove(S[key]);
@@ -2721,6 +2742,7 @@
       S.glow = new T.Mesh(geo.glow.build(), S.glowMat);
       S.group.add(S.glow);
     }
+    drawMembers(S, st);
     // what the decorations do: block the way, give light, make smoke
     S.lights = [];
     S.beds = [];
@@ -2742,9 +2764,11 @@
     for (const dr of S.doors) S.group.remove(dr.mesh);
     S.doors = [];
     const kk = (EAVE * S.hs - 0.3) / (EAVE - 0.3);
-    const doorways = S.colSegs.filter((sg) => isDoor(sg[4])).map((sg) => sg.slice(0, 5));
+    // a door that is still only planned has no leaf to swing yet
+    const doorways = S.rings.length ? S.colSegs.filter((sg) => isDoor(sg[4]) && !S.segs.some((q) => q[0] === sg[0] && q[1] === sg[1] && q[2] === sg[2] && q[3] === sg[3])).map((sg) => sg.slice(0, 5)) : [];
+    for (const sg of S.segs) isDoor(sg[4]) && !S.plan.has(sg[7]) && !(S.rings.length && inRings(S, (sg[0] + sg[2]) / 2, (sg[1] + sg[3]) / 2)) && doorways.push(sg.slice(0, 5));
     for (const [k, type] of S.walls) {
-      if (!isDoor(type) || S.hid.has(k)) continue;
+      if (!isDoor(type) || S.hid.has(k) || S.plan.has(S.oid.get(k))) continue;
       const [i, j, d] = parse(k);
       doorways.push(d === 0 ? [i, j, i + 1, j, type] : [i, j, i, j + 1, type]);
     }
@@ -2842,7 +2866,7 @@
       z0 = Math.min(z0, z);
       z1 = Math.max(z1, z);
     }
-    const target = S.y0 - 0.05,
+    const target = S.y0 - dropOf(S),
       CORE = pit ? 0.8 : 1.05,
       RIM = pit ? 0.801 : 2.9;
     let changed = false;
@@ -3509,6 +3533,10 @@
       ids: { walls: S.runs.map((g) => [g.m[0].k, g.id]), open: [...S.oid], floors: S.regs.map((g) => [g.m[0], g.id]), polys: S.pids.map((x) => x.slice()) },
     };
     if (Object.keys(S.asm).length) data.asm = { ...S.asm };
+    if (S.found !== "plinth") data.found = S.found;
+    if (S.ins) data.ins = S.ins;
+    if (S.lining !== "boards") data.lining = S.lining;
+    if (S.plan.size) data.plan = [...S.plan].sort();
     S.ser = { ver: S.ver, data };
     return data;
   }
@@ -3533,6 +3561,13 @@
     S.pids = (ids.polys || []).map((x) => x.slice());
     S.asm = d.asm ? { ...d.asm } : {};
     S.fresh = !!fresh;
+    S.found = d.found || "plinth";
+    S.ins = d.ins || null;
+    S.lining = d.lining === undefined ? "boards" : d.lining;
+    // a copy is a new plan: unbuilt where plans start unbuilt, built otherwise
+    S.plan = new Set(fresh ? [] : d.plan || []);
+    S.known = fresh ? new Set() : null;
+    S.sitePlanned = fresh ? B.cmode : [...S.plan].some((id) => id.endsWith(".site"));
     return S;
   }
   function snapshot() {
@@ -3576,7 +3611,7 @@
   // level the ground under freshly placed structures, then build them
   function settle(list) {
     for (const S of list) {
-      if (S.po) continue;
+      if (S.po || S.sitePlanned) continue;
       const smp = localSamples(S).map(([a, b]) => toWorld(S, a, b));
       if (!S.level) cutTerrain(S, smp, !!S.lift);
       else if (S.level < 0) cutTerrain(S, smp, true);
@@ -3589,7 +3624,9 @@
   const SAVE = "world-engine-build:1:",
     FORMAT = "homestead-buildings";
   function serialize() {
-    return { format: FORMAT, v: 2, nextStruct: B.nextId, nextPiece: B.nextPid, structs: B.structs.map(serial) };
+    const d = { format: FORMAT, v: 2, nextStruct: B.nextId, nextPiece: B.nextPid, structs: B.structs.map(serial) };
+    if (B.cmode) d.construction = true;
+    return d;
   }
   // the highest piece number used anywhere in saved data
   function topPid(data) {
@@ -3780,7 +3817,7 @@
   function applyOp(op, noUndo) {
     if (!op || !op.valid) return null;
     noUndo || pushUndo();
-    let S = op.F.isNew ? newStruct({ ox: op.F.ox, oz: op.F.oz, yaw: op.F.yaw, y0: op.y0, level: op.F.level || 0, hs: op.F.hs || B.hs, lift: op.F.lift || 0, po: op.addPaths.length > 0 || op.addDecor.length > 0 }) : op.F;
+    let S = op.F.isNew ? newStruct({ ox: op.F.ox, oz: op.F.oz, yaw: op.F.yaw, y0: op.y0, level: op.F.level || 0, hs: op.F.hs || B.hs, lift: op.F.lift || 0, po: op.addPaths.length > 0 || op.addDecor.length > 0, found: B.found, ins: B.ins, lining: B.lining, fresh: true }) : op.F;
     let refund = 0;
     for (const idx of [...op.delRoofs].sort((a, b) => b - a)) {
       const r = S.roofs.splice(idx, 1)[0];
@@ -3856,7 +3893,8 @@
       G.markStockDirty();
     }
     const samples = opSamples(op).map(([lx, lz]) => toWorld(S, lx, lz));
-    if (!S.level) cutTerrain(S, samples, !!S.lift);
+    if (S.sitePlanned) {
+    } else if (!S.level) cutTerrain(S, samples, !!S.lift);
     else if (S.level < 0) cutTerrain(S, samples, true);
     if (isEmpty(S)) {
       disposeStruct(S);
@@ -3864,7 +3902,7 @@
       S = null;
     } else {
       rebuild(S);
-      if (!S.level && S.polys.length) {
+      if (!S.level && S.polys.length && !S.sitePlanned) {
         const inner = [];
         for (const p of S.polys) {
           inner.push(toWorld(S, p.cx, p.cz));
@@ -5352,7 +5390,7 @@
             }
           }
         }
-        p.y0 = c.y + B.lift;
+        p.y0 = c.y + B.lift + FOUNDATIONS[B.found].drop - 0.05;
         p.lift = B.lift;
         F = p;
       }
@@ -6025,6 +6063,7 @@
     try {
       document.pointerLockElement && document.exitPointerLock();
     } catch {}
+    shellMat.opacity = 0.5;
     B.camSaved = { pitch: G.cam.pitch, dist: G.cam.dist };
     B.camT = 0.6;
     G.refreshLock && G.refreshLock();
@@ -6044,6 +6083,7 @@
       B.camSaved = null;
     }
     G.refreshLock && G.refreshLock();
+    shellMat.opacity = 0.3;
     B.drag = null;
     B.tapMode = "";
     B.press = B.marq = B.ov.marq = null;
@@ -6769,6 +6809,417 @@
     }
   }
 
+  /* ---------- construction: real members, build stages, what is built and what is still only planned ---------- */
+  // src/framing.js lists every member of a building (piers, joists, studs, sheets, rafters, batts). Here they are
+  // tied to the structures: each has an id, a stage and a built state, is drawn (solid when built, a pale ghost
+  // when it is next to be built), is reported in pieces(), and decides what layers a wall, floor or roof reports.
+  const FR = window.__framing,
+    FOUNDATIONS = FR.FOUNDATIONS,
+    STAGES = FR.STAGES,
+    CONCRETE = col(0xb5b2aa),
+    MEMBER_EXTRA = ["area", "thickness", "volume", "size", "plies", "roof", "opening", "height"];
+  const Lz = (material, thickness, role) => Object.freeze({ material, thickness, role });
+  const footPal = new Map();
+  function woodFoot(wm) {
+    let p = footPal.get(wm);
+    if (!p) footPal.set(wm, (p = WALLS[wm].courses ? WALLS[wm] : { ...WALLS[wm], stone: shade(WALLS[wm].beam, 1.15) }));
+    return p;
+  }
+  const dropOf = (S) => (S.level || S.po ? 0.05 : FOUNDATIONS[S.found].drop);
+  const stickWall = (cls, mat) => cls === "wall" && (mat === "timber" || mat === "dark");
+  // every member of a structure, in its own metres above its base; kept until the structure changes
+  function membersOf(S) {
+    if (S.mem && S.mem.ver === S.ver) return S.mem;
+    const H = EAVE * S.hs,
+      kS = (H - 0.3) / (EAVE - 0.3),
+      up = (y) => (y <= 0.3 ? y : 0.3 + (y - 0.3) * kS),
+      yo = (S.hs - 1) * EAVE,
+      desc = { found: S.level === 0 ? S.found : S.found === "plinth" ? "plinth" : "upper", spec: { ins: S.ins, lining: S.lining }, floors: [], walls: [], roofs: [] },
+      groundY = (x, z) => {
+        const [wx, wz] = toWorld(S, x, z);
+        return G.heightAt(wx, wz) - S.y0;
+      },
+      opening = (list, s0, mlen, type, id) => {
+        const sp = OPEN[type];
+        sp && list.push({ id, kind: sp.kind, offset: s0 + sp.t0 * mlen, width: (sp.t1 - sp.t0) * mlen, sill: up(sp.y0), height: up(sp.y1) - up(sp.y0) });
+      },
+      side = (ax, az, bx, bz) => {
+        // which side is outdoors: the one with no floor against the wall
+        const L = Math.hypot(bx - ax, bz - az) || 1,
+          nx = -(bz - az) / L,
+          nz = (bx - ax) / L,
+          mx = (ax + bx) / 2,
+          mz = (az + bz) / 2,
+          l = onFloorAt(S, mx + nx * 0.4, mz + nz * 0.4),
+          r = onFloorAt(S, mx - nx * 0.4, mz - nz * 0.4);
+        return l && r ? 0 : l ? -1 : 1;
+      };
+    if (!S.po) {
+      for (const g of S.regs) desc.floors.push({ id: g.id, outline: outlineOf(g.m)[0], y0: 0, ground: S.level === 0, groundY, mat: g.mat });
+      for (const p of S.polys) desc.floors.push({ id: p.id, outline: p.pts, y0: 0, ground: S.level === 0, groundY, mat: p.fmat });
+      for (const g of S.runs) {
+        if (!stickWall(g.cls, g.mat)) continue;
+        const x = g.d === 0,
+          a = x ? [g.t0, g.line] : [g.line, g.t0],
+          b = x ? [g.t1, g.line] : [g.line, g.t1],
+          opens = [];
+        for (const e of g.m) opening(opens, e.t - g.t0, 1, e.type, S.oid.get(e.k));
+        desc.walls.push({ id: g.id, a, b, y0: 0, h: H, out: side(a[0], a[1], b[0], b[1]), mat: g.mat, openings: opens, foot: desc.found === "plinth" ? 0.3 : undefined });
+      }
+      for (const g of S.fruns) {
+        if (!stickWall(g.cls, g.mat)) continue;
+        const opens = [];
+        for (const q of g.mods) opening(opens, q.s, q.len, q.type, S.segs[q.idx][7]);
+        desc.walls.push({ id: g.id, a: [g.x0, g.z0], b: [g.x1, g.z1], y0: 0, h: H, out: side(g.x0, g.z0, g.x1, g.z1), mat: g.mat, openings: opens, foot: desc.found === "plinth" ? 0.3 : undefined });
+      }
+      for (const r of S.roofs) {
+        const parts = roofParts(r),
+          R = { id: r.id, mat: r.mat || "thatch", planes: [], ridges: [], infills: [], ties: [] };
+        let n = 0,
+          gi = 0;
+        const topAt = (x, z) => {
+          let best = -1e9;
+          for (const pl of R.planes) {
+            const e0 = pl.pts[0],
+              t = (x - e0[0]) * -pl.facing[0] + (z - e0[1]) * -pl.facing[1];
+            if (pl.run && t > -0.01 && t < pl.run + 0.01) best = Math.max(best, pl.eaveY + ((pl.ridgeY - pl.eaveY) * t) / pl.run);
+          }
+          return best < -1e8 ? H : best;
+        };
+        for (const q of parts) {
+          if (q.part === "plane") R.planes.push({ id: r.id + "." + n++, pts: q.pts, eaveY: q.eaveY + yo, ridgeY: q.ridgeY + yo, run: q.run, facing: q.facing, overhang: (r.shape || "gable") === "gable" || r.shape === "shed" ? 0.45 : 0 });
+          else if (q.part === "ridge") R.ridges.push({ a: q.a, b: q.b, y: q.y0 + yo + ((r.shape || "gable") === "gable" ? 0 : 0.03) });
+        }
+        for (const q of parts) if (q.part === "infill") R.infills.push({ id: r.id + ".g" + gi++, a: q.a, b: q.b, y0: H, y1: q.y1 + yo, area: q.area, top: topAt });
+        if ((r.shape || "gable") === "gable") {
+          const ax = r.axis === "x",
+            a0 = ax ? r.i0 : r.j0,
+            a1 = (ax ? r.i1 : r.j1) + 1,
+            b0 = ax ? r.j0 : r.i0,
+            b1 = (ax ? r.j1 : r.i1) + 1,
+            nt = Math.max(1, Math.round((a1 - a0) / 1.2));
+          for (let k = 0; k <= nt; k++) {
+            const a = a0 + 0.02 + ((a1 - a0 - 0.04) * k) / nt;
+            R.ties.push({ a: ax ? [a, b0] : [b0, a], b: ax ? [a, b1] : [b1, a], y: H });
+          }
+        }
+        desc.roofs.push(R);
+      }
+    }
+    const list = FR.generate(desc),
+      byParent = new Map(),
+      byId = new Map();
+    for (const m of list) {
+      byId.set(m.id, m);
+      let L = byParent.get(m.parent);
+      if (!L) byParent.set(m.parent, (L = []));
+      L.push(m);
+    }
+    return (S.mem = { ver: S.ver, list, byParent, byId, planes: new Map(desc.roofs.map((R) => [R.id, R.planes.map((p) => p.id)])) });
+  }
+  // every id of a structure that can be planned or built on its own: members, doors and windows, and the pieces
+  // that are not made of members (stone walls, round rooms, stairs, pillars)
+  function plannable(S, stage) {
+    const out = [],
+      mem = membersOf(S);
+    for (const m of mem.list) (!stage || m.stage === stage) && out.push(m.id);
+    if (!stage || stage === "openings") {
+      for (const id of S.oid.values()) out.push(id);
+      for (const sg of S.segs) sg[7] && out.push(sg[7]);
+    }
+    if (!stage || stage === "wall-frame") {
+      for (const g of S.runs) mem.byParent.has(g.id) || out.push(g.id);
+      for (const g of S.fruns) mem.byParent.has(g.id) || out.push(g.id);
+      for (const r of S.rings) out.push(r.id);
+      for (const st of S.stairs) out.push(st.id);
+      for (const p of S.pillars) out.push(p[4]);
+    }
+    return out;
+  }
+  // What of a structure is finished (drawn as it always was), what is still only a plan (drawn as a ghost of the
+  // finished thing) and what is part way (its members are drawn one by one).
+  function memberState(S) {
+    const mem = membersOf(S),
+      ids = plannable(S),
+      all = new Set(ids);
+    if (S.known && B.cmode) for (const id of ids) S.known.has(id) || S.plan.add(id);
+    S.known = all;
+    for (const id of [...S.plan]) all.has(id) || S.plan.delete(id);
+    S.sitePlanned = mem.list.some((m) => m.kind === "site" && S.plan.has(m.id));
+    const st = { all: !S.plan.size, mem, finRun: null, finFloor: null, finRoof: null, cur: null, built: null, shell: null };
+    if (st.all) return st;
+    const P = (id) => S.plan.has(id),
+      kids = (id) => mem.byParent.get(id),
+      fin = (id, tail) => (kids(id) ? !P(id + tail) : !P(id)),
+      bare = (id) => (kids(id) ? kids(id).every((m) => P(m.id)) : true),
+      Db = { ...S, floors: new Set(), walls: new Map(), segs: [], polys: [], roofs: [], rings: [], portals: [], stairs: [], pillars: [] },
+      Ds = { ...Db, floors: new Set(), walls: new Map(), segs: [], polys: [], roofs: [], rings: [], portals: [], stairs: [], pillars: [], decor: [], paths: [], polyRoofs: [] };
+    st.finRun = new Set();
+    st.finFloor = new Set();
+    st.finRoof = new Set();
+    for (const g of S.runs) {
+      const f = fin(g.id, ".cl"),
+        D = f ? Db : bare(g.id) ? Ds : null;
+      f && st.finRun.add(g.id);
+      if (D) for (const e of g.m) D.walls.set(e.k, e.type);
+    }
+    for (const g of S.fruns) {
+      const f = fin(g.id, ".cl"),
+        D = f ? Db : bare(g.id) ? Ds : null;
+      f && st.finRun.add(g.id);
+      if (D) for (const n of g.m) D.segs.push(S.segs[n]);
+    }
+    for (const g of S.regs) {
+      const f = fin(g.id, ".fl"),
+        D = f ? Db : bare(g.id) && (!kids(g.id + ".fd") || bare(g.id + ".fd")) ? Ds : null;
+      f && st.finFloor.add(g.id);
+      if (D) for (const c of g.m) D.floors.add(c);
+    }
+    for (const p of S.polys) {
+      const f = fin(p.id, ".fl");
+      f && st.finFloor.add(p.id);
+      if (f) Db.polys.push(p);
+      else if (bare(p.id) && (!kids(p.id + ".fd") || bare(p.id + ".fd"))) Ds.polys.push({ ...p, roofed: false });
+    }
+    for (const r of S.roofs) {
+      const pl = mem.planes.get(r.id) || [],
+        f = pl.every((id) => !P(id + ".rc"));
+      f && st.finRoof.add(r.id);
+      if (f) Db.roofs.push(r);
+      else if (pl.every(bare) && !mem.list.some((m) => m.roof === r.id && !P(m.id))) Ds.roofs.push(r);
+    }
+    S.rings.forEach((r, n) => {
+      const D = P(r.id) ? Ds : Db;
+      D.rings.push(r);
+      D.portals.push(S.portals[n]);
+    });
+    for (const q of S.stairs) (P(q.id) ? Ds : Db).stairs.push(q);
+    for (const q of S.pillars) (P(q[4]) ? Ds : Db).pillars.push(q);
+    let cur = 99;
+    for (const m of mem.list) if (P(m.id)) cur = Math.min(cur, STAGES.indexOf(m.stage));
+    for (const id of S.plan) mem.byId.has(id) || (cur = Math.min(cur, STAGES.indexOf(S.oid.size && [...S.oid.values()].includes(id) ? "openings" : "wall-frame")));
+    st.cur = STAGES[cur] || null;
+    st.built = Db;
+    st.shell = Ds.walls.size || Ds.floors.size || Ds.segs.length || Ds.polys.length || Ds.roofs.length || Ds.rings.length || Ds.stairs.length || Ds.pillars.length ? Ds : null;
+    return st;
+  }
+  // members are drawn as instances of one box: built ones solid, the next ones to build as a calm pale ghost
+  const boxGeo = new T.BoxGeometry(1, 1, 1),
+    memMat = new T.MeshLambertMaterial({ color: 0xffffff }),
+    memGhost = new T.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.3, depthWrite: false, fog: false }),
+    shellMat = new T.MeshLambertMaterial({ vertexColors: true, color: 0xd4e8f8, transparent: true, opacity: 0.3, depthWrite: false, side: T.DoubleSide });
+  const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), concrete: CONCRETE, gravel: col(0x8f8b82) };
+  const _m4 = new T.Matrix4(),
+    _c = new T.Color();
+  function dropMembers(S) {
+    for (const m of S.memMeshes) {
+      S.group.remove(m);
+      m.userData.own && m.geometry.dispose();
+      m.dispose && m.dispose();
+    }
+    S.memMeshes = [];
+  }
+  function drawMembers(S, st) {
+    dropMembers(S);
+    const mem = st.mem,
+      P = (id) => S.plan.has(id),
+      gs = B.gstage || st.cur,
+      sets = [[], [], [], []]; // solid, solid under the roof, ghost, ghost under the roof
+    for (const m of mem.list) {
+      if (m.draw === 0) continue;
+      const roofId = m.roof || (/^(roof-frame|roof-deck|roofing)$/.test(m.stage) || m.type === "roof-batt" ? m.parent.split(".")[0] : null),
+        top = roofId ? 1 : 0;
+      if (P(m.id)) {
+        if (m.stage === gs && m.kind !== "site") sets[2 + top].push(m);
+        continue;
+      }
+      if (m.stage === "foundation" || m.stage === "floor-frame") sets[0].push(m);
+      else if (roofId) (st.all || st.finRoof.has(roofId)) || sets[1].push(m);
+      else if (m.stage === "subfloor" || m.type === "floor-batt") (st.all || st.finFloor.has(m.parent)) || sets[0].push(m);
+      else (st.all || st.finRun.has(m.parent)) || sets[0].push(m);
+    }
+    sets.forEach((list, k) => {
+      if (!list.length) return;
+      const mesh = new T.InstancedMesh(boxGeo, k < 2 ? memMat : memGhost, list.length);
+      list.forEach((m, n) => {
+        const ax = m.b[0] - m.a[0],
+          ay = m.b[1] - m.a[1],
+          az = m.b[2] - m.a[2],
+          L = Math.hypot(ax, ay, az) || 1,
+          d = m.section.d,
+          b = m.section.b / L,
+          nx = m.n[0],
+          ny = m.n[1],
+          nz = m.n[2];
+        // columns: along the member, across its depth, across its breadth
+        _m4.set(ax, nx * d, (ay * nz - az * ny) * b, (m.a[0] + m.b[0]) / 2, ay, ny * d, (az * nx - ax * nz) * b, (m.a[1] + m.b[1]) / 2, az, nz * d, (ax * ny - ay * nx) * b, (m.a[2] + m.b[2]) / 2, 0, 0, 0, 1);
+        mesh.setMatrixAt(n, _m4);
+        if (k < 2) {
+          const c = MCOL[m.col || "timber"],
+            v = 0.9 + 0.2 * hash(n, list.length, 7);
+          mesh.setColorAt(n, _c.setRGB(c[0] * v, c[1] * v, c[2] * v));
+        }
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      if (k < 2) mesh.castShadow = mesh.receiveShadow = true;
+      else mesh.renderOrder = 3;
+      mesh.userData.roof = k % 2 === 1;
+      mesh.visible = !mesh.userData.roof || S.roofOp > 0.5;
+      mesh.computeBoundingSphere();
+      S.group.add(mesh);
+      S.memMeshes.push(mesh);
+    });
+    if (st.shell) {
+      const ga = buildGeo(st.shell, S.depth),
+        g = ga.main,
+        mesh = new T.Mesh(g.build(), shellMat),
+        rm = new T.Mesh(ga.roof.build(), shellMat);
+      mesh.userData.own = rm.userData.own = true;
+      rm.userData.roof = true;
+      rm.visible = S.roofOp > 0.5;
+      mesh.renderOrder = rm.renderOrder = 2;
+      S.group.add(mesh, rm);
+      S.memMeshes.push(mesh, rm);
+    }
+  }
+  // what a framed wall is made of right now, from the outside in: only the layers that are built
+  function builtWallLayers(S, id, mat, kids) {
+    const ok = (f) => {
+        const L = kids.filter(f);
+        return L.length > 0 && L.every((m) => !S.plan.has(m.id));
+      },
+      out = [];
+    if (!ok((m) => m.kind === "stud")) return Object.freeze(out);
+    const outside = kids.some((m) => m.kind === "cladding");
+    if (ok((m) => m.kind === "cladding")) out.push(Lz("softwood-boards", 0.019, "cladding"));
+    if (ok((m) => m.kind === "membrane")) out.push(Lz("housewrap", 0.0002, "wrap"));
+    if (ok((m) => m.kind === "sheathing")) out.push(Lz("osb", 0.011, "sheathing"));
+    if (!outside && ok((m) => m.kind === "lining")) out.push(Lz("softwood-boards", 0.019, "lining"));
+    out.push(ok((m) => m.kind === "insulation") ? Lz(S.ins, 0.089, "insulation") : Lz("air", 0.089, "cavity"));
+    if (ok((m) => m.kind === "lining")) out.push(Lz(S.lining === "gypsum" ? "gypsum_board" : "softwood-boards", S.lining === "gypsum" ? 0.0127 : 0.019, "lining"));
+    return Object.freeze(out);
+  }
+  function builtFloorLayers(S, id, def) {
+    const kids = membersOf(S).byParent.get(id) || [],
+      fd = membersOf(S).byParent.get(id + ".fd") || [],
+      on = (f) => kids.concat(fd).some(f) && kids.concat(fd).filter(f).every((m) => !S.plan.has(m.id)),
+      fin = on((m) => m.type === "flooring") ? [def[def.length - 1]] : [];
+    if (kids.some((m) => m.kind === "joist")) {
+      if (!on((m) => m.kind === "joist")) return Object.freeze([]);
+      return Object.freeze([on((m) => m.kind === "insulation") ? Lz(S.ins, 0.14, "insulation") : Lz("air", 0.184, "joist-bay"), ...(on((m) => m.type === "subfloor") ? [Lz("osb", 0.018, "subfloor")] : []), ...fin]);
+    }
+    if (fd.some((m) => m.kind === "slab")) return Object.freeze(on((m) => m.kind === "slab") ? [Lz("gravel", 0.1, "base"), Lz("concrete", 0.1, "slab"), ...fin] : []);
+    return S.plan.has(id) || !fin.length ? Object.freeze([]) : def;
+  }
+  function builtRoofLayers(S, pid, def) {
+    const kids = membersOf(S).byParent.get(pid) || [],
+      on = (f) => kids.some(f) && kids.filter(f).every((m) => !S.plan.has(m.id));
+    if (!on((m) => m.kind === "rafter")) return Object.freeze([]);
+    return Object.freeze([...(on((m) => m.kind === "roofing") ? [def[0]] : []), ...(on((m) => m.type === "roof-deck") ? [Lz("osb", 0.011, "deck")] : []), on((m) => m.kind === "insulation") ? Lz(S.ins, 0.14, "insulation") : Lz("air", 0.14, "rafter-bay")]);
+  }
+  // mark members (or everything a wall, floor, roof or foundation is made of) as built or as still planned
+  function setBuilt(ids, on) {
+    on = on !== false;
+    let any = false;
+    const pcs = listPieces(),
+      want = new Set(Array.isArray(ids) ? ids : [ids]);
+    for (const S of B.structs) {
+      const mem = membersOf(S),
+        own = new Set(plannable(S)),
+        hit = [];
+      for (const id of want) {
+        if (own.has(id)) hit.push(id);
+        else if (mem.byParent.has(id)) {
+          for (const m of mem.byParent.get(id)) hit.push(m.id);
+          for (const p of pcs) p.wall === id && p.struct === S.id && own.has(p.id) && hit.push(p.id);
+        }
+      }
+      if (hit.length) markBuilt(S, hit, on), (any = true);
+    }
+    return any;
+  }
+  function markBuilt(S, ids, on) {
+    const wasSite = S.sitePlanned;
+    for (const id of ids) on ? S.plan.delete(id) : S.plan.add(id);
+    if (S.known) for (const id of ids) S.known.add(id);
+    S.ver++;
+    S.pc = null;
+    S.sitePlanned = membersOf(S).list.some((m) => m.kind === "site" && S.plan.has(m.id));
+    B.version++;
+    // once the site is cleared and levelled, the ground really is
+    if (wasSite && !S.sitePlanned) settle([S]);
+    else B.dirty.add(S);
+    touchUi();
+  }
+  function setStageBuilt(structId, stage, on) {
+    let any = false;
+    for (const S of B.structs) {
+      if (structId !== undefined && structId !== null && S.id !== structId) continue;
+      const ids = plannable(S, stage);
+      if (ids.length) markBuilt(S, ids, on !== false), (any = true);
+    }
+    return any;
+  }
+  function setAllBuilt(on) {
+    for (const S of B.structs) markBuilt(S, plannable(S), on !== false);
+  }
+  // what to buy, by stage, for one building (a structure id) or for everything
+  function materialsList(structId) {
+    const list = listPieces().filter((p) => p.stage && (structId === undefined || structId === null || p.struct === structId));
+    return FR.materialsList(list);
+  }
+  // change what a building stands on; it rises or settles so that the ground under it stays where it is
+  function setFound(S, v) {
+    if (!FOUNDATIONS[v] || S.found === v) return;
+    pushUndo();
+    const grp = groupOf(S),
+      base = grp.find((O) => O.level === 0) || S,
+      delta = FOUNDATIONS[v].drop - dropOf(base);
+    for (const O of grp) {
+      O.found = v;
+      O.y0 += delta;
+      O.group.position.y = O.y0;
+    }
+    for (const O of grp) rebuild(O);
+    touchUi();
+  }
+  /* ready-made plans: small buildings in real framing sizes, set down whole */
+  const PLANS = {
+    shed: { id: "shed", name: "Tool shed", size: "2.4 x 3.0 m", w: 2.4, l: 3.0, note: "A single-pitch roof, one door and one window, on six pier blocks.", roof: { shape: "shed", dir: 0, axis: "x", pitch: 1, mat: "shingle" }, door: [2, 0], windows: [[1, 1]], found: "pier-blocks", ins: null, lining: null },
+    cabin: { id: "cabin", name: "Small cabin", size: "3.6 x 4.8 m", w: 3.6, l: 4.8, note: "A gable roof, a door and two windows, insulated and lined, on pier blocks.", roof: { shape: "gable", dir: 0, axis: "z", pitch: 1, mat: "shingle" }, door: [2, 1], windows: [[1, 2], [3, 2]], found: "pier-blocks", ins: "fibreglass_batt", lining: "boards" },
+  };
+  const planList = () => Object.values(PLANS).map((p) => ({ id: p.id, name: p.name, size: p.size, widthM: p.w, lengthM: p.l, note: p.note, foundation: p.found }));
+  // door and windows are [side, module]: side 0 the back (z = 0), 1 the right, 2 the front, 3 the left
+  function placePlan(id, x, z, yawRad) {
+    const pl = PLANS[id];
+    if (!pl) return null;
+    pushUndo();
+    const S = newStruct({ ox: x, oz: z, yaw: yawRad || 0, y0: G.heightAt(x, z) + FOUNDATIONS[pl.found].drop - 0.05, level: 0, hs: 1, found: pl.found, ins: pl.ins, lining: pl.lining, fresh: true }),
+      hw = pl.w / 2,
+      hl = pl.l / 2,
+      cs = [[-hw, -hl], [hw, -hl], [hw, hl], [-hw, hl]];
+    for (let k = 0; k < 4; k++) {
+      const a = cs[k],
+        b = cs[(k + 1) % 4],
+        L = Math.hypot(b[0] - a[0], b[1] - a[1]),
+        n = Math.max(1, Math.round(L));
+      for (let m = 0; m < n; m++) {
+        const type = pl.door[0] === k && pl.door[1] === m ? "door" : pl.windows.some((q) => q[0] === k && q[1] === m) ? "window" : "wall";
+        S.segs.push([a[0] + ((b[0] - a[0]) * m) / n, a[1] + ((b[1] - a[1]) * m) / n, a[0] + ((b[0] - a[0]) * (m + 1)) / n, a[1] + ((b[1] - a[1]) * (m + 1)) / n, type, "timber", null, null]);
+      }
+    }
+    S.roofs.push({ i0: -hw, i1: hw - 1, j0: -hl, j1: hl - 1, ...pl.roof });
+    rebuild(S);
+    if (!S.sitePlanned) {
+      const inner = [];
+      for (let a = -hw; a <= hw + 1e-6; a += pl.w / 4) for (let b = -hl; b <= hl + 1e-6; b += pl.l / 4) inner.push(toWorld(S, a, b));
+      cutTerrain(S, inner);
+      rebuild(S);
+    }
+    touchUi();
+    return { struct: S.id, pieces: structPieces(S).filter((p) => !p.parent).map((p) => p.id) };
+  }
+
   /* ---------- the piece interface ---------- */
   // Every built element as plain data (see ARCHITECTURE.md): what it is, what it is made of, and its size and
   // place in world metres. Structure, heat, salvage and the rest read buildings only through this list.
@@ -6990,8 +7441,11 @@
       return { x, z };
     };
     const loop = (pts) => pts.map((q) => W2(q[0], q[1]));
-    const head = (id, kind, type, material) => ({ id, struct: S.id, storey: S.level, kind, type, material });
+    const head = (id, kind, type, material) => ({ id, struct: S.id, storey: S.level, kind, type, material, built: !S.plan.has(id) });
     const lay = (id, def) => S.asm[id] || def;
+    const mem = membersOf(S),
+      kids = (id) => mem.byParent.get(id) || null,
+      done = (id) => !S.plan.has(id);
     // height above the structure's base of a point y up a wall module that starts lvl storeys up (low walls are not stretched)
     const up = (y, lvl, fixed) => (fixed ? y : (lvl || 0) * H + (y <= 0.3 ? y : 0.3 + (y - 0.3) * kS));
     // one opening: its module starts s0 metres along the wall from (ax, az) and is mlen long
@@ -7010,12 +7464,12 @@
     };
     const wall = (id, cls, mat, ax, az, bx, bz, len, opens, storeys, extra) => {
       const hgt = cls === "rail" ? 1.02 : cls === "parapet" ? 1.5 : H * (storeys || 1),
-        L = lay(id, wallLayers(cls, mat)),
+        L = S.asm[id] || (kids(id) ? builtWallLayers(S, id, mat, kids(id)) : wallLayers(cls, mat)),
         gross = len * hgt;
       let cut = 0;
       for (const o of opens) cut += o.area;
       out.push({ ...head(id, "wall", cls, mat), a: W2(ax, az), b: W2(bx, bz), y0: y0 + (extra && extra.base ? extra.base : 0), y1: y0 + (extra && extra.base ? extra.base : 0) + hgt, length: len, height: hgt, thickness: sumT(L), area: gross, netArea: gross - cut, layers: L, openings: opens, ...(extra && extra.more) });
-      for (const p of pend) out.push(p);
+      for (const p of pend) ((p.stage = "openings"), (p.parent = id), out.push(p));
       pend.length = 0;
     };
     const floorLay = (id, mat) => lay(id, ASSEMBLIES.floor[mat] || ASSEMBLIES.floor.planks);
@@ -7023,7 +7477,8 @@
     const footing = (id, a, b, area, outline, holes) => {
       if (S.level !== 0 || S.po) return;
       const posts = S.lift > 0 && S.depth > 1.6;
-      out.push({ ...head(id + ".fd", "foundation", posts ? "posts" : "plinth", posts ? "timber" : "stone"), a, b, y0: y0 - S.depth, y1: y0, height: S.depth, area, outline, holes, floor: id });
+      const fd = S.found === "plinth" ? null : FOUNDATIONS[S.found];
+      out.push({ ...head(id + ".fd", "foundation", fd ? S.found : posts ? "posts" : "plinth", fd ? (S.found === "skids" || S.found === "pier-blocks" ? "timber" : "concrete") : posts ? "timber" : "stone"), a, b, y0: y0 - (fd ? fd.drop : S.depth), y1: y0, height: fd ? fd.drop : S.depth, area, outline, holes, floor: id, stage: "foundation" });
     };
 
     for (const g of S.runs) {
@@ -7047,7 +7502,7 @@
         b = W2(g.i1 + 1, g.j1 + 1),
         outline = loop(loops[0] || []),
         holes = loops.slice(1).map(loop);
-      out.push({ ...head(g.id, "floor", "floor", g.mat), a, b, y0, y1: y0 + FLOOR_T, thickness: sumT(L), area: g.m.length, perimeter: loops.reduce((s, q) => s + polyLen(q), 0), outline, holes, layers: L });
+      out.push({ ...head(g.id, "floor", "floor", g.mat), a, b, y0, y1: y0 + FLOOR_T, thickness: sumT(L), area: g.m.length, perimeter: loops.reduce((s, q) => s + polyLen(q), 0), outline, holes, layers: S.asm[g.id] || builtFloorLayers(S, g.id, L) });
       footing(g.id, a, b, g.m.length, outline, holes);
     }
     for (const p of S.polys) {
@@ -7060,7 +7515,7 @@
         a = W2(ax, az),
         b = W2(bx, bz),
         outline = loop(p.pts);
-      out.push({ ...head(p.id, "floor", "floor", p.fmat || "planks"), a, b, y0, y1: y0 + FLOOR_T, thickness: sumT(L), area: p.area, perimeter: polyLen(p.pts), outline, holes: [], layers: L });
+      out.push({ ...head(p.id, "floor", "floor", p.fmat || "planks"), a, b, y0, y1: y0 + FLOOR_T, thickness: sumT(L), area: p.area, perimeter: polyLen(p.pts), outline, holes: [], layers: S.asm[p.id] || builtFloorLayers(S, p.id, L) });
       footing(p.id, a, b, p.area, outline, []);
       if (!p.roofed || !p.roofId) continue;
       // a pointed roof over the shape, its eave pushed out a little
@@ -7091,10 +7546,10 @@
             e0 = q.pts[0],
             e1 = q.pts[1];
           const pid = r.id + "." + n++;
-          out.push({ ...head(pid, "roof", r.shape || "gable", mat), roof: r.id, a: W2(e0[0], e0[1]), b: W2(e1[0], e1[1]), y0: base + q.eaveY, y1: base + q.ridgeY, eaveY: base + q.eaveY, ridgeY: base + q.ridgeY, pitchDeg: (pitch * 180) / Math.PI, length: Math.hypot(e1[0] - e0[0], e1[1] - e0[1]), area: plan / Math.cos(pitch), planArea: plan, thickness: sumT(L), footprint: loop(q.pts), facing: { x: q.facing[0] * cy + q.facing[1] * sy, z: -q.facing[0] * sy + q.facing[1] * cy }, layers: S.asm[pid] || L });
+          out.push({ ...head(pid, "roof", r.shape || "gable", mat), roof: r.id, a: W2(e0[0], e0[1]), b: W2(e1[0], e1[1]), y0: base + q.eaveY, y1: base + q.ridgeY, eaveY: base + q.eaveY, ridgeY: base + q.ridgeY, pitchDeg: (pitch * 180) / Math.PI, length: Math.hypot(e1[0] - e0[0], e1[1] - e0[1]), area: plan / Math.cos(pitch), planArea: plan, thickness: sumT(L), footprint: loop(q.pts), facing: { x: q.facing[0] * cy + q.facing[1] * sy, z: -q.facing[0] * sy + q.facing[1] * cy }, layers: S.asm[pid] || S.asm[r.id] || builtRoofLayers(S, pid, L) });
         } else if (q.part === "infill") {
           out.push({ ...head(r.id + ".g" + gi++, "wall", "gable", "timber"), roof: r.id, a: W2(q.a[0], q.a[1]), b: W2(q.b[0], q.b[1]), y0: base + q.y0, y1: base + q.y1, length: Math.hypot(q.b[0] - q.a[0], q.b[1] - q.a[1]), height: q.y1 - q.y0, thickness: sumT(FRAME_WALL), area: q.area, netArea: q.area, shape: q.shape, layers: FRAME_WALL, openings: [] });
-        } else out.push({ ...head(r.id + ".rb", "beam", "ridge", "timber"), roof: r.id, a: W2(q.a[0], q.a[1]), b: W2(q.b[0], q.b[1]), y0: base + q.y0, y1: base + q.y1, length: Math.hypot(q.b[0] - q.a[0], q.b[1] - q.a[1]), height: q.y1 - q.y0, thickness: 0.2 });
+        } // the ridge is one of the roof's members
       }
     }
     S.rings.forEach((r, ni) => {
@@ -7234,6 +7689,24 @@
         c = W2(it[0], it[1]);
       out.push({ ...head(it[5], "fixture", it[2], "mixed"), name: def.name, a: c, b: c, y0: y0 + y, y1: y0 + y + bb.h, height: bb.h, width: bb.w, depth: bb.d, rotationRad: S.yaw + ((it[3] || 0) * Math.PI) / 4, colour: DYES[it[4] || 0][0], light: !!def.light, cosy: def.cosy || 0 });
     }
+    // every member of the construction, as a piece of its own; what it belongs to lists it and is built when they all are
+    for (const p of out) {
+      const k = kids(p.id);
+      if (!k) continue;
+      p.members = k.map((m) => m.id);
+      p.built = k.every((m) => done(m.id));
+    }
+    for (const m of mem.list) {
+      const ax = m.b[0] - m.a[0],
+        ay = m.b[1] - m.a[1],
+        az = m.b[2] - m.a[2],
+        al = Math.hypot(ax, ay, az) || 1,
+        wy = (az * m.n[0] - ax * m.n[2]) / al,
+        e = (Math.abs(m.n[1]) * m.section.d + Math.abs(wy) * m.section.b) / 2,
+        q = { ...head(m.id, m.kind, m.type, m.material), stage: m.stage, parent: m.parent, section: m.section, length: m.length, a: W2(m.a[0], m.a[2]), b: W2(m.b[0], m.b[2]), y0: y0 + Math.min(m.a[1], m.b[1]) - e, y1: y0 + Math.max(m.a[1], m.b[1]) + e };
+      for (const f of MEMBER_EXTRA) if (m[f] !== undefined) q[f] = m[f];
+      out.push(q);
+    }
     return out;
   }
   const PC = { v: -1, list: [], byId: null };
@@ -7262,6 +7735,7 @@
   function quantities(list) {
     const q = { pieces: 0, wallLength: 0, wallArea: 0, floorArea: 0, roofArea: 0, roofPlanArea: 0, doors: 0, windows: 0, posts: 0, beams: 0, stairs: 0, fixtures: 0, pathLength: 0 };
     for (const p of list || listPieces()) {
+      if (p.parent && p.kind !== "door" && p.kind !== "window") continue;   // members are counted through what they make up
       q.pieces++;
       if (p.kind === "wall" && p.type !== "gable") ((q.wallLength += p.length), (q.wallArea += p.netArea));
       else if (p.kind === "floor") q.floorArea += p.area;
@@ -7312,6 +7786,30 @@
     serialize,
     restore: restoreAll,
     setLayers,
+    // construction (docs/CONSTRUCTION.md): stages, built state, the shopping list and ready-made plans
+    STAGES,
+    FOUNDATIONS,
+    setConstructionMode(on) {
+      B.cmode = !!on;
+      touchUi();
+    },
+    get constructionMode() {
+      return B.cmode;
+    },
+    setBuilt,
+    setStageBuilt,
+    setAllBuilt,
+    showStage(stage) {
+      B.gstage = stage || null;
+      for (const S of B.structs) B.dirty.add(S);
+    },
+    materialsList,
+    plans: planList,
+    placePlan,
+    setFoundation(structId, type) {
+      const S = B.structs.find((O) => O.id === structId);
+      S && setFound(S, type);
+    },
     ASSEMBLIES,
     get LAYER_MATERIALS() {
       const names = new Set();
@@ -7383,6 +7881,10 @@
     },
     update(dt) {
       flushCover(dt);
+      if (B.dirty.size) {
+        for (const S of B.dirty) B.structs.includes(S) && rebuild(S);
+        B.dirty.clear();
+      }
       if (changeV !== B.version) {
         changeV = B.version;
         for (const fn of changeFns.slice()) {
@@ -7486,7 +7988,7 @@
           }
         }
         const pi = polyAt(S, lx, lz);
-        const inPoly = pi >= 0 && S.polys[pi].roofed && Math.abs(P.y - S.y0) < headroom;
+        const inPoly = pi >= 0 && S.polys[pi].cov && Math.abs(P.y - S.y0) < headroom;
         if (inPoly && Math.abs(P.y - (S.y0 + FLOOR_T)) < 0.5) sheltered = true;
         const ri = ringAt(S, lx, lz);
         const inRing = ri >= 0 && Math.abs(P.y - S.y0) < headroom;
@@ -7496,6 +7998,7 @@
         if (S.roofOp !== target) {
           S.roofOp = clamp(S.roofOp + Math.sign(target - S.roofOp) * dt * 4, 0, 1);
           S.roofMat.opacity = S.roofOp;
+          for (const m of S.memMeshes) if (m.userData.roof) m.visible = S.roofOp > 0.5;
         }
         const room = S.cellRoom.get(ck(ci, cj));
         if (room && room.enclosed && room.roofed && Math.abs(P.y - (S.y0 + FLOOR_T)) < 0.5) ((sheltered = true), (cosy = Math.max(cosy, room.cosy || 0)));

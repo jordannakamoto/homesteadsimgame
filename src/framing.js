@@ -392,7 +392,7 @@
   function buyAs(m) {
     const k = m.kind,
       t = m.type,
-      sz = k === "header" ? m.size : sizeOf(m),
+      sz = k === "header" ? m.size : m.section ? sizeOf(m) : null,
       lum = (label, why, plies) => [label + sz, sz ? "lumber_" + sz : null, "m", m.length * (plies || 1), label + " (" + (sz || "timber").replace("x", " x ") + ")", why];
     if (k === "site") return null;
     if (k === "stud") return lum(t === "gable" ? "Gable studs" : "Studs", t === "gable" ? "Short uprights that fill the triangle under the roof at each end." : "The uprights inside your walls. They carry the roof down to the floor.");
