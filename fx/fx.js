@@ -292,6 +292,8 @@
     smoke.frustumCulled = false; smoke.renderOrder = 6; scene.add(smoke);
   }
   // trees share one model per species; reshape each one in the vertex shader from its position (height, crown width, lean, lumps)
+  // Per-tree variation that keeps trees believable: crowns a little wider or narrower, trees a little taller
+  // or shorter, and a slight straight lean (a trunk stays straight; it never curves). No wobble or warping.
   const TREE_VARY = `
       {
         #ifdef USE_INSTANCING
@@ -301,14 +303,11 @@
         #endif
         float t1 = fract(sin(dot(tv, vec2(12.9898, 78.233))) * 43758.5453);
         float t2 = fract(t1 * 37.71 + 0.31), t3 = fract(t1 * 91.17 + 0.67), t4 = fract(t1 * 53.3 + 0.13);
-        float hk = clamp(transformed.y / 6.0, 0.0, 1.4), crown = smoothstep(0.18, 0.55, hk);
-        vec3 q = transformed * 0.9 + vec3(t1, t2, t3) * 40.0;
-        transformed.xz *= mix(1.0, mix(0.78, 1.32, t3), crown);
-        transformed.xz += vec2(sin(q.y * 1.7 + q.z), cos(q.y * 1.3 + q.x)) * 0.24 * crown;
-        transformed.y += sin(q.x * 1.1 + q.z * 1.4) * 0.2 * crown;
-        transformed.y *= mix(0.88, 1.16, t2);
+        float crown = smoothstep(0.9, 2.4, transformed.y);
+        transformed.xz *= mix(1.0, mix(0.86, 1.16, t3), crown);
+        transformed.y *= mix(0.9, 1.1, t2);
         float la = t1 * 6.2831;
-        transformed.xz += vec2(cos(la), sin(la)) * hk * hk * t4 * 0.85;
+        transformed.xz += vec2(cos(la), sin(la)) * transformed.y * 0.035 * t4 * t4;
       }`;
   let treeDone = false;
   function varyTrees() {
@@ -320,7 +319,7 @@
       m.__fxVary = true;
       const prev = m.onBeforeCompile, prevKey = m.customProgramCacheKey;
       m.onBeforeCompile = function (sh, r) { if (prev) prev.call(this, sh, r); sh.vertexShader = sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>' + TREE_VARY); };
-      m.customProgramCacheKey = function () { return (prevKey ? prevKey.call(this) : '') + '|vary1'; };
+      m.customProgramCacheKey = function () { return (prevKey ? prevKey.call(this) : '') + '|vary2'; };
       m.needsUpdate = true;
     }
     treeDone = true;
