@@ -99,6 +99,7 @@
     '<div id="bmain"><div id="bpieces" role="group" aria-label="Build tools"></div><div id="baids">' +
     '<button id="bsnap" type="button" aria-pressed="true" title="Snap to the grid, to ends, middles and walls, and to round angles ( / ). Hold Ctrl to place freely.">' + svg(I.snap, 20) + '<span class="name">Snap</span><span class="key">/</span></button>' +
     '<div id="blevel" title="The storey you are working on (Page Up, Page Down)"><button id="bldn" type="button" aria-label="Storey down">' + svg(I.down, 16) + '</button><span id="blname">Ground</span><button id="blup" type="button" aria-label="Storey up">' + svg(I.up, 16) + "</button></div>" +
+    '<button id="bsched" type="button" aria-pressed="false" title="The schedule: what this building needs, stage by stage">' + svg('<path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4"/>', 20) + '<span class="name">List</span></button>' +
     '<button id="bfree" type="button" aria-pressed="true" title="When off, pieces cost wood and removing them refunds it">Free</button>' +
     '<button id="bundo" type="button" title="Undo (Ctrl+Z)" aria-label="Undo">' + svg(I.undo, 18) + '<span>Undo</span></button><button id="bredo" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">' + svg(I.redo, 18) + "<span>Redo</span></button>" +
     '<button id="bdone" type="button" title="Leave build mode (B)">' + svg(I.done, 20) + '<span class="name">Done</span><span class="key">B</span></button></div></div>';
@@ -125,6 +126,27 @@
   press("blup", "level", 1);
   press("bldn", "level", -1);
   press("bfold", "fold");
+  press("bsched", "sched");
+  // the schedule: the bill of materials by stage, in a panel at the side
+  const sched = document.createElement("div");
+  sched.id = "bschedp";
+  sched.className = "panel";
+  sched.hidden = true;
+  document.body.appendChild(sched);
+  const money = (v) => "$" + Math.round(v).toLocaleString("en-US");
+  function renderSched(d) {
+    sched.hidden = !d;
+    $("bsched").setAttribute("aria-pressed", d ? "true" : "false");
+    if (!d) return;
+    sched.style.bottom = (B.barH || 130) + 10 + "px";
+    sched.innerHTML =
+      "<h2>Schedule<small>" + esc(d.title) + "</small></h2>" +
+      (d.stages.length
+        ? d.stages
+            .map((st) => '<section><h3><span>' + esc(st.name) + "</span><small>" + (st.built === st.of ? "built" : st.built ? st.built + " of " + st.of + " built" : "planned") + "</small><b>" + money(st.cost) + "</b></h3>" + st.lines.map((ln) => '<div class="ln" title="' + esc(ln.why) + '"><span>' + esc(ln.label) + "</span><i>" + esc(ln.qty) + "</i><b>" + (ln.missing ? "not sold yet" : money(ln.cost)) + "</b><em>" + esc(ln.why) + "</em></div>").join("") + "</section>")
+            .join("") + '<div class="tot"><span>Total</span><b>' + money(d.total) + "</b></div>"
+        : '<p class="none">Nothing to list yet. Draw a room, or set down a plan.</p>');
+  }
 
   /* ---------- the options strip and inspector ---------- */
   const opts = $("bopts"),
@@ -291,7 +313,7 @@
     py = -1,
     cursor = "";
   function frame() {
-    if (!B.on) return;
+    if (!B.on) return void (sched.hidden || (sched.hidden = true), (uiV = -1));
     if (uiV !== B.uiVer) {
       uiV = B.uiVer;
       const v = BL.view();
@@ -305,6 +327,7 @@
       text($("blname"), v.levelName);
       $("bstop").hidden = !v.busy;
       $("bstop").children[1].textContent = v.busy === "chain" ? "Finish" : v.busy === "copy" || v.busy === "move" ? "Put down" : "Stop";
+      renderSched(v.sched);
       bar.classList.toggle("fold", !!v.fold);
       $("bfold").setAttribute("aria-expanded", v.fold ? "false" : "true");
       // how much of the view the bar covers: build mode frames the site in what is left above it

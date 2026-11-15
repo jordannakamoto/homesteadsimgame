@@ -6123,7 +6123,38 @@
     step: (id, label, text, key) => ({ type: "stepper", id, label, text, key }),
     field: (id, label, value, unit, title) => ({ type: "field", id, label, value, unit, title }),
     info: (title, text) => ({ type: "info", title, text }),
+    select: (id, label, items, value, title) => ({ type: "select", id, label, items, value, title }),
   };
+  const FOUND_ITEMS = ["pier-blocks", "skids", "piers", "stemwall", "slab", "plinth"].map((v) => ({ v, name: window.__framing.FOUNDATIONS[v].name })),
+    INS_ITEMS = [{ v: null, name: "None" }, { v: "fibreglass_batt", name: "Fibreglass batts" }, { v: "mineral_wool", name: "Mineral wool" }, { v: "sheep_wool", name: "Sheep's wool" }],
+    LIN_ITEMS = [{ v: null, name: "None" }, { v: "boards", name: "Boards" }, { v: "gypsum", name: "Panels" }];
+  const makeUp = (g, pre, f, i, l) => {
+    g.push(G_.select(pre + "found", "Stands on", FOUND_ITEMS, f, (window.__framing.FOUNDATIONS[f] || {}).note));
+    g.push(G_.select(pre + "ins", "Insulation", INS_ITEMS, i, "What fills the spaces between studs, joists and rafters"));
+    g.push(G_.select(pre + "lining", "Inside", LIN_ITEMS, l, "What covers the inside of the walls"));
+  };
+  // the shopping list as the Schedule panel shows it: by stage, with what each line costs and how far along it is
+  function schedule() {
+    const S = B.sel.length ? (selRefs()[0] || {}).S : null,
+      grp = S ? groupOf(S) : null,
+      ids = grp ? new Set(grp.map((O) => O.id)) : null,
+      pcs = listPieces().filter((p) => p.stage && (!ids || ids.has(p.struct))),
+      items = G.stock && G.stock.ITEMS,
+      stages = [];
+    let total = 0;
+    for (const ln of FR.materialsList(pcs)) {
+      let st = stages[stages.length - 1];
+      if (!st || st.id !== ln.stage) {
+        const of = pcs.filter((p) => p.stage === ln.stage);
+        stages.push((st = { id: ln.stage, name: FR.STAGE_NAME[ln.stage], lines: [], cost: 0, built: of.filter((p) => p.built).length, of: of.length }));
+      }
+      const cost = ln.itemId && items && items[ln.itemId] ? items[ln.itemId].priceUsd * ln.qty : 0;
+      st.lines.push({ label: ln.label, qty: fmt(ln.qty) + (ln.unit === "each" ? "" : " " + ln.unit.replace("m2", "m²").replace("m3", "m³")), why: ln.why, cost, missing: !ln.itemId });
+      st.cost += cost;
+      total += cost;
+    }
+    return { title: grp ? "This building" : "Everything planned and built", stages, total };
+  }
   const hsItems = () => HEIGHTS.map((x) => ({ v: x[0], name: x[1], note: fmtM(EAVE * x[0]) }));
   const gapItems = (unit) => [1, 2, 3, 4].map((v) => ({ v, name: v + " m", note: unit }));
   const PAINT = () => [G_.toggle("paint", "Paint", B.tapMode === "paint", "paint", "Paint pieces already built with this material: click or drag across them (K)"), G_.toggle("pick", "Pick", B.tapMode === "pick", "pick", "Take the style and material of any piece in hand (I)")];
@@ -6214,6 +6245,12 @@
         g.push(G_.field("s:z", "Along", fmt(at[1]), "m", "Position on the building's grid"));
       }
     }
+    if (refs.length && !refs[0].S.po && refs.every((q) => groupOf(refs[0].S).includes(q.S))) {
+      const S0 = groupOf(refs[0].S).find((O) => O.level === 0) || refs[0].S,
+        left = groupOf(S0).reduce((a, O) => a + O.plan.size, 0);
+      if (left) g.push(G_.info("Being built", plural(left, "piece") + " still to build"));
+      makeUp(g, "s:", S0.found, S0.ins, S0.lining);
+    }
     g.push(G_.act("s:all", "Whole building", "building"));
     if (one) g.push(G_.act("s:pick", "More like this", "pick", "I"));
     g.push(G_.act("s:dup", "Copy", "copy", "Ctrl D"));
@@ -6242,6 +6279,7 @@
       ceil();
       lift();
       t === "room" && wing();
+      t === "room" && makeUp(g, "", B.found, B.ins, B.lining);
     } else if (t === "wall") {
       g.push(G_.tiles("style", "Style", tiles(STYLE_SHORT, "w-"), B.style, "Shift wheel"));
       g.push(G_.sw("wmat", "Material", SW.wall, B.wmat, "M"));
@@ -6254,6 +6292,7 @@
       g.push(...PAINT());
       lift();
       wing();
+      makeUp(g, "", B.found, B.ins, B.lining);
     } else if (t === "roof") {
       g.push(G_.tiles("rshape", "Shape", tiles(ROOF_SHAPES, "r-"), RS[0], "Shift wheel"));
       if (RS[0] === "gable" || RS[0] === "hip") g.push(G_.toggle("steep", "Steep", RS[3] > 1, "r-steep"));
@@ -6295,13 +6334,25 @@
       }
     } else if (t === "copy") g.push(G_.act("turn", "Turn", "turn", "Shift wheel"));
     const busy = B.move ? "move" : B.drag && B.drag.mode === "click" ? "chain" : B.tapMode ? B.tapMode : B.measA ? "measure" : t === "copy" ? "copy" : "";
-    return { tool: t, top: t === "tower" ? "room" : t === "copy" ? "select" : t, tools: TOOLS, groups: g, hint: B.hintText, undo: B.undo.length, redo: B.redo.length, snap: B.snap, free: B.free, level: B.level, levelName: LEVEL_NAME(B.level), busy, sel: B.sel.length, fold: B.fold };
+    return { tool: t, top: t === "tower" ? "room" : t === "copy" ? "select" : t, tools: TOOLS, groups: g, hint: B.hintText, undo: B.undo.length, redo: B.redo.length, snap: B.snap, free: B.free, level: B.level, levelName: LEVEL_NAME(B.level), busy, sel: B.sel.length, fold: B.fold, sched: B.sched ? schedule() : null };
   }
   function choose(id, v) {
     const RS = RSHAPES[B.rshape],
       turnOf = RS[0] === "gable" || RS[0] === "shed" ? RS[1] : 0;
     if (id === "shape") return setTool(v);
-    if (id === "wmat" || id === "fmat" || id === "rmat" || id === "pmat" || id === "dcol" || id === "style" || id === "wstyle" || id === "dstyle" || id === "pkind" || id === "pwidth" || id === "levels" || id === "tshape" || id === "gap" || id === "hs") B[id] = v;
+    if (id === "found" || id === "ins" || id === "lining") B[id] = v;
+    else if (id === "sched") B.sched = !B.sched;
+    else if (id === "s:found") {
+      const q = selRefs()[0];
+      q && setFound(q.S, v);
+    } else if (id === "s:ins" || id === "s:lining") {
+      const q = selRefs()[0];
+      if (q) {
+        pushUndo();
+        for (const O of groupOf(q.S)) ((O[id.slice(2)] = v), O.ver++);
+        for (const O of groupOf(q.S)) rebuild(O);
+      }
+    } else if (id === "wmat" || id === "fmat" || id === "rmat" || id === "pmat" || id === "dcol" || id === "style" || id === "wstyle" || id === "dstyle" || id === "pkind" || id === "pwidth" || id === "levels" || id === "tshape" || id === "gap" || id === "hs") B[id] = v;
     else if (id === "lift") B.lift = clamp(B.lift + v * 0.5, -3, 6);
     else if (id === "wing") B.wingNext = !B.wingNext;
     else if (id === "roofs") B.showRoofs = !B.showRoofs;
