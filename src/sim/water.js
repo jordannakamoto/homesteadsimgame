@@ -278,7 +278,7 @@ function step(ctx) {
   const el = ctx.get('electrical'), hasEl = ctx.sim.handlers.has('electrical.setLoad');
   const T = s.totals, today = s.today, day = Math.floor(ctx.t / DAY);
   if (today.day !== day) { s.today = { day, collectedL: 0, usedL: 0, overflowL: 0, firstFlushL: 0, wellL: 0 }; }
-  const R = { s, net, w, dt, minutes, hasEl, el, gwC: groundwaterC(w), wellAvail: {}, wellOut: {}, pipeFlow: {} };
+  const R = { s, net, w, dt, minutes, hasEl, el, gwC: groundwaterC(w), wellAvail: {}, wellOut: {}, wellDry: {}, pipeFlow: {} };
 
   // frost depth from the surface freezing index (snow insulates the surface)
   const insul = clamp((w.snowDepthM || 0) / 0.3, 0, 1), surfC = w.tempC < 0 ? w.tempC * (1 - insul) : w.tempC;
@@ -318,7 +318,7 @@ function step(ctx) {
     const q = R.wellOut[id] / minutes, k = wl.yieldLmin / (A * smax);       // per minute
     const sEq = (q * smax) / Math.max(1e-9, wl.yieldLmin), s0 = wl.levelM - wl.staticLevelM;
     wl.levelM = wl.staticLevelM + clamp(sEq + (s0 - sEq) * Math.exp(-k * minutes), 0, smax);
-    wl.pumpedLmin = q; wl.dry = wl.levelM >= wl.pumpDepthM - 1e-3 && q > 0;
+    wl.pumpedLmin = q; wl.dry = !!R.wellDry[id];
   }
 
   thermalStep(R);
@@ -406,7 +406,7 @@ function toGround(R, pid, L, cls) {
 // ------------------------------------------------------------------ sources
 function sourceSurfaceM(R, path) {
   const { s, net } = R;
-  if (path.kind === 'tank') return s.tanks[path.source].surfaceM;
+  if (path.kind === 'tank') { const t = s.tanks[path.source]; return t.elevationM + (t.storedL / t.capacityL) * net.fx.get(path.source).spec.heightM; }
   return (net.fx.get(path.source).p.y0 || 0) - s.wells[path.source].levelM;
 }
 function sourceAvailL(R, path) {
@@ -417,7 +417,10 @@ function sourceTempC(R, path) { return path.kind === 'tank' ? liquidTemp(R.s.tan
 function withdraw(R, path, L) {
   if (L <= 0) return;
   if (path.kind === 'tank') { const t = R.s.tanks[path.source]; removeLiquid(t, t.storedL, L); t.storedL = Math.max(0, t.storedL - L); }
-  else { R.wellAvail[path.source] -= L; R.wellOut[path.source] += L; ledger(R, 'wellL', L); }
+  else {
+    R.wellAvail[path.source] -= L; R.wellOut[path.source] += L; ledger(R, 'wellL', L);
+    if (R.wellAvail[path.source] <= 1e-6) R.wellDry[path.source] = true;     // took all the bore had
+  }
 }
 // Pipes the water went through: record the flow and flush them with source water (moving water does not freeze).
 function flowThrough(R, pipes, L, tC) {
@@ -439,7 +442,7 @@ function blocked(R, path, pipes, usePumps) {
       if (!f.spec.submersible && (f.p.y0 || 0) - sourceSurfaceM(R, path) > f.spec.maxSuctionM) return 'suction';
     }
   }
-  if (path.kind === 'well' && R.wellAvail[path.source] <= 1e-6) return 'dry';
+  if (path.kind === 'well' && R.wellAvail[path.source] <= 1e-6) { R.wellDry[path.source] = true; return 'dry'; }
   if (path.kind === 'tank' && sourceAvailL(R, path) <= 1e-6) return s.tanks[path.source].iceL > 0 ? 'iced' : 'empty';
   return null;
 }
@@ -574,7 +577,8 @@ function outletStep(R, id) {
   o.flowLmin = usedL / minutes;
   o.pressureKPa = outletHeadM(spec, o.flowLmin) * KPA_PER_M;
   o.served = usedL > 0;
-  o.why = usedL > 0 ? null : sup.reason || 'none';
+  const why = usedL > 0 ? null : sup.reason || 'none';
+  if (why !== o.why) { o.why = why; s.issuesDirty = true; }
   o.tempC = o.tempC ?? null;
   o.outTempC = usedL > 0 ? tc + hotFrac * (th - tc) : null;
 }
@@ -593,7 +597,7 @@ function heaterOutC(R, id, lmin) {
   if (sp.kind !== 'tankless') return liquidTemp(h);
   const up = upstream(R.net, id, 'in'), tin = up ? sourceTempC(R, up) : 10;
   if (lmin < sp.minLmin) return tin;                          // below the ignition flow it never lights
-  return Math.min(sp.setpointC, tin + (sp.efficiency * sp.inputW) / ((Math.min(lmin, sp.maxLmin) / 60) * CW));
+  return Math.min(sp.setpointC, tin + (sp.efficiency * sp.inputW) / ((lmin / 60) * CW));
 }
 function takeHot(R, hotPath, L) {
   const { s, net } = R, id = hotPath.heater, h = s.heaters[id], sp = net.fx.get(id).spec, up = upstream(net, id, 'in');
@@ -666,7 +670,9 @@ function ptankStep(R, id) {
   for (const pid of up.pumps) s.pumps[pid].wantedBy = true;
   const why = blocked(R, up, up.pipes, true);
   if (why) return;
-  const q = solveLmin(sourceSurfaceM(R, up), (f.p.y0 || 0) + f.spec.cutOutKPa / KPA_PER_M, up.pumps, net, up.K, null);
+  // the pump pushes against the tank's present pressure; it stops at cut-out, or where the pump can push no harder
+  const q = solveLmin(sourceSurfaceM(R, up), (f.p.y0 || 0) + ptankHeadM(pt, f.spec), up.pumps, net, up.K, null);
+  if (q <= 1e-6) { pt.refill = false; return; }
   const L = Math.min(q * minutes, pt.drawdownL - pt.storedL, sourceAvailL(R, up)), tin = sourceTempC(R, up);
   if (L <= 0) return;
   withdraw(R, up, L); flowThrough(R, up.pipes, L, tin); noteFlow(R, up, L / minutes);
@@ -699,7 +705,8 @@ function thermalStep(R) {
     ps.flowLmin = (R.pipeFlow[p.id] || 0) / R.minutes;
     const e = p.indoor ? { env: INDOOR_C, buried: false } : envFor(R, { buriedDepthM: p.buriedDepthM });
     relax(ps, p.volL, e.buried ? (p.volL * CW) / BURIED_TAU : p.uaFor(h), e.env, dt);
-    ps.frozen = ps.iceL >= 0.5 * p.volL;
+    const fr = ps.iceL >= 0.5 * p.volL;
+    if (fr !== ps.frozen) { ps.frozen = fr; s.issuesDirty = true; }
   }
   for (const id of net.heaters) {
     const hs = s.heaters[id], f = net.fx.get(id), sp = f.spec, st = f.p.settings || {};
@@ -790,9 +797,15 @@ function findIssues(R, ctx) {
 }
 
 // ---------------------------------------------------------------------------------------- commands
+// Commands can arrive right after the site changes (and while paused): bring the network up to date first.
+function ensure(ctx) {
+  if (!ctx.s || ctx.s.v !== STATE_V) ctx.s = fresh();
+  const site = ctx.get('site');
+  if (site && site.version !== ctx.s.version) sync(ctx.s, site, ctx);
+  return ctx.s;
+}
 function draw(ctx, p = {}) {
-  const s = ctx.s;
-  if (!s || s.v !== STATE_V) return null;
+  const s = ensure(ctx);
   const litres = +p.litres;
   if (!(litres > 0)) throw new Error('water.draw needs litres > 0');
   const id = p.id != null ? String(p.id) : 'draw' + s.nextDraw++;
@@ -805,18 +818,18 @@ function draw(ctx, p = {}) {
   return id;
 }
 function setTap(ctx, p = {}) {
-  const o = ctx.s && ctx.s.taps[p.id];
+  const o = ensure(ctx).taps[p.id];
   if (!o) throw new Error('no water outlet ' + p.id);
   o.open = !!p.open;
   if (p.tempC !== undefined) o.tempC = p.tempC;
 }
 function setDiverter(ctx, p = {}) {
   if (p.mode !== 'garden' && p.mode !== 'sewer') throw new Error('diverter mode is garden or sewer');
-  ctx.s.diverters[p.id] = { mode: p.mode };
+  ensure(ctx).diverters[p.id] = { mode: p.mode };
 }
 // Fill a tank from outside the homestead (a hose in town, a delivery): counted as imported.
 function fillTank(ctx, p = {}) {
-  const t = ctx.s.tanks[p.id];
+  const t = ensure(ctx).tanks[p.id];
   if (!t) throw new Error('no tank ' + p.id);
   const L = Math.min(Math.max(0, +p.litres || 0), t.capacityL - t.storedL);
   addLiquid(t, t.storedL, L, p.tempC ?? 12); t.storedL += L;
@@ -824,7 +837,7 @@ function fillTank(ctx, p = {}) {
   return L;
 }
 function emptyGrey(ctx, p = {}) {
-  const g = ctx.s.greywater.tanks[p.id];
+  const g = ensure(ctx).greywater.tanks[p.id];
   if (!g) throw new Error('no grey tank ' + p.id);
   ctx.s.greywater.toSewerL += g.storedL; g.storedL = 0;
 }
