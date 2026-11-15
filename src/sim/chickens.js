@@ -377,8 +377,7 @@ export function initChickens() {
 // ---------------------------------------------------------------------------------------- the light of the day
 // Natural light runs from civil dawn to civil dusk; a coop light on a timer adds light in the morning (the
 // usual practice, so the birds still go to roost at the natural dusk). Returns hours of day, clock hours.
-function lightDay(t, site, light, lit) {
-  const st = sunTimes(t, site);
+function lightDay(st, light, lit) {
   const dawnH = st.sunriseH - TWILIGHT_H, duskH = st.sunsetH + TWILIGHT_H, natural = duskH - dawnH;
   const extra = lit && light && light.on && light.hours > natural;
   const onH = extra ? duskH - light.hours : dawnH;
@@ -431,13 +430,14 @@ function step(c) {
 
   // light per shelter today
   const days = {};
+  const sun = sunTimes(t, site);
   for (const co of idx.coops) {
     const f = s.fx[co.id];
     let lit = !!(f.light && f.light.on);
     if (lit && elec && elec.loads && elec.loads[co.id + ':light']) lit = !!elec.loads[co.id + ':light'].served;
-    days[co.id] = lightDay(t, site, f.light, lit);
+    days[co.id] = lightDay(sun, f.light, lit);
   }
-  const wild = lightDay(t, site, null, false);
+  const wild = lightDay(sun, null, false);
 
   // roosters present at each place, for fertility
   let roosters = 0, hens = 0;
@@ -462,8 +462,12 @@ function step(c) {
   s.flock.count = count; s.flock.laying = laying; s.flock.eggsWaiting = s.eggs.length;
   for (const e of idx.feeders) { const f = s.fx[e.id]; if (f.feedKg <= 1e-6) { s.totals.feederWastedKg += f.feedKg; f.feedKg = 0; if (f.emptySinceT === null) f.emptySinceT = t; } else f.emptySinceT = null; }
   for (const e of idx.waterers) { const f = s.fx[e.id]; if (f.waterL - f.iceL <= 1e-6) { if (f.dryT === null) f.dryT = t; } else f.dryT = null; }
-  s.issues = computeIssues(s, idx, t, W, days, wild);
-  for (const id in s.birds) s.birds[id].status = statusLine(s, s.birds[id], idx, t, days, wild);
+  // the words (issues and each bird's status) are refreshed every half hour, and at once after any command
+  if (s.wordsDirty || (c.tick / EVERY) % 3 === 0) {
+    s.issues = computeIssues(s, idx, t, W, days, wild);
+    for (const id in s.birds) s.birds[id].status = statusLine(s, s.birds[id], idx, t, days, wild);
+    s.wordsDirty = false;
+  }
   s.lastStepT = t;
 }
 
@@ -1137,6 +1141,8 @@ export function overlayData(state) {
     cells: Object.values(s.ground.cells).map((c) => ({ x: c.x, z: c.z, w: c.w, d: c.d, yaw: c.yaw, forage: c.forageGm2 / PASTURE_K, nGm2: c.nGm2 })),
   };
 }
+
+for (const k of Object.keys(commands)) { const fn = commands[k]; commands[k] = (c, p) => { const r = fn(c, p); if (c.s) c.s.wordsDirty = true; return r; }; }
 
 export const chickensSystem = () => ({
   name: 'chickens',
