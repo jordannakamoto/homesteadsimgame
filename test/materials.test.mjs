@@ -187,7 +187,7 @@ test('buy, add and remove conserve money and mass', () => {
   r = runStockCommand(sim, 'stock.remove', { id: 'lumber_2x4', qty: 5 });
   assert.ok(r.ok); assert.equal(s.items.lumber_2x4, 15);
   near(mBefore - stockMassKg(sim.state), 5 * ITEMS.lumber_2x4.massKgPerUnit, 1e-9, 'mass removed');
-  assert.equal(s.money, Math.round((2500 - spent) * 100) / 100, 'removing does not refund');
+  assert.equal(s.money, Math.round((START_MONEY_USD - spent) * 100) / 100, 'removing does not refund');
   runStockCommand(sim, 'stock.remove', { id: 'lumber_2x4', qty: 15 });
   assert.ok(!('lumber_2x4' in s.items), 'empty stacks are deleted');
   runStockCommand(sim, 'stock.add', { id: 'log_oak', qty: 0.4 });
