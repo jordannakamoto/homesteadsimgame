@@ -336,7 +336,7 @@ function install(ctx, p) {
   const s = ctx.s, pr = s.progress[p && p.structId];
   if (!pr) return { ok: false, reason: 'unknown building' };
   const fromStacks = p.from === 'stacks';
-  const out = { ok: false, installed: [], partial: [], refused: [], stagesDone: [], done: false };
+  const out = { ok: false, installed: [], set: [], partial: [], refused: [], stagesDone: [], done: false };
   const before = new Set(C.STAGE_ORDER.filter((st) => stageComplete(pr, st)));
   for (const id of p.memberIds || []) {
     const m = pr.members[id];
@@ -352,6 +352,13 @@ function install(ctx, p) {
       }
     }
     const completes = !ln || give + 1e-6 >= need;
+    if (p.hold) {                          // set in place by hand: the material goes in, the piece stays loose until it is fastened
+      if (!ln || need <= 1e-6) { out.refused.push({ id, reason: 'already set' }); break; }
+      const used = fromStacks ? SUP.useFromStacks(s, ln.itemId, give, pr.x, pr.z) : SUP.useCarried(s, ln.itemId, give);
+      m.got = round6(m.got + used); ln.used = round6(ln.used + used);
+      if (completes) { m.got = m.need; out.set.push(id); } else { out.partial.push({ id, got: m.got, need: m.need }); break; }
+      continue;
+    }
     if (completes) { const lack = supplies(s, pr, m.stage, pr.tally[m.stage][0] + 1, true); if (lack) { out.refused.push({ id, reason: 'no fasteners', itemId: lack }); break; } }
     if (give > 0) {
       const used = fromStacks ? SUP.useFromStacks(s, ln.itemId, give, pr.x, pr.z) : SUP.useCarried(s, ln.itemId, give);
@@ -363,7 +370,7 @@ function install(ctx, p) {
       out.installed.push(id);
     } else { out.partial.push({ id, got: m.got, need: m.need }); break; }
   }
-  out.ok = out.installed.length > 0 || out.partial.length > 0;
+  out.ok = out.installed.length > 0 || out.partial.length > 0 || out.set.length > 0;
   if (!out.ok) { out.reason = out.refused[0] ? out.refused[0].reason : 'nothing to do'; if (out.refused[0] && out.refused[0].itemId) out.itemId = out.refused[0].itemId; return out; }
   refresh(ctx, s, pr);
   out.stagesDone = C.STAGE_ORDER.filter((st) => !before.has(st) && stageComplete(pr, st));

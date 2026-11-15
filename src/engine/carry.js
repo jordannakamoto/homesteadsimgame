@@ -114,5 +114,37 @@
       get loadForm() { return loadForm; },
     };
   }
-  window.__carry = { create };
+  // Reach: the spot the pointer picks, held within arm's reach of the character, with a marker on the ground.
+  // With the mouse captured (no pointer) the spot is a step ahead, the way the camera looks.
+  //   createReach(G, { reach }) -> { x, z, px, py (pointer, canvas pixels), free (a pointer is steering it), update(show), setReach(m) }
+  function createReach(G, opts = {}) {
+    const T = G.THREE, canvas = G.renderer.domElement, ray = new T.Raycaster(),
+      ring = new T.Mesh(new T.RingGeometry(0.15, 0.21, 20), new T.MeshBasicMaterial({ color: 0xffe2a0, transparent: true, opacity: 0.85, depthTest: false, fog: false, side: T.DoubleSide }));
+    ring.rotation.x = -Math.PI / 2; ring.renderOrder = 20; ring.visible = false;
+    G.scene.add(ring);
+    const R = { x: 0, z: 0, px: 0, py: 0, free: false, reach: opts.reach || 2, cx: 0, cy: 0, has: false, w: 1, h: 1 };
+    canvas.addEventListener('pointermove', (e) => { R.cx = e.clientX; R.cy = e.clientY; R.has = true; }, true);
+    canvas.addEventListener('pointerdown', (e) => { R.cx = e.clientX; R.cy = e.clientY; R.has = true; }, true);
+    R.update = (show) => {
+      const P = G.player, r = canvas.getBoundingClientRect();
+      R.w = r.width; R.h = r.height;
+      R.free = R.has && !document.pointerLockElement;
+      let tx, tz;
+      if (R.free) {
+        R.px = R.cx - r.left; R.py = R.cy - r.top;
+        ray.setFromCamera({ x: (R.px / r.width) * 2 - 1, y: -(R.py / r.height) * 2 + 1 }, G.camera);
+        const o = ray.ray.origin, d = ray.ray.direction;
+        let t = 1, hit = false;
+        for (; t < 200; t += 0.7) if (o.y + d.y * t < G.heightAt(o.x + d.x * t, o.z + d.z * t)) { hit = true; break; }
+        if (hit) { let a = t - 0.7, b = t; for (let i = 0; i < 5; i++) { const m = (a + b) / 2; if (o.y + d.y * m < G.heightAt(o.x + d.x * m, o.z + d.z * m)) b = m; else a = m; } tx = o.x + d.x * b; tz = o.z + d.z * b; }
+        else { tx = P.x + d.x * 3; tz = P.z + d.z * 3; }
+      } else { R.px = r.width / 2; R.py = r.height / 2; tx = P.x - Math.sin(G.cam.yaw) * R.reach; tz = P.z - Math.cos(G.cam.yaw) * R.reach; }
+      const dx = tx - P.x, dz = tz - P.z, dd = Math.hypot(dx, dz) || 1, k = Math.min(1, R.reach / dd);
+      R.x = P.x + dx * k; R.z = P.z + dz * k;
+      ring.visible = !!show;
+      if (show) ring.position.set(R.x, Math.max(G.heightAt(R.x, R.z), P.y) + 0.07, R.z);
+    };
+    return R;
+  }
+  window.__carry = { create, createReach };
 })();

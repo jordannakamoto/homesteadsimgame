@@ -87,6 +87,10 @@ export const WORK = Object.freeze({
   beatS: 0.33,                        // seconds between blows with a hammer
   tools: Object.freeze([{ tool: 'hammer', speed: 1 }, { tool: 'framing_nailer', speed: 3, power: true }]),
   sound: Object.freeze({ pier: 'scrape', footing: 'scrape', slab: 'scrape', stemwall: 'scrape', site: 'dig', sheathing: 'thunk', membrane: 'rustle', roofing: 'thunk', insulation: 'rustle', door: 'thunk', window: 'thunk' }),
+  // by hand: blows to fasten a piece once it is set in place (stamps for a pier block, strokes of the shovel for the site)
+  nails: Object.freeze({ site: 6, pier: 2, post: 1, beam: 2, skid: 2, footing: 2, stemwall: 3, slab: 3, joist: 2, plate: 2, stud: 2, header: 2, rafter: 2, sheathing: 3, membrane: 2, cladding: 3, roofing: 3, insulation: 1, lining: 3, door: 2, window: 2 }),
+  swingS: 0.3,                        // seconds between swings while the button is held
+  reachM: 2.1,                        // arm's reach around the character
   guidedSpeed: 2.5,                     // Guided fills a stage in this many times faster than working by hand
 });
 export function workSpeed(tools = [], hasPower = false) {
@@ -95,6 +99,7 @@ export function workSpeed(tools = [], hasPower = false) {
   return k;
 }
 export const memberBeats = (kind) => WORK.beats[kind] || 2;
+export const memberNails = (kind) => WORK.nails[kind] || 2;
 
 // ---- ready-made plans in the plan book
 export const PLAN_BOOK = Object.freeze({

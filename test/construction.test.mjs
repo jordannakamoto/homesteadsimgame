@@ -265,3 +265,21 @@ test('a plan sent again keeps what was built and ordered; one sent as built is f
   const all = sim.commandNow('construction.setPlan', K.planFromPieces(99, shed.pieces.map((p) => ({ ...p, struct: 99, built: true })), shed.materialsList, {}));
   assert.ok(all.ok && cs(sim).progress[99].done);
 });
+
+test('set by hand, then fastened: a piece set in place holds its material but is not built until it is nailed', () => {
+  const sim = start(); sim.commandNow('construction.setOption', { key: 'instant', value: true });
+  sim.commandNow('construction.order', { structId: shed.struct, stage: 'all' });
+  const s = cs(sim), P = pr(sim);
+  sim.commandNow('construction.install', { structId: P.id, memberIds: Object.keys(P.members).filter((id) => P.members[id].stage === 'site') });
+  const pier = Object.keys(P.members).find((id) => P.members[id].kind === 'pier');
+  assert.equal(sim.commandNow('construction.install', { structId: P.id, memberIds: [pier], hold: true }).reason, 'no material');
+  sim.commandNow('construction.pickUp', { stackId: s.stacks.find((k) => k.itemId === 'pier_block').id });
+  const r = sim.commandNow('construction.install', { structId: P.id, memberIds: [pier], hold: true });
+  assert.ok(r.ok); assert.deepEqual(r.set, [pier]); assert.equal(s.carried, null);
+  assert.equal(P.members[pier].built, 0); assert.equal(P.members[pier].got, 1); assert.equal(P.tally.foundation[0], 0);
+  assert.equal(sim.commandNow('construction.install', { structId: P.id, memberIds: [pier], hold: true }).reason, 'already set');
+  assert.deepEqual(SUP.imbalance(s), {});
+  const n = sim.commandNow('construction.install', { structId: P.id, memberIds: [pier] });      // the nailing: needs nothing in the hands
+  assert.ok(n.ok); assert.deepEqual(n.installed, [pier]); assert.equal(P.members[pier].built, 1);
+  assert.deepEqual(SUP.imbalance(s), {});
+});
