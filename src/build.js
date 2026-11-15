@@ -96,7 +96,12 @@
     uiVer: 1,
     ovVer: 1,
     hintText: "",
+    fold: false,
+    barH: 0,
   };
+  try {
+    B.fold = localStorage.getItem("build:fold") === "1";
+  } catch {}
 
   /* ---------- small helpers ---------- */
   const isWin = (t) => !!t && t.startsWith("window");
@@ -2546,6 +2551,23 @@
     for (const [k, ds] of deg) if (!(ds.length === 2 && ds[0] === ds[1])) S.corners.push(parse(k));
   }
 
+  // wall corners of every building standing on the same grid as a frame (its own included), in the frame's metres
+  function gridCorners(F) {
+    const out = [];
+    for (const O of B.structs) {
+      if (O.po || O.cx === undefined || (F.level !== undefined && O.level !== (F.level || 0)) || Math.hypot(O.cx - F.ox, O.cz - F.oz) > O.rad + 40) continue;
+      for (const [ci, cj] of O.corners) {
+        if (O === F) {
+          out.push([ci, cj]);
+          continue;
+        }
+        const [x, z] = toWorld(O, ci, cj),
+          [lx, lz] = toLocal(F, x, z);
+        if (Math.abs(lx - Math.round(lx)) < 1e-3 && Math.abs(lz - Math.round(lz)) < 1e-3) out.push([Math.round(lx), Math.round(lz)]);
+      }
+    }
+    return out;
+  }
   // after a structure changes, the terrain chunks under it are refreshed (a moment later, so a drag does it once)
   // to hide or bring back the grass and ground cover beneath its floors and paths
   const COVER_TAPS = [[0, 0], [0.3, 0], [-0.3, 0], [0, 0.3], [0, -0.3]];
@@ -3883,7 +3905,7 @@
   const SNAP = { x: 0, z: 0, type: "", g: [], ang: null, wx: 0, wz: 0 };
   const POINT_TOOL = { wall: 1, path: 1, pillar: 1, tower: 1, measure: 1 };
   const snapOn = () => B.snap !== (B.ctrl && !B.ctrlWheel);
-  const SNAP_NAME = { end: "End", mid: "Middle", centre: "Centre", point: "Measured point", edge: "On wall", angle: "", guide: "Lined up", grid: "", free: "" };
+  const SNAP_NAME = { end: "End", mid: "Middle", centre: "Centre", point: "Measured point", edge: "On wall", angle: "", guide: "Lined up", extend: "In line with wall", cross: "Where two walls would meet", grid: "", free: "" };
   // the points and wall lines of a structure that others can snap to, in world metres
   function snapData(S) {
     if (S.snapV === S.ver) return S.snapD;
@@ -4054,6 +4076,61 @@
       if (ax) o.g.push([ax[0], ax[1], gx, gz]);
       if (az) o.g.push([az[0], az[1], gx, gz]);
       if (ax || az) o.type = "guide";
+    }
+    // 5. in line with a wall that runs at an angle to this grid: carry its line on past its end. (Walls square to the
+    // grid are already covered by lining up with their corners.) Two such lines near the cursor meet at a point.
+    let e1 = null,
+      e2 = null;
+    for (const S of near) {
+      const D = snapData(S).lines;
+      for (let n = 0; n < D.length; n += 4) {
+        const p0x = (D[n] - F.ox) * c - (D[n + 1] - F.oz) * s,
+          p0z = (D[n] - F.ox) * s + (D[n + 1] - F.oz) * c,
+          p1x = (D[n + 2] - F.ox) * c - (D[n + 3] - F.oz) * s,
+          p1z = (D[n + 2] - F.ox) * s + (D[n + 3] - F.oz) * c,
+          len = Math.hypot(p1x - p0x, p1z - p0z);
+        if (len < 0.2) continue;
+        const ux = (p1x - p0x) / len,
+          uz = (p1z - p0z) / len;
+        if (Math.abs(ux) < 0.02 || Math.abs(uz) < 0.02) continue;
+        const t = (rx - p0x) * ux + (rz - p0z) * uz,
+          dd = Math.abs((rx - p0x) * uz - (rz - p0z) * ux);
+        if (dd > 0.25 || (t > -0.3 && t < len + 0.3) || t < -15 || t > len + 15) continue;
+        const cand = { d: dd, ux, uz, ex: t < 0 ? p0x : p1x, ez: t < 0 ? p0z : p1z, k: t < 0 ? -t : t - len, sg: t < 0 ? -1 : 1 };
+        if (!e1 || dd < e1.d) ((e2 = e1 && Math.abs(e1.ux * uz - e1.uz * ux) > 0.2 ? e1 : e2), (e1 = cand));
+        else if ((!e2 || dd < e2.d) && Math.abs(e1.ux * uz - e1.uz * ux) > 0.2) e2 = cand;
+      }
+    }
+    if (e1) {
+      // where it ends: on the second wall's line, on the round angle or the lined-up corner already found, else a
+      // round distance past the wall's end
+      const meet = (qx, qz, vx, vz) => {
+        const den = e1.ux * vz - e1.uz * vx;
+        if (Math.abs(den) < 0.05) return null;
+        const k = ((qx - e1.ex) * vz - (qz - e1.ez) * vx) / den;
+        return [e1.ex + e1.ux * k, e1.ez + e1.uz * k];
+      };
+      let pt = null,
+        kind = "extend";
+      if (e2) ((pt = meet(e2.ex, e2.ez, e2.ux, e2.uz)), (kind = "cross"));
+      else if (o.type === "angle") pt = meet(a.i, a.j, Math.cos(o.ang), Math.sin(o.ang));
+      else if (ax) pt = meet(ax[0], ax[1], 0, 1);
+      else if (az) pt = meet(az[0], az[1], 1, 0);
+      if (!pt || Math.hypot(pt[0] - rx, pt[1] - rz) > 0.45) {
+        const k = Math.max(0.5, Math.round(e1.k * 2) / 2) * e1.sg;
+        pt = [e1.ex + e1.ux * k, e1.ez + e1.uz * k];
+        kind = "extend";
+        o.g.length = 0;
+      }
+      gx = pt[0];
+      gz = pt[1];
+      o.g.push([e1.ex, e1.ez, gx, gz]);
+      if (kind === "cross") o.g.push([e2.ex, e2.ez, gx, gz]);
+      o.type = kind;
+      o.ang = null;
+      o.x = gx;
+      o.z = gz;
+      return o;
     }
     o.x = tidy(gx);
     o.z = tidy(gz);
@@ -4611,6 +4688,71 @@
     return finishOp(op);
   }
   const stretchable = (q) => q.kind === "run" && stretchOp(q.S, q.g, 1).addFloors.length + stretchOp(q.S, q.g, -1).addFloors.length > 0;
+  // A structure's grid as it would stand after an op, without touching the structure: for edits made of two steps.
+  function virtualAfter(S, op) {
+    const V = { ...S, floors: new Set(S.floors), walls: new Map(S.walls), wmat: new Map(S.wmat), fmat: new Map(S.fmat), oid: new Map(S.oid), wid: new Map(S.wid), roofs: S.roofs.slice() };
+    for (const idx of [...op.delRoofs].sort((a, b) => b - a)) V.roofs.splice(idx, 1);
+    for (const [i, j] of op.delFloors) (V.floors.delete(ck(i, j)), V.fmat.delete(ck(i, j)));
+    for (const [i, j, d] of op.delWalls) {
+      const k = ek(i, j, d);
+      (V.walls.delete(k), V.wmat.delete(k), V.oid.delete(k), V.wid.delete(k));
+    }
+    for (const [i, j, m] of op.addFloors) (V.floors.add(ck(i, j)), m && m !== "planks" ? V.fmat.set(ck(i, j), m) : V.fmat.delete(ck(i, j)));
+    for (const [i, j, d, ty, m] of op.addWalls) {
+      const k = ek(i, j, d);
+      V.walls.set(k, ty || "wall");
+      m && m !== "timber" ? V.wmat.set(k, m) : V.wmat.delete(k);
+    }
+    for (const r of op.addRoofs) V.roofs.push({ ...r });
+    if (op.ids) {
+      for (const [k, id] of op.ids.wid || []) V.wid.set(k, id);
+      for (const [k, id] of op.ids.oid || []) V.oid.set(k, id);
+    }
+    return V;
+  }
+  // the one op that takes a structure's grid from where it stands to a virtual state
+  function diffOp(S, V) {
+    const op = blankOp(S),
+      mat = (M, k) => M.wmat.get(k) || "timber",
+      sameRoof = (p, q) => p.id === q.id && p.i0 === q.i0 && p.i1 === q.i1 && p.j0 === q.j0 && p.j1 === q.j1;
+    op.ids = { wid: [], oid: [], fid: [] };
+    op.move = true;
+    for (const k of S.floors) V.floors.has(k) || op.delFloors.push(parse(k));
+    for (const k of V.floors) S.floors.has(k) || op.addFloors.push([...parse(k), V.fmat.get(k) || "planks"]);
+    for (const [k, ty] of S.walls) (V.walls.get(k) === ty && mat(V, k) === mat(S, k)) || op.delWalls.push(parse(k));
+    for (const [k, ty] of V.walls) {
+      if (S.walls.get(k) === ty && mat(V, k) === mat(S, k)) continue;
+      op.addWalls.push([...parse(k), ty, mat(V, k)]);
+      V.wid.get(k) && op.ids.wid.push([k, V.wid.get(k)]);
+      V.oid.get(k) && op.ids.oid.push([k, V.oid.get(k)]);
+    }
+    S.roofs.forEach((r, idx) => V.roofs.some((q) => sameRoof(q, r)) || op.delRoofs.push(idx));
+    for (const q of V.roofs) S.roofs.some((r) => sameRoof(q, r)) || op.addRoofs.push(q);
+    op.replacing = op.delRoofs.length > 0;
+    return op;
+  }
+  // Drag a room's corner both ways at once: the wall round the corner is pushed al metres and this wall ac metres.
+  function cornerOp(S, g, corner, al, ac) {
+    const op1 = stretchOp(S, corner, al);
+    if (!op1.adds && !op1.dels) return stretchOp(S, g, ac);
+    const V = virtualAfter(S, op1),
+      mid = (g.t0 + g.t1) / 2,
+      g2 = gridRuns(V).find((r) => r.d === g.d && r.line === g.line && r.t0 <= mid && r.t1 >= mid);
+    if (!g2) return op1;
+    g2.id = g.id;
+    const op2 = stretchOp(V, g2, ac);
+    if (!op2.adds && !op2.dels) return op1;
+    const V2 = virtualAfter(V, op2),
+      op = diffOp(S, V2),
+      runs = gridRuns(V2),
+      x = g.d === 0,
+      line2 = g.line + (op2.addWalls.length ? Math.sign(ac) * Math.max(...op2.addWalls.filter((w) => w[2] === g.d).map((w) => Math.abs((x ? w[1] : w[0]) - g.line))) : 0),
+      r1 = runs.find((r) => r.d === g.d && r.line === line2 && r.t0 <= mid && r.t1 >= mid);
+    if (r1) dim(op, x ? (r1.t0 + r1.t1) / 2 : r1.line, x ? r1.line : (r1.t0 + r1.t1) / 2, fmtM(r1.t1 - r1.t0));
+    for (const q of op2.dims) op.dims.push(q);
+    op.label = op2.label || op1.label;
+    return finishOp(op);
+  }
   // the grid wall that turns the corner at one end of another
   function cornerRun(S, g, which) {
     const t = which ? g.t1 : g.t0;
@@ -4708,7 +4850,8 @@
         ac = Math.round(x ? dz : dx),
         corner = cornerRun(S, g, M.end);
       key = "e" + al + "," + ac;
-      if (key !== M.key) op = Math.abs(al) >= Math.abs(ac) ? (al ? (corner ? stretchOp(S, corner, al) : endOp(S, g, M.end, M.end ? al : -al)) : null) : stretchOp(S, g, ac);
+      // a corner goes both ways at once; an end that is not a corner follows the larger of the two movements
+      if (key !== M.key) op = al && ac && corner ? cornerOp(S, g, corner, al, ac) : Math.abs(al) >= Math.abs(ac) ? (al ? (corner ? stretchOp(S, corner, al) : endOp(S, g, M.end, M.end ? al : -al)) : null) : stretchOp(S, g, ac);
     } else {
       // free-angle end: snap it like a wall being drawn from its other end
       const a = M.end ? { i: g.x0, j: g.z0 } : { i: g.x1, j: g.z1 },
@@ -5132,7 +5275,9 @@
     let F = null;
     if (B.drag) F = B.drag.F;
     else {
-      let best = 1e9;
+      let best = 1e9,
+        bt = 1e9;
+      const along = (y) => (ray.ray.direction.y < -1e-4 ? (y - ray.ray.origin.y) / ray.ray.direction.y : 1e9);
       for (const S of B.structs) {
         // paths and loose furniture live in their own structures, which only those tools draw into
         if (S.level !== B.level || (S.po ? tool !== "path" && tool !== "decor" : tool === "path")) continue;
@@ -5140,22 +5285,38 @@
         const [lx, lz] = toLocal(S, hit[0], hit[1]);
         const dx = Math.max(S.b.i0 - lx, 0, lx - S.b.i1),
           dz = Math.max(S.b.j0 - lz, 0, lz - S.b.j1),
-          dist = Math.hypot(dx, dz);
-        if (dist < (tool === "decor" && !S.po ? 0.6 : 3.5) && (dist < best || (dist === best && !S.po))) {
+          dist = Math.hypot(dx, dz),
+          t = S.po ? 1e9 : along(S.y0 + FLOOR_T);
+        // of two the cursor is right over, the one the ray meets first is the one you are pointing at
+        if (dist < (tool === "decor" && !S.po ? 0.6 : 3.5) && (dist < best - 1e-6 || (Math.abs(dist - best) <= 1e-6 && (S.po ? false : F && F.po ? true : t < bt)))) {
           best = dist;
+          bt = t;
           F = S;
         }
       }
-      if (!F && B.level !== 0 && tool !== "path" && tool !== "copy" && tool !== "decor" && tool !== "select" && tool !== "measure") {
+      if (B.level !== 0 && tool !== "path" && tool !== "copy" && tool !== "decor" && tool !== "select" && tool !== "measure") {
+        // A storey that does not exist yet starts over (or a cellar under) the building the cursor is on. That may be
+        // a different building from the nearest one that already has this storey, standing at a different height.
         const below = B.level > 0 ? B.level - 1 : 0;
+        let FN = null,
+          bn = F ? best : 1e9,
+          tn = F ? bt : 1e9;
         for (const S of B.structs) {
           if (S.level !== below || S.po) continue;
-          const y0 = B.level > 0 ? S.y0 + EAVE * S.hs : S.y0 - EAVE * B.hs,
-            hit = planeHit(y0 + FLOOR_T);
+          const y0 = B.level > 0 ? S.y0 + EAVE * S.hs : S.y0 - EAVE * B.hs;
+          if (B.structs.some((O) => O.level === B.level && !O.po && sameGrid(O, S) && Math.abs(O.y0 - y0) < 0.3)) continue;
+          const hit = planeHit(y0 + FLOOR_T);
           if (!hit) continue;
-          const [lx, lz] = toLocal(S, hit[0], hit[1]);
-          if (lx > S.b.i0 - 3 && lx < S.b.i1 + 3 && lz > S.b.j0 - 3 && lz < S.b.j1 + 3) F = { ox: S.ox, oz: S.oz, yaw: S.yaw, y0, isNew: true, level: B.level, hs: B.hs };
+          const [lx, lz] = toLocal(S, hit[0], hit[1]),
+            dist = Math.hypot(Math.max(S.b.i0 - lx, 0, lx - S.b.i1), Math.max(S.b.j0 - lz, 0, lz - S.b.j1)),
+            t = along(y0 + FLOOR_T);
+          if (dist < 3 && (dist < bn - 1e-6 || (Math.abs(dist - bn) <= 1e-6 && t < tn))) {
+            bn = dist;
+            tn = t;
+            FN = { ox: S.ox, oz: S.oz, yaw: S.yaw, y0, isNew: true, level: B.level, hs: B.hs };
+          }
         }
+        if (FN) F = FN;
         if (!F) {
           B.hover = null;
           return;
@@ -5292,10 +5453,10 @@
       gg.obox([(x0 + x1) / 2, FLOOR_T + 0.05, (z0 + z1) / 2], [dx / 2, 0, dz / 2], [0, 0.01, 0], [(-dz / L) * gw, 0, (dx / L) * gw], [1, 1, 1]);
     };
     for (const q of op.guides) line(q[0], q[1], q[2], q[3]);
-    if (S && tip && B.tool === "room" && snapOn()) {
+    if (tip && B.tool === "room" && snapOn()) {
       let gi = null,
         gj = null;
-      for (const [ci, cj] of S.corners) {
+      for (const [ci, cj] of gridCorners(F)) {
         if (ci === tip.i && cj !== tip.j && (!gi || Math.abs(cj - tip.j) < Math.abs(gi[1] - tip.j))) gi = [ci, cj];
         if (cj === tip.j && ci !== tip.i && (!gj || Math.abs(ci - tip.i) < Math.abs(gj[0] - tip.i))) gj = [ci, cj];
       }
@@ -5837,6 +5998,21 @@
     rebuild(t.S);
     touchUi();
   }
+  // Build mode frames the site in the part of the view the bar leaves free: the picture is shifted up by half the
+  // bar's height. It is an off-centre projection, so the camera itself, picking and the post pass all stay in step.
+  const VIEW = { off: 0, w: 0, h: 0 };
+  window.addEventListener("resize", () => (VIEW.w = 0));
+  function frameView(dt) {
+    const want = B.on ? Math.round((B.barH || 0) / 2) : 0;
+    if (VIEW.off === want && (VIEW.w || !want)) return;
+    const d = want - VIEW.off;
+    VIEW.off = Math.abs(d) < 0.75 ? want : VIEW.off + d * (1 - Math.exp(-14 * dt));
+    VIEW.w = window.innerWidth;
+    VIEW.h = window.innerHeight;
+    if (VIEW.off > 0.25) G.camera.setViewOffset(VIEW.w, VIEW.h, 0, VIEW.off, VIEW.w, VIEW.h);
+    else if (G.camera.view) G.camera.clearViewOffset();
+    B.key = "";
+  }
   function toggle() {
     if (P.tool !== "build") {
       B.prevTool = P.tool;
@@ -6079,7 +6255,7 @@
       }
     } else if (t === "copy") g.push(G_.act("turn", "Turn", "turn", "Shift wheel"));
     const busy = B.move ? "move" : B.drag && B.drag.mode === "click" ? "chain" : B.tapMode ? B.tapMode : B.measA ? "measure" : t === "copy" ? "copy" : "";
-    return { tool: t, top: t === "tower" ? "room" : t === "copy" ? "select" : t, tools: TOOLS, groups: g, hint: B.hintText, undo: B.undo.length, redo: B.redo.length, snap: B.snap, free: B.free, level: B.level, levelName: LEVEL_NAME(B.level), busy, sel: B.sel.length };
+    return { tool: t, top: t === "tower" ? "room" : t === "copy" ? "select" : t, tools: TOOLS, groups: g, hint: B.hintText, undo: B.undo.length, redo: B.redo.length, snap: B.snap, free: B.free, level: B.level, levelName: LEVEL_NAME(B.level), busy, sel: B.sel.length, fold: B.fold };
   }
   function choose(id, v) {
     const RS = RSHAPES[B.rshape],
@@ -6115,7 +6291,12 @@
     else if (id === "s:del") selDelete();
     else if (id === "s:dup") duplicate();
     else if (id === "snap") B.snap = !B.snap;
-    else if (id === "free") B.free = !B.free;
+    else if (id === "fold") {
+      B.fold = !B.fold;
+      try {
+        localStorage.setItem("build:fold", B.fold ? "1" : "");
+      } catch {}
+    } else if (id === "free") B.free = !B.free;
     else if (id === "level") return setLevel(B.level + v);
     else if (id === "undo") return undo();
     else if (id === "redo") return redo();
@@ -6179,6 +6360,7 @@
     if (e.code === "Equal" || e.code === "Minus" || e.code === "NumpadAdd" || e.code === "NumpadSubtract") return (choose("lift", e.code === "Equal" || e.code === "NumpadAdd" ? 1 : -1), true);
     if (e.code === "Comma" || e.code === "Period") return (cycleStyle(e.code === "Comma"), true);
     if (e.code === "Slash" && !e.repeat) return (choose("snap"), true);
+    if (e.code === "Backquote" && !e.repeat) return (choose("fold"), true);
     if (e.code === "KeyM" && !e.repeat) return (cycleMat(e.shiftKey), true);
     if (e.code === "KeyK" && !e.repeat) return (choose("paint"), true);
     if (e.code === "KeyI" && !e.repeat) return (B.tool === "select" && B.sel.length === 1 ? pickUp(B.sel[0]) : choose("pick"), true);
@@ -7368,6 +7550,7 @@
         hearth.position.set(P.x, P.y + 1.9, P.z);
       }
       B.sheltered = sheltered;
+      frameView(dt);
       if (!B.on) return;
       if (B.camT > 0) {
         B.camT -= dt;

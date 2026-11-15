@@ -52,7 +52,7 @@ async function open(opts) {
   await G(() => { __game.cam.dist = 44; }); await step(30);
   await page.keyboard.press('KeyR'); await step(2);
   check('R picks the Room tool and its options are shown as swatches', await G(() => __build.view().tool === 'room' && document.querySelectorAll('#bopts .bsw').length >= 18 && !!document.querySelector('#bopts .btile[aria-pressed="true"]')));
-  await G(() => { const g = __game, c = g.cam, x = g.player.x - Math.sin(c.yaw) * 6 - Math.cos(c.yaw) * 5, z = g.player.z - Math.cos(c.yaw) * 6 + Math.sin(c.yaw) * 5; const r = g.renderer.domElement.getBoundingClientRect(), v = new g.THREE.Vector3(x, g.heightAt(x, z), z).project(g.camera); window.__p0 = [r.left + (v.x * 0.5 + 0.5) * r.width, r.top + (-v.y * 0.5 + 0.5) * r.height]; });
+  await G(() => { const g = __game, c = g.cam, x = g.player.x - Math.sin(c.yaw) * 1 - Math.cos(c.yaw) * 5, z = g.player.z - Math.cos(c.yaw) * 1 + Math.sin(c.yaw) * 5; const r = g.renderer.domElement.getBoundingClientRect(), v = new g.THREE.Vector3(x, g.heightAt(x, z), z).project(g.camera); window.__p0 = [r.left + (v.x * 0.5 + 0.5) * r.width, r.top + (-v.y * 0.5 + 0.5) * r.height]; });
   await move(await G(() => window.__p0));
   await G(() => { const p = __build.state.pending; window.__F = { ox: p.ox, oz: p.oz, yaw: p.yaw }; });
 
