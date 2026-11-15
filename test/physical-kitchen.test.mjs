@@ -142,12 +142,31 @@ test("pantry custody, fragment limits, eating and bad commands cannot duplicate 
   );
   assert.equal(JSON.stringify(st), before);
   const food = st.objects.find((o) => o.kind === "carrot");
-  food.p = { x: 0.05, y: 0.12, z: 0.8 };
-  food.cooked = 1;
+  const pan = st.objects.find((o) => o.kind === "pan");
+  food.p = { ...pan.p, y: pan.p.y + 0.1 };
   sim.state.sys.cooking.fullness = 30;
-  act(sim, "eat", { id: food.id });
-  assert.equal(sim.state.sys.cooking.fullness, 42);
-  assert.equal(sim.commandNow("kitchen.eat", { id: food.id }).ok, false);
+  act(sim, "grab", { id: pan.id });
+  const plate = { x: 0.05, y: 0, z: 0.8 };
+  assert.equal(
+    sim.commandNow("kitchen.plate", plate).ok,
+    false,
+    "raw food stays in pan",
+  );
+  food.cooked = 1;
+  act(sim, "plate", plate);
+  assert.equal(sim.state.sys.cooking.fullness, 30, "serving does not eat");
+  advance(sim, 1); // The held pan can still move after its contents are removed.
+  assert.equal(
+    sim.commandNow("kitchen.plate", plate).ok,
+    false,
+    "cannot serve twice",
+  );
+  const copy = createGameSim(1337);
+  copy.load(sim.serialize());
+  const meal = copy.state.sys.cooking.meals[0];
+  assert.equal(meal.recipe, "panCarrots");
+  assert.equal(copy.commandNow("cooking.eat", { id: meal.id }).ok, true);
+  assert.equal(copy.state.sys.cooking.fullness, 42);
   for (let i = 0; i < 7; i++) act(sim, "carrot");
   assert.equal(stock.food_carrot || 0, 0);
   assert.equal(sim.commandNow("kitchen.carrot").ok, false);

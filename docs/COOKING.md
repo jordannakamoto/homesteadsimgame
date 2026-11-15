@@ -6,14 +6,13 @@ The current kitchen replaces the recipe/button interface with direct manipulatio
 
 Press **K** near the kitchen (first use places a starter bench). No cooking buttons or recipe selectors appear.
 
-- Left-drag the carrot, knife or pan. Releasing drops it under gravity. Drag the basket to take another carrot from pantry stock.
-- Drag the knife above a carrot, then **hold right mouse while still holding left** to lower the blade. Release right to lift it for another cut. The blade cuts where it crosses the food, rather than triggering a canned chop. Pieces have new closed geometry, independent rigid bodies and conserved mass.
-- Drop pieces into the hollow pan. Drag the pan onto any part of the hob, including partly off the burner. Its walls carry the loose ingredients through collision contacts.
-- Drag the physical stove dial upward for heat, downward to switch it off. **H** toggles a diagnostic temperature overlay on the pan. Hover food to see temperature and doneness. Normal rendering shows browning without the diagnostic colors.
-- Wheel adjusts held-object height. **Esc** leaves; heat continues with world time. Turning off the burner leaves residual pan heat. Handling works while world time is paused; heating does not.
-- Drop food onto the plate and press **E** to eat. **Delete** discards hovered food. Eating restores hunger, with a modest bonus for cooked food. Burned/spoiled pieces are refused.
+- Click the knife to pick it up, then click where you want to cut. The blade lowers through the carrot and lifts for the next cut. Right-click to set the knife down. Each slice remains a separate physical piece.
+- Drag an ingredient to move it, or drag the cutting board or Shift-drag a piece to gather everything on the board at once. Drop the pieces into the pan.
+- Drag the pan onto the hob. Partial overlap with the burner changes the heating pattern. Drag the stove dial up for more heat and down to turn it off. A hot pan with food gives off wisps that darken as the food burns. **H** shows the temperature grid.
+- Once the food is cooked, drag the pan over the plate and release. The kitchen shows **Meal ready**, and the packed meal goes to **Inventory (I)**. Eat it later from the inventory, or press **E** in the kitchen. **Delete** discards hovered pieces. The plate refuses undercooked, burned or spoiled food.
+- **Esc** leaves the kitchen. Heating continues with world time. Turning off the burner leaves residual heat.
 
-Old saved prepared meals can still be eaten with E when no physical food is selected. M collects a completed legacy batch. Legacy prep ingredients are refunded on entering the new kitchen. The supplier still replenishes carrots.
+**M** collects a completed legacy batch in the kitchen. Legacy prep ingredients are refunded on entering the new kitchen. The supplier replenishes carrots.
 
 ## Simulation
 

@@ -62,7 +62,21 @@ try {
   }
   async function begin(id) {
     const o = (await state()).objects.find((o) => o.id === id),
-      at = await screen(o.p);
+      grip =
+        o.kind === "pan"
+          ? await page.evaluate((o) => {
+              const offset = new __game.THREE.Vector3(0, 0.05, 0.83);
+              offset.applyQuaternion(
+                new __game.THREE.Quaternion(o.q.x, o.q.y, o.q.z, o.q.w),
+              );
+              return {
+                x: o.p.x + offset.x,
+                y: o.p.y + offset.y,
+                z: o.p.z + offset.z,
+              };
+            }, o)
+          : o.p,
+      at = await screen(grip);
     await page.mouse.move(at.x, at.y);
     await page.mouse.down();
     await step(35);
@@ -97,36 +111,43 @@ try {
   let st = await state(),
     knife = st.objects.find((o) => o.kind === "knife"),
     carrot = st.objects.find((o) => o.kind === "carrot");
-  const knifeOffset = await begin(knife.id);
-  await dragTo(knifeOffset, { x: carrot.p.x + 0.1, z: carrot.p.z });
-  await page.mouse.down({ button: "right" });
-  await step(45);
-  await page.mouse.up({ button: "right" });
-  await step(30);
+  const knifeAt = await screen(knife.p);
+  await page.mouse.click(knifeAt.x, knifeAt.y);
+  const cutAt = await screen({ x: carrot.p.x + 0.1, y: 0.15, z: carrot.p.z });
+  await page.mouse.click(cutAt.x, cutAt.y);
+  await step(80);
   assert.equal(
     (await state()).cuts,
     1,
-    "right-mouse blade stroke cuts at actual location",
+    "click creates a physical knife stroke",
   );
-  await dragTo(knifeOffset, { x: -1.3, z: 0.8 });
-  await page.mouse.up();
+  const restAt = await screen({ x: -0.85, y: 0.15, z: 0.78 });
+  await page.mouse.move(restAt.x, restAt.y);
+  await step(35);
+  await page.mouse.click(restAt.x, restAt.y, { button: "right" });
   await step(90);
-  console.log("ok actual knife drag creates two independent cut solids");
   st = await state();
   const pan = st.objects.find((o) => o.kind === "pan");
-  for (const piece of st.objects.filter((o) => o.kind === "carrot")) {
-    const offset = await begin(piece.id);
-    await dragTo(offset, { x: pan.p.x, z: pan.p.z });
-    await page.mouse.up();
-    await step(90);
-  }
+  const board = await screen({ x: -1.58, y: 0.04, z: 0.34 });
+  await page.mouse.move(board.x, board.y);
+  await page.mouse.down();
+  assert.equal(
+    Object.keys((await state()).group || {}).length,
+    1,
+    "board drag gathers both slices",
+  );
+  const panCenter = await screen({ ...pan.p, y: 0.15 });
+  await page.mouse.move(panCenter.x, panCenter.y);
+  await page.mouse.up();
+  await step(120);
+  console.log("ok click-to-cut and quick board-to-pan transfer");
   const panOffset = await begin(pan.id);
-  await dragTo(panOffset, { x: 1.72, z: -0.25 });
+  await dragTo(panOffset, { x: 1.58, z: -0.25 });
   await page.mouse.up();
   await step(150);
   st = await state();
   const movedPan = st.objects.find((o) => o.kind === "pan");
-  assert.ok(Math.abs(movedPan.p.x - 1.72) < 0.08);
+  assert.ok(Math.abs(movedPan.p.x - 1.58) < 0.08);
   assert.ok(
     st.objects
       .filter((o) => o.kind === "carrot")
@@ -147,7 +168,12 @@ try {
     __game.setSpeed(10);
     for (let i = 0; i < 1200; i++) {
       __game.step(1 / 60);
-      if (__game.sim.state.sys.physicalKitchen.objects.some(o => o.kind === 'carrot' && o.cooked >= 0.8 && o.burn < 0.6)) break;
+      if (
+        __game.sim.state.sys.physicalKitchen.objects
+          .filter((o) => o.kind === "carrot")
+          .every((o) => o.cooked >= 0.8 && o.burn < 0.6)
+      )
+        break;
     }
     __game.setSpeed(0);
   });
@@ -177,16 +203,31 @@ try {
   await page.mouse.move(dial.x, dial.y + 140, { steps: 8 });
   await page.mouse.up();
   assert.equal((await state()).power, 0);
-  const mealPiece = (await state()).objects.find(o => o.kind === 'carrot' && o.cooked >= 0.8 && o.burn < 0.6);
-  assert.ok(mealPiece, 'at least one physical piece actually cooked');
-  const mealOffset = await begin(mealPiece.id);
-  await dragTo(mealOffset, { x: 0.05, z: 0.8 });
-  await page.mouse.up(); await step(120);
-  const fullness = await page.evaluate(() => __game.sim.state.sys.cooking.fullness);
-  await page.keyboard.press('KeyE'); await step(2);
-  assert.ok(!(await state()).objects.some(o => o.id === mealPiece.id), 'plated food consumed');
-  assert.ok(await page.evaluate(before => __game.sim.state.sys.cooking.fullness > before, fullness));
-  console.log('ok cooked food can be plated and eaten without a recipe UI');
+  const smokeVisible = await page.evaluate(
+    () => __game.scene.getObjectByName("Kitchen smoke").visible,
+  );
+  assert.ok(smokeVisible, "hot food emits visible smoke");
+  const fullness = await page.evaluate(
+    () => __game.sim.state.sys.cooking.fullness,
+  );
+  await begin(pan.id);
+  const plate = await screen({ x: 0.05, y: 0.025, z: 0.8 });
+  await page.mouse.move(plate.x, plate.y);
+  await page.mouse.up();
+  await step(120);
+  assert.match(
+    await page.locator("#physical-kitchen-readout").textContent(),
+    /Meal ready/,
+  );
+  assert.equal(
+    (await state()).objects.filter((o) => o.kind === "carrot").length,
+    0,
+  );
+  assert.equal(
+    await page.evaluate(() => __game.sim.state.sys.cooking.fullness),
+    fullness,
+  );
+  console.log("ok smoke and plating into inventory");
   const before = await state();
   await page.keyboard.press("Escape");
   await page.evaluate(() => __game.saveGame());
@@ -202,6 +243,23 @@ try {
   assert.deepEqual(
     after.objects.filter((o) => o.kind === "carrot").map((o) => o.faces),
     before.objects.filter((o) => o.kind === "carrot").map((o) => o.faces),
+  );
+  assert.equal(
+    await page.evaluate(() => __game.sim.state.sys.cooking.meals[0]?.recipe),
+    "panCarrots",
+  );
+  await page.keyboard.press("KeyI");
+  await page.getByText("Pan-cooked carrots × 1").waitFor();
+  await page.locator('[data-act="eat-meal"]').click();
+  assert.equal(
+    await page.evaluate(() => __game.sim.state.sys.cooking.meals.length),
+    0,
+  );
+  assert.ok(
+    await page.evaluate(
+      (before) => __game.sim.state.sys.cooking.fullness > before,
+      fullness,
+    ),
   );
   assert.deepEqual(errors, []);
   console.log(

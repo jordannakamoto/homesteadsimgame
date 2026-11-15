@@ -1,8 +1,10 @@
+import { RECIPES } from "../sim/food-catalog.js";
 import {
   initKitchenPhysics,
   GRID,
   PAN_R,
   BURNER,
+  PLATE,
   cellPoint,
   validCell,
 } from "../sim/physical-kitchen.js";
@@ -35,6 +37,8 @@ export function createCookingView(G) {
     boundState = null,
     drag = null,
     hover = null,
+    knife = null,
+    stroke = null,
     heatMap = false,
     wasVisible = true,
     oldFov = 55;
@@ -42,7 +46,7 @@ export function createCookingView(G) {
     knob = null,
     burner = null,
     gridMesh = null,
-    panMesh = null,
+    plateRim = null,
     notice = "",
     noticeUntil = 0,
     lastPanel = "";
@@ -53,7 +57,7 @@ export function createCookingView(G) {
   ui.id = "physical-kitchen-ui";
   ui.hidden = true;
   ui.innerHTML =
-    '<div class="kitchen-title">Homestead kitchen <small>Esc · leave</small></div><div id="physical-kitchen-readout"></div><div class="kitchen-instructions">Drag food, knife or pan · Hold right mouse while dragging the knife to lower its blade<br>Mouse wheel · lift/lower held object · Drag stove dial up/down · H · heat view · E · eat from plate · Delete · discard hovered food</div>';
+    '<div class="kitchen-title">Homestead kitchen <small>Esc · leave</small></div><div id="physical-kitchen-readout"></div><div class="kitchen-instructions">Click knife to pick it up · Click food to cut · Right-click to put knife down<br>Drag board or Shift-drag food to gather · Drag pan onto plate to serve · E · eat packed meal · H · heat view</div>';
   const style = document.createElement("style");
   style.textContent = `
     #physical-kitchen-ui{position:fixed;inset:0;z-index:34;pointer-events:none;color:#fff0d4;font:14px system-ui}
@@ -74,6 +78,30 @@ export function createCookingView(G) {
   const entry = document.createElement("span");
   entry.textContent = " · K: kitchen";
   $("status").append(entry);
+  const mealName = (meal) =>
+    meal.recipe === "panCarrots"
+      ? "Pan-cooked carrots"
+      : RECIPES[meal.recipe].name;
+  const freshMeal = () =>
+    cooking().meals.find((meal) => meal.expiresAt > G.sim.state.t);
+  const smokeCanvas = document.createElement("canvas");
+  smokeCanvas.width = smokeCanvas.height = 32;
+  const ctx = smokeCanvas.getContext("2d");
+  const gradient = ctx.createRadialGradient(16, 16, 1, 16, 16, 16);
+  gradient.addColorStop(0, "#ffffffaa");
+  gradient.addColorStop(1, "#ffffff00");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 32, 32);
+  const smokeTexture = new T.CanvasTexture(smokeCanvas);
+  const smoke = Array.from({ length: 6 }, () => {
+    const puff = new T.Sprite(
+      new T.SpriteMaterial({ map: smokeTexture, depthWrite: false }),
+    );
+    puff.name = "Kitchen smoke";
+    puff.visible = false;
+    root.add(puff);
+    return puff;
+  });
   initKitchenPhysics()
     .then(() => {
       loading = false;
@@ -179,7 +207,7 @@ export function createCookingView(G) {
   function close() {
     if (!active) return;
     command("release");
-    drag = null;
+    drag = knife = stroke = null;
     hover = null;
     active = false;
     ui.hidden = true;
@@ -209,7 +237,10 @@ export function createCookingView(G) {
         block(staticGroup, 0x55412d, x, -h / 2, z, 0.13, h, 0.13);
       }
     block(staticGroup, 0x705238, 0, -0.65, 0, 6, 0.08, 3.6);
-    block(staticGroup, 0xb58a52, -1.25, 0.02, 0, 1.44, 0.04, 0.98);
+    tag(
+      block(staticGroup, 0xb58a52, -1.25, 0.02, 0, 1.44, 0.04, 0.98),
+      "board",
+    );
     // A smooth hob allows arbitrary pan placement, including partial overlap.
     block(staticGroup, 0x394440, 1.4, 0.08, -0.25, 1.4, 0.16, 1.32);
     burner = part(
@@ -277,6 +308,7 @@ export function createCookingView(G) {
     part(plate, cylinder, 0xd2cfb3, 0, 0.008, 0, 0.36, 0.015, 0.36);
     const rim = part(plate, ring, 0xe6dfc3, 0, 0.025, 0, 0.34, 0.34, 0.34);
     rim.rotation.x = Math.PI / 2;
+    plateRim = rim;
     for (const mesh of bodies.values()) targets.push(mesh);
   }
   function foodMesh(o) {
@@ -354,7 +386,6 @@ export function createCookingView(G) {
         }
         gridMesh.visible = heatMap;
         mesh.add(gridMesh);
-        panMesh = mesh;
       }
     }
     mesh.name = "Kitchen " + o.kind + " " + o.id;
@@ -399,8 +430,28 @@ export function createCookingView(G) {
     if (!p) return;
     const o = state().objects.find((o) => o.id === drag.id);
     if (!o) return;
-    const y = o.kind === "knife" && drag.lower ? 0.105 : drag.height;
-    command("move", { x: p.x + drag.dx, y, z: p.z + drag.dz });
+    command("move", { x: p.x + drag.dx, y: drag.height, z: p.z + drag.dz });
+  }
+  function finishDrag(event) {
+    if (!drag) return;
+    const p = tabletop(event);
+    if (
+      drag.kind === "pan" &&
+      p &&
+      Math.hypot(p.x - PLATE.x, p.z - PLATE.z) < PLATE.radius + 0.06
+    ) {
+      if (command("plate", { ...PLATE, y: 0 }).ok)
+        say("Meal ready · Pan-cooked carrots packed in your inventory");
+      // Leave the pan where you picked it up so it doesn't land on the plate.
+      command("move", drag.start);
+    } else {
+      moveDrag(event);
+    }
+    command("drop");
+    drag = null;
+  }
+  function aimKnife(p, y = 0.38) {
+    command("move", { x: p.x, y, z: p.z });
   }
   canvas.addEventListener(
     "pointerdown",
@@ -408,36 +459,70 @@ export function createCookingView(G) {
       if (!active) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (event.button === 2 && drag) {
-        drag.lower = true;
-        moveDrag(event);
+      if (knife && event.button === 2) {
+        command("release");
+        knife = stroke = null;
         return;
       }
-      if (event.button !== 0) return;
+      if (event.button !== 0 || drag) return;
+      const p = tabletop(event);
+      if (!p) return;
+      if (knife) {
+        if (!stroke) {
+          stroke = { p, phase: "align" };
+          aimKnife(p);
+        }
+        return;
+      }
       let id = pick(event);
       hover = id;
       if (id === "dial") {
         drag = { id, power: state().power, startY: event.clientY };
-        canvas.setPointerCapture(event.pointerId);
-        return;
+      } else {
+        if (id === "basket") {
+          if (!command("carrot").ok) return;
+          id = state().objects.at(-1).id;
+        }
+        const selected = state().objects.find((o) => o.id === id);
+        if (id === "board" || (event.shiftKey && selected?.kind === "carrot")) {
+          const result = command("scoop");
+          if (!result.ok) return;
+          id = state().held;
+          say(
+            result.count +
+              (result.count === 1 ? " piece gathered" : " pieces gathered"),
+          );
+        } else if (!selected || !command("grab", { id }).ok) return;
+        const o = state().objects.find((o) => o.id === id);
+        if (o.kind === "knife") {
+          knife = id;
+          aimKnife(p);
+          return;
+        }
+        const group =
+          o.kind === "carrot"
+            ? state().objects.filter((piece) => state().group?.[piece.id])
+            : [];
+        const count = group.length + 1;
+        drag = {
+          id,
+          kind: o.kind,
+          start: { ...o.p },
+          height: 0.65,
+          dx: group.length
+            ? -(
+                group.reduce((sum, piece) => sum + piece.p.x - o.p.x, 0) / count
+              )
+            : o.p.x - p.x,
+          dz: group.length
+            ? -(
+                group.reduce((sum, piece) => sum + piece.p.z - o.p.z, 0) / count
+              )
+            : o.p.z - p.z,
+        };
+        moveDrag(event);
       }
-      if (id === "basket") {
-        if (!command("carrot").ok) return;
-        id = state().objects.at(-1).id;
-      }
-      const o = state().objects.find((o) => o.id === id),
-        p = tabletop(event);
-      if (!o || !p) return;
-      if (!command("grab", { id }).ok) return;
-      drag = {
-        id,
-        dx: o.p.x - p.x,
-        dz: o.p.z - p.z,
-        height: o.kind === "knife" ? 0.6 : 0.65,
-        lower: false,
-      };
       canvas.setPointerCapture(event.pointerId);
-      moveDrag(event);
     },
     true,
   );
@@ -447,14 +532,11 @@ export function createCookingView(G) {
       if (!active) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (drag) {
-        drag.lower = !!(event.buttons & 2);
-        moveDrag(event);
-        if (!(event.buttons & 1)) {
-          command("release");
-          drag = null;
-        }
-      } else hover = pick(event);
+      if (drag) moveDrag(event);
+      else if (knife && !stroke) {
+        const p = tabletop(event);
+        if (p) aimKnife(p);
+      } else if (!knife) hover = pick(event);
     },
     true,
   );
@@ -464,59 +546,19 @@ export function createCookingView(G) {
       if (!active) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (event.button === 2 && drag) {
-        drag.lower = false;
-        moveDrag(event);
-        return;
-      }
-      if (event.button === 0) {
-        command("release");
-        drag = null;
-        if (canvas.hasPointerCapture(event.pointerId))
-          canvas.releasePointerCapture(event.pointerId);
-      }
-    },
-    true,
-  );
-  // Pointer events do not fire a second pointerdown when mouse buttons are chorded.
-  canvas.addEventListener(
-    "mousedown",
-    (e) => {
-      if (!active) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      if (e.button === 2 && drag) {
-        drag.lower = true;
-        moveDrag(e);
-      }
-    },
-    true,
-  );
-  canvas.addEventListener(
-    "mouseup",
-    (e) => {
-      if (!active) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      if (e.button === 2 && drag) {
-        drag.lower = false;
-        moveDrag(e);
-      }
-      if (e.button === 0 && drag) {
-        command("release");
-        drag = null;
-      }
+      if (event.button === 0) finishDrag(event);
     },
     true,
   );
   function cancelDrag() {
-    if (drag && state()) {
-      command("release");
-      drag = null;
-    }
+    if (!drag && !knife) return;
+    command("release");
+    drag = knife = stroke = null;
   }
   canvas.addEventListener("pointercancel", cancelDrag);
-  canvas.addEventListener("lostpointercapture", cancelDrag);
+  canvas.addEventListener("lostpointercapture", () => {
+    if (drag) cancelDrag();
+  });
   window.addEventListener("blur", () => {
     if (active) cancelDrag();
   });
@@ -565,20 +607,11 @@ export function createCookingView(G) {
       if (event.code === "Escape") close();
       if (event.code === "KeyH" && !event.repeat) heatMap = !heatMap;
       if (event.code === "KeyE" && !event.repeat) {
-        const food =
-          state().objects.find((o) => o.id === hover && o.kind === "carrot") ||
-          state().objects.find(
-            (o) =>
-              o.kind === "carrot" &&
-              Math.hypot(o.p.x - 0.05, o.p.z - 0.8) < 0.35,
-          );
-        if (food) command("eat", { id: food.id });
-        else if (cooking().meals.length) {
-          const r = G.sim.commandNow("cooking.eat", {
-            id: cooking().meals[0].id,
-          });
-          if (!r.ok) say(r.reason);
-        } else say("Drop a piece onto the plate, then press E.");
+        const meal = freshMeal();
+        if (meal) {
+          const result = G.sim.commandNow("cooking.eat", { id: meal.id });
+          say(result.ok ? "Ate " + mealName(meal) : result.reason);
+        } else say("No fresh prepared meals in your inventory.");
       }
       if (event.code === "Delete" && typeof hover === "number")
         command("discard", { id: hover });
@@ -629,7 +662,7 @@ export function createCookingView(G) {
         gridMesh.material.dispose();
         gridMesh = null;
       }
-      panMesh = null;
+      plateRim = null;
       stationKey = "";
       boundState = state();
     }
@@ -642,6 +675,24 @@ export function createCookingView(G) {
       station = cooking().station;
     // Fixed 60 Hz interaction physics continues settling after leaving the camera.
     if (s.initialized && dt > 0) command("advance", { dt: Math.min(0.25, dt) });
+    if (stroke) {
+      const blade = s.objects.find((o) => o.id === knife);
+      if (
+        stroke.phase === "align" &&
+        blade &&
+        Math.hypot(
+          blade.p.x - s.target.x,
+          blade.p.y - s.target.y,
+          blade.p.z - s.target.z,
+        ) < 0.015
+      ) {
+        stroke.phase = "cut";
+        aimKnife(stroke.p, 0.105);
+      } else if (stroke.phase === "cut" && blade && blade.p.y < 0.116) {
+        aimKnife(stroke.p);
+        stroke = null;
+      }
+    }
     const key = JSON.stringify(station);
     if (key !== stationKey) {
       stationKey = key;
@@ -654,6 +705,35 @@ export function createCookingView(G) {
       !!station &&
       s.initialized &&
       Math.hypot(G.player.x - station.x, G.player.z - station.z) < 110;
+    const pan = s.objects.find((o) => o.kind === "pan");
+    const hottest = Math.max(...s.grid);
+    const hotFood =
+      root.visible &&
+      pan &&
+      s.objects.find(
+        (o) =>
+          o.kind === "carrot" &&
+          o.temp > 100 &&
+          Math.hypot(o.p.x - pan.p.x, o.p.z - pan.p.z) < PAN_R &&
+          o.p.y > pan.p.y &&
+          o.p.y < pan.p.y + 0.28,
+      );
+    const phase = performance.now() * 0.00055;
+    for (let i = 0; i < smoke.length; i++) {
+      const puff = smoke[i];
+      puff.visible = !!hotFood;
+      if (!hotFood) continue;
+      const t = (phase + i / smoke.length) % 1;
+      puff.position.set(
+        hotFood.p.x + Math.sin(i + t * 3) * 0.13,
+        hotFood.p.y + t * 0.9,
+        hotFood.p.z + t * 0.18,
+      );
+      puff.scale.setScalar(0.14 + t * 0.48);
+      puff.material.color.setHex(hotFood.burn > 0.25 ? 0x82766d : 0xe8e4dc);
+      puff.material.opacity =
+        Math.sin(t * Math.PI) * (hotFood.burn > 0.25 ? 0.33 : 0.21);
+    }
     const ids = new Set(s.objects.map((o) => o.id));
     for (const [id, mesh] of bodies)
       if (!ids.has(id)) {
@@ -678,12 +758,14 @@ export function createCookingView(G) {
           1 - o.cooked * 0.35 - o.burn * 0.5,
         );
     }
+    if (plateRim)
+      plateRim.material = material(drag?.kind === "pan" ? 0xffe5a1 : 0xe6dfc3);
     if (knob) knob.rotation.y = -2.3 + s.power * 4.6;
     if (burner) {
       burner.material.emissive.setRGB(s.power * 0.65, s.power * 0.07, 0);
     }
-    if (gridMesh) {
-      gridMesh.visible = heatMap;
+    if (gridMesh) gridMesh.visible = active && heatMap;
+    if (gridMesh?.visible) {
       const color = new T.Color();
       for (let i = 0; i < s.grid.length; i++) {
         color.setHSL(
@@ -703,16 +785,19 @@ export function createCookingView(G) {
     );
     if (active) {
       const o = s.objects.find((o) => o.id === (drag?.id || hover));
-      const hottest = Math.max(...s.grid),
-        coldest = Math.min(...s.grid.filter((_, i) => validCell(i)));
+      const coldest = Math.min(...s.grid.filter((_, i) => validCell(i)));
       let text = `Burner ${Math.round(s.power * 100)}% · Pan ${Math.round(coldest)}–${Math.round(hottest)}°C`;
       if (o?.kind === "carrot")
         text += `\nCarrot · ${Math.round(o.mass * 1000)} g · ${Math.round(o.temp)}°C · ${o.age > 172800 ? "spoiled" : o.burn > 0.6 ? "burned" : o.cooked >= 0.8 ? "cooked" : "raw / cooking"}`;
+      const meal = freshMeal();
+      if (meal) text += "\nPacked meal · " + mealName(meal) + " · E to eat";
       if (hover === "basket")
         text +=
           "\nDrag a fresh carrot from the basket (" +
           (G.sim.state.sys.stock.items.food_carrot || 0) +
           " left)";
+      if (drag?.kind === "pan")
+        text += "\nDrop over the plate to pack the cooked food";
       if (hover === "dial")
         text += "\nDrag the dial upward for more heat, downward to turn it off";
       if (G.speed === 0)
@@ -726,7 +811,10 @@ export function createCookingView(G) {
       }
     } else if (noticeUntil > performance.now()) {
       entry.textContent = " · " + notice;
-    } else entry.textContent = " · K: kitchen";
+    } else
+      entry.textContent = freshMeal()
+        ? " · K: kitchen · I: prepared meals"
+        : " · K: kitchen";
   }
   function collide(entity, radius) {
     const s = cooking().station;
@@ -747,6 +835,18 @@ export function createCookingView(G) {
     },
     get ready() {
       return !loading && !error;
+    },
+    get meals() {
+      return cooking().meals.map((meal) => ({
+        id: meal.id,
+        name: mealName(meal),
+        qty: meal.qty,
+        quality: meal.quality,
+        hoursLeft: Math.max(
+          0,
+          Math.ceil((meal.expiresAt - G.sim.state.t) / 3600),
+        ),
+      }));
     },
     open,
     close,
