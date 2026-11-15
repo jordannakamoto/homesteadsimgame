@@ -134,6 +134,55 @@ Owns `src/build.js`, `src/touch.js`, the build markup and styles in `template/he
 - The second half (construction methods: stick frame, log, timber frame, A-frame; assisted framing; plan, elevation and section views) runs in wave C on the same files.
 - Material ids: until iteration 2 merges, pieces carry build mode's appearance names; the orchestrator maps them through `APPEARANCE_MATERIAL` at merge.
 
+## Wave C contracts
+
+Six iterations run in parallel. Every system reads buildings only through pieces, weather only through `ctx.get('weather')`, and materials only through `material(id)`. Each owns the files listed. Shared files (`src/sim/index.js`, `build.sh`, `template/head.html`) get one added line or block each. No iteration edits `src/engine.js` except to add a name to `window.__game`; if a system needs something from the engine, it asks for it through a name there.
+
+**Bridging pieces into the simulation.** Pieces live in build mode, outside the simulation. The orchestrator provides `src/sim/site.js`: a `site` system whose state holds a plain-data snapshot of what is built, refreshed by the command `site.setPieces` that the page issues whenever `__build.onChange` fires. Systems read `ctx.get('site').pieces` and `ctx.get('site').version`. Headless tests construct pieces by hand with the helpers in `test/helpers/pieces.mjs`. Equipment that is not a building piece (a panel, a tank, a stove, a coop feeder) is placed through the same mechanism: it is a piece with `kind: "fixture"`, a `fixture` id from the fixtures catalog, and `ports` describing its connections.
+
+**Overlays.** Each system that has an overlay exposes pure data for it (`overlayData(state)`), and one shared add-on, `src/overlays.js`, owned by the orchestrator, draws whichever overlay is selected. Systems do not draw.
+
+**Units in state.** Temperatures `...C`, power `...W`, energy `...Wh` or `...kWh`, water `...L`, flow `...Lmin`, pressure `...kPa`, force `...N`, stress `...MPa`, lengths metres.
+
+### Iteration 3: structural loads
+
+Owns `src/sim/structure.js`, `test/structure.test.mjs`. System `structure`, cadence: recompute only when `site.version` or snow depth band or wind band changes.
+State: `{ version, members: { [pieceId]: { load: { deadN, liveN, snowN, windN }, demand, capacity, utilisation (0..1+), governs ("bending" | "compression" | "deflection" | "bearing" | "uplift" | "unsupported"), supports: [ids], ok } }, foundations: { [pieceId]: { bearingKPa, allowableKPa, ok } }, worst, issues: [{ pieceId, severity, reason, fix }] }`.
+Loads follow real practice: dead load from material density and geometry; floor live load 1.9 kPa; roof snow from `weather.snowDepthM` and snow density, with a design value so a structure is judged before the storm arrives; wind pressure from `0.613 * v^2` Pa with a design gust. Load paths: roof to walls, posts and beams, to floors, to foundation and soil. Capacity from registry strength and stiffness with section properties from piece dimensions; span checks for bending, shear and deflection (L/240 floors, L/180 roofs).
+`issues[].reason` and `fix` are plain-language sentences for the inspector.
+
+### Iteration 4: rooms and thermal model
+
+Owns `src/sim/rooms.js`, `src/sim/thermal.js`, `test/thermal.test.mjs`. 
+`rooms.js` is pure: `findRooms(pieces)` -> `[{ id, floorAreaM2, volumeM3, heightM, envelope: [{ pieceId, areaM2, toRoom | "outside" | "ground", orientationRad, openings: [...] }], enclosed (bool), leaks: [reason] }]`. A space that is not closed (missing wall, no roof) is reported as not enclosed with the reason.
+System `thermal`, cadence 5 minutes. State: `{ rooms: { [roomId]: { tempC, massTempC, humidity, enclosed, uaWK, infiltrationAch, solarGainW, internalGainW, heatingW, lossW: { walls, roof, floor, windows, infiltration } } }, version }`.
+Per-room heat balance as a two-node model (air, and thermal mass from the assembly heat capacity): conduction through each assembly from its `layers` (series R-values plus surface films), windows by U-value, ground-contact floors against `weather.groundTempC`, infiltration from an air-change rate that rises with wind and openings, solar gain through glazing from `weather.solar` and the sun's angle on each window, internal gains supplied by other systems through the command `thermal.setGain({ roomId, source, watts })`. An unenclosed space tracks outside air. Energy is conserved: the test checks stored energy change equals gains minus losses.
+
+### Iteration 6: electrical
+
+Owns `src/sim/electrical.js`, `src/sim/fixtures-electrical.js` (catalog entries), `test/electrical.test.mjs`. System `electrical`, cadence 1 minute.
+State: `{ circuits: [...], sources: { [id]: { kind, ratedW, outputW } }, batteries: { [id]: { capacityWh, storedWh, voltageV, chargeW, soc } }, loads: { [id]: { ratedW, on, drawW, served } }, busV, generationW, demandW, unservedW, wires: { [id]: { currentA, ratingA, ok } }, today: { generatedWh, usedWh, wastedWh } }`.
+Solar output from `weather.solar`, panel area, tilt and azimuth (direct beam by incidence angle plus diffuse), cell temperature derating, and system losses. Batteries with round-trip efficiency, depth-of-discharge limits and charge-rate limits. Loads shed in priority order when supply and storage fall short. Wire current against ampacity for the gauge, breakers trip on overload, voltage drop reported. A generator burns fuel at a real specific consumption. Works at 12 V and at 120/240 V. Energy is conserved: generated = used + stored + losses + curtailed.
+Other systems register loads with the command `electrical.setLoad({ id, ratedW, on, priority })` and read `loads[id].served`. Exposes `powerAvailableAt(state, pieceId)` for power tools.
+
+### Iteration 7: water
+
+Owns `src/sim/water.js`, `src/sim/fixtures-water.js`, `test/water.test.mjs`. System `water`, cadence 1 minute.
+State: `{ tanks: { [id]: { capacityL, storedL, elevationM, overflowL } }, catchments: { [id]: { areaM2, efficiency, inflowLmin } }, pumps: { [id]: { on, ratedW, headM, flowLmin } }, taps: { [id]: { open, pressureKPa, flowLmin, served } }, wells: { [id]: { depthM, yieldLmin } }, greywater: { storedL }, today: { collectedL, usedL, overflowL } }`.
+Roof catchment from `weather.rainMmH` times roof plan area times a runoff coefficient (1 mm on 1 m2 is 1 L), snow contributing as it melts. Static pressure from elevation head (9.81 kPa per metre); a tap below the tank's water level flows by gravity, one above it needs a pump. Pipe friction as a simple head loss per metre by diameter and flow. Pumps draw power through `electrical.setLoad`. Freezing: exposed tanks and pipes can freeze when cold enough for long enough, reported as an issue before it happens. Water is conserved: collected + pumped = stored + used + overflow.
+Other systems draw water with the command `water.draw({ id, litres })` and get the amount actually supplied.
+
+### Iteration 13: chickens
+
+Owns `src/sim/animals.js` (the shared individual-animal framework), `src/sim/chickens.js`, `src/chickens-view.js` (add-on; models and behaviour on screen), `test/chickens.test.mjs`. System `chickens`, cadence 10 minutes for physiology; movement on screen is the view's business and carries no truth.
+State: `{ birds: { [id]: { name, sex, breed, bornT, traits: { ...heritable }, massKg, hungerKg (crop fill), waterL, energy, health, stress, roosting, location (pieceId | "range"), eggs: { nextT, laidTotal }, mood } }, flock: { feedKg, waterL }, eggs: [{ id, laidT, nestId, fertile }] }`.
+Laying follows day length (hens need roughly 14 hours of light for full lay), age and nutrition; feed intake about 110 to 130 g a day for a laying hen with real metabolisable energy; water about twice feed by mass, more in heat; birds roost at dusk and leave the coop at dawn; they forage on range and eat kitchen scraps; a chicken tractor moved onto fresh ground adds forage and leaves manure (recorded as nitrogen per square metre for the soil iteration). Each bird is an individual with inherited traits from a small genetic model.
+Fixtures: coop is an ordinary building; feeder, waterer, nest box and roost bar are fixtures.
+
+### Iteration 2a, second half: construction methods and the plan view
+
+Owns `src/build.js`, `src/buildui.js` if it exists, `src/touch.js`, build markup and CSS. Delivers: stick-frame, log, timber-frame and A-frame construction as real pieces; assisted building (draw a wall, generate framing, sheathing and finish pieces, with the option to place each by hand); a 2D plan view with sections and elevations; symbols with linked instances; offset, fillet, mirror and array; layers; schedule tables. Also the fixture placement tool the other five iterations rely on: place any catalog fixture, connect ports (wire, pipe) by dragging between them, and report it through `pieces()`.
+
 ## Global hooks
 
 Add-ons and tests reach the game only through these. Add a name here rather than reaching into internals.
