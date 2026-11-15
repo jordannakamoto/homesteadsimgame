@@ -33,7 +33,8 @@ The scope roughly doubled after the first playtest. These rules put landing each
 | B | 1 weather, 2 materials, 2a build mode (first half) | Merged, live | see `git log` for "Wave B complete" |
 | C | 3 structure, 4 thermal, 6 electrical, 7 water, 13 chickens, 2a build mode (second half) | Water and electrical merged headless; the rest in progress | |
 | C-int | Partly done: real equipment catalog in the Equip tool, power and water running in play, a Home panel. Still owed: store pricing for equipment, overlays in the world, engine and game folders. Wave C made playable; files moved into engine and game folders: equipment catalog in the store, fixture placement wired to power and water, overlays for structure, heat, power and water | Not started | |
-| F1 | In progress. **Farming, first playable: soil water, growth model, twelve crops, beds, sowing, watering, harvest, the first-salad card** (from owner feedback; `docs/FARMING.md`). Runs alongside wave C and D1 because it does not touch build mode | Not started | |
+| F2 | Garden controls rebuilt in the body with hands-on gestures (agent `a4c99fc4e093299f2`, `wt-f2-garden-hands`), after the owner's playtest | In progress | |
+| F1 | Merged, live; controls judged poor by the owner, being rebuilt as F2. **Farming, first playable: soil water, growth model, twelve crops, beds, sowing, watering, harvest, the first-salad card** (from owner feedback; `docs/FARMING.md`). Runs alongside wave C and D1 because it does not touch build mode | Not started | |
 | D1 | **2c construction and 2d store and plan book: the first shed, end to end** (from owner feedback) | In progress | |
 | D1b | 6a hook-ups: intuitive wiring and piping (from owner feedback), right after construction lands | Not started | |
 | D2 | 1a weather you can see, 5 heating and moisture, 5b camp and journal | Not started | |

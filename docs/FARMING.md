@@ -95,6 +95,25 @@ Later: fruit trees and berries (years to bear), herbs, onions, cabbage, cover cr
 - Frost is forecast the evening before by the almanac ("clear and still tonight: frost likely"), and a row cover is one action.
 - The first radishes are nearly impossible to fail.
 
+## Controls: revised after the first playtest (15 Nov)
+
+The owner's verdict on the first playable garden: "not really intuitive on a game level like Stardew Valley, and not realistic feeling with the controls and interactions." The first version was a palette of verbs and dragging over the ground from above, which is a design tool, not gardening. The owner's choices for the rebuild:
+
+- **In the body, mouse-aimed.** You hold a hoe, a can, a seed packet or nothing, chosen from a hotbar. The mouse picks a spot within arm's reach of the character. No acting on the ground from the sky.
+- **Hands-on gestures with Nintendo simplicity.** "A combination of hands-on gestures and simplified Nintendo style, like how in Zelda you hold items over your head." You make the motion yourself, but each motion is one clear, forgiving gesture with big readable feedback, chunky held items and friendly poses. Pulling a vegetable free ends with it held overhead for a beat. Things are carried visibly: the hoe over the shoulder, a squash overhead.
+- **You actually till.** "Rather than holding on an area to prepare it, we should actually have to till it." There is no marking out a bed and holding to dig. You pull the hoe through the ground stroke by stroke, and the bed is whatever ground you have tilled.
+
+| Job | Gesture |
+|---|---|
+| Till and weed | Press where the blade bites, pull back toward you, release. The strip turns over. |
+| Water | Lift the can over the spot and tip it; tip further to pour faster; sweep along the row. Refill at water. |
+| Sow | Click to drop a seed where you aim; drag along the row to drop them at the packet's spacing. |
+| Harvest roots | Press on the plant and pull up; it resists, then comes free and is held overhead. |
+| Harvest leaves and fruit | A short cut for leaves; click each ripe fruit. |
+| Mulch and compost | Hold and sweep over the bed. |
+
+The same hands (hotbar, reach, gestures, carrying) are meant to serve construction and other work later.
+
 ## The first garden: a guided project
 
 A project card, "Grow your first salad", optional and skippable: make one small bed, sow radish and lettuce, water it, and eat it about four weeks later. It teaches bed, sowing, watering by soil colour, and harvest. It opens the next cards: "Plant after the frost" (tomatoes and beans) and "Something for winter" (potatoes, squash, kale).
