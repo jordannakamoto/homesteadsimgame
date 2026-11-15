@@ -14,6 +14,7 @@ const frames = async (n) => { const f0 = await G(() => __game.renderer.info.rend
 
 await page.goto(file); await page.waitForTimeout(5000);
 check('page loads and exposes the game', await G(() => !!(window.__game && __game.sim && window.__build)));
+await G(() => __game.lockQuality());      // a slow software renderer must not auto-drop quality mid-check
 await G(() => __game.setQuality('low')); await frames(3);
 check('low quality renders', (await G(() => document.getElementById('quality').textContent)) === 'Low');
 await G(() => __game.setQuality('high')); await frames(3);
