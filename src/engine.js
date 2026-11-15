@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createGameSim, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND } from './sim/index.js';
+import { createGameSim, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -126,7 +126,12 @@ const world = {
   removed: new Set(),     // ids of felled trees / broken rocks
   queue: [],
   fallers: [], logs: [], pickups: [], shakes: [],
-  wood: 0, stone: 0, kills: 0,
+  kills: 0,
+  // wood and stone are views of the stock (items 'wood' and 'stone'), the way time is a view of the clock
+  get wood() { return stockState().items.wood || 0; },
+  set wood(n) { setCounter(stockState(), 'wood', n); },
+  get stone() { return stockState().items.stone || 0; },
+  set stone(n) { setCounter(stockState(), 'stone', n); },
   // time of day as a fraction (0 = midnight), read from the simulation. Setting it moves time
   // forward to the next moment the clock shows that time; time never runs backwards.
   get time() { return sim.dayFraction(); },
@@ -135,6 +140,7 @@ const world = {
     if (d > 1e-9) sim.advance(d * 86400 + 1e-6);
   },
 };
+const stockState = () => sim.state.sys.stock;
 const ckey = (cx, cz) => cx + ',' + cz;
 function getDelta(gx, gz) {
   const tx = Math.floor(gx / CS), tz = Math.floor(gz / CS);
@@ -906,7 +912,13 @@ function trunkPiece(type, y0, y1) {
   }
   const g = finish(B), cy = (y0 + y1) / 2;
   g.translate(0, -cy, 0); g.rotateZ(-Math.PI / 2); g.computeBoundingSphere();
-  return { geo: g, len: y1 - y0, r: (pts[0].r + pts[pts.length - 1].r) / 2, cy };
+  // real volume of this piece of trunk (m3 at scale 1): the sum of its tapered sections
+  let vol = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const h = pts[i + 1].p.y - pts[i].p.y, a = pts[i].r, b = pts[i + 1].r;
+    vol += (Math.PI * h * (a * a + a * b + b * b)) / 3;
+  }
+  return { geo: g, len: y1 - y0, r: (pts[0].r + pts[pts.length - 1].r) / 2, cy, vol };
 }
 const LOGS = TRUNK.map((T, t) => {
   const top = T.pts[T.pts.length - 1][1] - 0.4, mid = top * 0.5;
@@ -1484,7 +1496,7 @@ function spawnLog(x, z, yaw, type, stage, piece, scale) {
   mesh.scale.setScalar(scale);
   scene.add(mesh);
   const r = Math.max(piece.r * scale, 0.1);
-  const L = { mesh, x, z, yaw, type, stage, scale, len: piece.len * scale, r, v: 0, roll: 0, hp: 2, y: heightAt(x, z) + r };
+  const L = { mesh, x, z, yaw, type, stage, scale, len: piece.len * scale, r, v: 0, roll: 0, hp: 2, y: heightAt(x, z) + r, volM3: piece.vol * scale ** 3 };
   world.logs.push(L);
   return L;
 }
@@ -1516,6 +1528,7 @@ function updateLogs(dt) {
     L.mesh.quaternion.copy(_qa).multiply(_qb).multiply(_qc);
   }
 }
+const LOG_ITEM = ['log_pine', 'log_birch', 'log_oak'];     // by tree type: PINE, BIRCH, OAK
 const woodGeo = new THREE.BoxGeometry(0.42, 0.13, 0.13), stoneGeo = new THREE.IcosahedronGeometry(0.15, 0);
 const woodMat = new THREE.MeshLambertMaterial({ color: 0xb98a55 }), stoneMat = new THREE.MeshLambertMaterial({ color: 0x9aa0a3, flatShading: true });
 function spawnPickup(kind, x, y, z) {
@@ -1601,6 +1614,8 @@ function arcWorldDamage(ox, oz, oy, inArc, seen) {
       }
       burst(L.x, L.y + 0.2, L.z, 12, 0xd8b98a, 2.8, 3.5, 0.11, 0.9);
     } else {
+      // the half-log is cut up: its real volume goes into the stock as green log, besides the cut wood you see
+      runStockCommand(sim, 'stock.add', { id: LOG_ITEM[L.type], qty: Math.round(L.volM3 * 1000) / 1000 });
       const n = 1 + Math.round(L.len * 1.2);
       for (let k = 0; k < n; k++) spawnPickup('wood', L.x + ax * (Math.random() - 0.5) * L.len, L.y + 0.2, L.z + az * (Math.random() - 0.5) * L.len);
     }
@@ -2837,6 +2852,7 @@ function frame(now) {
     el('wood').textContent = String(world.wood);
     el('stone').textContent = String(world.stone);
     el('kills').textContent = String(world.kills);
+    el('money').textContent = '$' + Math.round(stockState().money).toLocaleString('en-US');
     hudDirty = false;
   }
   requestAnimationFrame(frame);
@@ -2853,7 +2869,13 @@ setTool('axe');
 lockUi();
 window.__game = {
   pm, get seed() { return SEED; },
-  get sim() { return sim; }, saveGame, saveData, setSpeed, get speed() { return simCtl.speed; },
+  get sim() { return sim; }, powerAvailable: () => false,
+  stock: {
+    MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, stockMassKg, canAfford, toolAvailable,
+    get state() { return stockState(); },
+    do: (name, payload) => { const r = runStockCommand(sim, name, payload); hudDirty = true; return r; },
+  },
+  saveGame, saveData, setSpeed, get speed() { return simCtl.speed; },
   enemies, spawnEnemy, arrows, fireArrow, MOVES, startMove, juice, updateHud, waveHeight, depthState, lockQuality: () => { autoDropped = true; }, world, player, cam, keys, mouse, cursor, step, render, heightAt, fellTree, applyBrush, setQuality, renderer, THREE,
   camera, scene, setTool, fade: addWind, burst, editGet: getDelta, editSet: setDelta, baseHeight, chunkSize: CS, treeKinds: TREE, refreshLock: lockUi, forestAt,
   light: SKY, noise: fbm, palette: PAL, quality: () => quality.level, composer: () => composer, treeGeo, pineLite: pineLiteGeo, markStockDirty: () => { hudDirty = true; },
