@@ -810,7 +810,7 @@ const until = (doy, d) => (d - doy + DAYS_IN_YEAR) % DAYS_IN_YEAR;
 // "Sow mid April to mid May (about four weeks before the last frost, usually mid May here)."
 // life: the world's lifeScale (365 / days in its year), so the advice can say how many game days away a date is.
 const gameDays = (calDays, life) => Math.max(0, Math.round(calDays / life));
-const inDays = (n) => (n <= 0 ? 'today' : n === 1 ? 'tomorrow' : 'in ' + n + ' days');
+const inDays = (n) => (n <= 0 ? 'later today' : n === 1 ? 'tomorrow' : 'in ' + n + ' days');
 export function sowAdvice(cropId, site, doy, life = 1) {
   const crop = CROPS[cropId], fd = frostDates(site), wins = sowWindows(crop, fd);
   const now = wins.find((w) => inWin(doy, w));

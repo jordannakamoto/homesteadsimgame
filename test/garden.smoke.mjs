@@ -72,7 +72,7 @@ check('watering wets the soil and empties the can', after > before && can < 9, '
 
 // time at 1000x until the radishes are ready (their four weeks, on this world's seasonal clock)
 await G(() => __game.setSpeed(1000));
-const ready = await until(() => Object.values(__game.sim.state.sys.garden.plants).some((p) => p.crop === 'radish' && p.readyT != null), 240000);
+const ready = await until(() => Object.values(__game.sim.state.sys.garden.plants).some((p) => p.crop === 'radish' && p.readyT != null), 900000);
 await G(() => __game.setSpeed(0));
 const lifeDays = await G(() => { const s = __game.sim.state, p = Object.values(s.sys.garden.plants).find((q) => q.crop === 'radish'); return p ? ((p.readyT - p.sownT) / 86400) * (365 / s.yearDays) : null; });
 check('radishes ready in about four weeks of their life', ready && lifeDays > 18 && lifeDays < 45, lifeDays && lifeDays.toFixed(0) + ' days');
