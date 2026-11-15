@@ -951,7 +951,9 @@ function step(ctx) {
 }
 export const structure = {
   name: 'structure',
-  every: 1,
+  // The weather it reads changes every ten ticks, so it looks every ten. A change to the site made in between (or while
+  // time is paused) shows at once in overlayData, and the interface can issue structure.recheck to bring state up to date.
+  every: 10,
   init: fresh,
   step,
   commands: {

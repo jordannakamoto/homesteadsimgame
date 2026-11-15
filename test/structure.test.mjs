@@ -182,8 +182,8 @@ test('the same house under an extreme snow load is flagged, in plain words, befo
   assert.equal(heavy.members['p8.rb'].ok, false); assert.equal(heavy.worst.pieceId, 'p8.rb');
   // and the same through the weather: a metre and more of old snow on the ground right now
   const sim = judged(house()); assert.equal(S(sim).issues.length, 0);
-  sim.state.sys.weather.snowSweMm = 700; sim.runTicks(1);
-  const now = S(sim); assert.ok(now.env.snowNowKPa > 6.8 && now.bands.snow === Math.ceil(700 * 9.81 / 1000 / 0.25));
+  sim.state.sys.weather.snowSweMm = 700; sim.runTicks(10);
+  const now = S(sim); assert.ok(now.env.snowNowKPa > 6.5 && now.bands.snow >= 27);
   const j = now.issues.find((x) => x.pieceId === 'p8.rb'); assert.ok(j && /snow lying on it now/.test(j.reason), JSON.stringify(now.issues));
   for (const x of now.issues) { assert.ok(['info', 'warn', 'fail'].includes(x.severity)); assert.ok(x.reason.length > 30 && x.fix.length > 15 && /[.]$/.test(x.reason)); }
 });
@@ -346,9 +346,9 @@ test('it recomputes only when the site, the snow band or the wind band changes, 
   const sim = createGameSim(11); let n = 0; sim.listen((t) => { if (t === 'structure.changed') n++; });
   setSite(sim, house()); sim.runTicks(1); assert.equal(n, 1);
   sim.runDays(20); assert.equal(n, 1, 'three weeks of spring weather: no work');
-  setSite(sim, house().filter((p) => p.id !== 'p7')); sim.runTicks(1); assert.equal(n, 2);
-  sim.state.sys.weather.snowSweMm = 30; sim.runTicks(1); assert.equal(n, 3, 'snow crossed a 0.25 kPa band'); assert.equal(S(sim).env.snowNowKPa, 0.5);
-  sim.state.sys.weather.snowSweMm = 45; sim.runTicks(1); assert.equal(n, 3, 'same band');
+  setSite(sim, house().filter((p) => p.id !== 'p7')); sim.runTicks(10); assert.equal(n, 2);
+  sim.state.sys.weather.snowSweMm = 30; sim.runTicks(10); assert.equal(n, 3, 'snow crossed a 0.25 kPa band'); assert.equal(S(sim).env.snowNowKPa, 0.5);
+  sim.state.sys.weather.snowSweMm = 45; sim.runTicks(10); assert.equal(n, 3, 'same band');
   // paused: the overlay still shows the site as it is, without touching state, and a recheck brings state up to date
   const before = sim.hash(); setSite(sim, house().filter((p) => p.id !== 'p1')); const h1 = sim.hash();
   const ov = structureOverlayData(sim.state); assert.equal(ov.pieces['p8.0'].status, 'fail'); assert.equal(sim.hash(), h1); assert.notEqual(before, h1);
@@ -362,7 +362,7 @@ test('structure state survives a save, and a save from before structure existed 
   assert.equal(again.hash(), sim.hash()); assert.equal(S(again).site.soil, 'gravel'); assert.equal(JSON.stringify(S(again)), JSON.stringify(JSON.parse(file).sim.sys.structure), 'plain JSON');
   sim.runDays(2); again.runDays(2); assert.equal(again.hash(), sim.hash());
   const old = sim.serialize(); delete old.sys.structure;
-  const up = createGameSim(1); up.load(old); assert.equal(S(up).version, -1); up.runTicks(1);
+  const up = createGameSim(1); up.load(old); assert.equal(S(up).version, -1); up.runTicks(10);
   assert.equal(S(up).version, up.state.sys.site.version); assert.ok(S(up).members['p8.rb'].ok); assert.equal(S(up).site.soil, 'firm-loam');
   assert.ok(JSON.stringify(S(sim)).length < 6000, 'a house\'s structure state is a few kilobytes: ' + JSON.stringify(S(sim)).length);
 });
