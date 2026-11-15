@@ -13,7 +13,9 @@ import {
 import { stockRemove } from "./stock.js";
 export const GRID = 9,
   PAN_R = 0.48,
+  PAN_RIM_HEIGHT = 0.22,
   BURNER = { x: 1.4, z: -0.25, r: 0.34, y: 0.16 };
+export const PLATE = { x: 0.05, z: 0.8, radius: 0.36 };
 export const MAX_PIECES = 32;
 const STEP = 1 / 60,
   IDENTITY = { x: 0, y: 0, z: 0, w: 1 },
@@ -114,8 +116,12 @@ function addBody(rt, o) {
       const a = (i * Math.PI) / 8;
       colliderFor(
         rt.world,
-        R.ColliderDesc.cuboid(0.1, 0.09, 0.025)
-          .setTranslation(Math.sin(a) * PAN_R, 0.09, Math.cos(a) * PAN_R)
+        R.ColliderDesc.cuboid(0.107, PAN_RIM_HEIGHT / 2, 0.025)
+          .setTranslation(
+            Math.sin(a) * PAN_R,
+            PAN_RIM_HEIGHT / 2,
+            Math.cos(a) * PAN_R,
+          )
           .setRotation({ x: 0, y: Math.sin(a / 2), z: 0, w: Math.cos(a / 2) })
           .setMass(0.025),
         body,
@@ -157,6 +163,8 @@ function runtime(s) {
   // A save never resumes a stale pointer capture.
   s.held = null;
   s.target = null;
+  s.group = null;
+  s.dropPending = false;
   return rt;
 }
 function sync(s, rt) {
@@ -301,6 +309,18 @@ export function heatStep(s, seconds) {
     }
   }
 }
+function panContents(objects, pan) {
+  const inv = inverse(pan.q);
+  return objects.filter((o) => {
+    if (o.kind !== "carrot") return false;
+    const [x, y, z] = rotate(
+      [o.p.x - pan.p.x, o.p.y - pan.p.y, o.p.z - pan.p.z],
+      inv,
+    );
+    return Math.hypot(x, z) < PAN_R && y >= 0 && y < 0.32;
+  });
+}
+
 export function physicalKitchenSystem() {
   let cachedState = null,
     rt = null;
@@ -316,12 +336,45 @@ export function physicalKitchenSystem() {
     if (!s.held) return;
     const r = getRuntime(s);
     if (!s.held) return; // Loading releases stale pointer ownership.
-    const b = r.bodies.get(s.held);
-    b.setBodyType(R.RigidBodyType.Dynamic, true);
-    b.setLinvel(zero(), true);
-    b.setAngvel(zero(), true);
+    for (const id of [s.held, ...Object.keys(s.group || {}).map(Number)]) {
+      const body = r.bodies.get(id);
+      body.setBodyType(R.RigidBodyType.Dynamic, true);
+      body.setLinvel(zero(), true);
+      body.setAngvel(zero(), true);
+    }
     s.held = null;
     s.target = null;
+    s.group = null;
+    s.dropPending = false;
+    r.tossTime = 0;
+  };
+  const grab = (s, objects) => {
+    const r = getRuntime(s);
+    release(s);
+    const anchor = objects[0];
+    s.held = anchor.id;
+    s.target = { ...anchor.p };
+    s.group = {};
+    for (const o of objects) {
+      r.bodies
+        .get(o.id)
+        .setBodyType(R.RigidBodyType.KinematicPositionBased, true);
+      if (o !== anchor)
+        s.group[o.id] = {
+          x: o.p.x - anchor.p.x,
+          y: o.p.y - anchor.p.y,
+          z: o.p.z - anchor.p.z,
+        };
+    }
+  };
+  const removeFood = (s, o) => {
+    if (s.group) delete s.group[o.id];
+    s.objects.splice(s.objects.indexOf(o), 1);
+    if (s === cachedState) {
+      rt.world.removeRigidBody(rt.bodies.get(o.id));
+      rt.bodies.delete(o.id);
+    }
+    s.version++;
   };
   return {
     name: "physicalKitchen",
@@ -358,14 +411,58 @@ export function physicalKitchenSystem() {
       },
       "kitchen.grab"(c, p) {
         if (!ready || !c.s.initialized) return no("Physics is loading.");
-        const r = getRuntime(c.s),
-          o = c.s.objects.find((o) => o.id === p.id);
+        const o = c.s.objects.find((o) => o.id === p.id);
         if (!o) return no("Missing object.");
-        release(c.s);
-        c.s.held = o.id;
-        c.s.target = { ...o.p };
-        const b = r.bodies.get(o.id);
-        b.setBodyType(R.RigidBodyType.KinematicPositionBased, true);
+        grab(c.s, o.kind === "pan" ? [o, ...panContents(c.s.objects, o)] : [o]);
+        return yes();
+      },
+      "kitchen.scoop"(c) {
+        if (!ready || !c.s.initialized) return no("Open the workbench first.");
+        const food = c.s.objects.filter(
+          (o) =>
+            o.kind === "carrot" &&
+            o.p.y >= 0 &&
+            o.p.y < 0.35 &&
+            Math.abs(o.p.x + 1.25) < 0.76 &&
+            Math.abs(o.p.z) < 0.53,
+        );
+        if (!food.length) return no("There’s no food on the board.");
+        grab(c.s, food);
+        return { ok: true, count: food.length };
+      },
+      "kitchen.toss"(c) {
+        const s = c.s;
+        const pan = s.objects.find((o) => o.id === s.held && o.kind === "pan");
+        if (!pan || s.dropPending)
+          return no("Hold the pan to toss its contents.");
+        const r = getRuntime(s);
+        if (r.tossTime) return no("Let the food land first.");
+        const pieces = Object.keys(s.group || {}).map(Number);
+        if (!pieces.length) return no("Put food in the pan first.");
+        // Hold the pan still for a short lift and catch. The pieces fly and
+        // rotate under gravity, then only pieces still inside are gathered.
+        r.tossTime = 0.68;
+        for (const [index, id] of pieces.entries()) {
+          const food = s.objects.find((o) => o.id === id);
+          const body = r.bodies.get(id);
+          body.setBodyType(R.RigidBodyType.Dynamic, true);
+          body.setLinvel(
+            {
+              x: (pan.p.x - food.p.x) * 1.7,
+              y: 2.65 + (index % 3) * 0.12,
+              z: (pan.p.z - food.p.z) * 1.7,
+            },
+            true,
+          );
+          body.setAngvel({ x: 7.5, y: 0, z: index % 2 ? -2 : 2 }, true);
+        }
+        s.group = {};
+        return yes();
+      },
+      "kitchen.drop"(c) {
+        const s = c.s;
+        if (!s.held) return yes();
+        s.dropPending = true;
         return yes();
       },
       "kitchen.move"(c, p) {
@@ -386,42 +483,47 @@ export function physicalKitchenSystem() {
         c.s.power = Math.max(0, Math.min(1, p.value));
         return yes();
       },
-      "kitchen.eat"(c, p) {
-        const o = c.s.objects.find((o) => o.id === p.id);
-        if (!o || o.kind !== "carrot" || o.age > 172800 || o.burn > 0.6)
-          return no("This piece cannot be eaten.");
+      "kitchen.plate"(c, p) {
+        const s = c.s;
         if (
-          c.s.held === o.id ||
-          o.p.y > 0.3 ||
-          o.p.y < 0 ||
-          Math.hypot(o.p.x - 0.05, o.p.z - 0.8) > 0.4
+          !ready ||
+          !s.initialized ||
+          !good(p) ||
+          Math.hypot(p.x - PLATE.x, p.z - PLATE.z) > PLATE.radius
         )
-          return no("Place the food on the plate first.");
-        if (c.s.held === o.id) release(c.s);
+          return no("Bring the pan over the plate.");
+        const pan = s.objects.find((o) => o.id === s.held && o.kind === "pan");
+        if (!pan) return no("Bring the pan over the plate.");
+        if (getRuntime(s).tossTime)
+          return no("Let the food land before serving.");
+        const food = s.objects.filter((o) => s.group?.[o.id]);
+        if (!food.length) return no("The pan is empty.");
+        if (food.some((o) => o.age >= 172800 || o.burn > 0.6))
+          return no("Remove burned or spoiled pieces before serving.");
+        if (food.some((o) => o.cooked < 0.8))
+          return no("Some pieces still need to cook.");
         const cooking = c.get("cooking");
-        cooking.fullness = Math.min(
-          100,
-          cooking.fullness + (o.mass / 0.12) * (o.cooked >= 0.8 ? 12 : 6),
-        );
-        if (o.cooked >= 0.8) cooking.wellFedUntil = c.t + 21600;
-        c.s.objects.splice(c.s.objects.indexOf(o), 1);
-        if (c.s === cachedState) {
-          rt.world.removeRigidBody(rt.bodies.get(o.id));
-          rt.bodies.delete(o.id);
-        }
-        c.s.version++;
+        if (cooking.meals.length >= 40)
+          return no("Your meal inventory is full.");
+        const mass = food.reduce((sum, o) => sum + o.mass, 0);
+        const quality = food.some((o) => o.burn > 0.25) ? "rough" : "good";
+        cooking.meals.push({
+          id: cooking.nextMeal++,
+          recipe: "panCarrots",
+          qty: 1,
+          quality,
+          satiety: (mass / 0.12) * 12,
+          madeAt: c.t,
+          expiresAt: c.t + Math.min(...food.map((o) => 172800 - o.age)),
+        });
+        for (const o of food) removeFood(s, o);
         return yes();
       },
       "kitchen.discard"(c, p) {
         const o = c.s.objects.find((o) => o.id === p.id);
         if (!o || o.kind !== "carrot") return no("Only food can be discarded.");
-        if (c.s.held === o.id) release(c.s);
-        c.s.objects.splice(c.s.objects.indexOf(o), 1);
-        if (c.s === cachedState) {
-          rt.world.removeRigidBody(rt.bodies.get(o.id));
-          rt.bodies.delete(o.id);
-        }
-        c.s.version++;
+        if (c.s.held === o.id || c.s.group?.[o.id]) release(c.s);
+        removeFood(c.s, o);
         return yes();
       },
       "kitchen.advance"(c, p) {
@@ -439,7 +541,7 @@ export function physicalKitchenSystem() {
           s.acc = Math.max(0, s.acc - STEP);
           let knife = null,
             oldY = 0;
-          if (s.held && s.target) {
+          if (s.held && s.target && !r.tossTime) {
             const o = s.objects.find((o) => o.id === s.held),
               b = r.bodies.get(s.held),
               pos = b.translation(),
@@ -448,12 +550,31 @@ export function physicalKitchenSystem() {
                 s.target.y - pos.y,
                 s.target.z - pos.z,
               ),
-              f = Math.min(1, (3 * STEP) / Math.max(d, 1e-8));
-            b.setNextKinematicTranslation({
+              f = Math.min(
+                1,
+                ((o.kind === "pan"
+                  ? s.dropPending && s.target.y <= 0.22
+                    ? 0.9
+                    : 3
+                  : o.kind === "knife"
+                    ? 6
+                    : 7) *
+                  STEP) /
+                  Math.max(d, 1e-8),
+              );
+            const next = {
               x: pos.x + (s.target.x - pos.x) * f,
               y: pos.y + (s.target.y - pos.y) * f,
               z: pos.z + (s.target.z - pos.z) * f,
-            });
+            };
+            b.setNextKinematicTranslation(next);
+            for (const [id, offset] of Object.entries(s.group || {})) {
+              r.bodies.get(Number(id)).setNextKinematicTranslation({
+                x: next.x + offset.x,
+                y: next.y + offset.y,
+                z: next.z + offset.z,
+              });
+            }
             // Held utensils stay upright; free objects have full rigid-body rotation.
             b.setNextKinematicRotation(IDENTITY);
             if (o.kind === "knife") {
@@ -464,6 +585,42 @@ export function physicalKitchenSystem() {
           r.world.step();
           sync(s, r);
           if (knife) sliceAtBlade(s, r, knife, oldY);
+          if (r.tossTime > 0) {
+            r.tossTime = Math.max(0, r.tossTime - STEP);
+            if (r.tossTime > 0) continue;
+            const pan = s.objects.find((o) => o.id === s.held);
+            for (const food of panContents(s.objects, pan)) {
+              const body = r.bodies.get(food.id);
+              body.setBodyType(R.RigidBodyType.KinematicPositionBased, true);
+              s.group[food.id] = {
+                x: food.p.x - pan.p.x,
+                y: food.p.y - pan.p.y,
+                z: food.p.z - pan.p.z,
+              };
+            }
+          }
+          const held = s.dropPending && r.bodies.get(s.held)?.translation();
+          if (
+            held &&
+            Math.hypot(
+              held.x - s.target.x,
+              held.y - s.target.y,
+              held.z - s.target.z,
+            ) < 0.012
+          ) {
+            const pan = s.objects.find(
+              (o) => o.id === s.held && o.kind === "pan",
+            );
+            if (pan && s.target.y > 0.22) {
+              const onHob =
+                Math.abs(s.target.x - BURNER.x) < 0.57 &&
+                Math.abs(s.target.z - BURNER.z) < 0.52;
+              const onBoard =
+                Math.abs(s.target.x + 1.25) < 0.72 &&
+                Math.abs(s.target.z) < 0.49;
+              s.target.y = onHob ? 0.187 : onBoard ? 0.068 : 0.028;
+            } else release(s);
+          }
         }
         return yes();
       },

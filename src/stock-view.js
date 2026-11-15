@@ -53,7 +53,16 @@
   function inventory(st) {
     let h = '';
     const total = S.stockMassKg(st);
-    let any = false;
+    const meals = G.cooking?.meals || [];
+    if (meals.length) h += '<h3>Prepared meals</h3>';
+    for (const meal of meals) {
+      const detail = meal.hoursLeft ? meal.quality + ' · ' + meal.hoursLeft + ' game hours left' : 'Spoiled';
+      h += '<div class="row shop" data-id="' + meal.id + '"><div class="name">' + esc(meal.name) +
+        ' × ' + meal.qty + '<small>' + esc(detail) + '</small></div><div class="buy">' +
+        '<button type="button" class="go" data-act="eat-meal"' + (meal.hoursLeft ? '' : ' disabled') + '>Eat</button>' +
+        '<button type="button" data-act="discard-meal">Discard</button></div></div>';
+    }
+    let any = meals.length > 0;
     for (const c of S.ITEM_CATEGORIES) {
       const ids = (isToolCat(c.id) ? st.tools : Object.keys(st.items)).filter((id) => S.ITEMS[id] && S.ITEMS[id].category === c.id);
       if (!ids.length) continue;
@@ -72,7 +81,7 @@
     }
     if (!any) h += '<div class="empty">Nothing here yet.</div>';
     h += '<div class="total">Everything you own weighs ' + kg(total) + '</div>';
-    if (!st.tools.length && !Object.keys(st.items).length) h = '<div class="empty">Your pockets are empty. Try the Supplier tab.</div>';
+    if (!any) h = '<div class="empty">Your pockets are empty. Try the Supplier tab.</div>';
     return h;
   }
   const isToolCat = (id) => id === 'tools_hand' || id === 'tools_power';
@@ -130,7 +139,7 @@
     for (const b of panel.querySelectorAll('.svtabs button')) b.setAttribute('aria-selected', b.dataset.tab === tab ? 'true' : 'false');
     sig = signature();
   }
-  const signature = () => { const st = S.state; return tab + '|' + st.money + '|' + JSON.stringify(st.items) + st.tools.length + '|' + st.projects.map((p) => p.status).join(); };
+  const signature = () => { const st = S.state; return tab + '|' + st.money + '|' + JSON.stringify(st.items) + st.tools.length + '|' + st.projects.map((p) => p.status).join() + (tab === 'inv' ? JSON.stringify(G.cooking?.meals || []) : ''); };
   function say(text, cls) { note.textContent = text; note.className = 'svnote ' + (cls || ''); }
   function pop() { const m = $('svmoney'); m.classList.add('pop'); setTimeout(() => m.classList.remove('pop'), 250); }
 
@@ -178,6 +187,14 @@
       act = b.dataset.act;
     if (act === 'toggledis') { showDismissed = !showDismissed; render(true); return; }
     if (['done', 'dismiss', 'reopen'].includes(act)) { S.do('projects.' + act, { id }); render(true); return; }
+    if (act === 'eat-meal' || act === 'discard-meal') {
+      const eating = act === 'eat-meal';
+      const meal = G.cooking.meals.find(item => item.id === Number(id));
+      const result = G.sim.commandNow(eating ? 'cooking.eat' : 'cooking.discardMeal', { id: Number(id) });
+      say(result.ok ? (eating ? 'Ate ' : 'Discarded ') + meal.name + '.' : result.reason, result.ok ? 'good' : 'bad');
+      render(true);
+      return;
+    }
     const it = S.ITEMS[id];
     if (!it) return;
     if (act === 'inc' || act === 'dec') {

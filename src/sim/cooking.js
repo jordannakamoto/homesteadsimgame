@@ -138,7 +138,7 @@ const commands = {
     const i = c.s.meals.findIndex((meal) => meal.id === p.id), meal = c.s.meals[i];
     if (!meal || meal.expiresAt <= c.t) return fail('That meal has spoiled.');
     const factor = meal.quality === 'rough' ? 0.75 : meal.quality === 'lovely' ? 1.1 : 1;
-    c.s.fullness = Math.min(100, c.s.fullness + RECIPES[meal.recipe].satiety * factor);
+    c.s.fullness = Math.min(100, c.s.fullness + (meal.satiety ?? RECIPES[meal.recipe].satiety) * factor);
     c.s.wellFedUntil = c.t + 6 * 3600;
     if (--meal.qty === 0) c.s.meals.splice(i, 1);
     return ok();
