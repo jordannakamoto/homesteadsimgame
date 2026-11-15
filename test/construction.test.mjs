@@ -260,6 +260,6 @@ test('a plan sent again keeps what was built and ordered; one sent as built is f
   assert.equal(Object.values(pr(sim).members).filter((m) => m.built).length, built);
   assert.equal(pr(sim).lines['foundation|pierblock'].ordered, 6); assert.equal(pr(sim).planId, 'shed');
   assert.deepEqual(SUP.imbalance(cs(sim)), {});
-  const all = sim.commandNow('construction.setPlan', K.planFromPieces(99, shed.pieces.map((p) => ({ ...p, struct: 99, built: true })), shed.materialsList, { built: true }));
+  const all = sim.commandNow('construction.setPlan', K.planFromPieces(99, shed.pieces.map((p) => ({ ...p, struct: 99, built: true })), shed.materialsList, {}));
   assert.ok(all.ok && cs(sim).progress[99].done);
 });

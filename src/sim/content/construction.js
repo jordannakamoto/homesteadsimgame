@@ -69,7 +69,8 @@ export function itemForm(itemId) {
 // ---- deliveries
 export const DELIVERY = Object.freeze({
   delayS: 3600,                       // an hour of world time: under a minute at normal speed
-  layout: Object.freeze({ cols: 4, dx: 1.5, dz: 3.6, mergeR: 9 }),
+  // the yard: long things (lumber, boards, sheets) side by side in rows, small things in a band in front of them
+  layout: Object.freeze({ mergeR: 14, slot: (i, itemId) => (/^(lumber|board|osb|plywood|gypsum|glulam)_/.test(itemId) ? { x: (i % 4) * 1.5, z: Math.floor(i / 4) * 3.4 } : { x: (i % 5) * 1.15, z: -2.5 - Math.floor(i / 5) * 1.2 }) }),
 });
 
 // ---- carrying: by hand about what a person lifts comfortably; a tool that carries more raises it

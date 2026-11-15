@@ -6534,10 +6534,10 @@
         for (let d = 0; d < 2; d++) {
           const wk = ek(i, j, d),
             ty = S.walls.get(wk);
-          if (ty && ((S.hid.size && S.hid.has(wk)) || (isThick(ty) && ey > wallTop))) continue;
+          if (ty && ((S.hid.size && S.hid.has(wk)) || (isThick(ty) && ey > wallTop) || (S.ghostW && S.ghostW.has(wk)))) continue;
           let block = blocks(ty, isPlayer, low);
           const R = isThick(ty) ? r + 0.52 : R0;
-          if (!block && !ty && low) {
+          if (!block && !ty && low && !S.deckGhost) {
             const a = d === 0 ? S.floors.has(ck(i, j - 1)) : S.floors.has(ck(i - 1, j)),
               b = S.floors.has(ck(i, j));
             block = a !== b;
@@ -7039,6 +7039,8 @@
     for (const id of [...S.plan]) all.has(id) || S.plan.delete(id);
     S.sitePlanned = mem.list.some((m) => m.kind === "site" && S.plan.has(m.id));
     const st = { all: !S.plan.size, mem, finRun: null, finFloor: null, finRoof: null, cur: null, built: null, shell: null };
+    S.ghostW = null;
+    S.deckGhost = false;
     if (st.all) return st;
     const P = (id) => S.plan.has(id),
       kids = (id) => mem.byParent.get(id),
@@ -7049,6 +7051,16 @@
     st.finRun = new Set();
     st.finFloor = new Set();
     st.finRoof = new Set();
+    {
+      // only what stands can be walked into: a wall whose frame is not up yet, and a floor with no deck, are not there
+      const stands = (id) => (kids(id) ? kids(id).every((m) => m.stage !== "wall-frame" || !P(m.id)) : !P(id)),
+        gone = new Set();
+      S.ghostW = new Set();
+      for (const g of S.runs) if (!stands(g.id)) for (const e of g.m) S.ghostW.add(e.k);
+      for (const g of S.fruns) if (!stands(g.id)) for (const n of g.m) gone.add(S.segs[n].slice(0, 4).join(","));
+      if (gone.size) S.colSegs = S.colSegs.filter((sg) => !gone.has(sg.slice(0, 4).join(",")));
+      S.deckGhost = mem.list.some((m) => (m.stage === "site" || m.stage === "foundation" || m.stage === "floor-frame" || m.stage === "subfloor") && P(m.id));
+    }
     for (const g of S.runs) {
       const f = fin(g.id, ".cl"),
         D = f ? Db : bare(g.id) ? Ds : null;
@@ -8383,6 +8395,25 @@
     materialsList,
     plans: planList,
     placePlan,
+    // for the construction add-on: where each building stands and how much of it is still only planned
+    structs: () => B.structs.map((S) => ({ id: S.id, ver: S.ver, x: S.cx, z: S.cz, r: S.rad, y0: S.y0, yaw: S.yaw || 0, level: S.level, planned: S.plan.size, sitePlanned: !!S.sitePlanned, found: S.found })),
+    // every member of one building in its own metres, with the matrix that puts them in the world
+    membersOf(structId) {
+      const S = B.structs.find((O) => O.id === structId);
+      if (!S) return null;
+      S.group.updateMatrixWorld(true);
+      return { matrix: S.group.matrixWorld, y0: S.y0, list: membersOf(S).list, planned: S.plan };
+    },
+    memberLook: () => ({ geo: boxGeo, mat: memMat, colors: MCOL }),
+    removeStruct(structId) {
+      const S = B.structs.find((O) => O.id === structId);
+      if (!S) return false;
+      pushUndo();
+      disposeStruct(S);
+      B.version++;
+      touchUi();
+      return true;
+    },
     setFoundation(structId, type) {
       const S = B.structs.find((O) => O.id === structId);
       S && setFound(S, type);
@@ -8443,7 +8474,7 @@
         const [lx, lz] = toLocal(S, x, z);
         const ci = Math.floor(lx),
           cj = Math.floor(lz);
-        if ((S.floors.has(ck(ci, cj)) && !wellOver(S, ci, cj)) || ringAt(S, lx, lz, 0.1) >= 0 || polyAt(S, lx, lz) >= 0) {
+        if (!S.deckGhost && ((S.floors.has(ck(ci, cj)) && !wellOver(S, ci, cj)) || ringAt(S, lx, lz, 0.1) >= 0 || polyAt(S, lx, lz) >= 0)) {
           const top = S.y0 + FLOOR_T;
           if (y >= top - 0.65) g = Math.max(g, top);
         }

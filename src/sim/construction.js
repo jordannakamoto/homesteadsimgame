@@ -234,7 +234,7 @@ function setPlan(ctx, p) {
   for (const m of p.members) {
     if (!C.STAGE[m.stage]) continue;
     const o = old && old.members[m.id];
-    pr.members[m.id] = { stage: m.stage, kind: m.kind, parent: m.parent || null, line: null, need: 0, got: o ? o.got : 0, built: p.built ? (m.built ? 1 : 0) : o ? o.built : 0 };
+    pr.members[m.id] = { stage: m.stage, kind: m.kind, parent: m.parent || null, line: null, need: 0, got: o ? o.got : 0, built: o ? o.built : m.built ? 1 : 0 };
   }
   for (const ln of p.lines) {
     if (!C.STAGE[ln.stage]) continue;
@@ -254,13 +254,14 @@ function setPlan(ctx, p) {
       const upto = wsum > 0 ? round6((qty * cum) / wsum) : 0, m = pr.members[q[0]];
       m.line = ln.key; m.need = round6(upto - prev); prev = upto;
       if (m.built) m.got = m.need;
+      else if (m.got > m.need) m.got = m.need;
       L.used = round6(L.used + m.got);
     }
   }
   if (old) for (const k in old.raised) pr.raised[k] = true;
-  if (p.built) for (const st of C.STAGES) if (st.flat) for (const par of flatParents(pr, st.id)) if (frameReady(pr, st.id, par)) pr.raised[par] = true;
+  if (!old) for (const st of C.STAGES) if (st.flat) for (const par of flatParents(pr, st.id)) if (frameReady(pr, st.id, par)) pr.raised[par] = true;
   retally(pr);
-  for (const key in pr.lines) { const ln = pr.lines[key]; if (ln.supply) { const t = pr.tally[ln.stage]; ln.used = old && old.lines[key] ? Math.min(old.lines[key].used, ln.qty) : 0; if (p.built && t && t[1]) ln.used = round6((ln.qty * t[0]) / t[1]); } }
+  for (const key in pr.lines) { const ln = pr.lines[key]; if (ln.supply) { const t = pr.tally[ln.stage]; ln.used = old && old.lines[key] ? Math.min(old.lines[key].used, ln.qty) : 0; if (!old && t && t[1]) ln.used = round6((ln.qty * t[0]) / t[1]); } }
   s.progress[p.structId] = pr;
   if (p.tutorial && s.tutorial.shed === null && !s.tutorial.done) s.tutorial.shed = p.structId;
   const was = old ? old.done : false;

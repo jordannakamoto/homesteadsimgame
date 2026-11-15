@@ -2629,6 +2629,7 @@ function updatePlayer(dt) {
       const sprint = shift && P.shiftT >= 0.2 && P.stam > 0 && !P.aiming && !swimming && !P.atk && !P.charging && !P.parry;
       if (sprint) { P.stam = Math.max(0, P.stam - 11 * dt); P.stamWait = 0.4; }
       sp = swimming ? 2.6 : sprint ? 8.2 : 5.4;
+      if (P.carryK) sp *= P.carryK;                                // slower with a load in the arms
       if (P.aiming) sp *= 0.55;
       if (P.charging) sp *= 0.6;
       if (P.atk) sp *= 0.4;
@@ -2855,6 +2856,7 @@ function updateHud() {
   if (combo !== hs.combo) { el('combo').textContent = combo; hs.combo = combo; }
 }
 let last = performance.now(), fpsAcc = 0, fpsN = 0, fps = 60, slowFor = 0, autoDropped = false;
+const stepHooks = [];
 function step(dt) {
   U.time.value += dt;
   if (dt > 0) { const dy = Math.atan2(Math.sin(cam.yaw - cam.prevYaw), Math.cos(cam.yaw - cam.prevYaw)); cam.yawRate = lerp(cam.yawRate, dy / dt, 0.3); cam.prevYaw = cam.yaw; }
@@ -2884,6 +2886,7 @@ function step(dt) {
   updateMotes();
   updateSky();
   if (window.__build) window.__build.update(dt);
+  for (let i = 0; i < stepHooks.length; i++) stepHooks[i](dt);    // add-ons that must move with the world (construction)
   // grass only near the player
   const gr = quality.level === 'high' ? 84 : 52;
   for (const c of world.chunks.values()) {
@@ -2935,6 +2938,7 @@ setTool('axe');
 lockUi();
 window.__game = {
   pm, get seed() { return SEED; },
+  stepHooks,
   get sim() { return sim; }, setYearDays: (d) => { sim.setYearDays(d); saveGame(); }, savedBuilds: () => simCtl.builds, powerAvailable: () => false,
   stock: {
     MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, stockMassKg, canAfford, toolAvailable,

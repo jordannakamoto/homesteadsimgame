@@ -372,6 +372,90 @@ body.cooking-active #utbar, body.cooking-active #ut { display: none; }
 #ck .ckbuy .go { font-family: var(--font-display); font-size: 17px; border-color: var(--accent); background: rgba(226, 182, 90, 0.2); }
 #ck .ckblurb { color: var(--ink-dim); font-size: 14px; }
 @media (max-width: 700px) { #ckbar { top: 134px; left: 6px; } #ckbar .key { display: none; } }
+/* construction (iteration 2c): the Build button, the next-step note, the Build panel, the work prompt, banners */
+#cvbar { top: 266px; left: 16px; padding: 5px 6px; display: flex; gap: 6px; }
+#cvbar button { padding: 3px 10px; font-family: var(--font-display); font-size: 15px; white-space: nowrap; }
+#cvbar button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+#cvbar .key { font-family: var(--font-body); font-size: 11px; color: var(--ink-dim); margin-left: 2px; }
+#cvnext { top: 310px; left: 16px; width: 252px; padding: 8px 12px 9px; border-left: 3px solid var(--accent); }
+#cvnext[hidden], #cv[hidden], #cvprompt[hidden], #cvbanner[hidden], #cvsand[hidden], #cvact[hidden] { display: none; }
+#cvnext .cvk { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim); }
+#cvnext .cvt { font-family: var(--font-display); font-size: 17px; line-height: 1.15; color: var(--accent); margin: 1px 0 3px; }
+#cvnext .cvl { font-size: 13.5px; line-height: 1.3; }
+#cvnext .cvl kbd, #cvprompt kbd, #cv kbd { font: 700 12px var(--font-body); color: #1b2326; background: var(--accent); border-radius: 4px; padding: 0 5px; margin: 0 2px; }
+#cvnext .cvwhy { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--panel-edge); font-size: 12.5px; line-height: 1.3; color: var(--ink-dim); }
+#cvnext .cvwhy b { color: var(--ink); font-weight: 600; }
+#cvnext .cvrow { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; }
+#cvnext button { font-size: 12.5px; padding: 3px 9px; }
+#cvnext button.go, #cv button.go { border-color: var(--accent); background: rgba(226, 182, 90, 0.2); color: var(--accent); font-weight: 700; }
+#cv { top: 74px; right: 12px; width: min(420px, calc(100vw - 24px)); max-height: calc(100vh - 170px); display: flex; flex-direction: column; gap: 6px; padding: 10px 12px 12px; z-index: 7; background: rgba(22, 28, 30, 0.93); }
+#cv .cvhead { display: flex; align-items: center; gap: 10px; }
+#cv .cvhead h2 { font-family: var(--font-display); font-weight: 400; font-size: 21px; margin: 0; color: var(--accent); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#cv .cvmoney { font-family: var(--font-display); font-size: 19px; font-variant-numeric: tabular-nums; }
+#cv .cvsay { min-height: 18px; font-size: 13px; color: var(--ink-dim); }
+#cv .cvsay.good { color: #b8e08a; } #cv .cvsay.bad { color: var(--danger); }
+#cvbody { overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 8px; padding-right: 3px; }
+#cv .cvstep { font-size: 13px; color: var(--ink); background: rgba(226, 182, 90, 0.1); border: 1px solid var(--panel-edge); border-radius: 6px; padding: 6px 9px; }
+#cv .cvstep b { color: var(--accent); font-weight: 700; }
+#cv .cvtop { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+#cv .cvtop button.go { font-size: 15px; padding: 7px 14px; flex: 1; }
+#cv .cvseg { display: flex; border: 1px solid var(--panel-edge); border-radius: 6px; overflow: hidden; }
+#cv .cvseg button { border: 0; border-radius: 0; font-size: 12.5px; padding: 4px 9px; background: none; }
+#cv .cvseg button[aria-pressed="true"] { background: rgba(226, 182, 90, 0.2); color: var(--accent); }
+#cv .cvopts { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; color: var(--ink-dim); align-items: center; }
+#cv .cvopts label { display: flex; gap: 4px; align-items: center; cursor: pointer; white-space: nowrap; }
+#cv .cvopts input { accent-color: #e2b65a; margin: 0; }
+#cv ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+#cv li.st { display: grid; grid-template-columns: 26px 1fr auto; gap: 1px 8px; align-items: center; padding: 6px 8px; border: 1px solid var(--panel-edge); border-radius: 7px; background: rgba(255, 255, 255, 0.03); }
+#cv li.st .n { grid-row: 1 / 3; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font: 700 12px var(--font-body); border: 1.5px solid var(--panel-edge); color: var(--ink-dim); align-self: start; margin-top: 1px; }
+#cv li.st .nm { font-family: var(--font-display); font-size: 16px; }
+#cv li.st .chip { font-size: 11.5px; color: var(--ink-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+#cv li.st .wh { grid-column: 2 / 4; font-size: 12.5px; line-height: 1.3; color: var(--ink-dim); }
+#cv li.st.done { opacity: 0.62; } #cv li.st.done .n { background: rgba(184, 224, 138, 0.2); border-color: #b8e08a; color: #b8e08a; }
+#cv li.st.locked { opacity: 0.5; }
+#cv li.st.next { border-color: var(--accent); background: rgba(226, 182, 90, 0.09); }
+#cv li.st.next .n { border-color: var(--accent); color: var(--accent); }
+#cv li.st.next .wh, #cv li.st.open .wh { color: var(--ink); }
+#cv li.st .why { grid-column: 2 / 4; font-size: 12.5px; line-height: 1.3; color: var(--ink-dim); }
+#cv li.st .mats { grid-column: 2 / 4; margin-top: 4px; display: grid; grid-template-columns: 1fr auto auto; gap: 1px 10px; font-size: 12.5px; }
+#cv li.st .mats i { font-style: normal; color: var(--ink-dim); font-variant-numeric: tabular-nums; text-align: right; }
+#cv li.st .mats em { grid-column: 1 / 4; font-style: normal; font-size: 11.5px; color: var(--ink-dim); margin: -1px 0 3px; line-height: 1.25; }
+#cv li.st .act { grid-column: 2 / 4; display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+#cv li.st .act button { font-size: 13px; padding: 4px 10px; }
+#cv .bar { grid-column: 2 / 4; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.1); margin-top: 3px; overflow: hidden; }
+#cv .bar b { display: block; height: 100%; background: var(--accent); }
+#cv .book { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+#cv .plan { display: flex; flex-direction: column; gap: 3px; padding: 9px 10px; border: 1px solid var(--panel-edge); border-radius: 8px; background: rgba(255, 255, 255, 0.04); text-align: left; }
+#cv .plan svg { width: 100%; height: 74px; }
+#cv .plan .nm { font-family: var(--font-display); font-size: 17px; color: var(--accent); }
+#cv .plan .sm { font-size: 12.5px; color: var(--ink-dim); line-height: 1.3; }
+#cv .plan .fig { font-size: 13px; font-variant-numeric: tabular-nums; }
+#cv .plan button { margin-top: 5px; }
+#cv .plan.locked { opacity: 0.6; }
+#cv h3 { font-family: var(--font-display); font-weight: 400; font-size: 15px; margin: 4px 0 0; color: var(--ink-dim); }
+#cv .tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+#cv .tabs button { font-size: 12.5px; padding: 3px 9px; }
+#cv .tabs button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+#cvprompt { bottom: 96px; left: 50%; transform: translateX(-50%); padding: 7px 14px 8px; display: flex; flex-direction: column; gap: 4px; align-items: center; pointer-events: none; z-index: 5; min-width: 180px; }
+#cvprompt .row { display: flex; gap: 8px; align-items: baseline; font-size: 16px; white-space: nowrap; }
+#cvprompt .row i { font-style: normal; color: var(--ink-dim); font-variant-numeric: tabular-nums; font-size: 14px; }
+#cvprompt .pb { width: 100%; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+#cvprompt .pb b { display: block; height: 100%; width: 0; background: var(--accent); }
+#cvprompt .pb[hidden] { display: none; }
+#cvbanner { top: 132px; left: 50%; transform: translateX(-50%); padding: 9px 22px 10px; text-align: center; pointer-events: none; z-index: 5; transition: opacity 0.5s; border-color: var(--accent); }
+#cvbanner.out { opacity: 0; }
+#cvbanner .t { font-family: var(--font-display); font-size: 25px; color: var(--accent); line-height: 1.1; }
+#cvbanner .l { font-size: 14px; color: var(--ink); }
+#cvbanner.small .t { font-size: 17px; }
+#cvsand { top: 120px; left: 16px; font-size: 12.5px; padding: 5px 10px; z-index: 6; }
+#cvact { right: 22px; bottom: 210px; width: 92px; height: 92px; border-radius: 50%; display: grid; place-items: center; text-align: center; font-family: var(--font-display); font-size: 15px; line-height: 1.1; z-index: 8; border-color: var(--accent); color: var(--accent); touch-action: none; user-select: none; }
+body.cooking-active #cvbar, body.cooking-active #cvnext, body.cooking-active #cvprompt { display: none; }
+@media (max-width: 700px) {
+  #cvbar { top: 214px; left: 6px; } #cvbar .key { display: none; }
+  #cvnext { top: 254px; left: 6px; width: 200px; padding: 6px 9px; } #cvnext .cvt { font-size: 15px; } #cvnext .cvl { font-size: 12.5px; }
+  #cv { top: 6px; right: 6px; max-height: calc(100vh - 12px); }
+  #cvprompt { bottom: 150px; } #cvbanner { top: 60px; }
+}
 </style>
 </head>
 <body>
@@ -490,12 +574,24 @@ body.cooking-active #utbar, body.cooking-active #ut { display: none; }
 <div id="reticle" hidden></div>
 <div id="lock" class="panel">Click the view to take control. Esc frees the mouse.</div>
 
+<div id="cvbar" class="panel" role="group" aria-label="Building"><button type="button" id="cvb" aria-pressed="false" title="Your buildings: order materials and raise them stage by stage (N)">Build <span class="key">N</span></button></div>
+<div id="cvnext" class="panel" aria-live="polite" hidden></div>
+<div id="cv" class="panel" role="dialog" aria-label="Build" hidden>
+  <div class="cvhead"><h2 id="cvtitle">Build</h2><span class="cvmoney" id="cvmoney"></span><button type="button" id="cvclose" title="Close (Esc)">Close</button></div>
+  <div class="cvsay" id="cvsay" aria-live="polite"></div>
+  <div id="cvbody"></div>
+</div>
+<div id="cvprompt" class="panel" hidden><div class="row"><kbd id="cvpk">F</kbd><span id="cvpt"></span><i id="cvpc"></i></div><div class="pb" id="cvpb" hidden><b></b></div></div>
+<div id="cvbanner" class="panel" hidden><div class="t"></div><div class="l"></div></div>
+<button type="button" id="cvsand" class="panel" hidden></button>
+<button type="button" id="cvact" class="panel" hidden></button>
+
 <div id="tools" class="panel" role="group" aria-label="Tools">
   <button type="button" data-tool="axe" aria-pressed="true"><span class="key">1</span><span class="name">Axe</span></button>
   <button type="button" data-tool="dig" aria-pressed="false"><span class="key">2</span><span class="name">Dig</span></button>
   <button type="button" data-tool="raise" aria-pressed="false"><span class="key">3</span><span class="name">Raise</span></button>
   <button type="button" data-tool="level" aria-pressed="false"><span class="key">4</span><span class="name">Level</span></button>
-  <button type="button" data-tool="build" aria-pressed="false"><span class="key">B</span><span class="name">Build</span></button>
+  <button type="button" data-tool="build" aria-pressed="false"><span class="key">B</span><span class="name">Plan</span></button>
 </div>
 
 <div id="buildbar" class="panel" hidden></div>

@@ -55,9 +55,9 @@ export function addToStacks(s, itemId, qty, x, z, { cols = 4, dx = 1.5, dz = 3.4
   if (st) { st.qty = round6(st.qty + qty); return st; }
   let px = x, pz = z;
   for (let i = 0; i < 400; i++) {
-    const o = slot ? slot(i) : { x: (i % cols) * dx, z: Math.floor(i / cols) * dz };
+    const o = slot ? slot(i, itemId) : { x: (i % cols) * dx, z: Math.floor(i / cols) * dz };
     px = round6(x + o.x); pz = round6(z + o.z);
-    if (!s.stacks.some((k) => Math.hypot(k.x - px, k.z - pz) < Math.min(dx, dz) * 0.6)) break;
+    if (!s.stacks.some((k) => Math.hypot(k.x - px, k.z - pz) < (slot ? 0.5 : Math.min(dx, dz) * 0.6))) break;
   }
   st = { id: 's' + s.nextId++, itemId, qty: round6(qty), x: px, z: pz };
   s.stacks.push(st);
