@@ -28,6 +28,7 @@
     { id: "pillar", name: "Pillar", key: "9", code: "Digit9", group: 2 },
     { id: "path", name: "Path", key: "0", code: "Digit0", group: 3 },
     { id: "decor", name: "Furnish", key: "F", code: "KeyF", group: 3 },
+    { id: "equip", name: "Equip", key: "E", code: "", group: 3 },
     { id: "measure", name: "Measure", key: "U", code: "KeyU", group: 4 },
     { id: "erase", name: "Remove", key: "X", code: "KeyX", group: 4 },
   ];
@@ -3571,7 +3572,7 @@
     return S;
   }
   function snapshot() {
-    return { wood: W.wood, structs: B.structs.map(serial) };
+    return { wood: W.wood, structs: B.structs.map(serial), fx: fxSerial() };
   }
   // put back an undo step
   function restoreSnap(snap) {
@@ -3579,6 +3580,7 @@
     for (const d of snap.structs) fill(newStruct(d), d);
     // storeys look at each other for stairwells, so build once all are in place
     for (const S of B.structs) rebuild(S);
+    fxRestore(snap.fx);
     W.wood = snap.wood;
     G.markStockDirty();
     B.version++;
@@ -3625,6 +3627,7 @@
     FORMAT = "homestead-buildings";
   function serialize() {
     const d = { format: FORMAT, v: 2, nextStruct: B.nextId, nextPiece: B.nextPid, structs: B.structs.map(serial) };
+    if (FX.list.length) Object.assign(d, fxSerial());
     if (B.cmode) d.construction = true;
     return d;
   }
@@ -3634,6 +3637,8 @@
     const see = (id) => {
       if (typeof id === "string" && id[0] === "p") top = Math.max(top, pidNum(id));
     };
+    for (const f of data.fixtures || []) see(f.id);
+    for (const l of data.links || []) see(l.id);
     for (const d of data.structs) {
       for (const r of d.roofs || []) see(r.id);
       for (const r of d.rings || []) see(r.id);
@@ -3659,6 +3664,7 @@
     B.drag = null;
     B.nextId = 1;
     const made = data.structs.map((d) => fill(newStruct(d), d));
+    fxRestore(data);
     B.nextId = Math.max(B.nextId, data.nextStruct || 1);
     B.nextPid = Math.max(topPid(data) + 1, data.nextPiece || 1);
     B.claim = new Set();
@@ -4239,7 +4245,7 @@
     }
     return t0;
   }
-  const roofsShown = () => B.tool === "roof" || B.tool === "erase" || (B.tool === "select" && B.showRoofs);
+  const roofsShown = () => B.tool === "roof" || B.tool === "erase" || (B.tool === "equip" && fxRoofs()) || (B.tool === "select" && B.showRoofs);
   function pickAt(opt) {
     if (!pick.valid) return null;
     const wallsOnly = opt === WALLS_ONLY,
@@ -5251,7 +5257,7 @@
 
   /* ---------- hover and preview ---------- */
   // what the interface draws over the view: live dimensions, the snap marker, wall handles, measurements, the marquee
-  B.ov = { dims: [], snap: null, handles: [], meas: [], marq: null };
+  B.ov = { dims: [], snap: null, handles: [], meas: [], marq: null, ports: [] };
   B.label = "";
   B.labelBad = false;
   B.gap = 2;
@@ -5544,6 +5550,7 @@
       return;
     }
     if (B.tool === "copy") return copyPreview(h);
+    if (B.tool === "equip") return fxPreview();
     const F = h.F,
       d = B.drag,
       ty = B.typed;
@@ -5590,6 +5597,7 @@
     decor: "Pick a piece, then click to place it. Wall pieces snap to walls.",
     measure: "Click two points to measure between them. Measurements stay until you clear them.",
     erase: "Click a piece to remove it, or drag a box to clear an area.",
+    equip: "Pick a piece of equipment and click to place it: on the ground, a floor, a wall or a roof. Drag from one port dot to another to run a wire or pipe.",
     copy: "Click where you want a copy.",
   };
   function hint() {
@@ -5709,7 +5717,7 @@
     return { d: Math.hypot(q.x - p.x, q.y - p.y) || 1, ang: Math.atan2(q.y - p.y, q.x - p.x), my: (p.y + q.y) / 2 };
   };
   // the tools that act on a single click
-  const tapTool = () => B.tool === "copy" || B.tool === "measure" || (B.drag && B.drag.mode === "click") || (B.move && B.move.hand) || (B.tool === "path" && B.alt) || B.tool === "decor";
+  const tapTool = () => B.tool === "equip" || B.tool === "copy" || B.tool === "measure" || (B.drag && B.drag.mode === "click") || (B.move && B.move.hand) || (B.tool === "path" && B.alt) || B.tool === "decor";
   function tapAct() {
     if (B.move && B.move.hand) return moveCommit();
     if (B.tapMode === "pick") {
@@ -5717,6 +5725,7 @@
       return void (B.hoverId && pickUp(B.hoverId));
     }
     if (B.tool === "measure") return measClick();
+    if (B.tool === "equip") return fxClick();
     if (B.tool === "copy") return void (B.clipb ? stamp() : copyPick());
     commit();
   }
@@ -5908,6 +5917,7 @@
   // put down what is in hand: a stroke, a copy, a measurement half taken. With nothing in hand, go home to Select.
   function putDown(home) {
     if (B.typed.a !== null || B.typed.b !== null) return (typedClear(), true);
+    if (B.tool === "equip" && (FX.from || FX.moving || FX.sel)) return ((FX.from = FX.moving = FX.sel = null), FX.v++, (B.key = ""), touchUi(), true);
     if (B.move) return (moveEnd(), true);
     if (B.marq) return ((B.marq = B.ov.marq = B.press = null), B.ovVer++, true);
     if (B.drag) return ((B.drag = null), (B.key = ""), hint(), touchUi(), true);
@@ -5938,6 +5948,9 @@
   function setTool(id) {
     if (B.tool !== id && (B.tool === "select" || id !== "select")) B.showRoofs = B.selRoofAuto = false;
     B.tool = id;
+    FX.from = FX.moving = FX.sel = null;
+    FX.v++;
+    fxGhost.visible = false;
     B.drag = null;
     B.tapMode = "";
     B.measA = null;
@@ -5981,6 +5994,7 @@
     else if (t === "stairs") B.stairDir = (B.stairDir + (back ? 3 : 1)) % 4;
     else if (t === "path") B.pwidth = cyc([1, 2, 3], B.pwidth, back);
     else if (t === "decor") B.drot = (B.drot + (back ? 7 : 1)) % 8;
+    else if (t === "equip") fxChoose("fx:turn");
     else if (t === "copy") B.clipb && (B.clipb.rot = (B.clipb.rot + (back ? 7 : 1)) % 8);
     else if (t === "roof") {
       if (overTower()) B.tshape = cyc(Object.keys(TOP_NAME), B.tshape, back);
@@ -6071,6 +6085,7 @@
     $("buildbar").hidden = false;
     for (const S of B.structs) S.gapMesh && (S.gapMesh.visible = true);
     B.key = "";
+    FX.v++;
     measDraw(null);
     hint();
     touchUi();
@@ -6090,7 +6105,8 @@
     B.move && moveEnd();
     document.body.classList.remove("building");
     $("buildbar").hidden = true;
-    ghostGroup.visible = gridGroup.visible = selGroup.visible = measMesh.visible = false;
+    ghostGroup.visible = gridGroup.visible = selGroup.visible = measMesh.visible = fxGhost.visible = fxHi.visible = false;
+    FX.v++;
     B.ov.dims.length = 0;
     B.ov.snap = null;
     label("");
@@ -6326,7 +6342,8 @@
       g.push(G_.act("turn", "Turn " + B.drot * 45 + "°", "turn", "Shift wheel"));
       g.push(...PAINT());
       g.push({ ...G_.chips("dkind", "", DKEYS.filter((k) => DECOR[k].cat === cat).map((k) => ({ v: k, name: DECOR[k].name })), B.dkind), row: 2 });
-    } else if (t === "measure") {
+    } else if (t === "equip") fxView(g);
+    else if (t === "measure") {
       if (B.meas.length) {
         const m = measText(B.meas[B.meas.length - 1].a, B.meas[B.meas.length - 1].b);
         g.push(G_.info("Last measured", fmtM(m.len) + " across · " + (Math.abs(m.rise) > 0.02 ? (m.rise > 0 ? "up " : "down ") + fmtM(Math.abs(m.rise)) : "level") + " · " + Math.round(m.angle) + "° from the grid" + (Math.abs(m.rise) > 0.02 ? " · " + fmtM(m.direct) + " direct" : "")));
@@ -6340,7 +6357,8 @@
     const RS = RSHAPES[B.rshape],
       turnOf = RS[0] === "gable" || RS[0] === "shed" ? RS[1] : 0;
     if (id === "shape") return setTool(v);
-    if (id === "found" || id === "ins" || id === "lining") B[id] = v;
+    if (id.startsWith("fx:")) fxChoose(id, v);
+    else if (id === "found" || id === "ins" || id === "lining") B[id] = v;
     else if (id === "sched") B.sched = !B.sched;
     else if (id === "s:found") {
       const q = selRefs()[0];
@@ -6420,12 +6438,14 @@
   }
   window.addEventListener("keyup", (e) => {
     if (e.code === "AltLeft" || e.code === "AltRight") ((B.alt = false), (B.key = ""));
+    if (e.code === "KeyE" && B.on && B.eDown && performance.now() - B.eDown < 220 && !(e.target && e.target.tagName === "INPUT")) setTool("equip");
     if (e.code === "ControlLeft" || e.code === "ControlRight" || e.code === "MetaLeft" || e.code === "MetaRight") ((B.ctrl = B.ctrlWheel = false), (B.key = ""));
   });
   window.addEventListener("blur", () => (B.alt = B.ctrl = B.ctrlWheel = false));
   const TOOL_KEY = { KeyV: "select", KeyR: "room", KeyN: "wall", KeyF: "floor", KeyO: "roof", KeyJ: "door", KeyU: "window", KeyZ: "stairs", KeyP: "pillar", KeyL: "path", KeyC: "decor", KeyY: "measure", KeyX: "erase" };
   const TOOL_LETTER = {};
   for (const k in TOOL_KEY) TOOL_LETTER[TOOL_KEY[k]] = k.slice(3);
+  TOOL_LETTER.equip = "E";
   function onKey(e) {
     if (e.code === "AltLeft" || e.code === "AltRight") ((B.alt = true), (B.key = ""));
     if (e.code === "ControlLeft" || e.code === "ControlRight" || e.code === "MetaLeft" || e.code === "MetaRight") ((B.ctrl = true), (B.key = ""));
@@ -6456,7 +6476,10 @@
     if (e.code === "KeyK" && !e.repeat) return (choose("paint"), true);
     if (e.code === "KeyI" && !e.repeat) return (B.tool === "select" && B.sel.length === 1 ? pickUp(B.sel[0]) : choose("pick"), true);
     if (e.code === "Escape") return (putDown(true) || toggle(), true);
+    if ((e.code === "Delete" || e.code === "Backspace") && !e.repeat && B.tool === "equip" && FX.sel) return (choose("fx:del"), true);
     if ((e.code === "Delete" || e.code === "Backspace") && !e.repeat) return (B.tool === "select" && B.sel.length ? selDelete() : setTool("erase"), true);
+    // E turns the view while it is held; a quick tap picks up the Equip tool
+    if (e.code === "KeyE") return (e.repeat || (B.eDown = performance.now()), true);
     if (digit && !e.repeat) {
       const tl = TOOLS.find((x) => x.code === e.code);
       tl && setTool(tl.id);
@@ -7271,6 +7294,488 @@
     return { struct: S.id, pieces: structPieces(S).filter((p) => !p.parent).map((p) => p.id) };
   }
 
+  /* ---------- equipment: fixtures from a catalog, and the wires and pipes between their ports ---------- */
+  // A fixture is a panel, a tank, a stove: anything a system needs that is not part of the building's fabric. The
+  // catalog comes from outside (setFixtureCatalog); until then a few demonstration pieces stand in. Fixtures and
+  // connections are pieces like any other (ARCHITECTURE.md, "Fixtures and connections").
+  const DEMO_FIXTURES = {
+    demo_solar_panel: { id: "demo_solar_panel", name: "Solar panel 300 W", category: "solar", system: "electrical", ports: [{ id: "dc", type: "power" }], dims: { w: 1.0, d: 1.65, h: 0.04 }, priceUsd: 220, massKg: 19, ratedW: 300, settingsSchema: [{ key: "tiltDeg", label: "Tilt", type: "number", min: 0, max: 90, step: 5, unit: "°", default: 35 }, { key: "azimuthDeg", label: "Faces", type: "number", min: 0, max: 359, step: 15, unit: "°", default: 180 }] },
+    demo_battery: { id: "demo_battery", name: "Battery 12 V 100 Ah", category: "battery", system: "electrical", ports: [{ id: "dc", type: "power" }], dims: { w: 0.33, d: 0.17, h: 0.22 }, priceUsd: 320, massKg: 12, capacityWh: 1200 },
+    demo_light: { id: "demo_light", name: "Light", category: "light", system: "electrical", ports: [{ id: "in", type: "power" }], dims: { w: 0.2, d: 0.2, h: 0.25 }, priceUsd: 12, massKg: 0.4, ratedW: 9, settingsSchema: [{ key: "on", label: "Switched on", type: "boolean", default: true }] },
+    demo_water_tank: { id: "demo_water_tank", name: "Water tank 1000 L", category: "tank", system: "water", ports: [{ id: "in", type: "water" }, { id: "out", type: "water" }], dims: { w: 1.1, d: 1.1, h: 1.3 }, priceUsd: 450, massKg: 25, capacityL: 1000 },
+    demo_tap: { id: "demo_tap", name: "Tap", category: "tap", system: "water", ports: [{ id: "in", type: "water" }], dims: { w: 0.15, d: 0.2, h: 0.9 }, priceUsd: 18, massKg: 0.6, settingsSchema: [{ key: "open", label: "Open", type: "boolean", default: false }] },
+    demo_wood_stove: { id: "demo_wood_stove", name: "Wood stove", category: "stove", system: "heating", ports: [{ id: "flue", type: "flue" }], dims: { w: 0.6, d: 0.5, h: 0.75 }, priceUsd: 900, massKg: 110, ratedW: 6000, settingsSchema: [{ key: "damper", label: "Air", type: "choice", options: ["low", "medium", "high"], default: "medium" }] },
+  };
+  const FX = { cat: DEMO_FIXTURES, list: [], links: [], kind: "demo_solar_panel", yaw: 0, sel: null, moving: null, from: null, v: 0, drawn: -1, group: new T.Group(), geo: new Map(), place: null, hov: null };
+  G.scene.add(FX.group);
+  const WIRE_GAUGES = [14, 12, 10, 8, 6, 4, 2, 0],
+    PIPE_MM = [13, 19, 25, 32, 50],
+    CONN = { power: { kind: "wire", name: "wire", material: "copper", key: "gauge", def: 12 }, water: { kind: "pipe", name: "pipe", material: "copper", key: "diameterMm", def: 19 }, flue: { kind: "pipe", name: "flue pipe", material: "steel", key: "diameterMm", def: 150 } };
+  const fxMat = texel(new T.MeshLambertMaterial({ vertexColors: true })),
+    fxGhost = new T.Mesh(new T.BufferGeometry(), new T.MeshBasicMaterial({ color: 0xffe2a0, transparent: true, opacity: 0.55, depthWrite: false, fog: false })),
+    fxHi = new T.Mesh(new T.BufferGeometry(), new T.MeshBasicMaterial({ color: 0xffc95e, transparent: true, opacity: 0.4, depthTest: false, depthWrite: false, fog: false })),
+    wireMat = new T.MeshBasicMaterial({ vertexColors: true, fog: false });
+  fxGhost.visible = fxHi.visible = false;
+  fxGhost.frustumCulled = fxHi.frustumCulled = false;
+  fxHi.renderOrder = 22;
+  G.scene.add(fxGhost, fxHi);
+  const fxDef = (id) => FX.cat[id] || DEMO_FIXTURES[id] || null;
+  const fxWords = (d) => (d.shape || "") + " " + d.id + " " + (d.category || "") + " " + (d.name || "");
+  const fxShape = (d) => {
+    const w = fxWords(d).toLowerCase();
+    return /gutter/.test(w) ? "gutter" : /solar|panel|pv/.test(w) ? "panel" : /batter/.test(w) ? "battery" : /tank|cistern|barrel/.test(w) ? "tank" : /pump/.test(w) ? "pump" : /stove|heater|boiler/.test(w) ? "stove" : /tap|faucet|shower|sink/.test(w) ? "tap" : /feeder|waterer|trough/.test(w) ? "feeder" : /light|lamp|bulb/.test(w) ? "light" : /nest|roost|coop/.test(w) ? "nest" : "box";
+  };
+  const fxSchema = (d) => (Array.isArray(d.settingsSchema) ? d.settingsSchema : d.settingsSchema ? Object.keys(d.settingsSchema).map((key) => ({ key, ...d.settingsSchema[key] })) : []);
+  function fxDefaults(d) {
+    const out = { ...(d.settings || {}) };
+    for (const f of fxSchema(d)) if (out[f.key] === undefined && f.default !== undefined) out[f.key] = f.default;
+    return out;
+  }
+  // a simple, tidy stand-in built from the catalog's dimensions: recognisable, not a model
+  function fxGeo(d, tilt) {
+    const shape = fxShape(d),
+      key = d.id + "|" + shape + "|" + Math.round(tilt || 0);
+    if (FX.geo.has(key)) return FX.geo.get(key);
+    const g = new Geo(),
+      { w, d: dp, h } = d.dims || { w: 0.5, d: 0.5, h: 0.5 },
+      hw = w / 2,
+      hd = dp / 2,
+      IRON = col(0x34373c),
+      STEEL = col(0xaab1b6),
+      DARK = col(0x23272c);
+    if (shape === "panel") {
+      // dims are the panel lying flat: w across, d up the slope. Off a roof it stands on a rack at its tilt.
+      const t = ((tilt || 0) * Math.PI) / 180,
+        c = Math.cos(t),
+        s = Math.sin(t),
+        up = tilt ? 0.25 : 0,
+        P = (x, v, o) => [x, up + (hd + v) * s + o * c, v * c - o * s - 0];
+      g.obox(P(0, 0, 0.02), [hw, 0, 0], [0, hd * s, hd * c], [0, 0.02 * c, -0.02 * s], STEEL);
+      for (let a = 0; a < 3; a++) for (let b = 0; b < 5; b++) g.obox(P(-hw + (a + 0.5) * (w / 3), -hd + (b + 0.5) * (dp / 5), 0.042), [w / 6 - 0.012, 0, 0], [0, (dp / 10 - 0.012) * s, (dp / 10 - 0.012) * c], [0, 0.004 * c, -0.004 * s], shade(col(0x1f3558), 0.9 + 0.2 * hash(a, b, 3)));
+      if (tilt) for (const x of [-hw + 0.08, hw - 0.08]) (g.abox(x - 0.02, 0, -hd * c - 0.02, x + 0.02, up + 2 * hd * s, -hd * c + 0.02, STEEL), g.abox(x - 0.02, 0, hd * c - 0.02, x + 0.02, up, hd * c + 0.02, STEEL), g.abox(x - 0.02, 0, -hd * c, x + 0.02, 0.04, hd * c, STEEL));
+    } else if (shape === "tank") {
+      const c0 = col(0x4c6a58);
+      g.cyl([0, 0, 0], [0, h * 0.9, 0], hw, hw, 14, shade(c0, 0.85), c0);
+      g.cyl([0, h * 0.9, 0], [0, h, 0], hw, hw * 0.35, 14, c0, shade(c0, 1.15));
+      for (const y of [0.25, 0.55]) g.cyl([0, h * y, 0], [0, h * y + 0.04, 0], hw + 0.012, hw + 0.012, 14, shade(c0, 0.7), shade(c0, 0.7), false);
+      g.cyl([0, h, 0], [0, h + 0.05, 0], 0.12, 0.12, 8, DARK, DARK);
+      g.cyl([0, 0.12, hd], [0, 0.12, hd + 0.08], 0.03, 0.03, 6, col(0xb08d3c), col(0xb08d3c));
+    } else if (shape === "battery") {
+      g.abox(-hw, 0, -hd, hw, h * 0.86, hd, DARK);
+      g.abox(-hw - 0.006, h * 0.86, -hd - 0.006, hw + 0.006, h * 0.92, hd + 0.006, shade(DARK, 1.6));
+      g.cyl([-hw * 0.6, h * 0.92, 0], [-hw * 0.6, h, 0], 0.016, 0.016, 6, col(0xb5352e), col(0xb5352e));
+      g.cyl([hw * 0.6, h * 0.92, 0], [hw * 0.6, h, 0], 0.016, 0.016, 6, IRON, IRON);
+    } else if (shape === "stove") {
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.abox(sx * (hw - 0.06) - 0.03, 0, sz * (hd - 0.06) - 0.03, sx * (hw - 0.06) + 0.03, 0.14, sz * (hd - 0.06) + 0.03, IRON);
+      g.abox(-hw, 0.14, -hd, hw, h, hd, IRON);
+      g.abox(-hw - 0.02, h, -hd - 0.02, hw + 0.02, h + 0.03, hd + 0.02, shade(IRON, 1.4));
+      g.abox(-hw * 0.6, 0.26, hd, hw * 0.6, h - 0.12, hd + 0.02, shade(IRON, 1.5));
+      g.abox(-hw * 0.45, 0.34, hd + 0.02, hw * 0.45, h - 0.2, hd + 0.03, [1, 0.62, 0.2]);
+      g.cyl([0, h, -hd * 0.4], [0, h + 1.5, -hd * 0.4], 0.075, 0.075, 8, shade(IRON, 0.9), IRON);
+    } else if (shape === "tap") {
+      const BR = col(0xb08d3c);
+      g.cyl([0, 0, 0], [0, h, 0], 0.02, 0.02, 6, STEEL, STEEL);
+      g.cyl([0, h, 0], [0, h, 0.13], 0.018, 0.018, 6, BR, BR);
+      g.cyl([0, h, 0.13], [0, h - 0.06, 0.13], 0.016, 0.016, 6, BR, BR);
+      g.abox(-0.05, h + 0.03, -0.012, 0.05, h + 0.05, 0.012, BR);
+    } else if (shape === "pump") {
+      g.abox(-hw, 0, -hd, hw, 0.05, hd, IRON);
+      g.cyl([-hw * 0.8, h * 0.5, 0], [hw * 0.2, h * 0.5, 0], h * 0.38, h * 0.38, 10, col(0x2f5d86), col(0x3a6c98));
+      g.cyl([hw * 0.2, h * 0.5, 0], [hw * 0.9, h * 0.5, 0], h * 0.3, h * 0.3, 10, STEEL, STEEL);
+      g.cyl([hw * 0.55, h * 0.5, 0], [hw * 0.55, h, 0], 0.03, 0.03, 6, STEEL, STEEL);
+    } else if (shape === "feeder") {
+      g.cyl([0, 0.04, 0], [0, 0.1, 0], hw, hw, 12, STEEL, shade(STEEL, 0.8));
+      g.cyl([0, 0.1, 0], [0, h * 0.8, 0], hw * 0.45, hw * 0.6, 12, shade(STEEL, 0.9), STEEL);
+      g.cyl([0, h * 0.8, 0], [0, h, 0], hw * 0.66, 0.02, 12, col(0xb5352e), col(0xc8473c));
+    } else if (shape === "light") {
+      g.cyl([0, h, 0], [0, h * 0.45, 0], 0.012, 0.012, 5, DARK, DARK);
+      g.cyl([0, h * 0.5, 0], [0, h * 0.2, 0], hw * 0.3, hw, 10, DARK, shade(DARK, 1.5), false);
+      g.ball([0, h * 0.2, 0], hw * 0.35, hw * 0.35, hw * 0.35, [1, 0.9, 0.6], { lat: 3, lon: 6 });
+    } else if (shape === "gutter") {
+      g.abox(-hw, -0.1, 0.02, hw, -0.02, 0.14, STEEL);
+      g.abox(-hw, -0.1, 0.02, hw, -0.09, 0.14, shade(STEEL, 0.7));
+      g.cyl([hw - 0.1, -0.1, 0.08], [hw - 0.1, -0.5, 0.08], 0.035, 0.035, 6, STEEL, STEEL);
+    } else if (shape === "nest") {
+      const WD = col(0xb08a5a);
+      g.abox(-hw, 0, -hd, hw, 0.03, hd, WD);
+      g.abox(-hw, 0, -hd, hw, h, -hd + 0.02, shade(WD, 0.9));
+      for (const sx of [-1, 1]) g.abox(sx * hw - 0.01, 0, -hd, sx * hw + 0.01, h, hd, shade(WD, 0.85));
+      g.abox(-hw, h - 0.02, -hd, hw, h, hd, shade(WD, 1.1));
+      g.abox(-hw, 0, hd - 0.02, hw, h * 0.3, hd, WD);
+      g.ball([0, 0.07, 0], hw * 0.7, 0.05, hd * 0.7, col(0xcdb25e), { lat: 2, lon: 7 });
+    } else {
+      const c0 = col(0x8d9499);
+      g.abox(-hw, 0, -hd, hw, h, hd, c0);
+      g.abox(-hw * 0.7, h * 0.25, hd, hw * 0.7, h * 0.75, hd + 0.012, shade(c0, 1.25));
+    }
+    FX.geo.set(key, g);
+    return g;
+  }
+  const fxTilt = (f) => (f.mount !== "roof" && fxShape(fxDef(f.fixture)) === "panel" ? (f.settings.tiltDeg === undefined ? 35 : +f.settings.tiltDeg) : 0);
+  // where a port is, in world metres: along the front of the piece at a third of its height
+  function portPos(f, pid) {
+    const d = fxDef(f.fixture),
+      n = d.ports.length,
+      k = Math.max(0, d.ports.findIndex((p) => p.id === pid)),
+      dm = d.dims || { w: 0.5, d: 0.5, h: 0.5 },
+      lx = n > 1 ? -dm.w * 0.3 + (dm.w * 0.6 * k) / (n - 1) : 0,
+      lz = fxShape(d) === "panel" ? 0 : dm.d / 2,
+      c = Math.cos(f.yaw),
+      s = Math.sin(f.yaw);
+    return [f.x + lx * c + lz * s, f.y + (fxShape(d) === "panel" ? 0.12 : Math.min(dm.h * 0.35, 0.4)), f.z - lx * s + lz * c];
+  }
+  // the run of a wire or pipe: down to the foot of one piece, along the ground or floor, and up to the other
+  function linkRoute(ln) {
+    const A = FX.list.find((f) => f.id === ln.from.piece),
+      Bq = FX.list.find((f) => f.id === ln.to.piece);
+    if (!A || !Bq) return null;
+    const a = portPos(A, ln.from.port),
+      b = portPos(Bq, ln.to.port),
+      ya = A.mount === "roof" || A.mount === "wall" ? Math.min(a[1], Bq.y) + 0.03 : A.y + 0.03,
+      yb = Bq.mount === "roof" || Bq.mount === "wall" ? Math.min(b[1], ya) : Bq.y + 0.03,
+      pts = [a, [a[0], ya, a[2]], [b[0], ya, a[2]], [b[0], yb, b[2]], b];
+    let L = 0;
+    for (let k = 1; k < pts.length; k++) L += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1], pts[k][2] - pts[k - 1][2]);
+    return { pts, len: Math.round(L * 1000) / 1000 };
+  }
+  function fxDraw() {
+    if (FX.drawn === FX.v) return;
+    FX.drawn = FX.v;
+    for (const m of [...FX.group.children]) (FX.group.remove(m), m.geometry.dispose());
+    for (const f of FX.list) {
+      const d = fxDef(f.fixture);
+      if (!d) continue;
+      const m = new T.Mesh(fxGeo(d, fxTilt(f)).build(), fxMat);
+      m.position.set(f.x, f.y, f.z);
+      m.rotation.order = "YXZ";
+      m.rotation.y = f.yaw;
+      m.rotation.x = f.mount === "roof" ? ((f.tilt || 0) * Math.PI) / 180 : 0;
+      m.castShadow = m.receiveShadow = true;
+      FX.group.add(m);
+    }
+    const g = new Geo();
+    for (const ln of FX.links) {
+      const r = linkRoute(ln);
+      if (!r) continue;
+      const w = ln.kind === "wire" ? 0.012 : Math.max(0.015, (ln.diameterMm || 19) / 2000),
+        c = ln.kind === "wire" ? [0.95, 0.7, 0.2] : (ln.diameterMm || 0) >= 100 ? [0.35, 0.36, 0.38] : [0.35, 0.65, 0.95],
+        cc = ln.id === FX.sel ? [1, 1, 1] : c;
+      for (let k = 1; k < r.pts.length; k++) {
+        const p = r.pts[k - 1],
+          q = r.pts[k];
+        g.abox(Math.min(p[0], q[0]) - w, Math.min(p[1], q[1]) - w, Math.min(p[2], q[2]) - w, Math.max(p[0], q[0]) + w, Math.max(p[1], q[1]) + w, Math.max(p[2], q[2]) + w, cc);
+      }
+    }
+    if (g.p.length) FX.group.add(new T.Mesh(g.build(), wireMat));
+    // the dots the interface draws on ports and in the middle of each run
+    const pv = [];
+    if (B.on && B.tool === "equip") {
+      for (const f of FX.list) for (const p of (fxDef(f.fixture) || { ports: [] }).ports) pv.push({ p: portPos(f, p.id), type: p.type, fid: f.id, pid: p.id, from: !!FX.from && FX.from.piece === f.id && FX.from.port === p.id });
+      for (const ln of FX.links) {
+        const r = linkRoute(ln);
+        r && pv.push({ p: [(r.pts[1][0] + r.pts[3][0]) / 2, r.pts[1][1], (r.pts[1][2] + r.pts[3][2]) / 2], type: "link", lid: ln.id, text: fmtM(r.len), sel: ln.id === FX.sel });
+      }
+    }
+    B.ov.ports = pv;
+    B.ovVer++;
+    const sf = FX.list.find((f) => f.id === FX.sel);
+    fxHi.visible = B.on && !!sf;
+    if (sf) {
+      setGeo(fxHi, fxGeo(fxDef(sf.fixture), fxTilt(sf)));
+      fxHi.position.set(sf.x, sf.y, sf.z);
+      fxHi.rotation.order = "YXZ";
+      fxHi.rotation.y = sf.yaw;
+      fxHi.rotation.x = sf.mount === "roof" ? ((sf.tilt || 0) * Math.PI) / 180 : 0;
+    }
+  }
+  // roofs stay on for the things that go on roofs, and lift away for everything else so you can reach indoors
+  function fxRoofs() {
+    if (FX.roofs !== undefined && FX.roofs !== null) return FX.roofs;
+    const mv = FX.moving && FX.list.find((f) => f.id === FX.moving),
+      d = fxDef(mv ? mv.fixture : FX.kind);
+    return !!d && /panel|gutter/.test(fxShape(d));
+  }
+  const fxTouch = () => (FX.v++, B.version++, (B.key = ""), touchUi());
+  const azOf = (fx, fz) => (((Math.atan2(fx, -fz) * 180) / Math.PI) % 360 + 360) % 360;
+  // where the piece in hand would go: on a roof plane, against a wall, on a floor, or on the ground
+  function fxPlacement(d) {
+    const dm = d.dims || { w: 0.5, d: 0.5, h: 0.5 },
+      o = ray.ray.origin,
+      r = ray.ray.direction,
+      pk = pickAt(ANY_PIECE),
+      shape = fxShape(d),
+      out = { x: pick.x, y: pick.y, z: pick.z, yaw: FX.yaw, mount: "ground", on: null, struct: null, tilt: 0, set: {}, text: "on the ground" };
+    if (pk && pk.kind === "roof") {
+      for (const p of listPieces()) {
+        if (p.roof !== pk.id || p.kind !== "roof" || !p.footprint) continue;
+        const tp = Math.tan((p.pitchDeg * Math.PI) / 180),
+          nx = p.facing.x * tp,
+          nz = p.facing.z * tp,
+          den = r.x * nx + r.y + r.z * nz;
+        if (Math.abs(den) < 1e-6) continue;
+        const t = ((p.a.x - o.x) * nx + (p.eaveY - o.y) + (p.a.z - o.z) * nz) / den,
+          x = o.x + r.x * t,
+          z = o.z + r.z * t;
+        if (t <= 0 || !pip(p.footprint.map((q) => [q.x, q.z]), x, z)) continue;
+        Object.assign(out, { x, y: o.y + r.y * t + 0.09, z, mount: "roof", on: p.id, struct: p.struct, tilt: p.pitchDeg, yaw: p.pitchDeg > 3 ? Math.atan2(p.facing.x, p.facing.z) : FX.yaw });
+        out.set = { roofPieceId: p.id, tiltDeg: Math.round(p.pitchDeg * 10) / 10, azimuthDeg: Math.round(p.pitchDeg > 3 ? azOf(p.facing.x, p.facing.z) : azOf(Math.sin(FX.yaw), Math.cos(FX.yaw))) };
+        out.text = "on the roof · tilted " + Math.round(p.pitchDeg) + "°";
+        if (shape === "gutter") {
+          // a gutter hangs along the whole eave of the plane it is put on
+          Object.assign(out, { x: (p.a.x + p.b.x) / 2, y: p.eaveY, z: (p.a.z + p.b.z) / 2, tilt: 0, yaw: Math.atan2(p.facing.x, p.facing.z) });
+          out.set = { roofPieceId: p.id, lengthM: Math.round(p.length * 100) / 100 };
+          out.text = "along the eave · " + fmtM(p.length);
+        }
+        return out;
+      }
+    }
+    if (pk && (pk.kind === "wall" || (pk.kind === "ring" && pk.side !== undefined)) && pk.kind === "wall") {
+      const p = pieceById(pk.id);
+      if (p && p.length > 0.2) {
+        const ex = p.b.x - p.a.x,
+          ez = p.b.z - p.a.z,
+          den = r.x * ez - r.z * ex;
+        if (Math.abs(den) > 1e-9) {
+          const t = ((p.a.x - o.x) * ez - (p.a.z - o.z) * ex) / den,
+            L = Math.hypot(ex, ez);
+          let nx = -ez / L,
+            nz = ex / L;
+          if (nx * r.x + nz * r.z > 0) ((nx = -nx), (nz = -nz));
+          const off = 0.08 + (shape === "panel" || shape === "light" ? 0.02 : dm.d / 2);
+          Object.assign(out, { x: o.x + r.x * t + nx * off, z: o.z + r.z * t + nz * off, y: clamp(o.y + r.y * t - dm.h / 2, p.y0 + 0.15, p.y1 - dm.h), mount: "wall", on: p.id, struct: p.struct, yaw: Math.atan2(nx, nz), text: "on the wall" });
+          if (snapOn()) out.y = Math.round(out.y * 10) / 10;
+          return out;
+        }
+      }
+    }
+    const h = B.hover;
+    if (h && !h.F.isNew && !h.F.po && onFloorAt(h.F, h.lx, h.lz)) {
+      const lx = snapOn() ? Math.round(h.lx * 4) / 4 : h.lx,
+        lz = snapOn() ? Math.round(h.lz * 4) / 4 : h.lz,
+        [x, z] = toWorld(h.F, lx, lz);
+      Object.assign(out, { x, z, y: h.F.y0 + FLOOR_T, mount: "floor", on: h.F.fid.get(ck(Math.floor(lx), Math.floor(lz))) || (h.F.polys[polyAt(h.F, lx, lz)] || {}).id || null, struct: h.F.id, yaw: FX.yaw + h.F.yaw, text: "on the floor" });
+    } else if (snapOn()) ((out.x = Math.round(out.x * 4) / 4), (out.z = Math.round(out.z * 4) / 4), (out.y = G.heightAt(out.x, out.z)));
+    if (fxSchema(d).some((f) => f.key === "azimuthDeg") || shape === "panel") out.set = { azimuthDeg: Math.round(azOf(Math.sin(out.yaw), Math.cos(out.yaw))) };
+    return out;
+  }
+  const fxAt = () => {
+    const R = localRay({ ox: 0, oz: 0, yaw: 0, y0: 0 });
+    let best = null,
+      bt = 1e9;
+    for (const f of FX.list) {
+      const dm = (fxDef(f.fixture) || {}).dims || { w: 0.5, d: 0.5, h: 0.5 },
+        w = Math.max(0.12, Math.max(dm.w, dm.d) / 2),
+        t = hitBox(R, f.x - w, f.y - 0.1, f.z - w, f.x + w, f.y + Math.max(0.25, dm.h), f.z + w);
+      if (t >= 0 && t < bt) ((bt = t), (best = f));
+    }
+    return best;
+  };
+  function fxPreview() {
+    B.op = null;
+    gridGroup.visible = ghostGroup.visible = false;
+    if (B.ov.dims.length || B.ov.snap) ((B.ov.dims.length = 0), (B.ov.snap = null), B.ovVer++);
+    const mv = FX.moving ? FX.list.find((f) => f.id === FX.moving) : null,
+      d = fxDef(mv ? mv.fixture : FX.kind);
+    FX.hov = mv ? null : fxAt();
+    FX.place = null;
+    fxGhost.visible = false;
+    if (FX.from) return label("Drag to a port on another piece");
+    if (FX.hov) return label("Click to select the " + fxDef(FX.hov.fixture).name.toLowerCase());
+    if (!d || !pick.valid) return label("");
+    const p = (FX.place = fxPlacement(d));
+    setGeo(fxGhost, fxGeo(d, p.mount === "roof" ? 0 : fxShape(d) === "panel" ? (mv ? fxTilt(mv) : fxDefaults(d).tiltDeg === undefined ? 35 : fxDefaults(d).tiltDeg) : 0));
+    fxGhost.position.set(p.x, p.y, p.z);
+    fxGhost.rotation.order = "YXZ";
+    fxGhost.rotation.y = p.yaw;
+    fxGhost.rotation.x = p.mount === "roof" ? (p.tilt * Math.PI) / 180 : 0;
+    fxGhost.visible = true;
+    label(d.name + " · " + p.text);
+  }
+  function fxPut(f, p) {
+    Object.assign(f, { x: p.x, y: p.y, z: p.z, yaw: p.yaw, mount: p.mount, on: p.on, struct: p.struct, tilt: p.tilt });
+    if (p.mount !== "roof") (delete f.settings.roofPieceId, f.wasRoof && delete f.settings.lengthM);
+    f.wasRoof = p.mount === "roof";
+    Object.assign(f.settings, p.set);
+  }
+  function fxClick() {
+    updateHover();
+    setRay();
+    fxPreview();
+    if (FX.from) return void ((FX.from = null), fxTouch());
+    if (FX.hov) return void ((FX.sel = FX.hov.id), FX.v++, (B.key = ""), touchUi());
+    const p = FX.place;
+    if (!p) return;
+    pushUndo();
+    if (FX.moving) (fxPut(FX.list.find((f) => f.id === FX.moving), p), (FX.sel = FX.moving), (FX.moving = null));
+    else {
+      const d = fxDef(FX.kind),
+        f = { id: newPid(), fixture: d.id, settings: fxDefaults(d) };
+      fxPut(f, p);
+      FX.list.push(f);
+      FX.sel = null;
+      G.burst(p.x, p.y + 0.3, p.z, 5, 0xcdb48a, 1.4, 2, 0.08, 0.4);
+    }
+    fxTouch();
+  }
+  // join two ports. Returns { ok, id } or { ok: false, reason } in plain words.
+  function fxConnect(a, ap, b, bp, opts) {
+    const A = FX.list.find((f) => f.id === a),
+      Bq = FX.list.find((f) => f.id === b),
+      pa = A && fxDef(A.fixture).ports.find((p) => p.id === ap),
+      pb = Bq && fxDef(Bq.fixture).ports.find((p) => p.id === bp),
+      no = (reason) => ({ ok: false, reason });
+    if (!pa || !pb) return no("There is no such port.");
+    if (A === Bq) return no("A piece cannot be joined to itself.");
+    if (pa.type !== pb.type) return no("A " + pa.type + " port cannot be joined to a " + pb.type + " port.");
+    const c = CONN[pa.type];
+    if (!c) return no("Nothing can be run from a " + pa.type + " port yet.");
+    if (FX.links.some((l) => (l.from.piece === a && l.from.port === ap && l.to.piece === b && l.to.port === bp) || (l.from.piece === b && l.from.port === bp && l.to.piece === a && l.to.port === ap))) return no("These two ports are already joined.");
+    pushUndo();
+    const ln = { id: newPid(), kind: c.kind, from: { piece: a, port: ap }, to: { piece: b, port: bp }, material: (opts && opts.material) || c.material };
+    ln[c.key] = (opts && opts[c.key]) || c.def;
+    FX.links.push(ln);
+    FX.sel = ln.id;
+    fxTouch();
+    return { ok: true, id: ln.id };
+  }
+  function fxPort(fid, pid, end) {
+    if (!end && FX.from && (FX.from.piece !== fid || FX.from.port !== pid)) end = true;   // a second click finishes the run too
+    if (!end) return void ((FX.from = { piece: fid, port: pid }), FX.v++, (B.key = ""), touchUi());
+    const from = FX.from;
+    FX.from = null;
+    if (!from || (from.piece === fid && from.port === pid)) return void fxTouch();
+    const r = fxConnect(from.piece, from.port, fid, pid);
+    r.ok || ((B.fxNote = r.reason), (B.fxNoteT = performance.now()), fxTouch());
+    return r;
+  }
+  function fxRemove(id) {
+    const n = FX.list.length + FX.links.length;
+    FX.list = FX.list.filter((f) => f.id !== id);
+    FX.links = FX.links.filter((l) => l.id !== id && l.from.piece !== id && l.to.piece !== id);
+    if (FX.sel === id) FX.sel = null;
+    return n !== FX.list.length + FX.links.length;
+  }
+  function fxSetting(id, key, value) {
+    const f = FX.list.find((q) => q.id === id);
+    if (!f) return false;
+    const sp = fxSchema(fxDef(f.fixture)).find((q) => q.key === key);
+    if (sp && sp.type === "number") {
+      value = +value;
+      if (!isFinite(value)) return false;
+      if (sp.min !== undefined) value = Math.max(sp.min, value);
+      if (sp.max !== undefined) value = Math.min(sp.max, value);
+    } else if (sp && sp.type === "boolean") value = !!value;
+    else if (sp && sp.type === "choice" && !sp.options.some((o) => (o && o.value !== undefined ? o.value : o) === value)) return false;
+    if ((key === "tiltDeg" || key === "azimuthDeg" || key === "roofPieceId") && f.mount === "roof") return false; // these come from the roof it is on
+    f.settings[key] = value;
+    if (key === "azimuthDeg") f.yaw = ((180 - value) * Math.PI) / 180;
+    fxTouch();
+    return true;
+  }
+  function fxAdd(list) {
+    const ids = [];
+    for (const q of list || []) {
+      const d = fxDef(q.fixture);
+      if (!d) {
+        ids.push(null);
+        continue;
+      }
+      const f = { id: q.id && !FX.list.some((o) => o.id === q.id) ? q.id : newPid(), fixture: d.id, x: q.x || 0, z: q.z || 0, y: q.y === undefined ? G.heightAt(q.x || 0, q.z || 0) : q.y, yaw: q.yawRad || 0, mount: q.mount || "ground", on: q.on || null, struct: q.struct || null, tilt: q.tilt || 0, settings: { ...fxDefaults(d), ...(q.settings || {}) } };
+      FX.list.push(f);
+      ids.push(f.id);
+    }
+    fxTouch();
+    return ids;
+  }
+  function fxPieces(out) {
+    for (const f of FX.list) {
+      const d = fxDef(f.fixture);
+      if (!d) continue;
+      const dm = d.dims || { w: 0.5, d: 0.5, h: 0.5 },
+        a = { x: f.x, z: f.z };
+      out.push({ id: f.id, struct: f.struct, storey: 0, kind: "fixture", type: d.id, fixture: d.id, name: d.name, category: d.category, system: d.system, built: true, stage: "services", a, b: a, y0: f.y, y1: f.y + dm.h, yawRad: f.yaw, rotationRad: f.yaw, width: dm.w, depth: dm.d, height: dm.h, mount: f.mount, on: f.on, settings: { ...f.settings }, ports: d.ports.map((p) => ({ ...p })) });
+    }
+    for (const ln of FX.links) {
+      const r = linkRoute(ln);
+      if (!r) continue;
+      const p = { id: ln.id, struct: null, storey: 0, kind: ln.kind, type: ln.kind, built: true, stage: "services", from: { ...ln.from }, to: { ...ln.to }, lengthM: r.len, material: ln.material, a: { x: r.pts[0][0], z: r.pts[0][2] }, b: { x: r.pts[4][0], z: r.pts[4][2] }, y0: Math.min(...r.pts.map((q) => q[1])), y1: Math.max(...r.pts.map((q) => q[1])) };
+      if (ln.kind === "wire") p.gauge = ln.gauge;
+      else p.diameterMm = ln.diameterMm;
+      out.push(p);
+    }
+  }
+  const fxSerial = () => ({ fixtures: FX.list.map((f) => ({ ...f, settings: { ...f.settings } })), links: FX.links.map((l) => ({ ...l, from: { ...l.from }, to: { ...l.to } })) });
+  function fxRestore(d) {
+    FX.list = ((d && d.fixtures) || []).map((f) => ({ ...f, settings: { ...f.settings } }));
+    FX.links = ((d && d.links) || []).map((l) => ({ ...l, from: { ...l.from }, to: { ...l.to } }));
+    FX.sel = FX.moving = FX.from = null;
+    FX.v++;
+  }
+  // the inspector and the catalog, for the options strip
+  function fxView(g) {
+    const sel = FX.list.find((f) => f.id === FX.sel),
+      ln = FX.links.find((l) => l.id === FX.sel);
+    if (B.fxNote && performance.now() - B.fxNoteT < 6000) g.push(G_.info("Cannot join these", B.fxNote));
+    if (sel) {
+      const d = fxDef(sel.fixture),
+        dm = d.dims || {},
+        n = FX.links.filter((l) => l.from.piece === sel.id || l.to.piece === sel.id).length;
+      g.push(G_.info(d.name, fmt(dm.w) + " × " + fmt(dm.d) + " × " + fmt(dm.h) + " m · " + (sel.mount === "roof" ? "on the roof" : sel.mount === "wall" ? "on a wall" : sel.mount === "floor" ? "on the floor" : "on the ground") + " · " + (n ? plural(n, "connection") : "not connected")));
+      for (const f of fxSchema(d)) {
+        const v = sel.settings[f.key],
+          locked = sel.mount === "roof" && (f.key === "tiltDeg" || f.key === "azimuthDeg");
+        if (f.type === "boolean") g.push(G_.toggle("fx:" + f.key, f.label || f.key, !!v, v ? "done" : "stop"));
+        else if (f.type === "choice") g.push(G_.select("fx:" + f.key, f.label || f.key, f.options.map((o) => (o && o.value !== undefined ? { v: o.value, name: o.label || String(o.value) } : { v: o, name: String(o) })), v));
+        else g.push({ ...G_.field("fx:" + f.key, f.label || f.key, fmt(+v || 0), f.unit || "", locked ? "Set by the roof it is on" : ""), locked });
+      }
+      g.push(G_.act("fx:turn", "Turn", "turn", "Shift wheel"));
+      g.push(G_.act("fx:move", "Move", "copy"));
+      g.push(G_.act("fx:del", "Remove", "bin", "Del", true));
+      g.push(G_.act("fx:none", "Done", "done"));
+    } else if (ln) {
+      const r = linkRoute(ln),
+        c = ln.kind === "wire" ? CONN.power : ln.diameterMm >= 100 ? CONN.flue : CONN.water,
+        nm = (id) => (fxDef((FX.list.find((f) => f.id === id) || {}).fixture) || { name: "?" }).name;
+      g.push(G_.info(c.name[0].toUpperCase() + c.name.slice(1) + " · " + fmtM(r ? r.len : 0), nm(ln.from.piece) + " to " + nm(ln.to.piece)));
+      if (ln.kind === "wire") g.push(G_.chips("fx:gauge", "Gauge (AWG)", WIRE_GAUGES.map((v) => ({ v, name: v === 0 ? "1/0" : String(v) })), ln.gauge));
+      else g.push(G_.chips("fx:dia", "Diameter", (ln.diameterMm >= 100 ? [100, 125, 150, 200] : PIPE_MM).map((v) => ({ v, name: v + " mm" })), ln.diameterMm));
+      g.push(G_.act("fx:del", "Remove", "bin", "Del", true));
+      g.push(G_.act("fx:none", "Done", "done"));
+    } else {
+      const all = Object.values(FX.cat),
+        cur = fxDef(FX.kind) || all[0],
+        sys = [...new Set(all.map((d) => d.system || "other"))];
+      g.push(G_.chips("fx:sys", "", sys.map((v) => ({ v, name: v[0].toUpperCase() + v.slice(1) })), cur.system || "other"));
+      g.push(G_.act("fx:turn", "Turn " + Math.round((((FX.yaw * 180) / Math.PI) % 360 + 360) % 360) + "°", "turn", "Shift wheel"));
+      g.push(G_.toggle("fx:roofs", "Roofs", fxRoofs(), "roofs", "Show the roofs to put something on one; hide them to reach indoors"));
+      g.push(G_.info(cur.name, (cur.priceUsd !== undefined ? "$" + cur.priceUsd + " · " : "") + (cur.dims ? fmt(cur.dims.w) + " × " + fmt(cur.dims.d) + " × " + fmt(cur.dims.h) + " m" : "")));
+      g.push({ ...G_.chips("fx:kind", "", all.filter((d) => (d.system || "other") === (cur.system || "other")).map((d) => ({ v: d.id, name: d.name })), cur.id), row: 2 });
+    }
+  }
+  function fxChoose(id, v) {
+    const key = id.slice(3),
+      sel = FX.list.find((f) => f.id === FX.sel),
+      ln = FX.links.find((l) => l.id === FX.sel);
+    if (key === "sys") FX.kind = (Object.values(FX.cat).find((d) => (d.system || "other") === v) || {}).id || FX.kind;
+    else if (key === "kind") ((FX.kind = v), (FX.roofs = null));
+    else if (key === "roofs") FX.roofs = !fxRoofs();
+    else if (key === "none") FX.sel = null;
+    else if (key === "sel") FX.sel = v;
+    else if (key === "turn") {
+      if (sel && sel.mount !== "roof") (pushUndo(), (sel.yaw += Math.PI / 4), sel.settings.azimuthDeg !== undefined && (sel.settings.azimuthDeg = Math.round(azOf(Math.sin(sel.yaw), Math.cos(sel.yaw)))), B.version++);
+      else if (!sel) FX.yaw += Math.PI / 4;
+    } else if (key === "move" && sel) FX.moving = sel.id;
+    else if (key === "del" && FX.sel) (pushUndo(), fxRemove(FX.sel), B.version++);
+    else if (key === "gauge" && ln) (pushUndo(), (ln.gauge = v), B.version++);
+    else if (key === "dia" && ln) (pushUndo(), (ln.diameterMm = v), B.version++);
+    else if (sel) {
+      const sp = fxSchema(fxDef(sel.fixture)).find((f) => f.key === key);
+      pushUndo();
+      fxSetting(sel.id, key, sp && sp.type === "boolean" ? !sel.settings[key] : v);
+    }
+    FX.v++;
+  }
+
   /* ---------- the piece interface ---------- */
   // Every built element as plain data (see ARCHITECTURE.md): what it is, what it is made of, and its size and
   // place in world metres. Structure, heat, salvage and the rest read buildings only through this list.
@@ -7769,6 +8274,7 @@
       if (!S.pc) S.pc = structPieces(S);
       for (const p of S.pc) out.push(p);
     }
+    fxPieces(out);
     PC.v = B.version;
     PC.list = out;
     PC.byId = null;
@@ -8104,6 +8610,7 @@
         hearth.position.set(P.x, P.y + 1.9, P.z);
       }
       B.sheltered = sheltered;
+      fxDraw();
       frameView(dt);
       if (!B.on) return;
       if (B.camT > 0) {
@@ -8112,7 +8619,7 @@
         G.cam.pitch += (1.12 - G.cam.pitch) * k;
         G.cam.dist += (Math.max(B.camSaved.dist, 27) - G.cam.dist) * k;
       }
-      const turn = (G.keys.KeyQ ? 1 : 0) - (G.keys.KeyE ? 1 : 0);
+      const turn = (G.keys.KeyQ ? 1 : 0) - (G.keys.KeyE && performance.now() - (B.eDown || 0) > 220 ? 1 : 0);
       if (turn) G.cam.yaw += turn * 1.9 * dt;
       // the hover is worked out again only when the pointer, the view or something built has moved
       const m = G.camera.matrixWorld.elements,
@@ -8139,8 +8646,26 @@
       B.selV++;
       B.meas.length = 0;
       B.measA = null;
+      fxRestore(null);
       touchUi();
     },
+    // equipment (ARCHITECTURE.md, "Fixtures and connections")
+    setFixtureCatalog(map) {
+      FX.cat = map && Object.keys(map).length ? map : DEMO_FIXTURES;
+      if (!FX.cat[FX.kind]) FX.kind = Object.keys(FX.cat)[0];
+      FX.geo.clear();
+      fxTouch();
+    },
+    fixtureCatalog: () => FX.cat,
+    addFixtures: fxAdd,
+    setFixtureSetting: fxSetting,
+    connect: fxConnect,
+    removeFixture(id) {
+      const ok = fxRemove(id);
+      ok && fxTouch();
+      return ok;
+    },
+    port: fxPort,
     state: B,
     Geo,
     texel,

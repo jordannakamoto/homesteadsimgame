@@ -26,6 +26,7 @@
     pillar: '<path d="M7.5 20h9M9.5 20V7M14.5 20V7M7 7h10M8.5 4.5h7"/>',
     path: '<path d="M8.5 21c0-5 6.5-5 6.5-9s-5.5-4-5.5-9M14.5 21c0-4 6-4 6-9"/>',
     decor: '<path d="M6 11V8.5A2.5 2.5 0 0 1 8.500 6h7A2.500 2.500 0 0 1 18 8.500V11"/><path d="M4 13.200a2 2 0 0 1 4 0V15h8v-1.800a2 2 0 0 1 4 0V18H4zM7 18v2M17 18v2"/>',
+    equip: '<path d="M9 3.500v4.500M15 3.500v4.500M6.500 8h11v3.500a5.500 5.500 0 0 1-11 0zM12 17v3.500"/>',
     measure: '<path d="M3.500 15.500l12-12 5 5-12 12zM7.500 13.500l1.600 1.600M10 11l2.400 2.400M12.500 8.500l1.600 1.600M15 6l2.400 2.400"/>',
     erase: '<path d="M5 7h14M10 7V4.500h4V7M6.500 7l1 13h9l1-13M10 11v5.500M14 11v5.500"/>',
     undo: '<path d="M8.500 5L4 9.500 8.500 14"/><path d="M4 9.500h10a5 5 0 0 1 0 10h-3"/>',
@@ -109,7 +110,7 @@
     if (t.group !== grp && grp >= 0) pieces.insertAdjacentHTML("beforeend", '<span class="sep"></span>');
     grp = t.group;
     const letter = BL.TOOL_LETTER[t.id] || "";
-    pieces.insertAdjacentHTML("beforeend", '<button type="button" data-piece="' + t.id + '" title="' + t.name + " (" + letter + " or " + t.key + ')" aria-pressed="false">' + svg(I[t.id], 19) + '<span class="name">' + t.name + '</span><span class="key">' + letter + "</span></button>");
+    pieces.insertAdjacentHTML("beforeend", '<button type="button" data-piece="' + t.id + '" title="' + t.name + " (" + letter + (t.key === letter ? "" : " or " + t.key) + ')" aria-pressed="false">' + svg(I[t.id], 19) + '<span class="name">' + t.name + '</span><span class="key">' + letter + "</span></button>");
   }
   const back = () => canvas.focus();
   pieces.addEventListener("click", (e) => {
@@ -247,6 +248,23 @@
   const dimEls = pool("bdim", 4, '<input type="text" inputmode="decimal" autocomplete="off" size="4" aria-label="Exact size"><span class="u"></span><span class="t"></span><em></em>'),
     handleEls = pool("bhandle", 2),
     measEls = pool("bmeas", 9, '<span></span><button type="button" aria-label="Clear this measurement">' + svg('<path d="M7 7l10 10M17 7L7 17"/>', 12) + "</button>");
+  // port dots on equipment (drag or click from one to another to run a wire or pipe) and a tag on each run
+  const portEls = pool("bport", 48, "<span></span>");
+  for (const d of portEls) {
+    d.addEventListener("pointerdown", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const q = d._q;
+      if (!q) return;
+      q.lid ? BL.choose("fx:sel", q.lid) : BL.port(q.fid, q.pid, false);
+    });
+    d.addEventListener("pointerup", (e) => {
+      e.stopPropagation();
+      const q = d._q;
+      q && !q.lid && !q.from && BL.port(q.fid, q.pid, true);
+      back();
+    });
+  }
   const v3 = new G.THREE.Vector3();
   let rc = canvas.getBoundingClientRect();
   window.addEventListener("resize", () => ((rc = canvas.getBoundingClientRect()), (lastCam = NaN)));
@@ -387,6 +405,16 @@
         text(d.firstChild, q.text);
         show(d.lastChild, q.n >= 0);
         place(d, q.x, q.y, q.z, 0, -14);
+      });
+      portEls.forEach((d, n) => {
+        const q = ov.ports[n];
+        show(d, !!q);
+        d._q = q || null;
+        if (!q) return;
+        const cls = "bport t-" + q.type + (q.from ? " on" : "") + (q.sel ? " sel" : "");
+        if (d._c !== cls) ((d._c = cls), (d.className = cls));
+        text(d.firstChild, q.text || "");
+        place(d, q.p[0], q.p[1], q.p[2]);
       });
       show(marq, !!ov.marq);
       if (ov.marq) {

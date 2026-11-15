@@ -35,7 +35,7 @@ async function open(opts) {
   const { ctx, page, G, step, draw } = await open({ viewport: { width: 1280, height: 720 } });
   await page.keyboard.press('KeyB'); await step(70);
   check('build mode opens on Select, the home tool', await G(() => __game.player.tool === 'build' && !document.getElementById('buildbar').hidden && __build.view().tool === 'select'));
-  check('thirteen tools, each with a letter', await G(() => { const b = [...document.querySelectorAll('#bpieces button')]; return b.length === 13 && b.every((x) => x.querySelector('.key').textContent.length === 1 && x.querySelector('svg')); }));
+  check('fourteen tools, each with a letter', await G(() => { const b = [...document.querySelectorAll('#bpieces button')]; return b.length === 14 && b.every((x) => x.querySelector('.key').textContent.length === 1 && x.querySelector('svg')); }));
 
   // screen position of a point given in a frame's own metres (the building's grid), at a height above its base
   const at = (lx, lz, up = 0.12) => G(([lx, lz, up]) => {
@@ -207,6 +207,44 @@ async function open(opts) {
   await page.click('#bsched'); await step(2);
   const tm = await G(() => { const t = performance.now(); for (let i = 0; i < 20; i++) { __build.state.version++; __build.state.structs.forEach((S) => (S.pc = null)); __build.pieces(); } return (performance.now() - t) / 20; });
   check('pieces() stays quick with every member in it', tm < 25, tm.toFixed(2) + ' ms to rebuild the whole list, ' + (await G(() => __build.pieces().length)) + ' pieces');
+  /* ---------- equipment: fixtures, their settings, and wires and pipes between ports ---------- */
+  await page.keyboard.press('KeyE'); await step(3);
+  check('E picks up the Equip tool with a catalog to choose from', await G(() => __build.view().tool === 'equip' && document.querySelectorAll('#bdecor .bchip').length >= 2 && Object.keys(__build.fixtureCatalog()).length >= 6));
+  // a panel on the roof takes the plane's tilt and facing; a battery and a light go on the floor by clicking
+  await click(await at(2.5, 0.8, 3.6)); await step(3);
+  let fx = await G(() => __build.pieces().filter((p) => p.kind === 'fixture' && p.fixture));
+  const plane = await G((id) => __build.piece(id), fx[0] && fx[0].settings.roofPieceId);
+  check('a solar panel clicked onto the roof takes that plane\'s tilt and facing', fx.length === 1 && fx[0].fixture === 'demo_solar_panel' && fx[0].mount === 'roof' && !!plane && plane.kind === 'roof' && near(fx[0].settings.tiltDeg, Math.round(plane.pitchDeg * 10) / 10) && near(fx[0].settings.azimuthDeg, Math.round(((Math.atan2(plane.facing.x, -plane.facing.z) * 180 / Math.PI) % 360 + 360) % 360)), JSON.stringify(fx[0] && fx[0].settings));
+  await G(() => __build.choose('fx:kind', 'demo_battery')); await page.keyboard.press('KeyV'); await step(2); await page.keyboard.press('KeyE'); await step(2); await G(() => __build.choose('fx:kind', 'demo_battery')); await step(2);
+  await click(await at(1.25, 1.25)); await step(3);
+  fx = await G(() => __build.pieces().filter((p) => p.kind === 'fixture' && p.fixture));
+  const bat = fx.find((f) => f.fixture === 'demo_battery');
+  check('a fixture piece has the contract\'s shape', !!bat && bat.mount === 'floor' && typeof bat.a.x === 'number' && typeof bat.y0 === 'number' && bat.y1 > bat.y0 && typeof bat.yawRad === 'number' && typeof bat.settings === 'object' && bat.ports.length === 1 && bat.ports[0].id === 'dc' && bat.ports[0].type === 'power' && /^p\d+$/.test(bat.id), JSON.stringify(bat));
+  const more = await G(() => { const g = __game, S = __build.state.structs[0], w = (lx, lz) => { const [x, z] = __build.toWorld(S, lx, lz); return { x, z, y: S.y0 + 0.12 }; };
+    return __build.addFixtures([{ fixture: 'demo_light', ...w(3.5, 2), mount: 'floor' }, { fixture: 'demo_water_tank', ...w(8, 2), y: undefined }, { fixture: 'demo_tap', ...w(4.5, 3.5), mount: 'floor' }]); });
+  check('addFixtures places equipment from code', more.length === 3 && more.every((id) => /^p\d+$/.test(id)));
+  const ids = { panel: fx.find((f) => f.fixture === 'demo_solar_panel').id, bat: bat.id, light: more[0], tank: more[1], tap: more[2] };
+  const c1 = await G((i) => __build.connect(i.panel, 'dc', i.bat, 'dc'), ids), c2 = await G((i) => __build.connect(i.tank, 'out', i.tap, 'in', { diameterMm: 25 }), ids), bad = await G((i) => __build.connect(i.bat, 'dc', i.tap, 'in'), ids), dup = await G((i) => __build.connect(i.bat, 'dc', i.panel, 'dc'), ids);
+  check('ports of different kinds refuse to join, in plain words', c1.ok && c2.ok && !bad.ok && /power port cannot be joined to a water port/.test(bad.reason) && !dup.ok, bad.reason);
+  // the third run is made by hand: from the battery's port dot to the light's
+  await step(3);
+  const dot = (fid, ev) => G(([fid, ev]) => { const d = [...document.querySelectorAll('.bport')].find((e) => !e.hidden && e._q && e._q.fid === fid); d.dispatchEvent(new PointerEvent(ev, { bubbles: true, cancelable: true })); return true; }, [fid, ev]);
+  await dot(ids.bat, 'pointerdown'); await step(2); await dot(ids.light, 'pointerup'); await step(3);
+  const links = await G(() => __build.pieces().filter((p) => p.kind === 'wire' || p.kind === 'pipe'));
+  const wire = links.find((l) => l.kind === 'wire' && l.to.piece === ids.light), pipe = links.find((l) => l.kind === 'pipe');
+  check('dragging from one port to another runs a wire; wires and pipes are pieces with a routed length', links.length === 3 && !!wire && wire.from.piece === ids.bat && wire.from.port === 'dc' && wire.to.port === 'in' && wire.gauge === 12 && wire.lengthM > 2 && wire.material === 'copper' && pipe.diameterMm === 25 && pipe.lengthM > 3 && pipe.gauge === undefined, JSON.stringify(wire));
+  check('the inspector offers the run\'s gauge', await G(() => __build.view().groups.some((g) => g.id === 'fx:gauge')));
+  await G(() => __build.choose('fx:gauge', 8)); await step(2);
+  check('and changing it changes the piece', (await G((id) => __build.piece(id).gauge, wire.id)) === 8);
+  const st = await G((i) => ({ a: __build.setFixtureSetting(i.light, 'on', false), b: __build.setFixtureSetting(i.panel, 'tiltDeg', 10), on: __build.piece(i.light).settings.on, tilt: __build.piece(i.panel).settings.tiltDeg }), ids);
+  check('setFixtureSetting changes a setting; a roof panel keeps the roof\'s tilt', st.a === true && st.on === false && st.b === false && st.tilt > 20, JSON.stringify(st));
+  const frt = await G(() => { const a = JSON.stringify(__build.serialize()), pj = JSON.stringify(__build.pieces().filter((p) => p.stage === 'services')); __build.restore(JSON.parse(a)); return { same: a === JSON.stringify(__build.serialize()), pieces: pj === JSON.stringify(__build.pieces().filter((p) => p.stage === 'services')), n: JSON.parse(pj).length }; });
+  check('fixtures and connections survive saving and loading, ids included', frt.same && frt.pieces && frt.n === 8, JSON.stringify(frt));
+  await G((i) => __build.removeFixture(i.tank), ids); await step(2);
+  check('removing a fixture takes its connections with it', (await G(() => __build.pieces().filter((p) => p.kind === 'pipe').length)) === 0);
+  check('the simulation sees the equipment', await G(() => { __game.step(1 / 60); return __game.sim.state.sys.site.pieces.some((p) => p.kind === 'fixture' && p.fixture === 'demo_battery' && p.ports.length === 1) && __game.sim.state.sys.site.pieces.some((p) => p.kind === 'wire' && p.material === 'copper'); }));
+  await draw(); await page.waitForTimeout(600); await page.screenshot({ path: 'dist/build-smoke-equip.png' });
+  await page.keyboard.press('Escape'); await step(2); await page.keyboard.press('Escape'); await step(2);
   await draw(); await page.waitForTimeout(600);
   await page.screenshot({ path: 'dist/build-smoke.png' });
   await ctx.close();
