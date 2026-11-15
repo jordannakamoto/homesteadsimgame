@@ -32,6 +32,7 @@ export * as animals from './animals.js';
 export { constructionSystem, CONSTRUCTION_CATALOG, buildingView as constructionView } from './construction.js';
 export { ITEMS_CONSTRUCTION } from './content/construction.js';
 export * as supply from './core/supply.js';
+export * from './fixtures.js';
 
 // Systems are added here, in dependency order, as the iterations land. Electrical runs before water
 // so a pump's request for power is answered in the same minute.

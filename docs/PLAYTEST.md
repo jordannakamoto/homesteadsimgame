@@ -212,3 +212,31 @@ Water, electricity and room heat are merged and tested headlessly. They become p
 - Group move, the ceiling field, cellars and towers were still not exercised end to end.
 - No precast pier block, door, or roof underlayment in the item catalog yet; the Schedule says "not sold yet".
 - Upper floors' joists overlap the top of the walls below by 8 cm.
+
+## Power and water are playable (live)
+
+**What is new**
+
+- The Equip tool in Build (B, then E) now offers the real equipment: 71 items including solar panels, charge controllers, batteries, inverters, lights, a fridge, a generator, gutters, tanks, pumps, taps, a shower, water heaters and a well.
+- Place them, then drag from a port on one to a port on another to run a wire or a pipe.
+- **Home panel (P, or the Home button).** Power: what you are making and using now, battery charge, today's totals. Water: tank levels, taps running, what was caught and used today. Indoors: each room's temperature against outside. Problems are stated in plain words with a fix, for example "The wire from the charge controller to the battery is too thin for 30 A at 12 V. Use 8 AWG or shorten the run."
+
+**Try this**
+
+1. Build, Equip: place a 200 W 12 V panel, an MPPT charge controller, a 12 V lithium battery and an LED light. Wire panel to controller, controller to battery, battery to light.
+2. Press P at midday. You should see about 150 W coming in and the light served. Run a cloudy day and a night and watch the battery.
+3. Place an IBC tank up on a platform or a slope and a tap lower down. Pipe them. The tap runs by gravity; the panel shows its flow. Put the tap above the tank and it will not.
+4. Draw a room with a roof and a door and read its temperature in the panel through a cold night.
+
+**Known gaps**
+
+- Equipment is free and appears instantly; it is not yet bought from the store.
+- Equipment looks like simple stand-in shapes.
+- There is no overlay in the world yet: flows and temperatures are only in the Home panel.
+- A panel placed on a roof does not yet take the roof's pitch.
+- The structural check is not in yet (in progress).
+
+**Critique prompts**
+
+- Is the Home panel enough to understand what your power and water are doing, or do you want to see it in the world?
+- Is wiring by dragging between ports clear?
