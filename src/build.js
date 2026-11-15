@@ -7349,9 +7349,10 @@
         c = Math.cos(t),
         s = Math.sin(t),
         up = tilt ? 0.25 : 0,
-        P = (x, v, o) => [x, up + (hd + v) * s + o * c, v * c - o * s - 0];
-      g.obox(P(0, 0, 0.02), [hw, 0, 0], [0, hd * s, hd * c], [0, 0.02 * c, -0.02 * s], STEEL);
-      for (let a = 0; a < 3; a++) for (let b = 0; b < 5; b++) g.obox(P(-hw + (a + 0.5) * (w / 3), -hd + (b + 0.5) * (dp / 5), 0.042), [w / 6 - 0.012, 0, 0], [0, (dp / 10 - 0.012) * s, (dp / 10 - 0.012) * c], [0, 0.004 * c, -0.004 * s], shade(col(0x1f3558), 0.9 + 0.2 * hash(a, b, 3)));
+        P = (x, v, o) => [x, up + (hd + v) * s + o * c, -v * c + o * s];
+      // it faces its front (+z): the low edge is at the front, the high edge at the back
+      g.obox(P(0, 0, 0.02), [hw, 0, 0], [0, hd * s, -hd * c], [0, 0.02 * c, 0.02 * s], STEEL);
+      for (let a = 0; a < 3; a++) for (let b = 0; b < 5; b++) g.obox(P(-hw + (a + 0.5) * (w / 3), -hd + (b + 0.5) * (dp / 5), 0.042), [w / 6 - 0.012, 0, 0], [0, (dp / 10 - 0.012) * s, -(dp / 10 - 0.012) * c], [0, 0.004 * c, 0.004 * s], shade(col(0x1f3558), 0.9 + 0.2 * hash(a, b, 3)));
       if (tilt) for (const x of [-hw + 0.08, hw - 0.08]) (g.abox(x - 0.02, 0, -hd * c - 0.02, x + 0.02, up + 2 * hd * s, -hd * c + 0.02, STEEL), g.abox(x - 0.02, 0, hd * c - 0.02, x + 0.02, up, hd * c + 0.02, STEEL), g.abox(x - 0.02, 0, -hd * c, x + 0.02, 0.04, hd * c, STEEL));
     } else if (shape === "tank") {
       const c0 = col(0x4c6a58);
