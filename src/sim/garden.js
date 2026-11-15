@@ -38,7 +38,7 @@ import { advance, newPlant, interception, stageIndex, thermalRate, EV_EMERGED, E
 import { CROPS, CROP_IDS } from './content/crops.js';
 import { SOILS, DEFAULT_SOIL, AMENDMENTS, MULCH } from './content/soils.js';
 import { ITEMS } from './items.js';
-import { DAY, HOUR } from './time.js';
+import { DAY, HOUR, calendarT } from './time.js';
 import { sunTimes, dayOfYear, MONTHS, MONTH_START, DAYS_IN_YEAR, START_DAY_OF_YEAR, monthOf, dayOfMonth } from './calendar.js';
 import { climateModel, CLIMATES, DEFAULT_CLIMATE } from './weather.js';
 
@@ -62,6 +62,7 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 const NUM = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
 const words = (n) => (n < NUM.length ? NUM[n] : String(n));
 const days = (n) => (n === 1 ? 'a day' : words(n) + ' days');
+const lifeOf = (state) => (state && state.yearDays ? 365 / state.yearDays : 1);
 
 // ---------------------------------------------------------------------------------------- state
 function fresh() {
@@ -625,13 +626,13 @@ export function plantInfo(state, id, t) {
   const g = state.sys ? state.sys.garden : state, p = g.plants[id];
   if (!p) return null;
   const crop = CROPS[p.crop], x = p.gdd / crop.readyGdd;
-  const packetT = p.sownT + crop.daysToMaturity * DAY;
+  const packetT = p.sownT + (crop.daysToMaturity / lifeOf(state.sys ? state : null)) * DAY;
   const expectT = p.readyT ?? p.expectT;
   const aheadDays = Math.round((packetT - expectT) / DAY);
   return {
     id, crop: crop.id, name: crop.name, variety: crop.variety, stage: crop.stages[p.stage].id, stageWord: STAGE_WORD[crop.stages[p.stage].id],
     status: p.status, reason: p.reason, progress: clamp(x, 0, 1.5), sownT: p.sownT, expectT, packetT, readyT: p.readyT,
-    ahead: p.dead ? 0 : aheadDays, count: p.count, area: p.area, dead: p.dead, bolted: p.bolted, wilt: p.wilt, yellow: p.yellow,
+    ahead: p.dead ? 0 : aheadDays,   // game days ahead of the seed packet (negative: behind) count: p.count, area: p.area, dead: p.dead, bolted: p.bolted, wilt: p.wilt, yellow: p.yellow,
     needs: needsOf(p, crop), yieldKg: yieldKgNow(p, crop), harvest: crop.harvest, gesture: crop.gesture,
     details: { gdd: Math.round(p.gdd), readyGdd: crop.readyGdd, lai: r3(p.lai), bioGm2: Math.round(p.bio), yieldDMgm2: Math.round(p.yieldDM), waterLimit: r3(p.lim.water), nitrogenLimit: r3(p.lim.nutrient), nUpGm2: r3(p.nUp), lightLimit: r3(p.lim.light), tempLimit: r3(p.lim.temp), crowd: r3(p.lim.crowd), ks: r3(p.ks) },
   };
@@ -692,7 +693,7 @@ export function rotationHint(lastCrop) {
 // climate's own day-to-day spread. The median last spring frost is the date after which the chance of any
 // further frost falls below one half (and likewise for autumn). Nights a few days apart are treated as
 // independent. DTR (mean diurnal range) is an approximation for a mid-latitude inland site.
-const DTR_C = 13;            // approx: typical mean daily range in a humid continental climate
+const DTR_C = 13;            // approx: typical mean daily range in a humid continental climate (6 h boundary layer)
 const NIGHT_EXTRA_C = 1.5;     // approx: leaves and soil surface run about 1 C below screen temperature on frosty nights
 const INDEPENDENT_DAYS = 3;  // approx: weather systems last a few days, so nights are not independent
 const frostCache = new Map();
@@ -709,7 +710,9 @@ export function frostDates(site) {
     if (mean > M.seasonalC[warm]) warm = d;
     const summer = clamp((mean - M.tMin) / Math.max(1e-6, M.tMax - M.tMin), 0, 1);
     const sd = Math.hypot(c.anomalySdC[0] + (c.anomalySdC[1] - c.anomalySdC[0]) * summer, 2);
-    pf[d] = phiN((0 - (mean - DTR_C / 2 - NIGHT_EXTRA_C)) / sd);
+    // the day-to-night range scales with how deep the weather model's boundary layer is: the sea damps it
+    const dtr = DTR_C * (c.boundaryLayerHours || 6) / 6;
+    pf[d] = phiN((0 - (mean - dtr / 2 - NIGHT_EXTRA_C)) / sd);
   }
   const at = (d) => pf[((d % DAYS_IN_YEAR) + DAYS_IN_YEAR) % DAYS_IN_YEAR];
   // spring: walk back from the warmest day; autumn: walk forward from it
@@ -734,16 +737,22 @@ export function sowWindows(crop, fd) {
 const inWin = (doy, w) => (w.from <= w.to ? doy >= w.from && doy <= w.to : doy >= w.from || doy <= w.to);
 const until = (doy, d) => (d - doy + DAYS_IN_YEAR) % DAYS_IN_YEAR;
 // "Sow mid April to mid May (about four weeks before the last frost, usually mid May here)."
-export function sowAdvice(cropId, site, doy) {
+// life: the world's lifeScale (365 / days in its year), so the advice can say how many game days away a date is.
+const gameDays = (calDays, life) => Math.max(0, Math.round(calDays / life));
+const inDays = (n) => (n <= 0 ? 'today' : n === 1 ? 'tomorrow' : 'in ' + n + ' days');
+export function sowAdvice(cropId, site, doy, life = 1) {
   const crop = CROPS[cropId], fd = frostDates(site), wins = sowWindows(crop, fd);
   const now = wins.find((w) => inWin(doy, w));
   const next = wins.slice().sort((a, b) => until(doy, a.from) - until(doy, b.from))[0];
   const frostWord = fd.frostFree ? 'Frost is rare here.' : 'Last frost usually ' + roughDate(fd.lastDoy) + ', first frost ' + roughDate(fd.firstDoy) + ' here.';
   return {
     now: !!now, until: now ? exactDate(now.to) : null, next: next ? exactDate(next.from) : null, daysToNext: next ? until(doy, next.from) : null,
+    gameDaysToNext: next ? gameDays(until(doy, next.from), life) : null, gameDaysLeft: now ? gameDays(until(doy, now.to), life) : null,
     windows: wins.map((w) => roughDate(w.from) + ' to ' + roughDate(w.to)),
     text: crop.sowText, frostWord,
-    short: now ? 'Sow now, until ' + exactDate(now.to) + '.' : 'Best sown from ' + exactDate(next.from) + '.',
+    // the real-calendar window, and when that is in this world's (possibly shorter) year
+    short: now ? 'Sow now, until ' + exactDate(now.to) + (life > 1.01 ? ' (' + (gameDays(until(doy, now.to), life) < 1 ? 'today is the last day' : gameDays(until(doy, now.to), life) + ' more game days') + ')' : '') + '.'
+      : 'Best sown from ' + exactDate(next.from) + (life > 1.01 ? ' (' + inDays(gameDays(until(doy, next.from), life)) + ')' : '') + '.',
   };
 }
 // Tonight's frost risk from the weather now: the night's minimum tends toward the dew point on a clear, still
@@ -762,12 +771,13 @@ export function almanac(state, t) {
   const g = state.sys ? state.sys.garden : null, w = state.sys ? state.sys.weather : null;
   const site = (w && w.site) || { climate: DEFAULT_CLIMATE, latitudeDeg: CLIMATES[DEFAULT_CLIMATE].latitudeDeg };
   t = t ?? state.t;
-  const doy = dayOfYear(t), fd = frostDates(site);
+  const life = lifeOf(state), ct = calendarT(t, state.lifeT ?? t);
+  const doy = dayOfYear(ct), fd = frostDates(site);
   const sowNow = [], sowSoon = [];
   for (const id of CROP_IDS) {
-    const a = sowAdvice(id, site, doy);
-    if (a.now) sowNow.push({ crop: id, until: a.until });
-    else if (a.daysToNext != null && a.daysToNext <= 21) sowSoon.push({ crop: id, from: a.next, inDays: a.daysToNext });
+    const a = sowAdvice(id, site, doy, life);
+    if (a.now) sowNow.push({ crop: id, until: a.until, gameDaysLeft: a.gameDaysLeft });
+    else if (a.daysToNext != null && a.daysToNext <= 21) sowSoon.push({ crop: id, from: a.next, inDays: a.gameDaysToNext });
   }
   const readySoon = [];
   if (g) for (const p of Object.values(g.plants)) {

@@ -102,7 +102,10 @@ export function advance(p, r, env, ev = { flags: 0 }) {
   const crowd = 1 / (1 + 0.5 * Math.max(0, p.density - 1));
   const L = p.lim;
   L.water = env.water; L.nutrient = env.nutrient; L.light = env.light; L.crowd = crowd; L.temp = tf; L.weeds = env.competition;
-  const g = Math.min(env.water, env.nutrient) * p.health;
+  // once the harvested part is filling, the plant moves nutrients out of its leaves into it (remobilisation),
+  // so a shortage then slows growth less than it does in a young plant
+  const nut = x > r.partition.from ? 0.4 + 0.6 * env.nutrient : env.nutrient;
+  const g = Math.min(env.water, nut) * p.health;
   // canopy: follows its potential (more plants per m2 make more leaf, with diminishing returns), held back by stress
   const past = x > r.stages[r.stages.length - 1].gdd / r.readyGdd;
   const target = laiPotential(r, Math.min(x, 1)) * Math.pow(p.density, 0.35) * p.health * (past ? 0.5 : 1);
