@@ -7,6 +7,9 @@
 //   - Wood Handbook (USDA Forest Products Laboratory, FPL-GTR-282): clear-wood means at 12 % moisture
 //     for the named species (MOR as bending strength, MOE as modulus, compression parallel to grain);
 //     density at 12 % is 1.12 x the tabulated oven-dry-mass / 12 %-volume specific gravity.
+//   Wood strengths come on two bases, marked by `strengthBasis`: 'clear-wood-mean' (average of small
+//   defect-free specimens; far above what a graded board may carry) and 'characteristic' (5th-percentile
+//   graded values). Structural code must convert to a design value from the basis, never mix them raw.
 //   - EN 338 (softwood strength classes, here C24 for spruce-pine-fir), EN 14080 (glulam GL24h),
 //     EN 300 / EN 12369 (OSB, plywood): characteristic grading values, which are lower than clear-wood means.
 //   - ISO 10456 / EN 12524 (hygrothermal design values) and ASHRAE Handbook Fundamentals ch. 26
@@ -36,17 +39,17 @@ const add = (id, name, cls, densityKgM3, conductivityWmK, specificHeatJkgK, extr
 
 // ------------------------------------------------------------------ wood (seasoned: 12 % moisture)
 add('spf_seasoned', 'Spruce-pine-fir (kiln dried)', 'wood', 420, 0.12, woodCp(0.12), {
-  bendingStrengthMPa: 24, compressiveStrengthMPa: 21, elasticModulusGPa: 11, source: 'EN 338 C24 characteristic strengths; ISO 10456 wood 0.12-0.13' });
+  strengthBasis: 'characteristic', bendingStrengthMPa: 24, compressiveStrengthMPa: 21, elasticModulusGPa: 11, source: 'EN 338 C24 characteristic strengths; ISO 10456 wood 0.12-0.13' });
 add('douglas_fir', 'Douglas fir', 'wood', dens12(0.48), 0.13, woodCp(0.12), {
-  bendingStrengthMPa: 85, compressiveStrengthMPa: 49.9, elasticModulusGPa: 13.4, source: 'Wood Handbook, Douglas-fir (coast), 12 % MC' });
+  strengthBasis: 'clear-wood-mean', bendingStrengthMPa: 85, compressiveStrengthMPa: 49.9, elasticModulusGPa: 13.4, source: 'Wood Handbook, Douglas-fir (coast), 12 % MC' });
 add('western_redcedar', 'Western red cedar', 'wood', dens12(0.32), 0.10, woodCp(0.12), {
-  bendingStrengthMPa: 51.7, compressiveStrengthMPa: 31.4, elasticModulusGPa: 7.7, source: 'Wood Handbook, western redcedar, 12 % MC; ISO 10456 (300 kg/m3: 0.10)' });
+  strengthBasis: 'clear-wood-mean', bendingStrengthMPa: 51.7, compressiveStrengthMPa: 31.4, elasticModulusGPa: 7.7, source: 'Wood Handbook, western redcedar, 12 % MC; ISO 10456 (300 kg/m3: 0.10)' });
 add('pine_seasoned', 'Pine (seasoned)', 'wood', dens12(0.51), 0.14, woodCp(0.12), {
-  bendingStrengthMPa: 88.3, compressiveStrengthMPa: 49.2, elasticModulusGPa: 12.3, source: 'Wood Handbook, loblolly pine, 12 % MC; ISO 10456' });
+  strengthBasis: 'clear-wood-mean', bendingStrengthMPa: 88.3, compressiveStrengthMPa: 49.2, elasticModulusGPa: 12.3, source: 'Wood Handbook, loblolly pine, 12 % MC; ISO 10456' });
 add('birch_seasoned', 'Birch (seasoned)', 'wood', dens12(0.62), 0.16, woodCp(0.12), {
-  bendingStrengthMPa: 114.5, compressiveStrengthMPa: 56.3, elasticModulusGPa: 13.9, source: 'Wood Handbook, yellow birch, 12 % MC; ISO 10456' });
+  strengthBasis: 'clear-wood-mean', bendingStrengthMPa: 114.5, compressiveStrengthMPa: 56.3, elasticModulusGPa: 13.9, source: 'Wood Handbook, yellow birch, 12 % MC; ISO 10456' });
 add('oak_seasoned', 'Oak (seasoned)', 'wood', dens12(0.68), 0.18, woodCp(0.12), {
-  bendingStrengthMPa: 104.3, compressiveStrengthMPa: 51.3, elasticModulusGPa: 12.3, source: 'Wood Handbook, white oak, 12 % MC; ISO 10456 (700 kg/m3: 0.18)' });
+  strengthBasis: 'clear-wood-mean', bendingStrengthMPa: 104.3, compressiveStrengthMPa: 51.3, elasticModulusGPa: 12.3, source: 'Wood Handbook, white oak, 12 % MC; ISO 10456 (700 kg/m3: 0.18)' });
 
 // Green logs: density is the green specific gravity times (1 + mean moisture content), so a freshly
 // felled log is far heavier than the same wood once seasoned. Moisture contents are Wood Handbook
@@ -61,11 +64,11 @@ add('log_oak_green', 'Oak log (green)', 'wood', greenDens(0.6, 0.7), 0.2, woodCp
 
 // ------------------------------------------------------------------ engineered wood
 add('plywood', 'Plywood', 'wood', 500, 0.13, 1600, {
-  bendingStrengthMPa: 24, compressiveStrengthMPa: 18, elasticModulusGPa: 6, approx: true, source: 'ISO 10456 plywood 500 kg/m3; strengths are nominal softwood-ply values (EN 12369-2 family)' });
+  strengthBasis: 'characteristic', bendingStrengthMPa: 24, compressiveStrengthMPa: 18, elasticModulusGPa: 6, approx: true, source: 'ISO 10456 plywood 500 kg/m3; strengths are nominal softwood-ply values (EN 12369-2 family)' });
 add('osb', 'OSB', 'wood', 650, 0.13, 1700, {
-  bendingStrengthMPa: 18, compressiveStrengthMPa: 15, elasticModulusGPa: 4.93, source: 'ISO 10456 OSB 650 kg/m3; EN 300 OSB/3 major-axis bending and modulus' });
+  strengthBasis: 'characteristic', bendingStrengthMPa: 18, compressiveStrengthMPa: 15, elasticModulusGPa: 4.93, source: 'ISO 10456 OSB 650 kg/m3; EN 300 OSB/3 major-axis bending and modulus' });
 add('glulam', 'Glulam (GL24h)', 'wood', 420, 0.12, woodCp(0.12), {
-  bendingStrengthMPa: 24, compressiveStrengthMPa: 24, elasticModulusGPa: 11.5, source: 'EN 14080 GL24h; mean density 420' });
+  strengthBasis: 'characteristic', bendingStrengthMPa: 24, compressiveStrengthMPa: 24, elasticModulusGPa: 11.5, source: 'EN 14080 GL24h; mean density 420' });
 
 // ------------------------------------------------------------------ masonry and concrete
 add('concrete', 'Concrete (C25/30)', 'masonry', 2400, 2.0, 1000, {
@@ -115,7 +118,7 @@ add('straw_bale', 'Straw bale', 'insulation', 100, 0.06, 2000, { source: 'Publis
 
 // ------------------------------------------------------------------ glass and glazing
 add('float_glass', 'Float glass', 'glass', 2500, 1.0, 750, {
-  bendingStrengthMPa: 45, compressiveStrengthMPa: 1000, elasticModulusGPa: 70, source: 'EN 572-1 soda-lime glass; EN 16612 annealed characteristic bending 45 MPa' });
+  strengthBasis: 'characteristic', bendingStrengthMPa: 45, compressiveStrengthMPa: 1000, elasticModulusGPa: 70, source: 'EN 572-1 soda-lime glass; EN 16612 annealed characteristic bending 45 MPa' });
 // Glazing assemblies: conductivity is the effective value (U x thickness) and density the mass per
 // area over the overall thickness; use uValueWm2K for heat-loss sums.
 add('dgu', 'Double glazing unit (4-12-4 air)', 'glass', 1000, 0.056, 750, {

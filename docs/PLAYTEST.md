@@ -28,3 +28,34 @@ One section per wave: what is new, how to try it, known gaps. Leave feedback in 
 **Deferred**
 
 - A proper pause menu and manual save slots.
+
+## Wave B, part 1 — materials, money and inventory (commit on `main`; see `docs/STATUS.md`)
+
+Wave B is landing in three parts as each finishes. This is the first.
+
+**What is new**
+
+- Three buttons under the stamina bar: Items (I), Supplier (U) and Projects (J).
+- **Supplier.** Browse lumber, logs, sheets, insulation, roofing, glass, stone, fasteners and tools. Each line shows the price, the unit, and real properties such as density and insulation value. You start with $2,500. Delivery is instant.
+- **Items.** Everything you own, grouped by category, with quantities and total mass.
+- **Projects.** A few optional cards (put a roof over your head, fell a tree, buy your first lumber). Tick them, dismiss them, or ignore them. Two tick themselves when you do the thing.
+- **Trees give real logs.** Chopping a felled trunk adds pine, birch or oak logs by the trunk's actual volume, on top of the wood you already got.
+- Underneath: a registry of 55 real materials (density, conductivity, heat capacity, strength) that every later system reads.
+
+**Try this**
+
+1. Press U, buy 20 m of 2 x 4 and a hammer, then press I and check the mass.
+2. Fell and chop a pine, then look for pine logs in Items.
+3. Reload the page: money, items and project ticks should all come back.
+
+**Known gaps**
+
+- Buying does nothing for building yet. Build mode still counts plain wood; it starts using real materials when its redesign lands.
+- Owning a tool does not yet gate any action.
+- Prices are estimates and starting money is a placeholder.
+- A handful of material values are marked approximate in the registry (green logs, cob, thatch, straw bale and a few others).
+
+**Critique prompts**
+
+- Is the Supplier readable at a glance, or is there too much small print on each line?
+- Is $2,500 too much or too little to start with?

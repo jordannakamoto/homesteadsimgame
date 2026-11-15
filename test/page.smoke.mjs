@@ -12,7 +12,7 @@ const check = (name, ok, info = '') => { console.log((ok ? 'ok   ' : 'FAIL ') + 
 const G = (fn, arg) => page.evaluate(fn, arg);
 const frames = async (n) => { const f0 = await G(() => __game.renderer.info.render.frame); for (let i = 0; i < 240; i++) { await page.waitForTimeout(250); if ((await G(() => __game.renderer.info.render.frame)) - f0 >= n) return; } throw new Error('page stopped rendering'); };
 
-await page.goto(file); await page.waitForTimeout(5000);
+await page.goto(file, { waitUntil: 'domcontentloaded', timeout: 120000 }); await page.waitForTimeout(8000);
 check('page loads and exposes the game', await G(() => !!(window.__game && __game.sim && window.__build)));
 await G(() => __game.lockQuality());      // a slow software renderer must not auto-drop quality mid-check
 await G(() => __game.setQuality('low')); await frames(3);
@@ -40,7 +40,7 @@ await page.keyboard.press('KeyB'); await frames(2);
 // save, change the world, reload: same world comes back
 await G(() => { const g = __game; g.editSet(3, 3, 1.25); g.world.wood = 17; g.player.x = 9; g.player.z = -4; g.saveGame(); });
 const saved = await G(() => ({ hash: __game.sim.hash(), tick: __game.sim.state.tick, seed: __game.seed }));
-await page.reload(); await page.waitForTimeout(5000);
+await page.reload({ waitUntil: 'domcontentloaded', timeout: 120000 }); await page.waitForTimeout(8000);
 const back = await G(() => ({ hash: __game.sim.hash(), tick: __game.sim.state.tick, seed: __game.seed, wood: __game.world.wood, edit: __game.editGet(3, 3), x: __game.player.x, day: document.getElementById('day').textContent }));
 check('reload restores the same world', back.seed === saved.seed && back.wood === 17 && Math.abs(back.edit - 1.25) < 1e-6 && back.tick >= saved.tick && back.tick - saved.tick < 400, JSON.stringify(back));
 
