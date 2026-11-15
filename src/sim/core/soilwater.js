@@ -11,9 +11,11 @@
 // in = change in storage + evaporation + transpiration + drainage + runoff.
 //
 // cell fields used: w (top layer water, mm), d (deep layer water, mm), de (depletion of the 10 cm surface
-// layer that evaporation draws on, mm). 1 mm over 1 m2 is 1 L.
+// layer that evaporation draws on, mm), sw (water in the top 2 cm where seeds lie, mm: part of w, wetted first by
+// rain and watering and dried first by evaporation, so a seed bed needs watering more often than the roots do).
+// 1 mm over 1 m2 is 1 L.
 
-export const TOP_M = 0.3, DEEP_M = 0.7, ZE_M = 0.1;
+export const TOP_M = 0.3, DEEP_M = 0.7, ZE_M = 0.1, SEED_M = 0.02;
 const KC_MAX = 1.2;   // FAO-56 eq. 72, the upper limit on evaporation plus transpiration after wetting
 
 // Capacities of a soil, in mm. Cached per soil record.
@@ -26,6 +28,7 @@ export function bucket(soil) {
     fc1: soil.fc * TOP_M * 1000, wp1: soil.wp * TOP_M * 1000, sat1: sat * TOP_M * 1000, dry1: 0.5 * soil.wp * TOP_M * 1000,
     fc2: soil.fc * DEEP_M * 1000, wp2: soil.wp * DEEP_M * 1000, sat2: sat * DEEP_M * 1000,
     tew: 1000 * (soil.fc - 0.5 * soil.wp) * ZE_M, rew: soil.rewMm, tauH: soil.drainTauH,
+    swCap: 1000 * (soil.fc - 0.5 * soil.wp) * SEED_M,
   };
   b.rew = Math.min(b.rew, b.tew * 0.9);
   cache.set(soil, b);
@@ -64,6 +67,7 @@ export function infiltrate(cell, b, mm) {
   if (!(mm > 0)) return 0;
   cell.w += mm;
   cell.de = Math.max(0, cell.de - mm);
+  cell.sw = Math.min(b.swCap, (cell.sw || 0) + mm);
   let off = 0;
   if (cell.w > b.sat1) {                                      // the top is full: the surplus goes down at once if the deep layer has room
     const over = cell.w - b.sat1, room = Math.max(0, b.sat2 - cell.d), down = Math.min(over, room);
@@ -78,7 +82,8 @@ export function infiltrate(cell, b, mm) {
 // out (reused, no allocation): { evap, transp, drain, ks } in mm.
 export function stepCell(cell, b, inp, hours, out) {
   // drainage: water above field capacity moves down the profile with the soil's time constant
-  const k = 1 - Math.exp(-hours / b.tauH), k2 = 1 - Math.exp(-hours / (b.tauH * 2));
+  if (b.hours !== hours) { b.hours = hours; b.k1 = 1 - Math.exp(-hours / b.tauH); b.k2 = 1 - Math.exp(-hours / (b.tauH * 2)); b.kc = 1 - Math.exp(-hours / 12); }
+  const k = b.k1, k2 = b.k2;
   if (cell.w > b.fc1) { const m = (cell.w - b.fc1) * k; cell.w -= m; cell.d += m; }
   let drain = 0;
   if (cell.d > b.sat2) { drain += cell.d - b.sat2; cell.d = b.sat2; }
@@ -86,6 +91,9 @@ export function stepCell(cell, b, inp, hours, out) {
   out.drain = drain;
   out.evap = 0; out.transp = 0;
   out.ks = stressOf(cell, b, inp.rootFrac, inp.p);
+  // the seed zone is fed from below by capillary rise, toward the moisture of the soil under it
+  const under = b.swCap * Math.max(0, 1 - cell.de / b.tew, 0.8 * Math.min(1, (cell.w - b.wp1) / (b.fc1 - b.wp1)));
+  if (under > (cell.sw || 0)) cell.sw = (cell.sw || 0) + (under - (cell.sw || 0)) * b.kc;
   if (inp.frozen || !(inp.et0 > 0)) return out;
   // evaporation from the wet surface, cut by the canopy shading it and by mulch (FAO-56 eqs. 71 to 77)
   const kr = cell.de <= b.rew ? 1 : Math.max(0, (b.tew - cell.de) / (b.tew - b.rew));
@@ -94,6 +102,8 @@ export function stepCell(cell, b, inp, hours, out) {
   let evap = ke * inp.et0 * (1 - (inp.mulchCut || 0) * (inp.mulch || 0));
   evap = Math.max(0, Math.min(evap, cell.w - b.dry1));
   cell.w -= evap; cell.de = Math.min(b.tew, cell.de + evap);
+  cell.sw = Math.max(0, (cell.sw || 0) - evap);
+
   // transpiration by the crop and the weeds, from the layers in proportion to the water each still holds
   const want = (inp.kcb + (inp.weedKc || 0)) * inp.et0 * out.ks;
   const a1 = Math.max(0, cell.w - b.wp1), a2 = inp.rootFrac * Math.max(0, cell.d - b.wp2), a = a1 + a2;
@@ -103,4 +113,5 @@ export function stepCell(cell, b, inp, hours, out) {
   return out;
 }
 
+export const seedFraction = (cell, b) => (cell.sw || 0) / b.swCap;
 export const storedMm = (cell) => cell.w + cell.d;

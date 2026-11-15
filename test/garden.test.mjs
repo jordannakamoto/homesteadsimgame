@@ -56,7 +56,7 @@ function bedWith(sim, crop, { n = 4, soil, compost = 20, x0 = 0, spacingM } = {}
 function tend(sim, bed, day, { waterIt = true, hoeIt = true } = {}) {
   const b = G(sim).field.groups[bed];
   if (waterIt) {
-    const dry = b.cells.map((_, i) => i).filter((i) => cellInfo(sim.state, bed, i).water < 0.55);
+    const dry = b.cells.map((_, i) => i).filter((i) => { const ci = cellInfo(sim.state, bed, i), p = b.cells[i].pl && G(sim).plants[b.cells[i].pl]; return ci.water < 0.55 || (p && !p.emerged && ci.seed < 0.6); });
     if (dry.length) cmd(sim, 'garden.water', { bed, cells: dry, litres: dry.length * 0.09 * 15, carriedL: 1e9 });
   }
   if (hoeIt && day % 7 === 0) cmd(sim, 'garden.hoe', { bed });
@@ -89,7 +89,7 @@ test('generic mechanisms work with any records (a fungus on a cave floor)', () =
   const g = addGroup(f, { x0: 0.1, z0: 0, x1: 2.1, z1: 1 }, () => ({ spores: 0 }));
   assert.equal(g.nx, 4); assert.equal(g.nz, 2);
   assert.equal(addGroup(f, { x0: 1, z0: 0.5, x1: 3, z1: 2 }, () => ({})).error, 'overlaps');
-  assert.equal(brush(f, { x: 0.5, z: 0.25, r: 0.4 }, (c) => { c.spores++; }), 1);
+  assert.equal(brush(f, { x: 0.4, z: 0.25, r: 0.2 }, (c) => { c.spores++; }), 1);
   assert.equal(resolve(f, { group: g.id }).length, 8);
   assert.deepEqual(snapRect(f, { x0: 0, z0: 0, x1: 0.2, z1: 2 }), null);
   const glowcap = { tb: 2, topt: 12, tceil: 20, germMinC: 3, readyGdd: 200, rue: 0.5, k: 0.5, laiMax: 1, frost: { damageC: -5, killC: -10 },
@@ -154,8 +154,8 @@ test('tomatoes planted out before the last frost are killed; peas sown then are 
 });
 
 test('a row cover saves tender plants on a light frost', () => {
-  const frosty = stubWeather({ meanC: (t) => (Math.floor(t / DAY) === 52 ? 3.5 : 14), rangeC: 9, cloud: 0, rainMmDay: 6, rainEvery: 3 });
-  const one = (covered) => { const sim = makeSim({ w: frosty }); runTo(sim, at(4, 20)); const b = bedWith(sim, 'bean', { n: 2 }); if (covered) cmd(sim, 'garden.cover', { bed: b.id, on: true }); sim.runDays(50); return plantsOf(sim, b.id)[0]; };
+  const frosty = stubWeather({ meanC: (t) => (Math.floor(t / DAY) === 62 ? 3.5 : 18), rangeC: 9, cloud: 0, rainMmDay: 6, rainEvery: 3 });
+  const one = (covered) => { const sim = makeSim({ w: frosty }); runTo(sim, at(4, 20)); const b = bedWith(sim, 'bean', { n: 2 }); if (covered) cmd(sim, 'garden.cover', { bed: b.id, on: true }); for (let d = 0; d < 50; d++) { sim.runDays(1); tend(sim, b.id, d); } return plantsOf(sim, b.id)[0]; };
   const bare = one(false), under = one(true);
   assert.ok(bare.dead === 'frost' || bare.frostBurn > 0.3, 'bare beans were frosted');
   assert.ok(!under.dead && under.frostBurn < bare.frostBurn + 1e-9);
@@ -171,12 +171,14 @@ test('lettuce bolts in a heat wave and not in a cool spell', () => {
 // ------------------------------------------------------------------ water
 test('a dry spell: the unwatered bed wilts and yields less; water is conserved', () => {
   const dry = stubWeather({ meanC: 20, rangeC: 12, cloud: 0.1, humidity: 0.45 });
-  const run = (waterIt) => { const sim = makeSim({ w: dry }); runTo(sim, at(4, 15)); const b = bedWith(sim, 'lettuce'); const r = grow(sim, b, 'lettuce', { waterIt }); return { sim, r, b }; };
+  // both beds are watered until the seedlings are up; then one is left to the weather
+  const establish = (sim, b) => { for (let d = 0; d < 40 && plantsOf(sim, b.id).some((p) => !p.emerged); d++) { sim.runDays(1); tend(sim, b.id, d); } };
+  const run = (waterIt) => { const sim = makeSim({ w: dry }); runTo(sim, at(4, 15)); const b = bedWith(sim, 'lettuce'); establish(sim, b); const r = grow(sim, b, 'lettuce', { waterIt }); return { sim, r, b }; };
   const wet = run(true), parched = run(false);
   assert.ok(parched.r.kgM2 < 0.6 * wet.r.kgM2, `unwatered ${parched.r.kgM2.toFixed(2)} vs watered ${wet.r.kgM2.toFixed(2)} kg/m2`);
   // the parched bed showed it: wilting and the reason in words
-  const sim = makeSim({ w: dry }); runTo(sim, at(4, 15)); const b = bedWith(sim, 'lettuce');
-  sim.runDays(30);
+  const sim = makeSim({ w: dry }); runTo(sim, at(4, 15)); const b = bedWith(sim, 'lettuce'); establish(sim, b);
+  sim.runDays(20);
   const p = plantsOf(sim, b.id)[0];
   assert.ok(p.wilt > 0.3 && /dry/.test(p.reason), p.status + ': ' + p.reason);
   // conservation: water in = change in storage + evaporation + transpiration + drainage + runoff
@@ -199,7 +201,9 @@ test('sandy soil dries out faster than clay', () => {
   assert.ok(sand < clay, `sand ${sand} days, clay ${clay} days`);
 });
 
-test('a tomato bed uses a realistic amount of water over the season (300 to 600 mm)', () => {
+// FAO Irrigation and Drainage Paper 33 (Doorenbos and Kassam): a field tomato needs 400 to 800 mm a season,
+// depending on climate and season length; a shorter northern season sits at the low end.
+test('a tomato bed uses a realistic amount of water over the season (350 to 700 mm)', () => {
   const sim = makeSim({ seed: 1 }); runTo(sim, at(4, 25));
   const b = bedWith(sim, 'tomato', { n: 2 });
   const T0 = { ...G(sim).totals };
@@ -207,7 +211,7 @@ test('a tomato bed uses a realistic amount of water over the season (300 to 600 
   const T = G(sim).totals, mm = (T.evapL + T.transpL - T0.evapL - T0.transpL) / b.areaM2;
   FIG.tomatoWaterMm = Math.round(mm);
   console.log('# tomato bed evapotranspiration, planting out to frost:', Math.round(mm), 'mm, per plant', Math.round(mm * 0.36), 'L; first frost ended it:', r.dead);
-  assert.ok(mm > 300 && mm < 600, mm.toFixed(0) + ' mm');
+  assert.ok(mm > 350 && mm < 700, mm.toFixed(0) + ' mm');
 });
 
 // ------------------------------------------------------------------ crowding, hunger, weeds, rotation, compost

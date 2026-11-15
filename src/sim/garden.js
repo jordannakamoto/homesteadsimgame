@@ -33,7 +33,7 @@
 // nIn, nFixed, nLeached, nRemoved, nExported }, produce in kg { harvestKg: { [cropId]: kg } }.
 
 import { makeField, addGroup, removeGroup, resolve, block, cellCentre, cellAt, groupArea } from './core/cellfield.js';
-import { bucket, priestleyTaylorMm, stepCell, infiltrate, topFraction, stressOf, TOP_M } from './core/soilwater.js';
+import { bucket, priestleyTaylorMm, stepCell, infiltrate, topFraction, stressOf, seedFraction, TOP_M } from './core/soilwater.js';
 import { advance, newPlant, interception, stageIndex, thermalRate, EV_EMERGED, EV_STAGE, EV_FROST, EV_KILLED, EV_BOLTED } from './core/growth.js';
 import { CROPS, CROP_IDS } from './content/crops.js';
 import { SOILS, DEFAULT_SOIL, AMENDMENTS, MULCH } from './content/soils.js';
@@ -76,12 +76,13 @@ const soilMassKgM2 = (soil) => soil.bulkGcm3 * TOP_M * 1000;
 function newCell(soil) {
   const b = bucket(soil), sn = (soil.omPct / 100) * soilMassKgM2(soil) * 1000 * N_IN_OM;
   return {
-    w: r3(b.wp1 + 0.7 * (b.fc1 - b.wp1)), d: r3(b.wp2 + 0.8 * (b.fc2 - b.wp2)), de: 0,
+    w: r3(b.wp1 + 0.7 * (b.fc1 - b.wp1)), d: r3(b.wp2 + 0.8 * (b.fc2 - b.wp2)), de: 0, sw: r3(0.6 * b.swCap),
     n: soil.nMinG, p: soil.pG, k: soil.kG, sn, on: 0, onk: RESIDUE_RATE, ph: soil.ph, lime: 0,
     weed: 0.01, wN: 0, mulch: 0, pl: null, hist: [],
   };
 }
-export const cellN = (c) => c.n + c.sn + c.on + c.wN;                // g N per m2 held in a cell (not counting plants)
+// g N per m2 held in a cell (not counting plants), including the straw mulch's own nitrogen still lying on it
+export const cellN = (c) => c.n + c.sn + c.on + c.wN + c.mulch * MULCH.kgPerL * 1000 * (MULCH.nPct / 100);
 export const omPct = (c, soil) => ((c.sn / N_IN_OM + c.on / N_IN_ADDED_OM) / (soilMassKgM2(soil) * 1000)) * 100;
 
 // Read-only helpers for other systems, tests and the view.
@@ -136,6 +137,7 @@ function plantWater(p, crop) {
 
 // ---------------------------------------------------------------------------------------- the soil step (hourly)
 const _out = { evap: 0, transp: 0, drain: 0, ks: 1 };
+const _inp = { et0: 0, kcb: 0, cover: 0, mulch: 0, mulchCut: MULCH.evapCut, rootFrac: 0, p: 0.5, weedKc: 0, frozen: false };
 function soilStep(ctx, s) {
   const w = ctx.get('weather') || {};
   const hours = SOIL_EVERY / 60;
@@ -157,7 +159,8 @@ function soilStep(ctx, s) {
   s.soilC += (tC - s.soilC) * (1 - Math.exp(-hours / 24));
   const frozen = s.soilC < -0.5;
   // the coldest a plant felt: on a clear, still night leaves radiate below the air temperature
-  const calm = clamp(1 - wind / 4, 0, 1), plantC = ghi > 0 ? tC : tC - 2 * (1 - cloud) * calm;
+  // (leaves on a radiation frost run 2 to 4 C below the screen temperature: extension frost-protection guides)
+  const calm = clamp(1 - wind / 4, 0, 1), plantC = ghi > 0 ? tC : tC - 3 * (1 - cloud) * calm;
   const A = s.acc;
   if (A.n < A.temps.length) A.temps[A.n++] = tC;
   A.minC = Math.min(A.minC, plantC); A.rsMJ += rsMJ;
@@ -170,7 +173,9 @@ function soilStep(ctx, s) {
       if (c.pl) { p = s.plants[c.pl]; if (p) { const pw = p._w; kcb = pw.kcb; cover = pw.cover; root = pw.root; pp = CROPS[p.crop].comfortP; } }
       if (inMm > 0) T.runoffL += infiltrate(c, b, inMm) * CELL_AREA;
       const weedKc = 0.9 * c.weed * (1 - 0.5 * cover);
-      const o = stepCell(c, b, { et0, kcb, cover, mulch: Math.min(1, c.mulch / MULCH.fullCoverLPerM2), mulchCut: MULCH.evapCut, rootFrac: root, p: pp, weedKc, frozen }, hours, _out);
+      const I = _inp;
+      I.et0 = et0; I.kcb = kcb; I.cover = cover; I.mulch = c.mulch > 0 ? Math.min(1, c.mulch / MULCH.fullCoverLPerM2) : 0; I.rootFrac = root; I.p = pp; I.weedKc = weedKc; I.frozen = frozen;
+      const o = stepCell(c, b, I, hours, _out);
       T.evapL += o.evap * CELL_AREA; T.transpL += o.transp * CELL_AREA; T.drainL += o.drain * CELL_AREA;
       // nitrate leaves with the water draining out of the root zone
       if (o.drain > 0 && c.n > 0) {
@@ -218,13 +223,20 @@ function growthStep(ctx, s) {
   const E = _env;
   E.days = dt; E.temps = A.temps; E.n = A.n; E.soilC = s.soilC ?? 10; E.dayH = dayH;
   const T = s.totals;
+  // the share of the soil's available nutrients roots can take up in one step (more steps of life per step in a short year)
+  const upN = 1 - Math.pow(0.8, life), upPK = 1 - Math.pow(0.9, life), upW = 1 - Math.pow(0.85, life);
+  // In a short year each night stands for lifeScale nights of the season, so frost is judged on the coldest of
+  // that many nights: the expected minimum of n normal draws is about sqrt(2 ln n) standard deviations below
+  // one draw (night-to-night spread about 2.5 C, approx).
+  const frostExtra = life > 1.5 ? 2.5 * Math.sqrt(2 * Math.log(life)) : 0;
   for (const id in s.plants) {
     const p = s.plants[id], crop = CROPS[p.crop], bed = s.field.groups[p.bed];
     if (!bed) continue;
     const soil = soilOf(bed), b = bucket(soil), list = cellsOfPlant(s, p);
-    let top = 0, weed = 0, n = 0, pp = 0, kk = 0, ph = 0;
-    for (const i of list) { const c = bed.cells[i]; top += topFraction(c, b); weed += c.weed; n += c.n; pp += c.p; kk += c.k; ph += c.ph; }
-    const m = list.length; top /= m; weed /= m; n /= m; pp /= m; kk /= m; ph /= m;
+    // seed: how moist the surface layer the seeds lie in is (1 - its evaporation depletion)
+    let top = 0, seed = 0, weed = 0, n = 0, pp = 0, kk = 0, ph = 0;
+    for (const i of list) { const c = bed.cells[i]; top += topFraction(c, b); seed += seedFraction(c, b); weed += c.weed; n += c.n; pp += c.p; kk += c.k; ph += c.ph; }
+    const m = list.length; top /= m; seed /= m; weed /= m; n /= m; pp /= m; kk /= m; ph /= m;
     const ks = p._ksN ? p._ks / p._ksN : stressOf(bed.cells[p.cell], b, p._w.root, crop.comfortP);
     p._ks = 0; p._ksN = 0; p.ks = ks;
     // nitrogen status: what the plant holds against what its dry matter needs (critical N); P and K by soil level
@@ -233,10 +245,11 @@ function growthStep(ctx, s) {
     const pk = Math.sqrt(clamp(pp / 4, 0.2, 1) * clamp(kk / 12, 0.2, 1));
     const nutrient = clamp((ns - 0.45) / 0.45, 0, 1) * pk;
     const light = (1 - (bed.shade || 0)) * (bed.cover ? COVER_LIGHT : 1);
-    E.topWet = top; E.water = ks; E.nutrient = nutrient; E.light = light;
-    E.minC = minC + (bed.cover ? COVER_FROST_C : 0);
+    E.topWet = seed; E.water = ks; E.nutrient = nutrient; E.light = light;
+    E.minC = minC - frostExtra + (bed.cover ? COVER_FROST_C : 0);
     E.rsMJ = A.rsMJ * light * life;
-    E.competition = 1 - 0.5 * weed * (p.lai < 1.5 ? 1 : 0.6);
+    // weeds shade the crop: a full cover of weeds takes most of the light from a low crop, less from a tall one
+    E.competition = 1 - 0.75 * weed * (p.lai < 1.5 ? 1 : 0.6);
     const wasStage = p.stage;
     advance(p, crop, E, _ev);
     // uptake to meet the new demand: legumes fix part of it from the air, the rest comes from the soil
@@ -249,17 +262,17 @@ function growthStep(ctx, s) {
     if (want > 0 && p.emerged) {
       const access = (0.25 + 0.75 * p._w.root) * phF * clamp(ks + 0.2, 0, 1);
       let got = 0;
-      for (const i of list) { const c = bed.cells[i], take = Math.min(c.n * 0.2 * access, want); c.n -= take; got += take; }
+      for (const i of list) { const c = bed.cells[i], take = Math.min(c.n * upN * access, want); c.n -= take; got += take; }
       p.nUp += got / m;   // per m2 of the plant's ground: each cell is an equal share of it
     }
     const wantP = Math.max(0, p.bio * crop.pConc - p.pUp), wantK = Math.max(0, p.bio * crop.kConc - p.kUp);
     for (const i of list) {
       const c = bed.cells[i];
-      const tp = Math.min(c.p * 0.1 * phF, wantP), tk = Math.min(c.k * 0.1 * phF, wantK);
+      const tp = Math.min(c.p * upPK * phF, wantP), tk = Math.min(c.k * upPK * phF, wantK);
       c.p -= tp; c.k -= tk; p.pUp += tp / m; p.kUp += tk / m;
     }
     // dry spells and wilting are counted in real hours: they are the soil's real days
-    if (!p.emerged) { p.dryH = top < 0.35 ? p.dryH + 3 : 0; }
+    if (!p.emerged) { p.dryH = E.topWet < 0.35 ? p.dryH + 3 : 0; }
     else if (ks < 0.65) p.dryH += 3; else p.dryH = Math.max(0, p.dryH - 6);
     // a plant left wilted for long enough dies
     if (p.emerged && !p.dead && ks < 0.08) { p.health -= 0.025; if (p.health <= 0.05) p.dead = 'drought'; }
@@ -271,7 +284,7 @@ function growthStep(ctx, s) {
     // (rate: degree days per day of the plant's life; expectT is on the real clock)
     if (p.readyT == null && !p.dead) p.expectT = ctx.t + (Math.min(400, (crop.readyGdd - p.gdd) / Math.max(0.5, p.rate)) / life) * DAY;
     p._w = plantWater(p, crop);
-    describe(p, crop, bed, s, ctx.t, top, weed);
+    describe(p, crop, bed, s, ctx.t, E.topWet, weed);
     if (_ev.flags & (EV_EMERGED | EV_STAGE | EV_FROST | EV_KILLED | EV_BOLTED)) ctx.emit('garden.plant', { id, flags: _ev.flags, stage: crop.stages[p.stage].id, dead: p.dead });
   }
   // soil processes in every cell: mineralisation, lime, weeds, mulch
@@ -290,10 +303,10 @@ function growthStep(ctx, s) {
       const p = c.pl ? s.plants[c.pl] : null, cover = p && p._w ? p._w.cover : 0;
       const mulchC = Math.min(1, c.mulch / MULCH.fullCoverLPerM2);
       if (minC < -2 && c.weed > 0.002) { c.on += c.wN; c.wN = 0; c.weed = 0.002; }
-      const gr = 0.13 * clamp((sc - 5) / 20, 0, 1) * moist * (1 - MULCH.weedCut * mulchC) * (1 - 0.7 * cover);
+      const gr = 0.13 * clamp((sc - 5) / 12, 0, 1) * moist * (1 - MULCH.weedCut * mulchC) * (1 - 0.7 * cover);
       c.weed = clamp(c.weed + gr * c.weed * (1 - c.weed) * dt + 0.0004 * gr * dt * 10, 0, 1);
       const wn = WEED_N_FULL * c.weed - c.wN;
-      if (wn > 0) { const take = Math.min(wn, c.n * 0.15); c.n -= take; c.wN += take; }
+      if (wn > 0) { const take = Math.min(wn, c.n * upW); c.n -= take; c.wN += take; }
       if (c.mulch > 0) {
         const rot = c.mulch * (1 - Math.exp(-MULCH.decayPerYear * yr * Math.max(0.2, tf)));
         c.mulch -= rot;
@@ -534,7 +547,17 @@ function returnResidue(s, p, crop, toCompost) {
   const bed = s.field.groups[p.bed], list = cellsOfPlant(s, p);
   const nLeft = p.nUp * p.area;
   if (toCompost || !bed) s.totals.nExported += nLeft;
-  else for (const i of list) { const c = bed.cells[i], add = nLeft / (list.length * CELL_AREA); c.onk = (c.on * c.onk + add * RESIDUE_RATE) / Math.max(1e-9, c.on + add); c.on += add; }
+  else {
+    const residueDM = Math.max(0, p.bio - p.yieldDM);   // g/m2 of the plant's ground
+    for (const i of list) {
+      const c = bed.cells[i], add = nLeft / (list.length * CELL_AREA);
+      // straw-like residue locks up mineral nitrogen as it rots (held in the slow organic pool)
+      const lock = Math.min(c.n, residueDM * crop.immobilizeGPerG);
+      c.n -= lock;
+      const inc = add + lock, rate = (add * crop.residueRate + lock * crop.residueRate) / Math.max(1e-9, inc);
+      c.onk = (c.on * c.onk + inc * rate) / Math.max(1e-9, c.on + inc); c.on += inc;
+    }
+  }
   if (bed) for (const i of list) { const c = bed.cells[i]; c.pl = null; c.hist.push(crop.id); if (c.hist.length > 4) c.hist.shift(); if (!toCompost) { c.p += p.pUp * p.area / (list.length * CELL_AREA) * 0.9; c.k += p.kUp * p.area / (list.length * CELL_AREA) * 0.9; } }
   delete s.plants[p.id];
 }
@@ -649,7 +672,7 @@ export function cellInfo(state, bedId, index) {
   const g = state.sys ? state.sys.garden : state, bed = g.field.groups[bedId];
   if (!bed) return null;
   const c = bed.cells[index], soil = soilOf(bed), b = bucket(soil);
-  return { water: topFraction(c, b), deep: clamp((c.d - b.wp2) / (b.fc2 - b.wp2), 0, 1.2), n: c.n, p: c.p, k: c.k, ph: c.ph, om: omPct(c, soil), weed: c.weed, mulch: Math.min(1, c.mulch / MULCH.fullCoverLPerM2), plant: c.pl, hist: c.hist };
+  return { water: topFraction(c, b), seed: seedFraction(c, b), deep: clamp((c.d - b.wp2) / (b.fc2 - b.wp2), 0, 1.2), n: c.n, p: c.p, k: c.k, ph: c.ph, om: omPct(c, soil), weed: c.weed, mulch: Math.min(1, c.mulch / MULCH.fullCoverLPerM2), plant: c.pl, hist: c.hist };
 }
 // A bed in a few words.
 export function bedSummary(state, bedId) {

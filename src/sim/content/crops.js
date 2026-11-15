@@ -195,6 +195,8 @@ const list = [
   },
 ];
 
+const RESIDUE_RATE = { legume: 0.7, brassica: 0.6, aster: 0.6, nightshade: 0.4, umbellifer: 0.5, cucurbit: 0.5, allium: 0.4, grass: 0.08 };
+
 // Derived figures: absolute stage thresholds in degree days, nitrogen per gram of dry matter, plants per 30 cm cell.
 function finish(c) {
   const R = c.readyGdd, st = c.stages;
@@ -210,6 +212,10 @@ function finish(c) {
     bioRef: ((c.yieldKgM2[0] + c.yieldKgM2[1]) / 2) * 1000 * c.dmf / hi,
     nConc: (c.npk[0] / 1000) * hi / c.dmf, pConc: (c.npk[1] / 1000) * hi / c.dmf, kConc: (c.npk[2] / 1000) * hi / c.dmf,
     legume: !!c.fixFrac,
+    // crop residue: the share of its nitrogen released in a year, and the mineral N its microbes lock up per g of
+    // dry residue. Legume and leafy residues (C:N about 15) release fast; corn stalks and straw (C:N 60 to 80) tie
+    // up 7 to 10 kg of N per tonne while they rot (approx: extension residue-management guides).
+    residueRate: RESIDUE_RATE[c.family] ?? 0.5, immobilizeGPerG: c.family === 'grass' ? 0.008 : 0,
   });
 }
 export const CROPS = Object.freeze(Object.fromEntries(list.map((c) => [c.id, finish(c)])));

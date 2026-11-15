@@ -69,7 +69,7 @@ export function advance(p, r, env, ev = { flags: 0 }) {
   // development
   if (!p.emerged) {
     // germination: on soil temperature, and only while the seed zone is moist
-    const dd = env.soilC > r.germMinC && env.topWet > 0.35 ? thermalRate(env.soilC, r) * env.days : 0;
+    const dd = env.soilC > r.germMinC ? thermalRate(env.soilC, r) * env.days * clamp((env.topWet - 0.15) / 0.35, 0, 1) : 0;
     p.gdd += dd;
     if (p.gdd >= r.stages[1].gdd) { p.emerged = true; p.lai = Math.max(p.lai, 0.01 * p.density); p.bio = Math.max(p.bio, 1.5 * p.density); ev.flags |= EV_EMERGED; }
   } else p.gdd += degreeDays(env.temps, env.n, r, (env.days * 24) / Math.max(1, env.n));
@@ -80,7 +80,8 @@ export function advance(p, r, env, ev = { flags: 0 }) {
   if (p.emerged && env.minC < r.frost.damageC) {
     if (env.minC <= r.frost.killC) { p.dead = 'frost'; p.lai = 0; ev.flags |= EV_KILLED | EV_FROST; return 0; }
     const f = (r.frost.damageC - env.minC) / (r.frost.damageC - r.frost.killC);
-    p.lai *= 1 - 0.7 * f; p.health = Math.max(0.05, p.health - 0.4 * f); p.frostBurn = Math.max(p.frostBurn, f); ev.flags |= EV_FROST;
+    p.lai *= 1 - 0.7 * f; p.health -= 0.4 * f; p.frostBurn = Math.max(p.frostBurn, f); ev.flags |= EV_FROST;
+    if (p.health <= 0.1) { p.dead = 'frost'; p.lai = 0; ev.flags |= EV_KILLED; return 0; }   // frost after frost
   }
   if (!p.emerged) return 0;
   const x = p.gdd / r.readyGdd;
