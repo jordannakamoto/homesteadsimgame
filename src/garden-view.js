@@ -1,15 +1,17 @@
-/* Garden view: the Garden tool (key 5), beds you draw on the ground, plants that grow in them, watering,
-   harvest, the plant inspector, the almanac (N) and the "Grow your first salad" cards.
-   Draws the simulation's garden (sim.state.sys.garden) and owns no truth of its own: every action is a
-   garden.* command. Reaches the game only through window.__game.
+/* Garden view: gardening with your hands (key 5). You hold a hoe, a watering can, a seed packet or nothing, chosen
+   from a small hotbar, and work the ground within arm's reach with one gesture per job: pull the hoe through the
+   soil, tip the can, drop seed along a row, pull a root up. Also the plants and beds themselves, the name tag, the
+   inspector card (F), the almanac (N) and the "Grow your first salad" cards.
+   Draws the simulation's garden (sim.state.sys.garden) and owns no truth of its own: every action is a garden.*
+   command. Reaches the game only through window.__game and the generic hands of src/engine/hands.js (window.__hands).
    Cost: nothing per frame unless something moves on screen; soil colours and plant instances are rebuilt only
    when a cell or plant changes visibly (checked four times a second, cheaply). */
 (() => {
-  const G = window.__game;
-  if (!G || !G.sim || !G.sim.handlers.has('garden.makeBed')) return;
+  const G = window.__game, H = window.__hands;
+  if (!G || !H || !G.sim || !G.sim.handlers.has('garden.till')) return;
   const T = G.THREE, $ = (id) => document.getElementById(id), canvas = $('view');
   const bar = $('gbar'), hint = bar.querySelector('.ghint'), toolsEl = bar.querySelector('.gtools'), seedsEl = bar.querySelector('.gseeds');
-  const label = $('glabel'), prog = $('gprog'), progArc = $('gprogarc'), fxEl = $('gfx'), card = $('gcard'), alm = $('galm'), tip = $('gtip');
+  const label = $('glabel'), fxEl = $('gfx'), card = $('gcard'), alm = $('galm'), tip = $('gtip');
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v), lerp = (a, b, t) => a + (b - a) * t;
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const CELL = 0.3, DAY = 86400;
@@ -41,53 +43,23 @@
   const read = G.garden;   // the garden's read-outs (almanac, plantInfo, cellInfo...), from the simulation
   if (!read) return;
 
-  /* ================= icons (inline SVG, drawn for this palette) ================= */
+
+  /* ================= icons (inline SVG, drawn for this hotbar) ================= */
   const I = (body) => '<svg viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="#f1ead6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' + body + '</svg>';
   const ICONS = {
-    bed: I('<path d="M6 28l8-12h18l-6 12z" fill="#7a5638" stroke="#e8c79a"/><path d="M10 25h14M13 21h14" stroke="#c99a6a" stroke-width="1.6"/><path d="M30 6v13" stroke="#cfd6dc" stroke-width="2.4"/><path d="M27 19h6l-1 6h-4z" fill="#b9c2c9" stroke="#cfd6dc"/>'),
-    sow: I('<path d="M8 30c6-2 18-2 24 0" stroke="#c99a6a"/><circle cx="14" cy="26" r="1.8" fill="#f2dfa0" stroke="none"/><circle cx="20" cy="25" r="1.8" fill="#f2dfa0" stroke="none"/><circle cx="26" cy="26" r="1.8" fill="#f2dfa0" stroke="none"/><path d="M20 21c0-6 3-9 8-10-1 5-4 8-8 10zM20 21c0-4-2-7-6-8 0 4 2 7 6 8z" fill="#8cc35a" stroke="#cfe3a6" stroke-width="1.4"/>'),
+    hands: I('<path d="M12 22v-9a2 2 0 0 1 4 0v6M16 18v-8a2 2 0 0 1 4 0v8M20 18v-7a2 2 0 0 1 4 0v8M24 19v-4a2 2 0 0 1 4 0v9c0 6-3 10-9 10-4 0-6-2-8-5l-4-7c-1-2 1-4 3-2l2 3" fill="#e9b88f" stroke="#f6dcc0"/>'),
     water: I('<path d="M8 17h16v13a3 3 0 0 1-3 3H11a3 3 0 0 1-3-3z" fill="#5f8fb0" stroke="#bfe2f7"/><path d="M24 20l9-7" stroke="#bfe2f7"/><path d="M33 13l2-2" stroke="#bfe2f7" stroke-width="3"/><path d="M12 17c0-4 2-6 4-6s4 2 4 6" stroke="#bfe2f7"/><path d="M35 18v3M32 22v3M36 24v3" stroke="#8fd0f2" stroke-width="1.8"/>'),
     hoe: I('<path d="M28 6L14 30" stroke="#d8b585" stroke-width="2.6"/><path d="M10 27l7 5-3 3-7-4z" fill="#b9c2c9" stroke="#cfd6dc"/><path d="M26 30c2-3 5-4 8-3M22 34c2-2 4-3 7-3" stroke="#8cc35a" stroke-width="1.6"/>'),
-    harvest: I('<path d="M9 18h22l-3 14H12z" fill="#a8743f" stroke="#e8c79a"/><path d="M9 18c3-6 19-6 22 0" stroke="#e8c79a"/><circle cx="16" cy="16" r="3.2" fill="#d8402c" stroke="none"/><circle cx="23" cy="15" r="3.2" fill="#e8822e" stroke="none"/><path d="M21 12c1-3 3-4 5-4" stroke="#8cc35a" stroke-width="1.6"/>'),
-    inspect: I('<circle cx="17" cy="17" r="9" fill="rgba(191,226,247,0.15)" stroke="#f1ead6"/><path d="M24 24l9 9" stroke-width="3"/><path d="M17 22c0-4 2-6 5-7-1 4-3 6-5 7z" fill="#8cc35a" stroke="none"/>'),
     mulch: I('<path d="M6 30c8-4 20-4 28 0" stroke="#e8c97a" stroke-width="3"/><path d="M8 27l6-5M14 28l5-7M20 27l6-6M26 28l5-5M11 24l-3-4M23 24l2-5" stroke="#e8c97a" stroke-width="1.6"/>'),
     compost: I('<path d="M8 32l4-14h16l4 14z" fill="#5a3d26" stroke="#c99a6a"/><path d="M12 18c2-4 14-4 16 0" stroke="#c99a6a"/><path d="M15 26h2M22 24h2M19 29h2" stroke="#9b7a52" stroke-width="2"/><path d="M27 12c2-2 5-2 6 0" stroke="#8cc35a" stroke-width="1.6"/>'),
-    almanac: I('<path d="M9 7h18a4 4 0 0 1 4 4v22H13a4 4 0 0 1-4-4z" fill="#3c4a4e" stroke="#e8c79a"/><path d="M13 13h13M13 18h13M13 23h8" stroke="#e8c79a" stroke-width="1.6"/><circle cx="27" cy="26" r="4" fill="#e2b65a" stroke="none"/>'),
+    box: I('<path d="M6 16h28v16H6z" fill="#8a6238" stroke="#e8c79a"/><path d="M6 16l4-6h20l4 6" stroke="#e8c79a"/><path d="M13 10v-3h5v3M22 10v-4h5v4" fill="#f2e8c8" stroke="#f2e8c8" stroke-width="1.4"/><path d="M16 24h8" stroke="#e8c79a"/>'),
+    packet: (hex) => I('<path d="M11 6h18v28H11z" fill="#f2e8c8" stroke="#fff6dc"/><path d="M11 12h18" stroke="#c9b98a" stroke-width="1.6"/><circle cx="20" cy="22" r="6" fill="' + hex + '" stroke="none"/><path d="M20 15c0-3 2-4 4-4" stroke="#6f9a3a" stroke-width="1.8"/>'),
   };
-  const TOOLS = [
-    { id: 'bed', name: 'Bed' }, { id: 'sow', name: 'Sow' }, { id: 'water', name: 'Water' }, { id: 'hoe', name: 'Hoe' },
-    { id: 'harvest', name: 'Harvest' }, { id: 'inspect', name: 'Inspect' }, { id: 'mulch', name: 'Mulch' }, { id: 'compost', name: 'Compost' },
-    { id: 'almanac', name: 'Almanac' },
-  ];
-  toolsEl.innerHTML = TOOLS.map((t) => '<button type="button" data-g="' + t.id + '" aria-pressed="false" title="' + t.name + (t.id === 'almanac' ? ' (N)' : '') + '">' + ICONS[t.id] + '<span>' + t.name + '</span></button>').join('');
+  const hexOf = (n) => '#' + n.toString(16).padStart(6, '0');
 
   /* ================= state of the view ================= */
-  let on = false, tool = 'bed', crop = 'radish', dirty = true, hintSig = '';
-  const ptr = { x: 0, y: 0, ndcX: 0, ndcY: 0, down: false, btn: -1, rx: 0, ry: 0, inside: false, ground: null };
-  let drag = null;            // { a: {x,z}, b: {x,z} } while drawing a bed or sowing a block
-  let marked = null;          // a bed marked out and waiting to be dug: { x0, z0, nx, nz, done (0..1) }
-  let acting = 0;             // seconds since the last swathe command while holding a tool
+  let on = false, crop = 'radish', dirty = true, hintSig = '';
   const flash = { msg: '', until: 0 };
-
-  /* ================= ground picking ================= */
-  const ray = new T.Raycaster(), v2 = new T.Vector2();
-  function groundAt(nx, ny, out) {
-    v2.set(nx, ny); ray.setFromCamera(v2, G.camera);
-    const o = ray.ray.origin, d = ray.ray.direction;
-    let t = 0, prev = 0;
-    for (let i = 0; i < 200 && t < 140; i++) {
-      const x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t, h = G.heightAt(x, z);
-      if (y < h) {
-        let a = prev, b = t;
-        for (let k = 0; k < 10; k++) { const m = (a + b) / 2; if (o.y + d.y * m < G.heightAt(o.x + d.x * m, o.z + d.z * m)) b = m; else a = m; }
-        out.x = o.x + d.x * b; out.z = o.z + d.z * b; out.y = G.heightAt(out.x, out.z);
-        return out;
-      }
-      prev = t; t += Math.max(0.15, (y - h) * 0.5);
-    }
-    return null;
-  }
-  const gp = { x: 0, y: 0, z: 0 };
   const snap = (v) => Math.round(v / CELL) * CELL;
   function cellAt(x, z) {
     for (const b of Object.values(S().field.groups)) {
@@ -96,71 +68,78 @@
     }
     return null;
   }
-  function toScreen(x, y, z, out) {
-    const v = toScreen.v || (toScreen.v = new T.Vector3());
-    v.set(x, y, z).project(G.camera);
-    out.x = (v.x * 0.5 + 0.5) * innerWidth; out.y = (-v.y * 0.5 + 0.5) * innerHeight; out.vis = v.z < 1;
-    return out;
-  }
+  const toScreen = H.toScreen;
+  const tillOf = (c) => (c.till === undefined ? 1 : c.till);
+  const tillAt = (b, ix, iz) => (ix < 0 || iz < 0 || ix >= b.nx || iz >= b.nz ? 0 : tillOf(b.cells[iz * b.nx + ix]));
 
-  /* ================= the soil: one mesh per bed, coloured by moisture, mulch and weeds ================= */
+  /* ================= the soil: one mesh per bed. Ground is drawn where it has been worked: rough clods after the
+     first stroke of the hoe, fine furrowed tilth once worked through; coloured by moisture, mulch and weeds ================= */
   const soilMat = new T.MeshLambertMaterial({ vertexColors: true });
-  const sideMat = new T.MeshLambertMaterial({ color: 0x4a3324 });
   const coverMat = new T.MeshLambertMaterial({ color: 0xf4f2ea, transparent: true, opacity: 0.45, side: T.DoubleSide, depthWrite: false });
-  const bedViews = new Map();   // bed id -> { group, soil, colors, sig: Float32Array, x0, z0, nx, nz, cover }
+  const bedViews = new Map();   // bed id -> { group, soil, geo, pos, col, sig, till, b, dim, cover }
   const hash = (a, b) => { let h = (a * 374761393 + b * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
-  const SOIL_DRY = new T.Color(0x8c7860), SOIL_WET = new T.Color(0x3a2c22), STRAW = new T.Color(0xcdb176), WEEDY = new T.Color(0x56703a), _c = new T.Color();
+  const SOIL_DRY = new T.Color(0x8c7860), SOIL_WET = new T.Color(0x3a2c22), STRAW = new T.Color(0xcdb176), WEEDY = new T.Color(0x56703a), SOD = new T.Color(0x5d7a36), _c = new T.Color();
   const RAISE = 0.05;
   const SUB = 2;   // each 30 cm cell is drawn as 2 x 2 little quads, so the tilth has clods and furrows
+  const dimOf = (b) => b.x0 + ':' + b.z0 + ':' + b.nx + ':' + b.nz;
   function buildBed(b) {
     const g = new T.Group();
     const n = b.nx * b.nz, per = SUB * SUB * 6, pos = new Float32Array(n * per * 3), col = new Float32Array(n * per * 3);
-    const W = b.nx * CELL, D = b.nz * CELL;
-    // a mounded bed: the soil rises from the edges, with clods and gentle furrows along the long side
-    const along = W >= D;
-    const H = (x, z) => {
-      const e = Math.min(x - b.x0, b.x0 + W - x, z - b.z0, b.z0 + D - z);
-      const mound = 0.015 + RAISE * Math.min(1, Math.max(0, e) / 0.22);
-      const across = along ? z - b.z0 : x - b.x0;
-      const furrow = 0.008 * Math.cos((across / CELL) * Math.PI * 2);
-      const clod = (hash(Math.round(x * 60), Math.round(z * 60)) - 0.5) * 0.02;
-      return G.heightAt(x, z) + mound + furrow + clod;
-    };
-    let k = 0;
-    const st = CELL / SUB;
-    for (let iz = 0; iz < b.nz; iz++) for (let ix = 0; ix < b.nx; ix++) for (let sz = 0; sz < SUB; sz++) for (let sx = 0; sx < SUB; sx++) {
-      const x0 = b.x0 + ix * CELL + sx * st, z0 = b.z0 + iz * CELL + sz * st, x1 = x0 + st, z1 = z0 + st;
-      const q = [[x0, z0], [x0, z1], [x1, z0], [x1, z0], [x0, z1], [x1, z1]];
-      for (const [x, z] of q) { pos[k++] = x; pos[k++] = H(x, z); pos[k++] = z; }
-    }
     const geo = new T.BufferGeometry();
     geo.setAttribute('position', new T.BufferAttribute(pos, 3));
     geo.setAttribute('color', new T.BufferAttribute(col, 3));
-    geo.computeVertexNormals();
     const soil = new T.Mesh(geo, soilMat);
-    soil.receiveShadow = true;
+    soil.receiveShadow = true; soil.frustumCulled = false;
     g.add(soil);
     G.scene.add(g);
-    const v = { group: g, soil, geo, col, sig: new Float32Array(n).fill(-1), b, cover: null, per };
+    const v = { group: g, soil, geo, pos, col, sig: new Float32Array(n).fill(-1), till: new Float32Array(n).fill(-1), b, dim: dimOf(b), cover: null, per };
     // a fixed speckle per vertex: lighter grains and darker crumbs
     v.noise = new Float32Array(n * per);
     for (let i = 0; i < v.noise.length; i++) { const r = hash(i, b.nx * 31 + b.nz); v.noise[i] = r < 0.08 ? 1.25 : r > 0.9 ? 0.72 : 0.9 + 0.16 * hash(i, 7); }
     bedViews.set(b.id, v);
-    hideGrass();
     return v;
+  }
+  // the shape of the worked ground: sod is left alone, a first stroke leaves rough clods, worked soil is furrowed
+  function shapeBed(v) {
+    const b = v.b, pos = v.pos, st = CELL / SUB, along = b.nx >= b.nz, e = 0.07;
+    const tp = (x, z) => tillAt(b, Math.floor((x - b.x0) / CELL + 1e-6), Math.floor((z - b.z0) / CELL + 1e-6));
+    let k = 0;
+    for (let iz = 0; iz < b.nz; iz++) for (let ix = 0; ix < b.nx; ix++) {
+      const t = tillAt(b, ix, iz);
+      for (let sz = 0; sz < SUB; sz++) for (let sx = 0; sx < SUB; sx++) {
+        const x0 = b.x0 + ix * CELL + sx * st, z0 = b.z0 + iz * CELL + sz * st;
+        for (let q = 0; q < 6; q++) {
+          const x = x0 + (q === 2 || q === 3 || q === 5 ? st : 0), z = z0 + (q === 1 || q === 4 || q === 5 ? st : 0);
+          let y = G.heightAt(x, z);
+          if (t <= 0) y -= 0.3;
+          else if (tp(x - e, z - e) > 0 && tp(x + e, z - e) > 0 && tp(x - e, z + e) > 0 && tp(x + e, z + e) > 0) {
+            const across = along ? z - b.z0 : x - b.x0, r = hash(Math.round(x * 60), Math.round(z * 60)) - 0.5;
+            y += t >= 1 ? RAISE + 0.02 * Math.cos((across / CELL) * Math.PI * 2) + r * 0.016 : 0.025 + 0.02 * t + r * 0.07;
+          } else y += 0.006;
+          pos[k++] = x; pos[k++] = y; pos[k++] = z;
+        }
+      }
+    }
+    v.geo.attributes.position.needsUpdate = true;
+    v.geo.computeVertexNormals();
   }
   function paintBed(v) {
     const b = S().field.groups[v.b.id] || v.b, info = read.cellInfo;
-    let changed = false;
+    let changed = false, reshaped = false;
+    for (let i = 0; i < b.cells.length; i++) { const t = tillOf(b.cells[i]); if (v.till[i] !== t) { v.till[i] = t; reshaped = true; v.sig[i] = -1; } }
+    if (reshaped) { shapeBed(v); hideGrass(true); }
     for (let i = 0; i < b.cells.length; i++) {
-      const c = b.cells[i], ci = info(G.sim.state, b.id, i);
+      const till = v.till[i];
+      if (till <= 0) continue;
+      const ci = info(G.sim.state, b.id, i);
       const wet = clamp(ci.water, 0, 1), s = Math.round(wet * 40) + Math.round(ci.mulch * 10) * 64 + Math.round(ci.weed * 10) * 1024;
       if (v.sig[i] === s) continue;
       v.sig[i] = s; changed = true;
-      _c.copy(SOIL_DRY).lerp(SOIL_WET, Math.pow(wet, 0.8)).lerp(STRAW, ci.mulch * 0.85).lerp(WEEDY, ci.weed * 0.35);
+      _c.copy(SOIL_DRY).lerp(SOIL_WET, Math.pow(wet, 0.8) * (till < 1 ? 0.55 : 1)).lerp(STRAW, ci.mulch * 0.85).lerp(WEEDY, ci.weed * 0.35);
       for (let k = 0; k < v.per; k++) {
         const o = i * v.per + k, n = v.noise[o];
-        v.col[o * 3] = _c.r * n; v.col[o * 3 + 1] = _c.g * n; v.col[o * 3 + 2] = _c.b * n;
+        if (till < 1 && hash(o, 91) < (1 - till) * 0.75) { v.col[o * 3] = SOD.r * n; v.col[o * 3 + 1] = SOD.g * n; v.col[o * 3 + 2] = SOD.b * n; }   // turned sod: grass still showing between the clods
+        else { v.col[o * 3] = _c.r * n; v.col[o * 3 + 1] = _c.g * n; v.col[o * 3 + 2] = _c.b * n; }
       }
     }
     if (changed) v.geo.attributes.color.needsUpdate = true;
@@ -171,9 +150,6 @@
       const m = new T.Mesh(geo, coverMat);
       const len = along ? W : D, wide = along ? D : W;
       m.scale.set(wide * 0.55, len, Math.min(0.45, wide * 0.5));
-      m.rotation.set(0, 0, 0);
-      if (along) m.rotation.z = Math.PI / 2; else m.rotation.x = Math.PI / 2;
-      m.rotation.order = 'XYZ';
       const y = G.heightAt(b.x0 + W / 2, b.z0 + D / 2) + RAISE;
       m.position.set(b.x0 + W / 2, y, b.z0 + D / 2);
       // a half-cylinder standing on the bed: rotate so its open side faces down
@@ -187,25 +163,32 @@
     G.scene.remove(v.group);
     v.group.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
     bedViews.delete(id);
-    hideGrass(true);
   }
 
-  /* ---- grass inside beds: the engine's tufts are hidden where a bed lies (re-applied when a chunk redraws) ---- */
+  /* ---- grass on worked ground: the engine's tufts are hidden there (re-applied when a chunk redraws) ---- */
   const grassSeen = new WeakMap();
   const ZERO = new T.Matrix4().makeScale(0, 0, 0);
   function hideGrass(force) {
     const beds = Object.values(S().field.groups);
     const chunks = G.world && G.world.chunks;
-    if (!chunks) return;
+    if (!chunks || !beds.length) return;
+    const CS = G.chunkSize || 32;
     for (const c of chunks.values()) {
+      let near = false;
+      for (const b of beds) if (b.x0 < c.ox + CS * 2 && b.x0 + b.nx * CELL > c.ox - CS && b.z0 < c.oz + CS * 2 && b.z0 + b.nz * CELL > c.oz - CS) { near = true; break; }
+      if (!near) continue;
       for (const [mesh, list] of [[c.grassMesh, c.grass], [c.flowerMesh, c.flowers]]) {
         if (!mesh || !list) continue;
         const ver = mesh.instanceMatrix.version;
         if (!force && grassSeen.get(mesh) === ver) continue;
         let n = 0;
-        if (beds.length) list.forEach((g, i) => {
+        list.forEach((g, i) => {
           const x = c.ox + g.lx, z = c.oz + g.lz;
-          for (const b of beds) if (x > b.x0 - 0.15 && x < b.x0 + b.nx * CELL + 0.15 && z > b.z0 - 0.15 && z < b.z0 + b.nz * CELL + 0.15) { mesh.setMatrixAt(i, ZERO); n++; break; }
+          for (const b of beds) {
+            if (x < b.x0 - 0.1 || x > b.x0 + b.nx * CELL + 0.1 || z < b.z0 - 0.1 || z > b.z0 + b.nz * CELL + 0.1) continue;
+            const ix = clamp(Math.floor((x - b.x0) / CELL), 0, b.nx - 1), iz = clamp(Math.floor((z - b.z0) / CELL), 0, b.nz - 1);
+            if (tillOf(b.cells[iz * b.nx + ix]) > 0) { mesh.setMatrixAt(i, ZERO); n++; break; }
+          }
         });
         if (n) mesh.instanceMatrix.needsUpdate = true;
         grassSeen.set(mesh, mesh.instanceMatrix.version + (n ? 1 : 0));
@@ -492,7 +475,7 @@
   function layoutWeeds() {
     let n = 0, sig = '';
     for (const b of Object.values(S().field.groups)) for (let i = 0; i < b.cells.length && n < 2040; i++) {
-      const w = b.cells[i].weed, k = w > 0.7 ? 3 : w > 0.4 ? 2 : w > 0.15 ? 1 : 0;
+      const w = b.cells[i].till === undefined || b.cells[i].till >= 1 ? b.cells[i].weed : 0, k = w > 0.7 ? 3 : w > 0.4 ? 2 : w > 0.15 ? 1 : 0;
       sig += k;
       for (let j = 0; j < k; j++) {
         const x = b.x0 + ((i % b.nx) + 0.15 + 0.7 * hash(i * 5 + j, 21)) * CELL, z = b.z0 + (Math.floor(i / b.nx) + 0.15 + 0.7 * hash(i * 3 + j, 23)) * CELL;
@@ -505,42 +488,52 @@
     weedSig = sig; weedMesh.count = n; weedMesh.instanceMatrix.needsUpdate = true;
   }
 
-  /* ================= ghosts: the bed being drawn, the sowing spacing, the brush ================= */
-  const ghostMat = new T.MeshBasicMaterial({ color: 0xfff2c4, transparent: true, opacity: 0.35, depthWrite: false });
-  const lineMat = new T.LineBasicMaterial({ color: 0xffe6a0, transparent: true, opacity: 0.9, depthTest: false });
-  const outline = new T.Line(new T.BufferGeometry(), lineMat); outline.renderOrder = 11; outline.visible = false; outline.frustumCulled = false; G.scene.add(outline);
-  const markedLine = new T.Line(new T.BufferGeometry(), new T.LineDashedMaterial({ color: 0xffe6a0, dashSize: 0.15, gapSize: 0.1, depthTest: false, transparent: true })); markedLine.renderOrder = 11; markedLine.visible = false; markedLine.frustumCulled = false; G.scene.add(markedLine);
-  function rectLine(line, x0, z0, x1, z1, dashed) {
-    const pts = [], n = 8;
-    const edge = (ax, az, bx, bz) => { for (let i = 0; i <= n; i++) { const x = lerp(ax, bx, i / n), z = lerp(az, bz, i / n); pts.push(x, G.heightAt(x, z) + 0.08, z); } };
-    edge(x0, z0, x1, z0); edge(x1, z0, x1, z1); edge(x1, z1, x0, z1); edge(x0, z1, x0, z0);
-    line.geometry.dispose(); line.geometry = new T.BufferGeometry(); line.geometry.setAttribute('position', new T.BufferAttribute(new Float32Array(pts), 3));
-    if (dashed) line.computeLineDistances();
-    line.visible = true;
-  }
-  const dotGeo = new T.CircleGeometry(0.025, 8); dotGeo.rotateX(-Math.PI / 2);
-  const dots = new T.InstancedMesh(dotGeo, new T.MeshBasicMaterial({ color: 0xfff2c4, transparent: true, opacity: 0.8, depthWrite: false }), 1600);
-  dots.count = 0; dots.renderOrder = 10; dots.frustumCulled = false; G.scene.add(dots);
-  const brushRing = new T.Mesh(new T.RingGeometry(0.4, 0.44, 32), new T.MeshBasicMaterial({ color: 0xfff2c4, transparent: true, opacity: 0.8, depthTest: false }));
-  brushRing.rotation.x = -Math.PI / 2; brushRing.renderOrder = 11; brushRing.visible = false; G.scene.add(brushRing);
-  const BRUSH = { water: 0.45, hoe: 0.35, harvest: 0.3, mulch: 0.45, compost: 0.45 };
+  /* ================= what the hands hold: big, chunky, readable from above ================= */
+  const toolMat = new T.MeshLambertMaterial({ vertexColors: true });
+  const box = (w, h, d) => new T.BoxGeometry(w, h, d);
+  const mesh = (parts) => { const m = new T.Mesh(merge(parts), toolMat); m.castShadow = true; return m; };
+  const ITEMSHOW = {};
+  // the hoe: its blade at the origin, the handle up along +y
+  ITEMSHOW.hoe = { obj: mesh([part(stick(1.5, 0.032, 6), 0xb98a52, 0, 0.04, 0), part(box(0.34, 0.05, 0.2), 0xaab4bb, 0, 0.03, 0.09, 0.35), part(box(0.1, 0.09, 0.08), 0x7d868c, 0, 0.07, 0)]),
+    use: 'tip', still: [0.44, 0.02, 0.22, 0, 0, 0], stillArm: -0.5, walk: [0.3, 1.74, -0.78, 2.15, 0, 0], walkArm: -1.0 };
+  // the watering can: body on the origin, spout and rose ahead (+z), handle behind
+  ITEMSHOW.can = { obj: mesh([part(new T.CylinderGeometry(0.17, 0.19, 0.3, 10), 0x4f8fb5, 0, 0.15, 0), part(stick(0.42, 0.035, 6), 0x5c9cc2, 0, 0.1, 0.14, 0.95), part(new T.CylinderGeometry(0.085, 0.05, 0.06, 8), 0xd9e6ee, 0, 0.345, 0.48, 0.95),
+    part(box(0.05, 0.3, 0.05), 0x3f7699, 0, 0.2, -0.24), part(box(0.05, 0.05, 0.12), 0x3f7699, 0, 0.34, -0.19), part(box(0.05, 0.05, 0.12), 0x3f7699, 0, 0.08, -0.19)]),
+    use: 'over', overD: 0.6, overH: 0.78, tiltMax: 0.95, still: [0.4, 0.5, 0.1, 0, 0, 0], stillArm: -0.12 };
+  const ROSE = new T.Vector3(0, 0.37, 0.52);
+  ITEMSHOW.mulch = { obj: mesh([part(new T.CylinderGeometry(0.2, 0.16, 0.26, 10), 0x8a8f94, 0, 0.13, 0), part(ball(0.19, 1), 0xe0c070, 0, 0.27, 0, 0, 0, 0, 1, 0.6, 1)]), use: 'over', overD: 0.55, overH: 0.8, tiltHold: 0.9, tiltMax: 0.3, still: [0.4, 0.5, 0.12, 0, 0, 0], stillArm: -0.15 };
+  ITEMSHOW.compost = { obj: mesh([part(new T.CylinderGeometry(0.2, 0.16, 0.26, 10), 0x8a8f94, 0, 0.13, 0), part(ball(0.19, 1), 0x4a3324, 0, 0.27, 0, 0, 0, 0, 1, 0.6, 1)]), use: 'over', overD: 0.55, overH: 0.8, tiltHold: 0.9, tiltMax: 0.3, still: [0.4, 0.5, 0.12, 0, 0, 0], stillArm: -0.15 };
+  const packetShow = {};
+  const packetOf = (c) => packetShow[c] || (packetShow[c] = { obj: mesh([part(box(0.22, 0.28, 0.04), 0xf2e8c8), part(box(0.22, 0.06, 0.045), 0xc9b98a, 0, 0.1, 0), part(ball(0.07, 1), CROPS[c].col, 0, -0.03, 0.02, 0, 0, 0, 1, 1, 0.35)]),
+    use: 'hand', still: [0.3, 0.86, 0.36, -0.5, 0, 0], reach: [0.3, 0.8, 0.5, -1.1, 0, 0], stillArm: -1.0 });
 
+  /* ================= marks on the ground: where seeds go; the stream from the can ================= */
+  const dotGeo = new T.CircleGeometry(0.025, 8); dotGeo.rotateX(-Math.PI / 2);
+  const dots = new T.InstancedMesh(dotGeo, new T.MeshBasicMaterial({ color: 0xfff2c4, transparent: true, opacity: 0.8, depthWrite: false }), 600);
+  dots.count = 0; dots.renderOrder = 10; dots.frustumCulled = false; G.scene.add(dots);
+  const drops = new T.InstancedMesh(new T.IcosahedronGeometry(0.03, 0), new T.MeshBasicMaterial({ color: 0xa9dcf7, transparent: true, opacity: 0.85 }), 16);
+  drops.count = 0; drops.frustumCulled = false; G.scene.add(drops);
   // the engine's terrain-brush ring is meant for the Dig and Raise tools: hide it while gardening
   let engineRing = null;
   const findRing = () => engineRing || (engineRing = G.scene.children.find((o) => o.isMesh && o.geometry && o.geometry.type === 'RingGeometry' && o.geometry.parameters.innerRadius === 2.45) || null);
 
-  /* ================= the palette, seed cards and hints ================= */
-  function setGTool(id) {
-    if (id === 'almanac') { toggleAlmanac(); return; }
-    tool = id; drag = null; dirty = true;
-    for (const b of toolsEl.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.g === id));
-    seedsEl.hidden = id !== 'sow';
-    if (id === 'sow') renderSeeds();
-    if (id !== 'inspect') card.hidden = card.hidden || false;
-    updateHint(true);
-  }
-  toolsEl.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { setGTool(b.dataset.g); canvas.focus(); } });
+  /* ================= the hotbar, the seed box and the one hint line ================= */
   const money = (v) => '$' + (Math.round(v * 100) / 100).toFixed(v % 1 ? 2 : 0);
+  const hasSeed = (c) => have(CROPS[c].seed) > 0 || (S().packets[c] || 0) > 0;
+  const canDig = () => owns('hoe') || owns('spade') || owns('shovel');
+  const held = () => H.held || 'hands';
+  const heldCrop = () => (held().startsWith('seed:') ? held().slice(5) : null);
+  function slotList() {
+    const s = S(), out = [];
+    out.push({ id: 'hands', name: 'Hands', icon: ICONS.hands, title: 'Hands: harvest and tend' });
+    out.push({ id: 'hoe', name: 'Hoe', icon: ICONS.hoe, item: ITEMSHOW.hoe, dim: !canDig(), title: 'Hoe: break ground and weed' });
+    out.push({ id: 'can', name: 'Can', icon: ICONS.water, item: ITEMSHOW.can, dim: !owns('watering_can'), meter: owns('watering_can') ? s.can.litres / 9 : null, freezeY: true, title: 'Watering can' });
+    for (const c of CROP_IDS) if (hasSeed(c)) out.push({ id: 'seed:' + c, name: CROPS[c].name, icon: ICONS.packet(hexOf(CROPS[c].col)), item: packetOf(c), title: CROPS[c].name + ' seed' });
+    if (have('mulch_straw') > 0) out.push({ id: 'mulch', name: 'Straw', icon: ICONS.mulch, item: ITEMSHOW.mulch, badge: Math.round(have('mulch_straw')) + ' L' });
+    if (have('compost') > 0) out.push({ id: 'compost', name: 'Compost', icon: ICONS.compost, item: ITEMSHOW.compost, badge: Math.round(have('compost')) + ' L' });
+    out.push({ id: 'box', name: 'Seed box', icon: ICONS.box, title: 'Seed box: buy seed, straw and compost' });
+    return out;
+  }
   function sowWord(c) {
     try { return read.sowAdvice(c, G.sim.state.sys.weather.site, read.doy(G.sim.state), life()); } catch (e) { return null; }
   }
@@ -550,245 +543,331 @@
       const it = ITEMS[CROPS[c].seed], own = have(it.id) + ((S().packets[c] || 0) > 0 ? 1e-6 : 0), adv = sowWord(c);
       const ownTxt = it.unit === 'kg' ? (Math.round(have(it.id) * 10) / 10) + ' kg' : String(Math.floor(have(it.id)));
       const open = S().packets[c] > 0 ? ' + open' : '';
-      h += '<button type="button" class="gseed" data-crop="' + c + '" aria-pressed="' + (c === crop) + '"><b>' + esc(CROPS[c].name) + '<i style="background:#' + CROPS[c].col.toString(16).padStart(6, '0') + '"></i></b>' +
+      h += '<button type="button" class="gseed" data-crop="' + c + '"><b>' + esc(CROPS[c].name) + '<i style="background:' + hexOf(CROPS[c].col) + '"></i></b>' +
         '<span class="when' + (adv && adv.now ? '' : ' no') + '">' + esc(adv ? adv.short : '') + '</span>' +
         '<span>' + (CROPS[c].spacing >= 0.3 ? Math.round(CROPS[c].spacing * 100) + ' cm apart' : CROPS[c].count + ' to a 30 cm square') + '</span>' +
         (own > 0 ? '<span class="own">You have ' + ownTxt + open + '</span>' : '<span>Buy for ' + money(it.priceUsd) + (it.unit === 'kg' ? ' a kg' : '') + '</span>') + '</button>';
     }
+    for (const [id, nm, q] of [['mulch_straw', 'Straw mulch', 150], ['compost', 'Compost', 40]])
+      h += '<button type="button" class="gseed" data-buy="' + id + '" data-qty="' + q + '"><b>' + nm + '</b><span>' + (id === 'compost' ? 'Feeds the soil for months' : 'Keeps soil moist, weeds down') + '</span><span>' + (have(id) > 0 ? 'You have ' + Math.round(have(id)) + ' L. ' : '') + 'Buy ' + q + ' L for ' + money(ITEMS[id].priceUsd * q) + '</span></button>';
     seedsEl.innerHTML = h;
   }
   seedsEl.addEventListener('click', (e) => {
     const b = e.target.closest('.gseed'); if (!b) return;
+    if (b.dataset.buy) {
+      const r = cmd('stock.buy', { id: b.dataset.buy, qty: +b.dataset.qty });
+      say(r.ok ? 'Bought.' : 'Not enough money.');
+      if (r.ok) { H.setSlots(slotList()); H.hold(b.dataset.buy === 'compost' ? 'compost' : 'mulch'); }
+      canvas.focus(); return;
+    }
     crop = b.dataset.crop;
     const it = ITEMS[CROPS[crop].seed];
-    if (have(it.id) <= 0 && !(S().packets[crop] > 0)) {
+    if (!hasSeed(crop)) {
       const r = cmd('stock.buy', { id: it.id, qty: 1 });
       say(r.ok ? 'Bought ' + it.name.toLowerCase() + '.' : 'Not enough money for ' + it.name.toLowerCase() + '.');
     }
-    renderSeeds(); updateHint(true); canvas.focus();
+    if (hasSeed(crop)) { H.setSlots(slotList()); H.hold('seed:' + crop); }
+    else renderSeeds();
+    canvas.focus();
   });
   function say(msg, secs = 3) { flash.msg = msg; flash.until = performance.now() + secs * 1000; updateHint(true); }
   function buyButton(id, label) { return ' <button type="button" class="go" data-buy="' + id + '">' + esc(label) + ' ' + money(ITEMS[id].priceUsd) + '</button>'; }
   hint.addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
-    if (b.dataset.buy) { const r = cmd('stock.buy', { id: b.dataset.buy, qty: ITEMS[b.dataset.buy].unit === 'L' ? (b.dataset.buy === 'mulch_straw' ? 150 : 40) : 1 }); say(r.ok ? 'Bought.' : 'Not enough money.'); if (b.dataset.buy === 'watering_can' && r.ok) cmd('garden.refill', {}); }
+    if (b.dataset.buy) { const r = cmd('stock.buy', { id: b.dataset.buy, qty: 1 }); say(r.ok ? 'Bought.' : 'Not enough money.'); if (b.dataset.buy === 'watering_can' && r.ok) cmd('garden.refill', {}); }
     if (b.dataset.act === 'refill') { cmd('garden.refill', {}); say('Filled the can: 9 litres.'); }
     if (b.dataset.act === 'cover') { const r = cmd('garden.cover', {}); say(r.ok ? (r.on ? 'The beds are under fleece.' : 'Covers off.') : r.reason); }
     updateHint(true); canvas.focus();
   });
+  function onHold(id) {
+    seedsEl.hidden = id !== 'box';
+    if (id === 'box') renderSeeds();
+    if (id.startsWith('seed:')) crop = id.slice(5);
+    dots.count = 0; dotKey = ''; drops.count = 0;
+    updateHint(true);
+  }
   function updateHint(force) {
-    const s = S(), can = s.can.litres;
+    const s = S(), can = s.can.litres, id = held(), c = heldCrop();
     let h;
     const now = performance.now();
     if (flash.until > now) h = esc(flash.msg);
-    else if (tool === 'bed') {
-      const spade = owns('spade') || owns('shovel');
-      if (!spade) h = 'You need a spade to turn the sod.' + buyButton('spade', 'Buy a spade');
-      else if (marked) h = '<b>Hold</b> on the marked bed to dig it' + (owns('spade') ? '.' : ' (a spade is quicker than the shovel).') ;
-      else h = '<b>Drag</b> on the grass to mark out a bed. Small is good to start: about 1.2 by 1 m.';
-    } else if (tool === 'sow') {
-      const it = ITEMS[CROPS[crop].seed];
-      h = (have(it.id) > 0 || s.packets[crop] > 0) ? '<b>Click</b> a bed square to sow ' + esc(CROPS[crop].plural) + ', or <b>drag</b> to sow a row or block. The dots show the spacing.' : 'Choose a seed packet above to buy it.';
-    } else if (tool === 'water') {
+    else if (id === 'hands') h = '<b>Pull</b> a root crop up, <b>swipe</b> across leaves to cut them, <b>click</b> fruit to pick it. <b>F</b> looks closer.';
+    else if (id === 'hoe') h = canDig() ? '<b>Press</b> the blade into the ground and <b>drag</b> it toward you. ' + (owns('hoe') ? 'Two strokes' : 'Three strokes') + ' turn grass into fine soil.' + (owns('hoe') ? '' : buyButton('hoe', 'A real hoe is quicker')) : 'You need a hoe.' + buyButton('hoe', 'Buy a hoe');
+    else if (id === 'can') {
       if (!owns('watering_can')) h = 'You need a watering can.' + buyButton('watering_can', 'Buy a can');
-      else h = '<b>Hold</b> over the soil to water. Dry soil looks pale, wet soil dark. Can <span id="gcan"><i style="width:' + Math.round((can / 9) * 100) + '%"></i></span>' + can.toFixed(1) + ' L <button type="button" data-act="refill">Refill</button>';
-    } else if (tool === 'hoe') h = owns('hoe') ? '<b>Drag</b> over a bed to hoe the weeds off at the root.' : 'You need a hoe.' + buyButton('hoe', 'Buy a hoe');
-    else if (tool === 'harvest') h = '<b>Click</b> or drag over ripe plants to harvest them.';
-    else if (tool === 'inspect') h = '<b>Click</b> a plant or a bed to see how it is doing and why.';
-    else if (tool === 'mulch') h = have('mulch_straw') > 0 ? '<b>Drag</b> over a bed to spread straw: it keeps the soil moist and the weeds down. You have ' + Math.round(have('mulch_straw')) + ' L.' : 'Straw mulch keeps the soil moist and smothers weeds.' + buyButton('mulch_straw', 'Buy 150 L');
-    else if (tool === 'compost') h = have('compost') > 0 ? '<b>Drag</b> over a bed to spread compost (2 cm). It feeds the soil for months. You have ' + Math.round(have('compost')) + ' L.' : 'Compost feeds the soil slowly, for months.' + buyButton('compost', 'Buy 40 L');
+      else if (can < 0.05) h = 'The can is empty. ' + (source.kind === 'none' ? 'There is no pump or pond near. <button type="button" data-act="refill">Fill it here (for now)</button>' : source.kind === 'pond' && !source.fixtures ? '<b>Dip</b> it in the water to fill it.' : 'Fill it at the pump by the well: <b>hold</b> the can under the spout and <b>pump</b> the handle (drag down, let go).');
+      else h = '<b>Hold</b> to lift the can, then <b>drag down</b> to tip it and pour. Walk along the row while it pours. <span id="gcan"><i style="width:' + Math.round((can / 9) * 100) + '%"></i></span>' + can.toFixed(1) + ' L';
+    } else if (c) { const adv = sowWord(c); h = '<b>Click</b> worked soil to drop ' + esc(CROPS[c].name.toLowerCase()) + ' seed, or <b>hold and drag</b> along the row.' + (adv && adv.short ? ' <span style="color:' + (adv.now ? '#cfe3a6' : '#e8b48c') + '">' + esc(adv.short) + '.</span>' : ''); }
+    else if (id === 'mulch') h = '<b>Hold and sweep</b> over the bed to scatter straw: it keeps the soil moist and the weeds down.';
+    else if (id === 'compost') h = '<b>Hold and sweep</b> over the bed to scatter compost. It feeds the soil for months.';
+    else h = 'Take a packet from the seed box to hold it.';
     const fr = read.frostTonight(G.sim.state.sys.weather);
     if (fr.level === 'likely' && Object.keys(s.plants).length && Object.values(s.field.groups).some((b) => !b.cover) && flash.until <= now) h = '<b>' + esc(fr.text) + '</b> Cover the beds tonight. <button type="button" class="go" data-act="cover">Cover the beds</button><br>' + h;
     if (h !== hintSig || force) { hintSig = h; hint.innerHTML = h; }
   }
 
-  /* ================= input ================= */
-  function setPtr(e) {
-    const r = canvas.getBoundingClientRect();
-    ptr.x = e.clientX; ptr.y = e.clientY; ptr.ndcX = ((e.clientX - r.left) / r.width) * 2 - 1; ptr.ndcY = -(((e.clientY - r.top) / r.height) * 2 - 1);
-    ptr.ground = groundAt(ptr.ndcX, ptr.ndcY, gp) ? gp : null;
+  /* ================= water to fill the can: a pump, tap or tank of the water system, or a pond ================= */
+  const source = { kind: 'none', fixtures: false, t: 0 };
+  const waterPieces = () => { try { return (window.__build ? window.__build.pieces() : []).filter((p) => p.kind === 'fixture' && p.system === 'water' && /^(outlet|pump|storage)$/.test(p.category)); } catch (e) { return []; } };
+  const isPond = (x, z) => G.heightAt(x, z) < (G.sea || 0) - 0.08;
+  function findSources() {
+    const P = G.player;
+    source.fixtures = waterPieces().length > 0; source.kind = source.fixtures ? 'fixture' : 'none';
+    if (!source.fixtures) for (let r = 4; r <= 64 && source.kind === 'none'; r += 6) for (let a = 0; a < 16; a++) if (isPond(P.x + Math.sin(a * 0.3927) * r, P.z + Math.cos(a * 0.3927) * r)) { source.kind = 'pond'; break; }
   }
-  const fingers = new Map();
-  window.addEventListener('pointerdown', (e) => {
-    if (!on || e.target !== canvas) return;
-    e.stopImmediatePropagation(); e.preventDefault();
-    canvas.focus();
-    if (e.pointerType === 'touch') { fingers.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (fingers.size > 1) { ptr.down = false; drag = null; return; } }
-    setPtr(e);
-    if (e.button === 2) { ptr.btn = 2; ptr.rx = e.clientX; ptr.ry = e.clientY; return; }
-    if (e.button !== 0) return;
-    ptr.down = true; ptr.btn = 0; acting = 1;
-    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-    press();
-  }, true);
-  window.addEventListener('pointermove', (e) => {
-    if (!on || (e.target !== canvas && !ptr.down && ptr.btn !== 2)) return;
-    e.stopImmediatePropagation();
-    if (e.pointerType === 'touch' && fingers.size > 1) {
-      // two fingers: turn and tilt the view
-      const f = fingers.get(e.pointerId); if (!f) return;
-      G.cam.yaw -= (e.clientX - f.x) * 0.003; G.cam.pitch = clamp(G.cam.pitch + (e.clientY - f.y) * 0.002, 0.5, 1.35);
-      f.x = e.clientX; f.y = e.clientY; return;
-    }
-    if (ptr.btn === 2 && (e.buttons & 2)) {
-      G.cam.yaw -= (e.clientX - ptr.rx) * 0.005; G.cam.pitch = clamp(G.cam.pitch + (e.clientY - ptr.ry) * 0.004, 0.5, 1.35);
-      ptr.rx = e.clientX; ptr.ry = e.clientY; return;
-    }
-    setPtr(e);
-    ptr.inside = true;
-    if (ptr.down && drag && ptr.ground) { drag.b.x = ptr.ground.x; drag.b.z = ptr.ground.z; }
-    hover();
-  }, true);
-  const up = (e) => {
-    if (!on) return;
-    if (e.pointerType === 'touch') fingers.delete(e.pointerId);
-    if (ptr.btn === 2) { ptr.btn = -1; e.stopImmediatePropagation(); return; }
-    if (!ptr.down) return;
-    e.stopImmediatePropagation();
-    ptr.down = false; ptr.btn = -1;
-    release();
-  };
-  window.addEventListener('pointerup', up, true);
-  window.addEventListener('pointercancel', up, true);
-  canvas.addEventListener('contextmenu', (e) => { if (on) e.preventDefault(); });
+  function fixtureNear(x, z) {
+    let best = null, bd = 1.1;
+    for (const p of waterPieces()) { const d = Math.hypot(p.a.x - x, p.a.z - z); if (d < bd) { bd = d; best = p; } }
+    return best;
+  }
+  let draw = null;   // water asked of a fixture and not yet all in the can: { id, credited }
+  function settleDraw() {
+    const w = G.sim.state.sys.water, r = w && w.results && w.results[draw.id];
+    if (!r) { draw = null; return; }
+    const d = r.suppliedL - draw.credited;
+    if (d > 0.001) { cmd('garden.refill', { litres: d }); draw.credited += d; }
+    if (r.done) { if (draw.credited < 0.01) say('No water came' + (r.reason ? ': ' + String(r.reason).replace(/[-_]/g, ' ') : '') + '.'); draw = null; }
+  }
+  function drawFrom(piece, litres) {
+    if (draw) settleDraw();
+    try { G.sim.commandNow('water.draw', { id: piece.id, litres }); draw = { id: String(piece.id), credited: 0 }; settleDraw(); } catch (e) { say('No water came.'); }
+    G.burst(piece.a.x, (piece.y1 || G.heightAt(piece.a.x, piece.a.z) + 0.8) - 0.1, piece.a.z, 12, 0x9fd4f2, 0.6, 0.3, 0.06, 0.5);
+  }
 
-  function press() {
-    const g = ptr.ground; if (!g) return;
-    if (tool === 'bed') {
-      if (marked && inRect(g, marked)) { marked.digging = true; return; }
-      if (!(owns('spade') || owns('shovel'))) { say('You need a spade first.'); return; }
-      marked = null; markedLine.visible = false;
-      drag = { a: { x: g.x, z: g.z }, b: { x: g.x, z: g.z } };
-    } else if (tool === 'sow') {
-      drag = { a: { x: g.x, z: g.z }, b: { x: g.x, z: g.z } };
-    } else if (tool === 'inspect') inspectAt(g);
-    else if (tool === 'harvest') harvestAt(g);
-  }
-  function release() {
-    if (tool === 'bed' && drag) {
-      const r = rectOf(drag); drag = null; outline.visible = false; label.hidden = true;
-      if (r && r.nx * r.nz >= 1) {
-        const c = cellAt(r.x0 + 0.01, r.z0 + 0.01);
-        if (overlapsBed(r)) say('That overlaps a bed already there.');
-        else { marked = { ...r, done: 0, digging: false }; rectLine(markedLine, r.x0, r.z0, r.x0 + r.nx * CELL, r.z0 + r.nz * CELL, true); tipEvent('marked'); }
+  /* ================= the gestures ================= */
+  const act = { kind: '', acc: 0, n: 0, piece: null, armed: true, grab: null, done: false, lastKey: 0, lx: 0, lz: 0, why: '' };
+  const strokeCells = new Set(), batch = [];
+  const keyOf = (gx, gz) => (gx + 50000) * 100000 + (gz + 50000);
+  const _w = new T.Vector3(), _dm = new T.Matrix4();
+
+  // --- the hoe: every square the blade passes over is worked once per stroke
+  function hoeAlong(x0, z0, x1, z1) {
+    const len = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.ceil(len / 0.1));
+    batch.length = 0;
+    for (let i = 0; i <= n; i++) {
+      const x = x0 + ((x1 - x0) * i) / n, z = z0 + ((z1 - z0) * i) / n;
+      const gx0 = Math.floor((x - HOE_W) / CELL), gx1 = Math.floor((x + HOE_W) / CELL), gz0 = Math.floor((z - HOE_W) / CELL), gz1 = Math.floor((z + HOE_W) / CELL);
+      for (let gz = gz0; gz <= gz1; gz++) for (let gx = gx0; gx <= gx1; gx++) {
+        if (Math.hypot((gx + 0.5) * CELL - x, (gz + 0.5) * CELL - z) > HOE_W + 0.02) continue;
+        if (isPond((gx + 0.5) * CELL, (gz + 0.5) * CELL)) continue;
+        const k = keyOf(gx, gz);
+        if (!strokeCells.has(k)) { strokeCells.add(k); batch.push([gx, gz]); }
       }
-    } else if (tool === 'bed' && marked) marked.digging = false;
-    else if (tool === 'sow' && drag) { sowRect(rectOf(drag, true)); drag = null; outline.visible = false; label.hidden = true; dots.count = 0; }
-    updateHint(true);
-  }
-  const inRect = (g, r) => g.x >= r.x0 && g.x <= r.x0 + r.nx * CELL && g.z >= r.z0 && g.z <= r.z0 + r.nz * CELL;
-  function rectOf(d, cellsOnly) {
-    const ax = Math.min(d.a.x, d.b.x), bx = Math.max(d.a.x, d.b.x), az = Math.min(d.a.z, d.b.z), bz = Math.max(d.a.z, d.b.z);
-    if (cellsOnly) return { ax, bx, az, bz };
-    const x0 = snap(ax), z0 = snap(az), nx = Math.max(1, Math.round((bx - x0) / CELL)), nz = Math.max(1, Math.round((bz - z0) / CELL));
-    return { x0, z0, nx: Math.min(nx, 50), nz: Math.min(nz, 50) };
-  }
-  function overlapsBed(r) {
-    for (const b of Object.values(S().field.groups)) if (r.x0 < b.x0 + b.nx * CELL - 1e-6 && b.x0 < r.x0 + r.nx * CELL - 1e-6 && r.z0 < b.z0 + b.nz * CELL - 1e-6 && b.z0 < r.z0 + r.nz * CELL - 1e-6) return true;
-    return false;
-  }
-  function hover() {
-    const g = ptr.ground;
-    brushRing.visible = false;
-    if (!g) { label.hidden = true; return; }
-    if ((tool === 'bed' || tool === 'sow') && drag) {
-      if (tool === 'bed') {
-        const r = rectOf(drag), W = r.nx * CELL, D = r.nz * CELL;
-        rectLine(outline, r.x0, r.z0, r.x0 + W, r.z0 + D);
-        label.hidden = false; label.textContent = W.toFixed(1) + ' m × ' + D.toFixed(1) + ' m · ' + (W * D).toFixed(2) + ' m²' + (overlapsBed(r) ? ' · overlaps a bed' : '');
-      } else spacingGhost(rectOf(drag, true));
-      label.style.transform = 'translate(' + (ptr.x + 16) + 'px,' + (ptr.y - 30) + 'px)';
-      return;
     }
-    label.hidden = true;
-    if (tool === 'sow') spacingGhost({ ax: g.x, bx: g.x, az: g.z, bz: g.z });
-    if (BRUSH[tool]) {
-      const r = BRUSH[tool];
-      brushRing.scale.setScalar(r / 0.44); brushRing.position.set(g.x, g.y + 0.1, g.z); brushRing.visible = true;
-    }
+    if (!batch.length) return;
+    const res = cmd('garden.till', { cells: batch });
+    if (!res.ok) { say(res.reason); return; }
+    act.n += batch.length;
+    const y = G.heightAt(x1, z1);
+    G.burst(x1, y + 0.12, z1, 5 + batch.length * 2, 0x5a4230, 1.5, 2.6, 0.075, 0.6);       // clods
+    if (res.broke) G.burst(x1, y + 0.12, z1, 4, 0x5e8a3a, 1.4, 2.2, 0.06, 0.6);             // torn sod
+    if (res.clearedM2 > 0.004) G.burst(x1, y + 0.1, z1, 5, 0x6f9a3a, 1.2, 1.8, 0.05, 0.5);  // cut weeds
+    if (res.worked) tipEvent('bed');
   }
-  // the dots where seeds would go
-  function spacingGhost(r) {
-    const span = spanOf(crop), per = CROPS[crop].per, grid = Math.ceil(Math.sqrt(per));
+  const HOE_W = 0.2;
+
+  // --- seed: one square at a time as the hand passes
+  function sowAt(a, first) {
+    const c = cellAt(a.x, a.z), cr = heldCrop();
+    if (!cr) return;
+    if (!c || tillOf(c.bed.cells[c.i]) < 1) { if (first) say(c ? 'This ground is only half worked: pull the hoe through it once more.' : 'Seed only takes in worked soil. Break the ground with the hoe first.'); return; }
+    const span = spanOf(cr), ix = c.ix - (c.ix % span), iz = c.iz - (c.iz % span), i = iz * c.bed.nx + ix, k = keyOf(ix, iz) + 7;
+    if (k === act.lastKey) return;
+    act.lastKey = k;
+    if (c.bed.cells[i].pl) { if (first) say('Something is already growing there.'); return; }
+    const res = cmd('garden.sow', { crop: cr, bed: c.bed.id, cells: [i] });
+    if (!res.ok) { if (first || !act.why) say(res.reason); act.why = res.reason; return; }
+    act.n += res.plants;
+    const x = c.bed.x0 + (ix + span / 2) * CELL, z = c.bed.z0 + (iz + span / 2) * CELL, y = G.heightAt(x, z) + RAISE;
+    G.burst(x, y + 0.25, z, 5, 0xf2dfa0, 0.25, -0.6, 0.035, 0.35);   // the seed falls
+    G.burst(x, y + 0.04, z, 6, 0x6b4f35, 0.7, 1.0, 0.045, 0.4);      // and is pressed in with a puff
+    dotKey = '';
+    if (!hasSeed(cr)) { say('That was the last of the ' + CROPS[cr].name.toLowerCase() + ' seed.'); }
+  }
+  // faint marks where this packet's seeds belong, around the aimed spot
+  let dotKey = '';
+  function spacingMarks(a) {
+    const cr = heldCrop();
+    if (!cr || !a.valid) { if (dots.count) dots.count = 0; dotKey = ''; return; }
+    const k = Math.round(a.x / CELL) + ':' + Math.round(a.z / CELL) + cr;
+    if (k === dotKey) return;
+    dotKey = k;
+    const span = spanOf(cr), per = CROPS[cr].per, grid = Math.ceil(Math.sqrt(per));
     let n = 0;
-    for (const b of Object.values(S().field.groups)) for (let iz = 0; iz < b.nz; iz++) for (let ix = 0; ix < b.nx; ix++) {
-      const cx = b.x0 + (ix + 0.5) * CELL, cz = b.z0 + (iz + 0.5) * CELL;
-      if (cx < r.ax - CELL / 2 || cx > r.bx + CELL / 2 || cz < r.az - CELL / 2 || cz > r.bz + CELL / 2) continue;
-      if (span > 1 && (ix % span || iz % span)) continue;
-      if (b.cells[iz * b.nx + ix].pl) continue;
-      for (let j = 0; j < per && n < 1600; j++) {
-        const x = b.x0 + (ix + (span > 1 ? span / 2 : ((j % grid) + 0.5) / grid)) * CELL, z = b.z0 + (iz + (span > 1 ? span / 2 : (Math.floor(j / grid) + 0.5) / grid)) * CELL;
-        _m.makeTranslation(x, G.heightAt(x, z) + RAISE + 0.02, z); dots.setMatrixAt(n++, _m);
+    for (const b of Object.values(S().field.groups)) {
+      const ia = Math.floor((a.x - 0.75 - b.x0) / CELL), ib = Math.floor((a.x + 0.75 - b.x0) / CELL), ja = Math.floor((a.z - 0.75 - b.z0) / CELL), jb = Math.floor((a.z + 0.75 - b.z0) / CELL);
+      for (let iz = Math.max(0, ja); iz <= Math.min(b.nz - 1, jb); iz++) for (let ix = Math.max(0, ia); ix <= Math.min(b.nx - 1, ib); ix++) {
+        if (span > 1 && (ix % span || iz % span)) continue;
+        const cell = b.cells[iz * b.nx + ix];
+        if (cell.pl || tillOf(cell) < 1) continue;
+        for (let j = 0; j < per && n < 600; j++) {
+          const x = b.x0 + (ix + (span > 1 ? span / 2 : ((j % grid) + 0.5) / grid)) * CELL, z = b.z0 + (iz + (span > 1 ? span / 2 : (Math.floor(j / grid) + 0.5) / grid)) * CELL;
+          _dm.makeTranslation(x, G.heightAt(x, z) + RAISE + 0.03, z); dots.setMatrixAt(n++, _dm);
+        }
       }
     }
     dots.count = n; dots.instanceMatrix.needsUpdate = true;
   }
-  function sowRect(r) {
-    const span = spanOf(crop), cells = {};
-    for (const b of Object.values(S().field.groups)) for (let iz = 0; iz < b.nz; iz++) for (let ix = 0; ix < b.nx; ix++) {
-      const cx = b.x0 + (ix + 0.5) * CELL, cz = b.z0 + (iz + 0.5) * CELL;
-      if (cx < r.ax - CELL / 2 || cx > r.bx + CELL / 2 || cz < r.az - CELL / 2 || cz > r.bz + CELL / 2) continue;
-      if (span > 1 && (ix % span || iz % span)) continue;
-      (cells[b.id] || (cells[b.id] = [])).push(iz * b.nx + ix);
+
+  // --- hands: each crop comes away with its own motion
+  const MOTION = { pull: 'up', dig: 'up', cut: 'side', reap: 'side', pick: 'click', twist: 'click' };
+  const plantAt = (x, z) => { const c = cellAt(x, z), id = c && c.bed.cells[c.i].pl; return id && S().plants[id] ? S().plants[id] : null; };
+  function takePlant(p, a) {
+    const res = cmd('garden.harvest', { bed: p.bed, cells: [p.cell] });
+    if (res.ok) { flourish(res); return true; }
+    const st = read.stageOf(p).stage;
+    if (p.dead || st === 'past' || (a && a.shift)) {
+      const b = S().field.groups[p.bed], sp = p.span || 1, x = b.x0 + ((p.cell % b.nx) + sp / 2) * CELL, z = b.z0 + (Math.floor(p.cell / b.nx) + sp / 2) * CELL;
+      if (cmd('garden.pull', { bed: p.bed, cells: [p.cell] }).ok) { G.burst(x, G.heightAt(x, z) + 0.2, z, 9, 0x6b4f35, 1.6, 2.4, 0.06, 0.6); say('Pulled it out. The bed is free to sow again.'); return true; }
     }
-    const ids = Object.keys(cells);
-    if (!ids.length) { say('Sow on a bed: make one first with the Bed tool.'); return; }
-    let sown = 0, why = '';
-    for (const id of ids) { const res = cmd('garden.sow', { crop, bed: id, cells: cells[id] }); if (res.ok) sown += res.plants; else why = res.reason; if (res.partial) why = res.reason; }
-    if (sown) { say('Sowed ' + sown + (spanOf(crop) > 1 || CROPS[crop].count === 1 ? ' ' + (sown === 1 ? CROPS[crop].name.toLowerCase() : CROPS[crop].plural) : ' squares of ' + CROPS[crop].plural) + '.' + (why ? ' ' + why : '') + ' Water them in.'); tipEvent('sown'); }
-    else say(why || 'Nothing to sow there.');
-    renderSeeds();
+    return false;
   }
-  // while a tool is held down: water, hoe, mulch, compost or harvest the swathe under the pointer
-  function holdAct(dt) {
-    const g = ptr.ground; if (!g || !ptr.down) return;
-    acting += dt;
-    if (tool === 'bed' && marked && marked.digging) return dig(dt);
-    if (acting < 0.16) return;
-    const step = acting; acting = 0;
-    const sel = { x: g.x, z: g.z, r: BRUSH[tool] || 0.4 };
-    if (!cellAt(g.x, g.z) && tool !== 'harvest') return;
-    if (tool === 'water') {
-      if (!owns('watering_can')) return say('You need a watering can.');
-      if (S().can.litres <= 0.01) return say('The can is empty. Refill it.');
-      const res = cmd('garden.water', { ...sel, litres: Math.min(S().can.litres, 1.6 * step) });   // a can's rose pours about 1.5 L a second
-      if (res.ok) { G.burst(g.x, g.y + 0.5, g.z, 6, 0x9fd4f2, 1.2, 0.2, 0.05, 0.5); tipEvent('watered'); }
-      updateHint();
-    } else if (tool === 'hoe') {
-      if (!owns('hoe')) return say('You need a hoe.');
-      const res = cmd('garden.hoe', sel);
-      if (res.ok) G.burst(g.x, g.y + 0.1, g.z, res.clearedM2 > 0.01 ? 7 : 3, res.clearedM2 > 0.01 ? 0x6f9a3a : 0x6b4f35, 1.4, 2, 0.05, 0.5);
-    } else if (tool === 'mulch' || tool === 'compost') {
-      const area = Math.PI * sel.r * sel.r;
-      const res = tool === 'mulch' ? cmd('garden.mulch', { ...sel, litres: area * 75 * 0.5 }) : cmd('garden.amend', { ...sel, kind: 'compost', litres: area * 20 * 0.5 });
-      if (res.ok) G.burst(g.x, g.y + 0.2, g.z, 6, tool === 'mulch' ? 0xe8c97a : 0x4a3324, 1, 1.5, 0.05, 0.5);
-      else say(res.reason);
-      updateHint();
-    } else if (tool === 'harvest') harvestAt(g, true);
+  function handsFrame(a) {
+    const g = act.grab;
+    if (g && !act.done) {
+      const p = S().plants[g];
+      if (!p) { act.done = true; return; }
+      const m = MOTION[CROPS[p.crop].gesture] || 'click';
+      const far = Math.abs(a.dx) + Math.abs(a.dy) > 130;
+      const k = m === 'up' ? a.lift : m === 'side' ? Math.min(1, a.side / 55) : 1;
+      if (m === 'up' && a.lift > 0.25 && Math.random() < 0.25) G.burst(a.ox, a.y + 0.08, a.oz, 1, 0x6b4f35, 0.8, 1.2, 0.04, 0.3);   // the soil gives a little
+      if (k >= 1 || far) {
+        act.done = true;
+        if (!takePlant(p, a)) say(read.plantStatus(G.sim.state, p.id).reason + (a.shift ? '' : ' (Hold Shift to pull it out anyway.)'), 4);
+        else act.n++;
+      }
+    } else if (act.done && act.n) {
+      // the hand keeps working along the row: whatever else is ready comes with a touch
+      const p = plantAt(a.x, a.z);
+      if (p && p.id !== g && cmdQuiet(p)) { const res = cmd('garden.harvest', { bed: p.bed, cells: [p.cell] }); if (res.ok) { flourish(res); act.n++; } }
+    }
   }
-  // turning the sod: hold to dig, a moment for a small bed (with a spade; the shovel is slower)
-  function dig(dt) {
-    const m = marked, area = m.nx * m.nz * CELL * CELL;
-    const secs = clamp(0.7 + area * 0.75, 0.9, 6) * (owns('spade') ? 1 : 1.5);
-    m.done = Math.min(1, m.done + dt / secs);
-    const x = m.x0 + Math.random() * m.nx * CELL, z = m.z0 + Math.random() * m.nz * CELL;
-    if (Math.random() < dt * 14) G.burst(x, G.heightAt(x, z) + 0.15, z, 4, Math.random() < 0.3 ? 0x5e8a3a : 0x6b4f35, 1.6, 2.6, 0.06, 0.6);
-    prog.hidden = false; prog.style.left = ptr.x + 'px'; prog.style.top = ptr.y + 'px';
-    progArc.setAttribute('stroke-dashoffset', String(138.2 * (1 - m.done)));
-    if (m.done >= 1) {
-      const res = cmd('garden.makeBed', { x0: m.x0, z0: m.z0, nx: m.nx, nz: m.nz });
-      marked = null; markedLine.visible = false; prog.hidden = true;
-      if (res.ok) { say('A new bed: ' + res.areaM2.toFixed(2) + ' m² of fresh soil. Now sow something.'); for (let k = 0; k < 14; k++) { const xx = m.x0 + Math.random() * m.nx * CELL, zz = m.z0 + Math.random() * m.nz * CELL; G.burst(xx, G.heightAt(xx, zz) + 0.2, zz, 5, 0x6b4f35, 2.2, 3.4, 0.07, 0.8); } tipEvent('bed'); setGTool('sow'); }
+  const cmdQuiet = (p) => { const s = read.plantStatus(G.sim.state, p.id); return s && /^Ready/.test(s.status); };
+
+  function press(a) {
+    const id = held();
+    act.kind = id; act.acc = 1; act.n = 0; act.grab = null; act.done = false; act.lastKey = 0; act.piece = null; act.armed = false; act.why = '';
+    act.lx = a.x; act.lz = a.z;
+    tag.hidden = true; tagSig = '';
+    if (id === 'hoe') {
+      if (!canDig()) { act.kind = ''; return say('You need a hoe first.'); }
+      strokeCells.clear();
+      G.cam.shake = Math.max(G.cam.shake, 0.12);
+      hoeAlong(a.x, a.z, a.x, a.z);
+    } else if (id === 'can') {
+      if (!owns('watering_can')) { act.kind = ''; return say('You need a watering can first.'); }
+      const fx = fixtureNear(a.x, a.z) || fixtureNear(G.player.x, G.player.z);
+      if (fx) {
+        act.kind = 'fill'; act.piece = fx;
+        const room = 9 - S().can.litres;
+        if (room < 0.05) say('The can is full.');
+        else drawFrom(fx, fx.category === 'pump' ? Math.min(3, room) : room);
+      } else if (isPond(a.x, a.z)) act.kind = 'dip';
+    } else if (id.startsWith('seed:')) sowAt(a, true);
+    else if (id === 'hands') {
+      const p = plantAt(a.x, a.z);
+      if (p) { act.grab = p.id; handsFrame(a); }
+    }
+  }
+  function frameAct(a, dt) {
+    if (draw) settleDraw();
+    if (!a.down) { if (drops.count) drops.count = 0; if (on) spacingMarks(a); return; }
+    const k = act.kind;
+    act.acc += dt;
+    if (k === 'hoe') {
+      if (Math.hypot(a.x - act.lx, a.z - act.lz) > 0.06) { hoeAlong(act.lx, act.lz, a.x, a.z); act.lx = a.x; act.lz = a.z; }
+    } else if (k === 'can') {
+      const can = S().can.litres, pouring = a.tip > 0.12 && can > 0.01;
+      if (a.tip > 0.12 && can <= 0.01 && act.acc > 0.5) { act.acc = 0; say('The can is empty.'); }
+      if (pouring) {
+        // the stream: drops along an arc from the rose to the aimed spot
+        ITEMSHOW.can.obj.updateWorldMatrix(true, false);
+        _w.copy(ROSE).applyMatrix4(ITEMSHOW.can.obj.matrixWorld);
+        const n = 4 + Math.round(a.tip * 10), tm = performance.now() * 0.0022;
+        for (let i = 0; i < n; i++) {
+          const t = (i / n + tm) % 1, sc = 0.7 + a.tip * 0.9;
+          _dm.makeScale(sc, sc * 1.6, sc);
+          _dm.setPosition(_w.x + (a.x - _w.x) * t + Math.sin(i * 7.1) * 0.03 * t, _w.y + (a.y + 0.05 - _w.y) * t * t, _w.z + (a.z - _w.z) * t + Math.cos(i * 5.3) * 0.03 * t);
+          drops.setMatrixAt(i, _dm);
+        }
+        drops.count = n; drops.instanceMatrix.needsUpdate = true;
+        if (act.acc >= 0.12) {
+          const step = Math.min(0.4, act.acc); act.acc = 0;
+          const res = cmd('garden.water', { x: a.x, z: a.z, r: 0.42, litres: Math.min(can, (0.5 + 2.2 * a.tip) * step) });   // a rose pours up to about 2.5 L a second
+          G.burst(a.x, a.y + 0.08, a.z, 3 + Math.round(a.tip * 4), 0x9fd4f2, 0.9, 0.8, 0.04, 0.35);
+          if (res.ok) { act.n++; tipEvent('watered'); }
+        }
+      } else if (drops.count) drops.count = 0;
+    } else if (k === 'fill') {
+      // at a pump: each push of the handle (drag down, let go) brings a gush; a tap or tank simply runs
+      if (a.tip < 0.3) act.armed = true;
+      else if (a.tip > 0.7 && act.armed && act.piece.category === 'pump') {
+        act.armed = false;
+        const room = 9 - S().can.litres;
+        if (room < 0.05) say('The can is full.'); else drawFrom(act.piece, Math.min(3, room));
+      }
+    } else if (k === 'dip') {
+      if (act.acc >= 0.15) { const step = act.acc; act.acc = 0; if (S().can.litres < 8.99) { cmd('garden.refill', { litres: 6 * step }); G.burst(a.x, (G.sea || 0) + 0.05, a.z, 3, 0xcfeaf7, 0.8, 0.6, 0.04, 0.4); } else if (!act.n) { act.n = 1; say('The can is full.'); } }
+    } else if (k.startsWith('seed:')) sowAt(a, false);
+    else if (k === 'hands') handsFrame(a);
+    else if ((k === 'mulch' || k === 'compost') && act.acc >= 0.16) {
+      act.acc = 0;
+      if (!cellAt(a.x, a.z)) return;
+      const sel = { x: a.x, z: a.z, r: 0.45 }, area = Math.PI * sel.r * sel.r;
+      const res = k === 'mulch' ? cmd('garden.mulch', { ...sel, litres: area * 75 * 0.5 }) : cmd('garden.amend', { ...sel, kind: 'compost', litres: area * 20 * 0.5 });
+      if (res.ok) G.burst(a.x, a.y + 0.6, a.z, 7, k === 'mulch' ? 0xe8c97a : 0x4a3324, 1.3, 0.4, 0.06, 0.6);
       else say(res.reason);
     }
+  }
+  function release(a) {
+    const k = act.kind;
+    drops.count = 0;
+    if (k === 'hoe' && act.n && a.travel < 0.2) say('Now drag the blade toward you: a long pull works a whole strip.');
+    else if (k === 'can' && !act.n && a.held > 0.25 && S().can.litres > 0.01 && a.tip < 0.12) say('Drag the mouse down to tip the can (or hold the right button).');
+    else if (k === 'fill' && act.piece && act.piece.category === 'pump' && S().can.litres < 8.9) say('Keep pumping: press again, or drag down and let go. ' + S().can.litres.toFixed(1) + ' of 9 L.');
+    else if (k.startsWith('seed:') && act.n) { const c = k.slice(5); say('Sowed ' + act.n + ' ' + (act.n === 1 && CROPS[c].count === 1 ? CROPS[c].name.toLowerCase() : spanOf(c) > 1 || CROPS[c].count === 1 ? CROPS[c].plural : (act.n === 1 ? 'square' : 'squares') + ' of ' + CROPS[c].plural) + '. Water them in.'); tipEvent('sown'); }
+    act.kind = ''; act.grab = null;
+    updateHint(true);
   }
 
-  /* ================= harvest flourish ================= */
+  /* ================= the name tag by the marker: what this is, and the one thing it needs ================= */
+  const tag = label;
+  let tagSig = '', tagX = -1, tagY = -1;
+  const tagPt = { x: 0, y: 0, vis: false };
+  function updateTag() {
+    const a = H.aim, id = held();
+    let txt = '', warn = false;
+    if (a.valid && !a.down && !H.raising) {
+      const c = cellAt(a.x, a.z), cell = c && c.bed.cells[c.i], p = cell && cell.pl && S().plants[cell.pl];
+      if (p) { const s = read.plantStatus(G.sim.state, p.id); txt = CROPS[p.crop].name + ': ' + (s ? s.reason.split(/(?<=\.) /)[0] : ''); warn = !!s && /Thirsty|Hungry|Weedy|dry|Killed|Dried|Past|Bolted/.test(s.status); }
+      else if (id.startsWith('seed:')) { if (!c) { txt = 'Grass: break the ground with the hoe first'; warn = true; } else if (tillOf(cell) < 1) { txt = 'Half worked: one more stroke of the hoe'; warn = true; } }
+      else if (id === 'can' && owns('watering_can')) {
+        const fx = fixtureNear(a.x, a.z);
+        if (fx) txt = S().can.litres > 8.95 ? 'The can is full' : fx.category === 'pump' ? 'Hold the can here and pump: drag down, let go' : 'Hold the can here to fill it';
+        else if (isPond(a.x, a.z)) txt = 'Hold to dip the can';
+        else if (cell && tillOf(cell) >= 1) { const ci = read.cellInfo(G.sim.state, c.bed.id, c.i); txt = ci.water < 0.35 ? 'Dry soil' : ci.water > 0.8 ? 'Wet enough' : ''; warn = ci.water < 0.35; }
+      } else if (id === 'hoe' && cell && tillOf(cell) >= 1 && cell.weed > 0.25) txt = 'Weeds: pull the hoe through them';
+    }
+    H.setMark(warn ? 0xf0b080 : 0xfff2c4, id === 'can' || id === 'mulch' || id === 'compost' ? 2.2 : id === 'hoe' ? 1.3 : 1);
+    if (txt !== tagSig) { tagSig = txt; tag.textContent = txt; tag.hidden = !txt; tag.classList.toggle('warn', warn); tagX = -1; }
+  }
+  function moveTag() {
+    if (tag.hidden) return;
+    const a = H.aim; toScreen(a.x, a.y + 0.35, a.z, tagPt);
+    const x = Math.round(tagPt.x + 18), y = Math.round(tagPt.y - 34);
+    if (x !== tagX || y !== tagY) { tagX = x; tagY = y; tag.style.transform = 'translate(' + x + 'px,' + y + 'px)'; }
+  }
+
+  /* ================= harvest: it comes free, and the first of each crop is held up to admire ================= */
   const WORD = { pull: 'Pulled', pick: 'Picked', cut: 'Cut', dig: 'Dug', twist: 'Snapped off', reap: 'Reaped' };
   const fxPt = { x: 0, y: 0, vis: false };
-  function harvestAt(g, quiet) {
-    const res = cmd('garden.harvest', { x: g.x, z: g.z, r: BRUSH.harvest });
-    if (!res.ok) { if (!quiet) { const c = cellAt(g.x, g.z), p = c && c.bed.cells[c.i].pl && S().plants[c.bed.cells[c.i].pl]; say(p ? read.plantStatus(G.sim.state, p.id).reason : res.reason); } return; }
+  const trophies = new Map();
+  function trophyOf(c) {
+    let m = trophies.get(c);
+    if (!m) { const g = geoFor(c, 'ready'); g.computeBoundingSphere(); m = new T.Mesh(g, toolMat); m.castShadow = true; m.userData.k = 0.34 / Math.max(0.05, g.boundingSphere.radius); trophies.set(c, m); }
+    return m;
+  }
+  function flourish(res) {
     const byCrop = {};
     for (const pk of res.picks) (byCrop[pk.crop] || (byCrop[pk.crop] = [])).push(pk);
     let i = 0;
@@ -799,36 +878,21 @@
         const b = S().field.groups[p.bed] || bedViews.get(p.bed)?.b; if (!b) continue;
         const span = spanOf(c), x = b.x0 + ((p.cell % b.nx) + span / 2) * CELL, z = b.z0 + (Math.floor(p.cell / b.nx) + span / 2) * CELL, y = G.heightAt(x, z) + 0.2;
         G.burst(x, y, z, 10, CROPS[c].col, 2.2, 3.2, 0.06, 0.8);
-        if (CROPS[c].gesture === 'pull' || CROPS[c].gesture === 'dig') popPlant(c, x, y - 0.15, z);
+        if (CROPS[c].gesture === 'pull' || CROPS[c].gesture === 'dig') G.burst(x, y - 0.1, z, 6, 0x6b4f35, 1.4, 2.4, 0.06, 0.5);
       }
-      const p0 = pk[0], b0 = S().field.groups[p0.bed];
-      if (b0) {
-        const x = b0.x0 + ((p0.cell % b0.nx) + 0.5) * CELL, z = b0.z0 + (Math.floor(p0.cell / b0.nx) + 0.5) * CELL;
-        toScreen(x, G.heightAt(x, z) + 0.6, z, fxPt);
-        const el = document.createElement('div');
-        el.className = 'pop'; el.style.left = fxPt.x + 'px'; el.style.top = (fxPt.y - i * 30) + 'px';
-        const what = CROPS[c].count > 1 && CROPS[c].gesture === 'pull' ? n + ' ' + CROPS[c].plural : CROPS[c].plural;
-        el.innerHTML = esc(WORD[CROPS[c].gesture] + ' ' + what) + '<small>+' + (kg < 1 ? Math.round(kg * 1000) + ' g' : kg.toFixed(1) + ' kg') + (it ? ' · ' + it[1] + ' for the kitchen' : '') + '</small>';
-        fxEl.appendChild(el); setTimeout(() => el.remove(), 1700);
-      }
+      // the first of each crop, and any big haul, is held up overhead for a beat; after that a quick lift, so a row stays quick
+      const first = !tipState.got || !tipState.got[c], big = kg >= 1.5;
+      if (first) { (tipState.got || (tipState.got = {}))[c] = true; saveTips(); }
+      if (first || big || !H.raising) { const m = trophyOf(c); m.rotation.set(0, 0, 0); H.raise(m, first || big ? 1.35 : 0.42, m.userData.k); }
+      const P = G.player;
+      toScreen(P.x, P.y + (first || big ? 2.5 : 2.0), P.z, fxPt);
+      const el = document.createElement('div');
+      el.className = 'pop' + (first || big ? ' big' : ''); el.style.left = fxPt.x + 'px'; el.style.top = (fxPt.y - i * 34) + 'px';
+      const what = CROPS[c].count > 1 && CROPS[c].gesture === 'pull' ? n + ' ' + CROPS[c].plural : CROPS[c].plural;
+      el.innerHTML = esc(first ? (CROPS[c].count > 1 || /s$/.test(CROPS[c].plural) ? 'Your first ' + CROPS[c].plural + '!' : 'Your first ' + CROPS[c].name.toLowerCase() + '!') : WORD[CROPS[c].gesture] + ' ' + what) + '<small>+' + (kg < 1 ? Math.round(kg * 1000) + ' g' : kg.toFixed(1) + ' kg') + (it ? ' · ' + it[1] + ' for the kitchen' : ' into the stores') + '</small>';
+      fxEl.appendChild(el); setTimeout(() => el.remove(), first || big ? 2300 : 1700);
       i++;
       tipEvent('harvest', c);
-    }
-  }
-  // a pulled root lifts out of the soil and fades
-  const pops = [];
-  function popPlant(c, x, y, z) {
-    if (pops.length > 10) return;
-    const m = new T.Mesh(geoFor(c, 'ready'), plantMat);
-    m.position.set(x, y, z); m.rotation.y = Math.random() * 6.28;
-    G.scene.add(m); pops.push({ m, t: 0 });
-  }
-  function animatePops(dt) {
-    for (let i = pops.length - 1; i >= 0; i--) {
-      const p = pops[i]; p.t += dt;
-      p.m.position.y += dt * (1.6 - p.t * 2.5); p.m.rotation.z = p.t * 1.5;
-      p.m.scale.setScalar(Math.max(0.01, 1.25 - p.t * 1.3));
-      if (p.t > 0.9) { G.scene.remove(p.m); pops.splice(i, 1); }
     }
   }
 
@@ -916,13 +980,13 @@
   });
 
   /* ================= the first salad: a guided project, optional and skippable ================= */
-  const PROJECT = { id: 'salad', title: 'Grow your first salad', blurb: 'Press 5 for the Garden. Make a small bed, sow radish and lettuce, water them, and eat them in about four weeks.' };
+  const PROJECT = { id: 'salad', title: 'Grow your first salad', blurb: 'Press 5 for the Garden. Work a small patch with the hoe, sow radish and lettuce, water them, and eat them in about four weeks.' };
   const TIPS = {
-    start: { h: 'Grow your first salad', b: 'Drag on the grass to mark out a small bed, then hold on it to dig. About 1.2 by 1 metre is plenty.', why: 'Turning the sod gives the seeds loose soil without grass roots to fight.' },
-    sow: { h: 'Sow radish and lettuce', b: 'Pick the radish packet above, then drag across the bed. Do the same with lettuce.', why: 'Radishes are ready in about four weeks, leaf lettuce in about six. Both like the cool spring.' },
-    water: { h: 'Water them in', b: 'Choose Water and hold over the bed. Dry soil is pale; wet soil turns dark.', why: 'Seeds only sprout in moist soil. Water again when the soil looks pale, not every day.' },
-    wait: { h: 'Now let them grow', b: 'Speed up time with the clock buttons if you like. Use Inspect on a plant to see how it is doing.', why: 'Plants grow on warmth and light: a cool week is slower than a warm one.' },
-    harvest: { h: 'Your first radishes!', b: 'Choose Harvest and click the ripe radishes. They go straight into your stores.', why: 'Leave them too long and they turn woody, so pick them when ready.' },
+    start: { h: 'Grow your first salad', b: 'Hold the Hoe (2). Press the blade into the grass and drag it toward you; go over each strip again until it is fine, dark soil. A patch about 1.2 by 1 metre is plenty.', why: 'Turning the sod gives the seeds loose soil without grass roots to fight.' },
+    sow: { h: 'Sow radish and lettuce', b: 'Open the Seed box and take the radish packet. Click the soil to drop seed, or hold and drag along the row. Then do the same with lettuce.', why: 'Radishes are ready in about four weeks, leaf lettuce in about six. Both like the cool spring.' },
+    water: { h: 'Water them in', b: 'Hold the Can (3). Hold the button to lift it, drag down to tip it, and walk along the row. Fill your can at the pump by the well: hold it under the spout and pump the handle.', why: 'Seeds only sprout in moist soil. Dry soil is pale, wet soil dark: water again when it looks pale, not every day.' },
+    wait: { h: 'Now let them grow', b: 'Speed up time with the clock buttons if you like. Point at a plant to see how it is doing; F looks closer.', why: 'Plants grow on warmth and light: a cool week is slower than a warm one.' },
+    harvest: { h: 'Your first radishes!', b: 'Hold Hands (1). Press on a radish and pull upward until it comes free. Lettuce is cut with a sideways swipe.', why: 'Leave them too long and they turn woody, so pull them when ready.' },
   };
   const tipKey = () => 'homestead:gardentips:' + G.seed;
   let tipState = (() => { try { return JSON.parse(localStorage.getItem(tipKey()) || '{}'); } catch (e) { return {}; } })();
@@ -946,9 +1010,9 @@
     tip.hidden = true; canvas.focus();
   });
   function tipEvent(ev, c) {
-    if (ev === 'bed' || ev === 'marked') { tipState.start = true; showTip('sow'); }
-    else if (ev === 'sown') { tipState.sow = tipState.sow || false; showTip('water'); }
-    else if (ev === 'watered' && tip.dataset.id === 'water' && !tip.hidden) { tipState.water = true; saveTips(); showTip('wait'); }
+    if (ev === 'bed') { if (!tipState.start) { tipState.start = true; showTip('sow'); } }
+    else if (ev === 'sown') { if (!tipState.sown) { tipState.sown = true; showTip('water'); } }
+    else if (ev === 'watered') { if (tip.dataset.id === 'water' && !tip.hidden) { tipState.water = true; saveTips(); showTip('wait'); } return; }
     else if (ev === 'harvest' && (c === 'radish' || c === 'lettuce')) {
       const got = S().totals.harvestKg;
       if (got.radish > 0 && got.lettuce > 0 && projectOpen()) { cmd('projects.done', { id: PROJECT.id }); say('Your first salad: radishes and lettuce from your own garden.', 5); tip.hidden = true; }
@@ -961,57 +1025,62 @@
     for (const p of Object.values(S().plants)) if ((p.crop === 'radish' || p.crop === 'lettuce') && p.readyT != null && !p.dead) { showTip('harvest'); tipState.harvest = true; saveTips(); return; }
   }
 
-  /* ================= switching the Garden on and off ================= */
+  /* ================= taking up the garden tools, and putting them away ================= */
+  let lastHeld = 'hoe';
   function enter() {
     on = true; document.body.classList.add('gardening'); bar.hidden = false;
-    if (document.pointerLockElement) document.exitPointerLock();
     const r = findRing(); if (r) r.scale.setScalar(0);
-    ensureProject();
-    setGTool(tool);
-    if (!Object.keys(S().field.groups).length && !tipState.start) showTip('start');
+    ensureProject(); findSources();
+    const anyBed = Object.keys(S().field.groups).length > 0;
+    H.open({ bar: toolsEl, reach: 1.5, camDist: 7.5, pace: 0.5, tipPx: 90, liftPx: 70, slots: slotList(), held: anyBed ? lastHeld : 'hoe', onHold, press, frame: frameAct, release });
+    onHold(held());
+    if (!anyBed && !tipState.start) showTip('start');
   }
   function leave() {
+    lastHeld = held() === 'box' ? 'hands' : held();
     on = false; document.body.classList.remove('gardening'); bar.hidden = true; tip.hidden = true;
+    H.close();
     const r = findRing(); if (r) r.scale.setScalar(1);
-    outline.visible = false; brushRing.visible = false; label.hidden = true; prog.hidden = true; dots.count = 0; drag = null;
-    if (marked) { marked.digging = false; }
+    tag.hidden = true; tagSig = ''; dots.count = 0; drops.count = 0;
   }
   window.addEventListener('keydown', (e) => {
     if (e.target && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
     if (G.player.tool === 'build') return;                     // build mode has first refusal while open
     if (e.code === 'Digit5' && !e.repeat) { G.setTool(G.player.tool === 'garden' ? 'axe' : 'garden'); e.preventDefault(); }
     else if (e.code === 'KeyN' && !e.repeat) { toggleAlmanac(); e.preventDefault(); }
-    else if (e.code === 'Escape') { if (!card.hidden) { card.hidden = true; cardFor = null; } else if (!alm.hidden) toggleAlmanac(false); else if (marked) { marked = null; markedLine.visible = false; } }
+    else if (e.code === 'KeyF' && !e.repeat && on && H.aim.valid) { inspectAt(H.aim); e.preventDefault(); }
+    else if (e.code === 'Escape') { if (!card.hidden) { card.hidden = true; cardFor = null; } else if (!alm.hidden) toggleAlmanac(false); else if (on) G.setTool('axe'); }
   });
 
   /* ================= every frame (cheap) and four times a second (the garden's look) ================= */
-  let last = performance.now(), lastAct = last, slow = 0, bedSig = '';
+  let last = performance.now(), slow = 0, bedSig = '', srcT = 0;
   function frame(t) {
     const dt = Math.min(0.1, (t - last) / 1000); last = t;
     const want = G.player.tool === 'garden';
     if (want !== on) { if (want) enter(); else leave(); }
-    if (on && ptr.down) holdAct(Math.min(0.5, (t - lastAct) / 1000));   // a held tool works on real time, even when frames are slow
-    lastAct = t;
-    if (!(on && ptr.down && tool === 'bed' && marked && marked.digging)) prog.hidden = true;
-    if (pops.length) animatePops(dt);
+    if (on) moveTag();
     slow += dt;
     if (slow > 0.25 || dirty) { slow = 0; refresh(); dirty = false; }
     requestAnimationFrame(frame);
   }
   function refresh() {
     const s = S(), ids = Object.keys(s.field.groups);
-    const sig = ids.join(',');
+    let sig = '';
+    for (const id of ids) sig += id + '@' + dimOf(s.field.groups[id]) + ',';
     if (sig !== bedSig) {
-      for (const id of [...bedViews.keys()]) if (!s.field.groups[id]) dropBed(id);
+      for (const [id, v] of [...bedViews]) if (!s.field.groups[id] || dimOf(s.field.groups[id]) !== v.dim) dropBed(id);
       for (const id of ids) if (!bedViews.has(id)) buildBed(s.field.groups[id]);
-      bedSig = sig;
+      bedSig = sig; plantSig = ''; weedSig = ''; hideGrass(true);
     }
     for (const v of bedViews.values()) { v.b = s.field.groups[v.b.id] || v.b; paintBed(v); }
     if (ids.length) hideGrass();
     const ps = plantSignature();
     if (ps !== plantSig) { plantSig = ps; layoutPlants(); }
     layoutWeeds();
-    if (on) { updateHint(); tipsTick(); }
+    if (on) {
+      if ((srcT += 1) % 12 === 0) findSources();
+      H.setSlots(slotList()); updateHint(); updateTag(); tipsTick();
+    }
     if (!alm.hidden) renderAlmanac();
     if (cardFor && !card.hidden && (G.sim.ticksLastAdvance || dirty)) renderCard();
   }
@@ -1020,9 +1089,9 @@
 
   // test hooks
   window.__gardenView = {
-    get on() { return on; }, get tool() { return tool; }, get marked() { return marked; }, setTool: setGTool, choose: (c) => { crop = c; renderSeeds(); },
-    groundAt: (nx, ny) => { const o = {}; return groundAt(nx, ny, o) ? o : null; }, toScreen: (x, y, z) => toScreen(x, y, z, {}),
+    get on() { return on; }, get held() { return held(); }, hold: (id) => H.hold(id), choose: (c) => { crop = c; H.setSlots(slotList()); return H.hold('seed:' + c); },
+    groundAt: (nx, ny) => { const o = {}; return H.groundAt(nx, ny, o) ? o : null; }, toScreen: (x, y, z) => toScreen(x, y, z, {}),
     meshes: () => [...meshes.entries()].map(([k, m]) => [k, m.count]), beds: () => [...bedViews.keys()], almanac: toggleAlmanac,
-    inspect: (x, z) => inspectAt({ x, z }), refresh: () => { dirty = true; refresh(); },
+    inspect: (x, z) => inspectAt({ x, z }), refresh: () => { dirty = true; refresh(); }, source,
   };
 })();
