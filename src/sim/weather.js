@@ -247,7 +247,9 @@ function diagnose(s, t, M, precip) {
 function step(ctx) {
   let s = ctx.s;
   if (!s || s.v !== STATE_V) { ctx.s = s = freshState((s && s.site) || defaultSite(), ctx.t, ctx.rng()); return; }
-  const dt = ctx.dt, t = ctx.t + dt / 2, G = s.gen, rng = ctx.rng();
+  // t carries the date from the seasonal clock and the hour from the clock (ctx.ct), so a shortened
+  // year compresses the seasons while each day's weather still runs hour by hour
+  const dt = ctx.dt, t = (ctx.ct === undefined ? ctx.t : ctx.ct) + dt / 2, G = s.gen, rng = ctx.rng();
   const M = climateModel(s.site.climate, s.site.latitudeDeg), c = M.climate;
   const x = dayOfYear(t) + dayFraction(t);
   // weather systems
@@ -292,7 +294,7 @@ function step(ctx) {
   s.snowDepthM = s.snowSweMm / s.snowDensityKgM3;
   // deep soil, insulated by snow
   const insul = clamp(s.snowDepthM / 0.3, 0, 1), airForSoil = s.tempC + (Math.max(s.tempC, 0) - s.tempC) * insul;
-  s.groundTempC += (airForSoil - s.groundTempC) * (1 - Math.exp(-dt / TAU_SOIL));
+  s.groundTempC += (airForSoil - s.groundTempC) * (1 - Math.exp(-(ctx.lifeDt === undefined ? dt : ctx.lifeDt) / TAU_SOIL));   // the soil follows the seasons, so it runs on the seasonal clock
   s.totals.precipMm += P * hours; s.totals.snowfallMm += fall; s.totals.meltMm += melt;
 }
 

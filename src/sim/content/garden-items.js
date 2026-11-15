@@ -3,6 +3,9 @@
 // mass, typed). Prices are 2026 US retail, rounded; produce prices are what the same food costs in a shop,
 // kept for the ledger and a roadside stand later.
 //
+// Potatoes, carrots and tomatoes are harvested as the kitchen's own ingredients (food_potato, food_carrot,
+// food_tomato in src/sim/food-catalog.js), counted whole, so they can be cooked; the rest are produce by weight.
+//
 // Seed counts per packet are typical for the variety's seed size (seed-catalogue figures, approx).
 // Seed potatoes and seed garlic are sold by weight: a 55 g seed piece per plant (about 18 per kg), and
 // about 100 cloves per kg of hardneck seed garlic. Tomatoes come as transplants, six to a tray.
@@ -40,8 +43,8 @@ export const ITEMS_GARDEN = Object.freeze([
   { id: 'mulch_straw', name: 'Straw mulch', category: 'garden', unit: 'L', massKg: 0.05, priceUsd: 0.03, blurb: '75 L covers a square metre: less watering, fewer weeds' },
 
   ...[
-    ['produce_radish', 'Radishes', 6], ['produce_lettuce', 'Lettuce', 9], ['produce_peas', 'Snap peas', 10], ['produce_potato', 'Potatoes', 2.5],
-    ['produce_tomato', 'Tomatoes', 6], ['produce_bean', 'Green beans', 8], ['produce_carrot', 'Carrots', 3], ['produce_squash', 'Butternut squash', 3.5],
+    ['produce_radish', 'Radishes', 6], ['produce_lettuce', 'Lettuce', 9], ['produce_peas', 'Snap peas', 10], 
+    ['produce_bean', 'Green beans', 8], ['produce_squash', 'Butternut squash', 3.5],
     ['produce_kale', 'Kale', 10], ['produce_garlic', 'Garlic', 18], ['produce_corn', 'Sweet corn', 4], ['produce_wheat', 'Wheat grain', 0.6],
   ].map(([id, name, priceUsd]) => ({ id, name, category: 'produce', unit: 'kg', massKg: 1, priceUsd, blurb: 'Grown here' })),
 ]);

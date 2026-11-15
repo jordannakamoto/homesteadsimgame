@@ -8,6 +8,14 @@
 // Cadence: soil water every hour (every 60 ticks); growth, nutrients and weeds every three hours. With no
 // beds the step returns at once.
 //
+// Two clocks. A world's year can be shorter than a real one (ctx.lifeScale = 365 / days in the year). Everything
+// that belongs to a plant's life runs on the seasonal clock (ctx.lifeDt): degree days, germination, growth from
+// sunlight, ripening, nutrient release, lime, weeds and mulch. The soil-water balance stays on real time (ctx.dt):
+// rain is a real day's rain and a can is a can, so evaporation, drainage and the plants' drinking are a real day's
+// physics. Scaling transpiration alone would empty the bucket lifeScale times too fast; scaling everything would
+// make a can of water worth weeks. So a compressed crop simply lives through fewer days of weather, and water
+// stress is judged from the bucket as before. Calendar functions get ctx.ct (date from the seasonal clock).
+//
 // Evapotranspiration: Priestley-Taylor reference rate (soilwater.priestleyTaylorMm) from the weather's
 // temperature, sunshine, cloud and humidity, times the FAO-56 dual crop coefficient.
 //
@@ -59,7 +67,7 @@ const days = (n) => (n === 1 ? 'a day' : words(n) + ' days');
 function fresh() {
   return {
     v: STATE_V, field: makeField(CELL_M), plants: {}, nextPlant: 1, can: { litres: 0 }, packets: {},
-    acc: { n: 0, temps: [0, 0, 0, 0, 0, 0], minC: 99, rsMJ: 0 }, soilC: null, last: null, pending: [],
+    acc: { n: 0, temps: [0, 0, 0, 0, 0, 0], minC: 99, rsMJ: 0 }, soilC: null, last: null, pending: [], carryKg: {},
     totals: { rainL: 0, irrigL: 0, evapL: 0, transpL: 0, drainL: 0, runoffL: 0, nInit: 0, nIn: 0, nFixed: 0, nLeached: 0, nRemoved: 0, nExported: 0, harvestKg: {} },
   };
 }
@@ -201,9 +209,10 @@ const _ev = { flags: 0 };
 const _env = { days: 0, temps: null, n: 0, soilC: 0, topWet: 0, minC: 0, rsMJ: 0, dayH: 12, water: 1, nutrient: 1, light: 1, competition: 1 };
 function growthStep(ctx, s) {
   const w = ctx.get('weather') || {}, site = w.site || { latitudeDeg: 45 };
-  const A = s.acc, dt = GROWTH_EVERY * 60 / DAY;
+  const life = ctx.lifeScale ?? 1, ct = ctx.ct ?? ctx.t;
+  const A = s.acc, dt = (GROWTH_EVERY * 60 / DAY) * life;   // dt: days of the plants' life
   if (!A.n) { A.temps[0] = w.tempC ?? 10; A.n = 1; }
-  const dayH = sunTimes(ctx.t, site).dayLengthH;
+  const dayH = sunTimes(ct, site).dayLengthH;
   const minC = A.minC < 98 ? A.minC : (w.tempC ?? 10);
   const E = _env;
   E.days = dt; E.temps = A.temps; E.n = A.n; E.soilC = s.soilC ?? 10; E.dayH = dayH;
@@ -225,7 +234,7 @@ function growthStep(ctx, s) {
     const light = (1 - (bed.shade || 0)) * (bed.cover ? COVER_LIGHT : 1);
     E.topWet = top; E.water = ks; E.nutrient = nutrient; E.light = light;
     E.minC = minC + (bed.cover ? COVER_FROST_C : 0);
-    E.rsMJ = A.rsMJ * light;
+    E.rsMJ = A.rsMJ * light * life;
     E.competition = 1 - 0.5 * weed * (p.lai < 1.5 ? 1 : 0.6);
     const wasStage = p.stage;
     advance(p, crop, E, _ev);
@@ -248,6 +257,7 @@ function growthStep(ctx, s) {
       const tp = Math.min(c.p * 0.1 * phF, wantP), tk = Math.min(c.k * 0.1 * phF, wantK);
       c.p -= tp; c.k -= tk; p.pUp += tp / m; p.kUp += tk / m;
     }
+    // dry spells and wilting are counted in real hours: they are the soil's real days
     if (!p.emerged) { p.dryH = top < 0.35 ? p.dryH + 3 : 0; }
     else if (ks < 0.65) p.dryH += 3; else p.dryH = Math.max(0, p.dryH - 6);
     // a plant left wilted for long enough dies
@@ -257,7 +267,8 @@ function growthStep(ctx, s) {
     // expected harvest from the warmth of the last week
     p.rate += ((p.gdd - p.lastGdd) / dt - p.rate) * (1 - Math.exp(-dt / 7));
     p.lastGdd = p.gdd;
-    if (p.readyT == null && !p.dead) p.expectT = ctx.t + Math.min(400, (crop.readyGdd - p.gdd) / Math.max(0.5, p.rate)) * DAY;
+    // (rate: degree days per day of the plant's life; expectT is on the real clock)
+    if (p.readyT == null && !p.dead) p.expectT = ctx.t + (Math.min(400, (crop.readyGdd - p.gdd) / Math.max(0.5, p.rate)) / life) * DAY;
     p._w = plantWater(p, crop);
     describe(p, crop, bed, s, ctx.t, top, weed);
     if (_ev.flags & (EV_EMERGED | EV_STAGE | EV_FROST | EV_KILLED | EV_BOLTED)) ctx.emit('garden.plant', { id, flags: _ev.flags, stage: crop.stages[p.stage].id, dead: p.dead });
@@ -425,7 +436,7 @@ function sow(ctx, p = {}) {
     const id = 'p' + s.nextPlant++;
     const pl = newPlant(crop, ctx.t, density);
     Object.assign(pl, { id, crop: crop.id, bed: g.id, cell: i, span, count: Math.round(perCell * 100) / 100, area: span * span * CELL_AREA,
-      nUp: 0, nFix: 0, pUp: 0, kUp: 0, ks: 1, dryH: 0, readyT: null, expectT: ctx.t + crop.daysToMaturity * DAY, rate: crop.readyGdd / crop.daysToMaturity, lastGdd: 0,
+      nUp: 0, nFix: 0, pUp: 0, kUp: 0, ks: 1, dryH: 0, readyT: null, expectT: ctx.t + (crop.daysToMaturity / (ctx.lifeScale ?? 1)) * DAY, rate: crop.readyGdd / crop.daysToMaturity, lastGdd: 0,
       status: 'Sown', reason: '', wilt: 0, yellow: 0, _ks: 0, _ksN: 0 });
     // a transplant arrives with its own nitrogen (counted as brought in)
     if (crop.transplant) { pl.nUp = nCrit(crop, pl.bio); s.totals.nIn += pl.nUp * pl.area; }
@@ -554,9 +565,18 @@ function harvest(ctx, p = {}) {
       out.push({ plant: pl.id, crop: crop.id, kg, gesture: crop.gesture, bed: pl.bed, cell: pl.cell });
     }
   }
-  for (const id in got) call(ctx, 'stock.add', { id: CROPS[id].produce, qty: got[id] });
-  if (out.length) ctx.emit('garden.harvest', { picks: out, kg: got });
-  return out.length ? { ok: true, kg: got, picks: out } : fail('Nothing here is ready to harvest yet.');
+  // produce sold whole (the kitchen's potatoes, carrots, tomatoes) is counted out; the remainder waits for the next pick
+  const items = {};
+  for (const id in got) {
+    const it = ITEMS[CROPS[id].produce];
+    if (it.unit === 'each') {
+      const kg = got[id] + (s.carryKg[id] || 0), n = Math.floor(kg / it.massKgPerUnit + 1e-9);
+      s.carryKg[id] = r3(kg - n * it.massKgPerUnit);
+      if (n > 0) { call(ctx, 'stock.add', { id: it.id, qty: n }); items[it.id] = n; }
+    } else { call(ctx, 'stock.add', { id: it.id, qty: got[id] }); items[it.id] = got[id]; }
+  }
+  if (out.length) ctx.emit('garden.harvest', { picks: out, kg: got, items });
+  return out.length ? { ok: true, kg: got, items, picks: out } : fail('Nothing here is ready to harvest yet.');
 }
 function pull(ctx, p = {}) {
   const s = ensure(ctx), list = selection(s, p);

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createCookingView } from './cooking/view.js';
 import { createChunkStream } from './world/chunk-stream.js';
 import { createGameSim, mapPieces, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
@@ -1983,7 +1984,7 @@ function towardOvercast(c, target, k) {
 function updateSky() {
   if (window.__game && !window.__game.calendar) window.__game.calendar = calendar;
   const wx = sim.state.sys.weather, site = (wx && wx.site) || SKY.site;
-  const sp = calendar.sunPosition(sim.state.t + sim.acc, site);
+  const sp = calendar.sunPosition(sim.calendarT(), site);
   const e = Math.sin(sp.elevationRad);
   const dayF = smoothstep(0.02, 0.4, e), nightF = 1 - smoothstep(-0.22, 0.06, e);
   const goldF = clamp(1 - dayF - nightF, 0, 1);
@@ -2040,6 +2041,7 @@ for (const b of document.querySelectorAll('#speed button')) b.addEventListener('
 // ---------------------------------------------------------- saving
 // One save per world seed: the simulation state plus what the engine owns (terrain edits, felled
 // trees, stock, where the player stood, and editable build data).
+const NEW_WORLD_YEAR_DAYS = 20;          // five days a season. The player can change it in the weather panel.
 const SAVE_KEY = 'homestead:save:', LAST_KEY = 'homestead:last-seed';
 function syncSite() {
   const build = window.__build;
@@ -2101,6 +2103,7 @@ function resetWorld(seed) {
   noise = makeSimplex(SEED);
   sim = createGameSim(SEED); simCtl.builds = null; simCtl.siteV = -1;
   clearEnemies();
+  if (window.__game?.cooking?.active) window.__game.cooking.close();
   if (window.__build) window.__build.reset();
   chunkStream.reset();
   world.edits.clear(); world.removed.clear();
@@ -2116,7 +2119,7 @@ function resetWorld(seed) {
   player.x = 0; player.z = 0;
   let raw = null;
   try { raw = localStorage.getItem(SAVE_KEY + SEED); } catch (e) { /* no storage here */ }
-  if (raw) applySave(raw);
+  if (!(raw && applySave(raw))) sim.setYearDays(NEW_WORLD_YEAR_DAYS);   // a new world gets the short year; saved worlds keep theirs
   chunkStream.update(player.x, player.z, Infinity);
   player.y = heightAt(player.x, player.z);
   cam.tx = player.x; cam.tz = player.z; cam.ty = player.y;
@@ -2223,6 +2226,7 @@ function pushOut(o, rad) {
       if (d < r && d > 1e-4) { o.x = rk.x + (dx / d) * r; o.z = rk.z + (dz / d) * r; }
     }
   });
+  if (window.__game?.cooking) window.__game.cooking.collide(o, rad);
   if (window.__build) window.__build.collide(o, rad, o === player);      // walls and furniture
 }
 const trails = { t: 0, cur: null };
@@ -2537,6 +2541,7 @@ function respawn() {
 
 // ============================================================ main loop
 function updatePlayer(dt) {
+  if (window.__game?.cooking?.active) { mouse.left = mouse.right = false; ring.visible = false; return; }
   const P = player;
   P.hurt = Math.max(0, P.hurt - dt);
   if (P.dead > 0) {
@@ -2566,7 +2571,11 @@ function updatePlayer(dt) {
   const alt = !!(keys.AltLeft || keys.AltRight);
   const armed = P.tool === 'axe';
   P.stamWait -= dt; P.regenWait -= dt; P.rollCd -= dt; P.dashCd -= dt; P.shotCd -= dt; P.comboLock -= dt; P.comboShow -= dt; P.riposte -= dt; P.tap -= dt;
-  if (P.stamWait <= 0) P.stam = Math.min(100, P.stam + 30 * dt);
+  if (P.stamWait <= 0) {
+    const food = sim.state.sys.cooking;
+    const fed = food && food.fullness >= 60 && food.wellFedUntil > sim.state.t;
+    P.stam = Math.min(100, P.stam + 30 * dt * (fed ? 1.1 : 1));
+  }
   if (P.regenWait <= 0) P.hp = Math.min(100, P.hp + 2 * dt);
   // key edges
   const shift = !!(keys.ShiftLeft || keys.ShiftRight);
@@ -2781,6 +2790,7 @@ function updateShakes(dt) {
 }
 const _proj = new THREE.Vector3();
 function updateCamera(dt) {
+  if (window.__game?.cooking?.updateCamera(dt)) return;
   const k = cam.aimK = lerp(cam.aimK, player.aiming ? 1 : 0, 1 - Math.exp(-11 * dt));
   const follow = 1 - Math.exp(-lerp(9, 24, k) * dt);
   cam.tx = lerp(cam.tx, player.x, follow); cam.tz = lerp(cam.tz, player.z, follow);
@@ -2846,7 +2856,7 @@ let last = performance.now(), fpsAcc = 0, fpsN = 0, fps = 60, slowFor = 0, autoD
 function step(dt) {
   U.time.value += dt;
   if (dt > 0) { const dy = Math.atan2(Math.sin(cam.yaw - cam.prevYaw), Math.cos(cam.yaw - cam.prevYaw)); cam.yawRate = lerp(cam.yawRate, dy / dt, 0.3); cam.prevYaw = cam.yaw; }
-  if (juice.lockFailed && !locked() && mouse.inside && player.tool !== 'build') {     // no pointer capture: steer by pushing toward the screen edge
+  if (!window.__game?.cooking?.active && juice.lockFailed && !locked() && mouse.inside && player.tool !== 'build') {     // no pointer capture: steer by pushing toward the screen edge
     const ax = Math.abs(mouse.x);
     if (ax > 0.18) cam.yaw -= Math.sign(mouse.x) * ((ax - 0.18) / 0.82) * 2.8 * dt;
     cam.aimPitch = clamp(0.25 - mouse.y * 0.5, -0.28, 0.9);
@@ -2864,6 +2874,7 @@ function step(dt) {
   updateLogs(dt);
   updatePickups(dt);
   updateParticles(dt);
+  if (window.__game?.cooking) window.__game.cooking.update(dt);
   updateCamera(dt);
   updateDepthMap(dt);
   updateAim();
@@ -2922,7 +2933,7 @@ setTool('axe');
 lockUi();
 window.__game = {
   pm, get seed() { return SEED; },
-  get sim() { return sim; }, savedBuilds: () => simCtl.builds, powerAvailable: () => false,
+  get sim() { return sim; }, setYearDays: (d) => { sim.setYearDays(d); saveGame(); }, savedBuilds: () => simCtl.builds, powerAvailable: () => false,
   stock: {
     MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, stockMassKg, canAfford, toolAvailable,
     get state() { return stockState(); },
@@ -2933,4 +2944,5 @@ window.__game = {
   camera, scene, setTool, fade: addWind, fadeR: U.fadeR, burst, editGet: getDelta, editSet: setDelta, baseHeight, chunkSize: CS, treeKinds: TREE, refreshLock: lockUi, forestAt,
   light: SKY, noise: fbm, palette: PAL, quality: () => quality.level, composer: () => composer, treeGeo, pineLite: pineLiteGeo, markStockDirty: () => { hudDirty = true; },
 };
+window.__game.cooking = createCookingView(window.__game);
 requestAnimationFrame(frame);

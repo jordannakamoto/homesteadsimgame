@@ -116,3 +116,29 @@ test('an immediate command can replace system state with zero elapsed time', () 
   s.runTicks(1);
   assert.deepEqual(s.state.sys.fixture, { elapsed: 5 * TICK });
 });
+
+test('a shorter year compresses the seasons but not the day', async () => {
+  const { calendar } = await import('../src/sim/index.js');
+  const real = createGameSim(5), short = createGameSim(5);
+  short.setYearDays(20);
+  const d0 = calendar.dayOfYear(short.calendarT());
+  short.runDays(5); real.runDays(5);
+  // five game days of a 20-day year is a quarter of the year: spring has become summer
+  const moved = (calendar.dayOfYear(short.calendarT()) - d0 + 365) % 365;
+  assert.ok(Math.abs(moved - 91.25) < 1.5, 'moved ' + moved + ' days of the calendar');
+  assert.equal((calendar.dayOfYear(real.calendarT()) - d0 + 365) % 365, 5);
+  assert.equal(short.state.t, real.state.t);                         // the clock is the same clock
+  assert.ok(short.state.sys.weather.tempC > real.state.sys.weather.tempC - 2);
+  short.runDays(15);                                                  // a whole short year
+  assert.ok(Math.abs(((calendar.dayOfYear(short.calendarT()) - d0 + 365 + 180) % 365) - 180) < 1.5);
+  // July of a short year is as warm as July of a real one, within weather noise
+  const mean = (sim, days) => { let s = 0, n = 0; for (let i = 0; i < days * 24; i++) { sim.runTicks(60); s += sim.state.sys.weather.tempC; n++; } return s / n; };
+  const a = createGameSim(9); a.setYearDays(20); a.runDays(4.5); const julyShort = mean(a, 1.6);
+  const b = createGameSim(9); b.runDays(82); const julyReal = mean(b, 30);
+  assert.ok(Math.abs(julyShort - julyReal) < 6, julyShort.toFixed(1) + ' vs ' + julyReal.toFixed(1));
+  assert.throws(() => short.setYearDays(2));
+  const again = createGameSim(5); again.load(short.serialize());
+  assert.equal(again.state.yearDays, 20); assert.equal(again.hash(), short.hash());
+  const old = short.serialize(); delete old.lifeT; delete old.yearDays; again.load(old);
+  assert.equal(again.state.yearDays, 365); assert.equal(again.state.lifeT, again.state.t);
+});
