@@ -37,10 +37,10 @@ export function createSim({ seed = 1, systems = [], record = false } = {}) {
     return sim;
   };
 
-  function ctxFor(sys) {
+  function ctxFor(sys, dt = sys.every * TICK) {
     const st = S();
     return {
-      sim, state: st, t: st.t, tick: st.tick, dt: sys.every * TICK,
+      sim, state: st, t: st.t, tick: st.tick, dt,
       get s() { return st.sys[sys.name]; },
       set s(v) { st.sys[sys.name] = v; },
       get: (name) => st.sys[name],                    // read another system's state
@@ -63,7 +63,7 @@ export function createSim({ seed = 1, systems = [], record = false } = {}) {
     const h = sim.handlers.get(name);
     if (!h) throw new Error('unknown command: ' + name);
     if (sim.recorded) sim.recorded.push({ tick: S().tick, name, payload });
-    return h.fn({ ...ctxFor(h.sys), dt: 0 }, payload);
+    return h.fn(ctxFor(h.sys, 0), payload);
   };
 
   function tickOnce() {

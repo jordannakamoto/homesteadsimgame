@@ -103,3 +103,16 @@ test('the game simulation builds, runs a year, and is deterministic', () => {
   assert.equal(a.hash(), b.hash());
   assert.ok(ms < 20000, 'a simulated year should run headlessly in seconds, took ' + ms.toFixed(0) + ' ms');
 });
+
+test('an immediate command can replace system state with zero elapsed time', () => {
+  const s = createSim({ systems: [{
+    name: 'fixture', every: 5,
+    commands: { 'fixture.replace': (c) => { c.s = { elapsed: c.dt }; } },
+  }] });
+  s.commandNow('fixture.replace');
+  assert.deepEqual(s.state.sys.fixture, { elapsed: 0 });
+  assert.equal(s.state.tick, 0);
+  s.command('fixture.replace');
+  s.runTicks(1);
+  assert.deepEqual(s.state.sys.fixture, { elapsed: 5 * TICK });
+});

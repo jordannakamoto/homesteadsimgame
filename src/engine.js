@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createChunkStream } from './world/chunk-stream.js';
 import { createGameSim, mapPieces, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -141,7 +142,10 @@ const world = {
   get time() { return sim.dayFraction(); },
   set time(f) {
     const d = (((f - sim.dayFraction()) % 1) + 1) % 1;
-    if (d > 1e-9) sim.advance(d * 86400 + 1e-6);
+    if (d > 1e-9) {
+      syncSite();
+      sim.advance(d * 86400 + 1e-6);
+    }
   },
 };
 const stockState = () => sim.state.sys.stock;
@@ -1328,23 +1332,16 @@ class Chunk {
   }
 }
 
-function updateChunks(px, pz, budgetMs) {
-  const pcx = Math.floor(px / CS), pcz = Math.floor(pz / CS);
-  const want = [];
-  for (let dz = -LOAD_R; dz <= LOAD_R; dz++) for (let dx = -LOAD_R; dx <= LOAD_R; dx++) {
-    if (dx * dx + dz * dz > (LOAD_R + 0.5) * (LOAD_R + 0.5)) continue;
-    if (!world.chunks.has(ckey(pcx + dx, pcz + dz))) want.push([dx * dx + dz * dz, pcx + dx, pcz + dz]);
-  }
-  want.sort((a, b) => a[0] - b[0]);
-  const t0 = performance.now();
-  for (const w of want) {
-    world.chunks.set(ckey(w[1], w[2]), new Chunk(w[1], w[2])); depthState.dirty = true;
-    if (performance.now() - t0 > budgetMs) break;
-  }
-  for (const [k, c] of world.chunks) {
-    if (Math.max(Math.abs(c.cx - pcx), Math.abs(c.cz - pcz)) > LOAD_R + 1) { c.dispose(); world.chunks.delete(k); }
-  }
-}
+const chunkStream = createChunkStream({
+  size: CS, radius: LOAD_R, chunks: world.chunks, key: ckey,
+  load(cx, cz) {
+    const chunk = new Chunk(cx, cz);
+    depthState.dirty = true;
+    return chunk;
+  },
+  unload: (chunk) => chunk.dispose(),
+  now: () => performance.now(),
+});
 function forNearby(x, z, r, fn) {
   const c0x = Math.floor((x - r) / CS), c1x = Math.floor((x + r) / CS);
   const c0z = Math.floor((z - r) / CS), c1z = Math.floor((z + r) / CS);
@@ -2042,9 +2039,19 @@ for (const b of document.querySelectorAll('#speed button')) b.addEventListener('
 
 // ---------------------------------------------------------- saving
 // One save per world seed: the simulation state plus what the engine owns (terrain edits, felled
-// trees, stock, where the player stood). Buildings are saved by build mode under the same seed.
+// trees, stock, where the player stood, and editable build data).
 const SAVE_KEY = 'homestead:save:', LAST_KEY = 'homestead:last-seed';
+function syncSite() {
+  const build = window.__build;
+  if (!build) return;
+  build.ensureLoaded();
+  if (build.version === simCtl.siteV) return;
+  const version = build.version;
+  sim.commandNow('site.setPieces', { pieces: mapPieces(build.pieces()) });
+  simCtl.siteV = version;
+}
 function saveData() {
+  syncSite();
   const edits = {};
   for (const [k, a] of world.edits) edits[k] = f32ToBase64(a);
   return makeSave(sim.serialize(), {
@@ -2095,8 +2102,8 @@ function resetWorld(seed) {
   sim = createGameSim(SEED); simCtl.builds = null; simCtl.siteV = -1;
   clearEnemies();
   if (window.__build) window.__build.reset();
-  for (const c of world.chunks.values()) c.dispose();
-  world.chunks.clear(); world.edits.clear(); world.removed.clear();
+  chunkStream.reset();
+  world.edits.clear(); world.removed.clear();
   for (const f of world.fallers) scene.remove(f.mesh);
   for (const L of world.logs) scene.remove(L.mesh);
   for (const p of world.pickups) scene.remove(p.mesh);
@@ -2110,7 +2117,7 @@ function resetWorld(seed) {
   let raw = null;
   try { raw = localStorage.getItem(SAVE_KEY + SEED); } catch (e) { /* no storage here */ }
   if (raw) applySave(raw);
-  updateChunks(player.x, player.z, 1e9);
+  chunkStream.update(player.x, player.z, Infinity);
   player.y = heightAt(player.x, player.z);
   cam.tx = player.x; cam.tz = player.z; cam.ty = player.y;
   spawnEnemy('start|e0', 12, 10, 0, 'start');
@@ -2844,16 +2851,12 @@ function step(dt) {
     if (ax > 0.18) cam.yaw -= Math.sign(mouse.x) * ((ax - 0.18) / 0.82) * 2.8 * dt;
     cam.aimPitch = clamp(0.25 - mouse.y * 0.5, -0.28, 0.9);
   }
-  // hand real time to the simulation; it advances in fixed ticks, a bounded number per frame
+  // Refresh geometry before a tick or save can read the headless site.
+  syncSite();
   sim.advance(dt * WORLD_SECONDS_PER_REAL_SECOND * (keys.KeyT ? Math.max(simCtl.speed, 100) : simCtl.speed), 24);
-  // keep the simulation's picture of what is built in step with build mode
-  if (window.__build && window.__build.pieces && window.__build.version !== simCtl.siteV) {
-    simCtl.siteV = window.__build.version;
-    sim.commandNow('site.setPieces', { pieces: mapPieces(window.__build.pieces()) });
-  }
   simCtl.saveT += dt;
   if (simCtl.saveT > 20) { simCtl.saveT = 0; saveGame(); }
-  updateChunks(player.x, player.z, 5);
+  chunkStream.update(player.x, player.z, 5);
   updatePlayer(dt);
   updateEnemies(dt);
   updateShakes(dt);

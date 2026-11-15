@@ -2,6 +2,8 @@
 
 How the game is put together, what each part may and may not do, and the contracts the V1 iterations code against. The plan itself is `docs/V1_PLAN.md`. Update this file in the same commit as any change to a boundary or interface described here.
 
+See [Steam and co-op foundations](docs/FOUNDATIONS.md) for the implementation sequence, compatibility boundaries and benchmark results.
+
 ## What exists (audit, November 2026)
 
 The game is one self-contained HTML page built by `build.sh`: `src/engine.js` is bundled with three.js into one script, and the add-ons are minified into a second.
@@ -101,7 +103,7 @@ Rules:
 - Autosaves every 20 s and when the page is hidden or closed. The last world played reopens on load.
 - `SAVE_VERSION` and `MIGRATIONS` in `save.js`: any change to the shape of a save adds a migration. A save from the previous wave must load.
 - Terrain edits are stored as base64 `Float32Array` tiles keyed by chunk.
-- **Not yet unified:** buildings are still saved by build mode under `world-engine-build:1:<seed>`. Iteration 2a moves them into the world save through the piece interface. Loose objects in flight (falling trees, logs, pickups) are not saved.
+- Editable buildings are saved in `world.builds`. Build mode keeps `world-engine-build:1:<seed>` as a legacy fallback. Loose objects in flight (falling trees, logs, pickups) are not saved.
 - New systems get saved automatically, because their state lives in `sim.state.sys`.
 
 ## The piece interface
@@ -174,7 +176,7 @@ Owns `src/build.js`, `src/touch.js`, the build markup and styles in `template/he
 
 Six iterations run in parallel. Every system reads buildings only through pieces, weather only through `ctx.get('weather')`, and materials only through `material(id)`. Each owns the files listed. Shared files (`src/sim/index.js`, `build.sh`, `template/head.html`) get one added line or block each. No iteration edits `src/engine.js` except to add a name to `window.__game`; if a system needs something from the engine, it asks for it through a name there.
 
-**Bridging pieces into the simulation.** Pieces live in build mode, outside the simulation. The orchestrator provides `src/sim/site.js`: a `site` system whose state holds a plain-data snapshot of what is built, refreshed by the command `site.setPieces` that the page issues whenever `__build.onChange` fires. Systems read `ctx.get('site').pieces` and `ctx.get('site').version`. Headless tests construct pieces by hand with the helpers in `test/helpers/pieces.mjs`. Equipment that is not a building piece (a panel, a tank, a stove, a coop feeder) is placed through the same mechanism: it is a piece with `kind: "fixture"`, a `fixture` id from the fixtures catalog, and `ports` describing its connections.
+**Bridging pieces into the simulation.** Pieces live in build mode, outside the simulation. The orchestrator provides `src/sim/site.js`: a `site` system whose state holds a plain-data snapshot of what is built, refreshed by the command `site.setPieces` before the page advances simulation or saves, when the build version has changed. Systems read `ctx.get('site').pieces` and `ctx.get('site').version`. Headless tests construct pieces by hand with the helpers in `test/helpers/pieces.mjs`. Equipment that is not a building piece (a panel, a tank, a stove, a coop feeder) is placed through the same mechanism: it is a piece with `kind: "fixture"`, a `fixture` id from the fixtures catalog, and `ports` describing its connections.
 
 **Fixtures and connections.** A fixture piece is `{ id, kind: "fixture", fixture: <catalog id>, a: { x, z }, y0, y1, yawRad, settings: {...}, ports: [{ id, type: "power" | "water" | "flue" }] }`. A connection is a piece of kind `"wire"` or `"pipe"`: `{ id, kind, from: { piece, port }, to: { piece, port }, lengthM, gauge | diameterMm, material }`. Each system that needs equipment exports its catalog from its own `fixtures-<system>.js` as `FIXTURES_<SYSTEM>`: a frozen map `id -> { id, name, category, system, ports: [...], priceUsd, massKg, dims: { w, d, h }, ...ratings in SI units }`. The orchestrator merges the catalogs into `src/sim/fixtures.js` and the supplier. Systems find their equipment by filtering `ctx.get('site').pieces` for their fixture ids; nothing else tells a system what exists. Test helpers: `test/helpers/pieces.mjs` (`house()`, `setSite()`, `fixture()`, `link()`).
 

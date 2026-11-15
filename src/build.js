@@ -3638,6 +3638,14 @@
       restoreAll(fromWorld && Array.isArray(fromWorld.structs) ? fromWorld : JSON.parse(raw));
     } catch {}
   }
+  function ensureLoaded() {
+    const seed = String(G.seed);
+    if (seed === B.seed) return;
+    B.seed = seed;
+    loadBuilds();
+    B.savedV = B.version;
+    B.saveT = 0;
+  }
   /* ---------- copy and stamp ---------- */
   function copyPick() {
     const h = B.hover;
@@ -7139,6 +7147,7 @@
     },
     serialize,
     restore: restoreAll,
+    ensureLoaded,
     setLayers,
     ASSEMBLIES,
     get LAYER_MATERIALS() {
@@ -7210,6 +7219,7 @@
       return g;
     },
     update(dt) {
+      ensureLoaded();
       flushCover(dt);
       if (changeV !== B.version) {
         changeV = B.version;
@@ -7223,20 +7233,12 @@
       }
       const on = P.tool === "build" && !(P.dead > 0);
       if (on !== B.on) on ? enter() : exit();
-      {
-        const sd = $("seed") ? $("seed").textContent : "0";
-        if (sd !== B.seed) {
-          B.seed = sd;
-          loadBuilds();
+      if (B.version !== B.savedV && !B.drag) {
+        B.saveT += dt;
+        if (B.saveT > 1.2) {
+          saveBuilds();
           B.savedV = B.version;
           B.saveT = 0;
-        } else if (B.version !== B.savedV && !B.drag) {
-          B.saveT += dt;
-          if (B.saveT > 1.2) {
-            saveBuilds();
-            B.savedV = B.version;
-            B.saveT = 0;
-          }
         }
       }
       // roofs lift away when you are under them or drafting; doors swing; shelter

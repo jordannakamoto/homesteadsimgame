@@ -116,6 +116,22 @@ async function open(opts) {
   // saving: exact round trip, ids included
   const rt = await G(() => { const a = JSON.stringify(__build.serialize()), ids = __build.pieces().map((p) => p.id).join(), pj = JSON.stringify(__build.pieces()); __build.restore(JSON.parse(a)); return { same: a === JSON.stringify(__build.serialize()), ids: ids === __build.pieces().map((p) => p.id).join(), pieces: pj === JSON.stringify(__build.pieces()) }; });
   check('serialize and restore round-trip exactly, piece for piece and id for id', rt.same && rt.ids && rt.pieces, JSON.stringify(rt));
+  check('a paused save captures build edits without waiting for a frame', await G(() => {
+    const speed = __game.speed, build = __build.serialize();
+    __game.setSpeed(0);
+    try {
+      __build.restore({ ...build, structs: [] });
+      const empty = __game.saveData();
+      __build.restore(build);
+      const restored = __game.saveData();
+      const ids = __build.pieces().map((p) => p.id).join();
+      return empty.sim.sys.site.pieces.length === 0 &&
+        restored.sim.sys.site.pieces.map((p) => p.id).join() === ids &&
+        ids.length > 0 && empty.sim.tick === restored.sim.tick;
+    } finally {
+      __game.setSpeed(speed);
+    }
+  }));
   // a save from before pieces had ids still loads, and its pieces are given ids
   const old = await G(() => { const d = JSON.parse(JSON.stringify(__build.serialize())), keep = JSON.stringify(d), n = __build.pieces().length; const v1 = { v: 1, structs: d.structs.map((s) => { delete s.ids; delete s.id; s.roofs.forEach((r) => delete r.id); s.segs = s.segs.map((x) => x.slice(0, 6)); return s; }) }; __build.restore(v1); const got = __build.pieces(), ok = got.length === n && got.every((p) => /^p\d/.test(p.id)) && new Set(got.map((p) => p.id)).size === n; __build.restore(JSON.parse(keep)); return ok; });
   check('a version 1 save (no ids) loads and every piece gets an id', old);
