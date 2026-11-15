@@ -13,6 +13,7 @@ import {
 import { stockRemove } from "./stock.js";
 export const GRID = 9,
   PAN_R = 0.48,
+  PAN_RIM_HEIGHT = 0.22,
   BURNER = { x: 1.4, z: -0.25, r: 0.34, y: 0.16 };
 export const PLATE = { x: 0.05, z: 0.8, radius: 0.36 };
 export const MAX_PIECES = 32;
@@ -115,8 +116,12 @@ function addBody(rt, o) {
       const a = (i * Math.PI) / 8;
       colliderFor(
         rt.world,
-        R.ColliderDesc.cuboid(0.1, 0.09, 0.025)
-          .setTranslation(Math.sin(a) * PAN_R, 0.09, Math.cos(a) * PAN_R)
+        R.ColliderDesc.cuboid(0.107, PAN_RIM_HEIGHT / 2, 0.025)
+          .setTranslation(
+            Math.sin(a) * PAN_R,
+            PAN_RIM_HEIGHT / 2,
+            Math.cos(a) * PAN_R,
+          )
           .setRotation({ x: 0, y: Math.sin(a / 2), z: 0, w: Math.cos(a / 2) })
           .setMass(0.025),
         body,
@@ -341,6 +346,7 @@ export function physicalKitchenSystem() {
     s.target = null;
     s.group = null;
     s.dropPending = false;
+    r.tossTime = 0;
   };
   const grab = (s, objects) => {
     const r = getRuntime(s);
@@ -424,6 +430,35 @@ export function physicalKitchenSystem() {
         grab(c.s, food);
         return { ok: true, count: food.length };
       },
+      "kitchen.toss"(c) {
+        const s = c.s;
+        const pan = s.objects.find((o) => o.id === s.held && o.kind === "pan");
+        if (!pan || s.dropPending)
+          return no("Hold the pan to toss its contents.");
+        const r = getRuntime(s);
+        if (r.tossTime) return no("Let the food land first.");
+        const pieces = Object.keys(s.group || {}).map(Number);
+        if (!pieces.length) return no("Put food in the pan first.");
+        // Hold the pan still for a short lift and catch. The pieces fly and
+        // rotate under gravity, then only pieces still inside are gathered.
+        r.tossTime = 0.68;
+        for (const [index, id] of pieces.entries()) {
+          const food = s.objects.find((o) => o.id === id);
+          const body = r.bodies.get(id);
+          body.setBodyType(R.RigidBodyType.Dynamic, true);
+          body.setLinvel(
+            {
+              x: (pan.p.x - food.p.x) * 1.7,
+              y: 2.65 + (index % 3) * 0.12,
+              z: (pan.p.z - food.p.z) * 1.7,
+            },
+            true,
+          );
+          body.setAngvel({ x: 7.5, y: 0, z: index % 2 ? -2 : 2 }, true);
+        }
+        s.group = {};
+        return yes();
+      },
       "kitchen.drop"(c) {
         const s = c.s;
         if (!s.held) return yes();
@@ -459,6 +494,8 @@ export function physicalKitchenSystem() {
           return no("Bring the pan over the plate.");
         const pan = s.objects.find((o) => o.id === s.held && o.kind === "pan");
         if (!pan) return no("Bring the pan over the plate.");
+        if (getRuntime(s).tossTime)
+          return no("Let the food land before serving.");
         const food = s.objects.filter((o) => s.group?.[o.id]);
         if (!food.length) return no("The pan is empty.");
         if (food.some((o) => o.age >= 172800 || o.burn > 0.6))
@@ -504,7 +541,7 @@ export function physicalKitchenSystem() {
           s.acc = Math.max(0, s.acc - STEP);
           let knife = null,
             oldY = 0;
-          if (s.held && s.target) {
+          if (s.held && s.target && !r.tossTime) {
             const o = s.objects.find((o) => o.id === s.held),
               b = r.bodies.get(s.held),
               pos = b.translation(),
@@ -515,7 +552,14 @@ export function physicalKitchenSystem() {
               ),
               f = Math.min(
                 1,
-                ((o.kind === "pan" ? 3 : o.kind === "knife" ? 6 : 7) * STEP) /
+                ((o.kind === "pan"
+                  ? s.dropPending && s.target.y <= 0.22
+                    ? 0.9
+                    : 3
+                  : o.kind === "knife"
+                    ? 6
+                    : 7) *
+                  STEP) /
                   Math.max(d, 1e-8),
               );
             const next = {
@@ -541,6 +585,20 @@ export function physicalKitchenSystem() {
           r.world.step();
           sync(s, r);
           if (knife) sliceAtBlade(s, r, knife, oldY);
+          if (r.tossTime > 0) {
+            r.tossTime = Math.max(0, r.tossTime - STEP);
+            if (r.tossTime > 0) continue;
+            const pan = s.objects.find((o) => o.id === s.held);
+            for (const food of panContents(s.objects, pan)) {
+              const body = r.bodies.get(food.id);
+              body.setBodyType(R.RigidBodyType.KinematicPositionBased, true);
+              s.group[food.id] = {
+                x: food.p.x - pan.p.x,
+                y: food.p.y - pan.p.y,
+                z: food.p.z - pan.p.z,
+              };
+            }
+          }
           const held = s.dropPending && r.bodies.get(s.held)?.translation();
           if (
             held &&
@@ -557,7 +615,10 @@ export function physicalKitchenSystem() {
               const onHob =
                 Math.abs(s.target.x - BURNER.x) < 0.57 &&
                 Math.abs(s.target.z - BURNER.z) < 0.52;
-              s.target.y = onHob ? 0.19 : 0.07;
+              const onBoard =
+                Math.abs(s.target.x + 1.25) < 0.72 &&
+                Math.abs(s.target.z) < 0.49;
+              s.target.y = onHob ? 0.187 : onBoard ? 0.068 : 0.028;
             } else release(s);
           }
         }

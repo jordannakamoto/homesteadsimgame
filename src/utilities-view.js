@@ -54,7 +54,7 @@
     h += row("Outside", n(out, 1) + " °C", "");
     // structure
     const st = S.structure;
-    const SHOW_STRUCTURE = false;   // off until two false alarms on the tutorial shed are fixed (see docs/STATUS.md)
+    const SHOW_STRUCTURE = true;
     if (SHOW_STRUCTURE) h += `<h3>Structure</h3>`;
     const members = st ? Object.keys(st.members || {}).length : 0;
     if (!SHOW_STRUCTURE) { /* hidden for now */ } else if (!st || !members) h += `<p class="utnone">Nothing built yet. When there is, this says how hard each part is working and what would fail first.</p>`;

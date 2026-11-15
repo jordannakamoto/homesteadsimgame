@@ -92,6 +92,29 @@ test("food drops into a hollow pan and travels with it through contacts", () => 
   );
   assert.ok(Math.abs(pan.p.y - 0.185) < 0.06, "pan settles on stove");
 });
+test("a held pan toss flips food and supports a gentle set-down", () => {
+  const sim = make();
+  advance(sim);
+  const pan = s(sim).objects.find((o) => o.kind === "pan");
+  const food = s(sim).objects.find((o) => o.kind === "carrot");
+  move(sim, food.id, { x: pan.p.x, y: 0.65, z: pan.p.z });
+  act(sim, "grab", { id: pan.id });
+  act(sim, "move", { x: 1.4, y: 0.65, z: -0.25 });
+  advance(sim);
+  const before = food.p.y;
+  const orientation = { ...food.q };
+  act(sim, "toss");
+  assert.equal(sim.commandNow("kitchen.toss").ok, false);
+  advance(sim, 12);
+  assert.ok(food.p.y > before + 0.15, "food leaves the pan floor");
+  assert.notDeepEqual(food.q, orientation, "food rotates in flight");
+  act(sim, "drop");
+  advance(sim, 130);
+  assert.equal(s(sim).held, null);
+  assert.ok(Math.hypot(food.p.x - pan.p.x, food.p.z - pan.p.z) < 0.48);
+  assert.ok(food.p.y > pan.p.y && food.p.y < pan.p.y + 0.22);
+  assert.ok(Math.abs(pan.p.y - 0.185) < 0.03);
+});
 test("partial burner overlap heats contact cells, diffusion spreads heat and lifting stops input", () => {
   const sim = make(),
     st = s(sim),

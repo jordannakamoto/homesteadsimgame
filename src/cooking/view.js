@@ -3,6 +3,7 @@ import {
   initKitchenPhysics,
   GRID,
   PAN_R,
+  PAN_RIM_HEIGHT,
   BURNER,
   PLATE,
   cellPoint,
@@ -57,7 +58,7 @@ export function createCookingView(G) {
   ui.id = "physical-kitchen-ui";
   ui.hidden = true;
   ui.innerHTML =
-    '<div class="kitchen-title">Homestead kitchen <small>Esc · leave</small></div><div id="physical-kitchen-readout"></div><div class="kitchen-instructions">Click knife to pick it up · Click food to cut · Right-click to put knife down<br>Drag board or Shift-drag food to gather · Drag pan onto plate to serve · E · eat packed meal · H · heat view</div>';
+    '<div class="kitchen-title">Homestead kitchen <small>Esc · leave</small></div><div id="physical-kitchen-readout"></div><div class="kitchen-instructions">Click knife to pick it up · Click food to cut · Right-click to put knife down<br>Drag board or Shift-drag food to gather · Space while holding pan to toss · Drag pan onto plate to serve · E · eat packed meal · H · heat view</div>';
   const style = document.createElement("style");
   style.textContent = `
     #physical-kitchen-ui{position:fixed;inset:0;z-index:34;pointer-events:none;color:#fff0d4;font:14px system-ui}
@@ -361,10 +362,10 @@ export function createCookingView(G) {
             mesh,
             0x4b5350,
             Math.sin(a) * PAN_R,
-            0.09,
+            PAN_RIM_HEIGHT / 2,
             Math.cos(a) * PAN_R,
-            0.2,
-            0.18,
+            0.214,
+            PAN_RIM_HEIGHT,
             0.05,
           );
           wall.rotation.y = a;
@@ -605,6 +606,8 @@ export function createCookingView(G) {
       }
       if (!active) return;
       if (event.code === "Escape") close();
+      if (event.code === "Space" && !event.repeat && drag?.kind === "pan")
+        command("toss");
       if (event.code === "KeyH" && !event.repeat) heatMap = !heatMap;
       if (event.code === "KeyE" && !event.repeat) {
         const meal = freshMeal();

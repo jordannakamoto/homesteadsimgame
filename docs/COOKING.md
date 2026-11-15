@@ -9,6 +9,7 @@ Press **K** near the kitchen (first use places a starter bench). No cooking butt
 - Click the knife to pick it up, then click where you want to cut. The blade lowers through the carrot and lifts for the next cut. Right-click to set the knife down. Each slice remains a separate physical piece.
 - Drag an ingredient to move it, or drag the cutting board or Shift-drag a piece to gather everything on the board at once. Drop the pieces into the pan.
 - Drag the pan onto the hob. Partial overlap with the burner changes the heating pattern. Drag the stove dial up for more heat and down to turn it off. A hot pan with food gives off wisps that darken as the food burns. **H** shows the temperature grid.
+- While holding the pan, press **Space** to toss and flip the food. The pan steadies briefly for the catch. The raised rim catches more pieces, and setting down the pan lowers it gently.
 - Once the food is cooked, drag the pan over the plate and release. The kitchen shows **Meal ready**, and the packed meal goes to **Inventory (I)**. Eat it later from the inventory, or press **E** in the kitchen. **Delete** discards hovered pieces. The plate refuses undercooked, burned or spoiled food.
 - **Esc** leaves the kitchen. Heating continues with world time. Turning off the burner leaves residual heat.
 
