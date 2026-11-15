@@ -5,6 +5,7 @@ import { createSim } from './sim.js';
 import { stockSystem } from './stock.js';
 import { weather } from './weather.js';
 import { siteSystem } from './site.js';
+import { cookingSystem } from './cooking.js';
 import { water } from './water.js';
 
 export * from './sim.js';
@@ -21,7 +22,7 @@ export { water, overlayData as waterOverlay, freshStoredL } from './water.js';
 export * from './fixtures-water.js';
 
 // Systems are added here, in dependency order, as the iterations land (thermal, power...).
-export const GAME_SYSTEMS = [weather, stockSystem(), siteSystem(), water];
+export const GAME_SYSTEMS = [weather, stockSystem(), siteSystem(), water, cookingSystem()];
 
 export function createGameSim(seed, opts = {}) {
   return createSim({ seed, systems: GAME_SYSTEMS, ...opts });
