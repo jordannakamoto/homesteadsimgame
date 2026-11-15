@@ -103,7 +103,7 @@ function groundTint(c, x, z, f, blades) {
     c.lerp(groundTintPal.lush, (1 - smoothstep(0.1, 0.3, f)) * smoothstep(0.02, 0.42, -q2) * 0.26),
     c.lerp(groundTintPal.bare, smoothstep(0.28, 0.5, fbm(x * 0.17 - 7, z * 0.17 + 19, 2)) * 0.2),
     // the ground under the sward is shaded thatch and soil, darker than the blades above it
-    blades || c.multiplyScalar(0.97),
+    blades || c.multiplyScalar(0.8),
     // under a canopy most of the sky is hidden, so the floor of the woods receives less ambient light
     c.multiplyScalar(1 - 0.15 * smoothstep(0.14, 0.42, f)));
 }
@@ -2205,7 +2205,13 @@ const MOVES = {
   slam: { wind: 1.05, hold: [0, 0], dmg: 24, reach: 2.8, arc: 1.3, parry: false, rec: 1.2 },
 };
 const MOVESET = [['jab', 'swing', 'swing', 'delay'], ['swing', 'delay', 'slam', 'jab']];
+// The game is a peaceful homestead builder by default. The old action-RPG combat (enemies, combat HUD) is kept
+// behind a switch: run localStorage.setItem('combat', '1') in the console and reload to bring it back.
+let COMBAT = false;
+try { COMBAT = localStorage.getItem('combat') === '1'; } catch (e) {}
+document.body.classList.toggle('peaceful', !COMBAT);
 function spawnEnemy(id, x, z, kind, chunkKey) {
+  if (!COMBAT) return;
   const m = makeEnemy(kind);
   const e = {
     id, x, z, y: heightAt(x, z), hx: x, hz: z, tx: x, tz: z, kind, chunkKey, m,

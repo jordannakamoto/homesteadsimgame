@@ -247,23 +247,29 @@
         }
         break;
       case "bramble": {
-        // arching thorny canes with leaves and berries
-        for (let k = 0; k < 4 + v; k++) {
+        // a low, dense thicket: a leafy mound with sprays of leaves arching just out of it (no bare canes: those read as spider legs)
+        const tone = v ? C.hazel : C.leaf;
+        for (let k = 0; k < 4; k++) {
           const a = r() * TAU,
-            reach = 0.5 + r() * 0.5,
-            top = 0.35 + r() * 0.35,
+            d = r() * 0.3;
+          g.ball([Math.cos(a) * d, 0.16 + r() * 0.16, Math.sin(a) * d], 0.3 + r() * 0.12, 0.17 + r() * 0.07, 0.3 + r() * 0.12, shade(tone, 0.72 + 0.3 * r()), { flat: true, jit: 0.26, seed: k + v * 7, lat: 3, lon: 6 });
+        }
+        leafy(0, 0.2, 0, 0.5, 30, tone);
+        for (let k = 0; k < 3; k++) {
+          const a = (k / 3) * TAU + r(),
+            reach = 0.5 + r() * 0.2,
+            top = 0.3 + r() * 0.12,
             cx = Math.cos(a),
             cz = Math.sin(a),
-            pt = (t) => [cx * reach * t, top * Math.sin(Math.PI * Math.min(1, t * 0.95)) + 0.02, cz * reach * t];
-          for (let q = 0; q < 3; q++) g.cyl(pt(q / 3), pt((q + 1) / 3), 0.014, 0.01, 3, C.cane, C.cane, false);
-          for (let q = 1; q <= 5; q++) {
-            const p = pt(q / 5.3),
-              la = a + (q % 2 ? 1.4 : -1.4),
-              lx = Math.cos(la) * 0.13,
-              lz = Math.sin(la) * 0.13,
-              c = shade(q % 2 ? C.leaf : C.hazel, 0.8 + 0.4 * r());
-            g.triS(p, [p[0] + lx + cx * 0.05, p[1] + 0.03, p[2] + lz + cz * 0.05], [p[0] + lx * 0.5 - cx * 0.06, p[1] + 0.02, p[2] + lz * 0.5 - cz * 0.06], [0, 1, 0], [0, 1, 0], [0, 1, 0], c, c, c);
-            if (q % 2 === 0) g.ball([p[0], p[1] - 0.03, p[2]], 0.025, 0.025, 0.025, v ? col(0x3a2248) : C.berry, { lat: 2, lon: 4 });
+            pt = (t) => [cx * reach * t, 0.12 + top * Math.sin(Math.PI * Math.min(1, t * 0.8)), cz * reach * t];
+          for (let q = 2; q <= 9; q++) {
+            const p = pt(q / 9),
+              la = a + (q % 2 ? 1.3 : -1.3),
+              lx = Math.cos(la) * 0.15,
+              lz = Math.sin(la) * 0.15,
+              c = shade(tone, 0.85 + 0.4 * r());
+            g.triS(p, [p[0] + lx + cx * 0.07, p[1] + 0.04, p[2] + lz + cz * 0.07], [p[0] + lx * 0.5 - cx * 0.07, p[1] + 0.02, p[2] + lz * 0.5 - cz * 0.07], [0, 1, 0], [0, 1, 0], [0, 1, 0], c, c, shade(c, 1.15));
+            if (q % 3 === 0) g.ball([p[0], p[1] - 0.02, p[2]], 0.025, 0.025, 0.025, v ? col(0x3a2248) : C.berry, { lat: 2, lon: 4 });
           }
         }
         break;
@@ -580,14 +586,15 @@
     mat.onBeforeCompile = (sh, rnd) => {
       before && before(sh, rnd);
       sh.fragmentShader = sh.fragmentShader.replace("#include <lights_fragment_begin>", a).replace("#include <lights_lambert_pars_fragment>", b);
-      // each tuft thins out toward its foot instead of ending in a hard line on the ground
+      // each tuft is shaded toward its foot, down to the tone of the ground it stands on, so blade and soil
+      // read as one surface. (This used to punch a dot pattern through the foot instead, which showed as speckles.)
       if (kind === "grass")
         sh.fragmentShader = sh.fragmentShader.replace(
           "#include <alphatest_fragment>",
-          "#include <alphatest_fragment>\n\t#ifdef USE_MAP\n\t{ float gy = vMapUv.y / 0.3; if ( gy < 1.0 && fract( 52.9829189 * fract( dot( floor( gl_FragCoord.xy ), vec2( 0.06711056, 0.00583715 ) ) ) ) > gy * gy + 0.08 ) discard; }\n\t#endif",
+          "#include <alphatest_fragment>\n\t#ifdef USE_MAP\n\tdiffuseColor.rgb *= mix( 0.93, 1.0, smoothstep( 0.0, 0.5, vMapUv.y ) );\n\t#endif",
         );
     };
-    mat.customProgramCacheKey = () => (keyBefore ? keyBefore.call(mat) : "") + "soft" + floor + kind;
+    mat.customProgramCacheKey = () => (keyBefore ? keyBefore.call(mat) : "") + "soft2" + floor + kind;
     mat.needsUpdate = true;
   }
   function dispose(ch) {
@@ -1171,7 +1178,7 @@
   }
 
   /* ================= wiring ================= */
-  window.__nature = { populate, refresh, dispose, animals, bugs, add, KINDS };
+  window.__nature = { populate, refresh, dispose, animals, bugs, add, KINDS, template };
   for (const ch of W.chunks.values()) {
     populate(ch);
     refresh(ch);

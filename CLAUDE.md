@@ -1,0 +1,28 @@
+# Homestead: rules for every chat working in this repo
+
+A browser homestead builder (Stardew-style direction) on a Valheim-style voxel world engine. One page, built from this repo.
+
+## Workflow
+- `main` is the game. Before any work: `git fetch origin main` and start from the newest `main`.
+- Work on your own branch, keep commits small, and merge into `main` often. Never force-push `main`.
+- If `main` moved while you worked, rebase or merge it in before pushing. Do not restore files `main` deleted.
+- Say in the commit message what the player would notice.
+- Archived, do not merge: `combat` (old action RPG), `build-mode`, `fx`, `engine-source`.
+
+## Build and test
+- `npm install && sh build.sh` writes `dist/index.html`, one self-contained page.
+- Test headlessly before pushing: the page must load with no errors, build mode must open (B), and Low and High quality must both work.
+
+## The live page
+- The game page is the claude.ai artifact "Homestead" (formerly "World Engine Prototype"; slug `17909dd9-2610-496f-be32-0d354df886eb`).
+- Publish only a build of `main` that is already pushed. Read the artifact's live version first and publish over that.
+
+## Code map
+- `src/engine.js`: world, terrain, trees, grass, water, player, tools, day and night. Ordinary source with real names; edit it directly.
+- `src/build.js`: build mode and furniture. `src/touch.js`: touch controls. `src/nature.js`: ground cover, shrubs, insects, animals, soft foliage lighting.
+- `src/fxpost.js`: the one post pass (occlusion, depth of field, sun shafts, haze, grade). `src/fxhost.js` + `src/fx.js`: fires, smoke, tree variety, characters.
+- Add-ons reach the engine only through `window.__game`, `window.__build` and `window.__nature`. Add a name there rather than reaching into engine internals.
+
+## Direction
+- Peaceful by default. Combat is switched off, not deleted (`localStorage.combat = '1'` brings it back); do not build on it.
+- Look: realistic lighting on a voxel world, calm rather than noisy. Performance target is 144 fps on a desktop GPU: no new full-screen passes, and measure before adding per-frame work.

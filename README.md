@@ -1,6 +1,8 @@
-# Homestead sim game (World Engine prototype)
+# Homestead
 
-Browser homestead builder (heading toward a Stardew-style sim) on a Valheim-style world engine.
+Browser homestead builder (heading toward a Stardew-style sim) on a Valheim-style world engine. Working rules for contributors are in `CLAUDE.md`.
+
+Peaceful by default: the old combat is switched off, not removed (`localStorage.setItem('combat', '1')` and reload brings it back).
 
 `main` = the `build-mode` branch + the `fx` add-on. The `combat` branch is archived and not merged; it holds the later combat work (stealth, flow, allies, camps) on the same engine, without the engine patches made here.
 
