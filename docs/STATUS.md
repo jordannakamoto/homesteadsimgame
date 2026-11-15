@@ -69,7 +69,7 @@ State at 02:10 Pacific, 15 Nov. Usage window runs to 06:30. Keep at most four ag
 | 7 water | `wt-07-water` | `a794eb67a6f7cff9d` | Merged (headless) |
 | 6 electrical | `wt-06-electrical` | `a8d26ca299cbd8bc9` | Merged (headless) |
 | 13 chickens | `wt-13-chickens` | `a194e2272cd6e5656` | Merged, live |
-| 2a second half (framing, stages, materials list, plans, fixtures) | `wt-02b-build` | `a4d4f2abc82ad3b82` | Running |
+| 2a second half (framing, stages, materials list, plans, fixtures) | `wt-02b-build` | `a4d4f2abc82ad3b82` | Merged, live. Not done: log, timber frame, A-frame, 2D plan view, placing single members by hand |
 | F1 farming | `wt-f1-farming` | `aff01250a5f1dc736` | Running |
 | 4 thermal | `wt-04-thermal` | `a1ed4e1a9cafe5d67` | Merged (headless) |
 | 3 structure | `wt-03-structure` | `ac42fcd07389e8bfb` | Resumed 02:35 |
