@@ -11,13 +11,15 @@ A browser homestead builder (Stardew-style direction) on a Valheim-style voxel w
 
 ## Build and test
 - `npm install && sh build.sh` writes `dist/index.html`, one self-contained page.
-- Test headlessly before pushing: the page must load with no errors, build mode must open (B), and Low and High quality must both work.
+- Test headlessly before pushing: `npm test` (simulation, seconds) and `node test/page.smoke.mjs` (the built page: loads with no errors, build mode opens, Low and High quality work, saves survive a reload).
 
 ## The live page
 - The game page is the claude.ai artifact "Homestead" (formerly "World Engine Prototype"; slug `17909dd9-2610-496f-be32-0d354df886eb`).
 - Publish only a build of `main` that is already pushed. Read the artifact's live version first and publish over that.
 
 ## Code map
+- `ARCHITECTURE.md`: the layers, the simulation rules and the interfaces. `docs/V1_PLAN.md`: the plan and vision. `docs/PLAYTEST.md`: what each wave added.
+- `src/sim/`: the simulation. All world truth that changes over time lives here: deterministic, fixed ticks, seeded randomness, no DOM or three.js. One system per file, registered in `src/sim/index.js`.
 - `src/engine.js`: world, terrain, trees, grass, water, player, tools, day and night. Ordinary source with real names; edit it directly.
 - `src/build.js`: build mode and furniture. `src/touch.js`: touch controls. `src/nature.js`: ground cover, shrubs, insects, animals, soft foliage lighting.
 - `src/fxpost.js`: the one post pass (occlusion, depth of field, sun shafts, haze, grade). `src/fxhost.js` + `src/fx.js`: fires, smoke, tree variety, characters.

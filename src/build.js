@@ -4304,7 +4304,37 @@
     if (moved) [e.x, e.z] = toWorld(S, lx, lz);
     e.__bp = { id: S.id, lx, lz };
   }
+  // The piece interface, version 0 (see ARCHITECTURE.md). Every built element as plain data:
+  // what it is, what it is made of, and its size and place in world metres. Simulation systems
+  // (structure, heat, salvage) read buildings only through this list, never through build mode's internals.
+  function listPieces() {
+    const out = [];
+    for (const S of B.structs) {
+      const h = WALL_H * S.hs;
+      const at = (lx, lz) => { const [x, z] = toWorld(S, lx, lz); return { x, z }; };
+      const add = (kind, type, material, a, b, y0, y1, extra) => out.push({ id: S.id + ":" + kind + ":" + out.length, struct: S.id, kind, type, material, a, b, y0: S.y0 + y0, y1: S.y0 + y1, ...extra });
+      for (const k of S.floors) {
+        const [i, j] = parse(k);
+        add("floor", "floor", S.fmat.get(k) || "planks", at(i, j), at(i + 1, j + 1), -FLOOR_T, 0, { area: 1, thickness: FLOOR_T });
+      }
+      for (const [k, type] of S.walls) {
+        const [i, j, d] = parse(k);
+        const low = isLow(type);
+        add(isDoor(type) ? "door" : isWin(type) ? "window" : "wall", type, S.wmat.get(k) || "timber", at(i, j), d === 0 ? at(i + 1, j) : at(i, j + 1), 0, low ? 1 : h, { length: 1, height: low ? 1 : h, thickness: isThick(type) ? 1 : HALF_T * 2 });
+      }
+      for (const sg of S.segs) {
+        const len = Math.hypot(sg[2] - sg[0], sg[3] - sg[1]);
+        add("wall", String(sg[4] || "wall"), "timber", at(sg[0], sg[1]), at(sg[2], sg[3]), 0, h, { length: len, height: h, thickness: HALF_T * 2, free: true });
+      }
+      for (const p of S.pillars) add("post", "pillar", "timber", at(p[0], p[1]), at(p[0], p[1]), 0, h, { height: h });
+      for (const r of S.roofs) out.push({ id: S.id + ":roof:" + out.length, struct: S.id, kind: "roof", type: "roof", material: "thatch", raw: { ...r } });
+      for (const r of S.rings) out.push({ id: S.id + ":tower:" + out.length, struct: S.id, kind: "tower", type: "tower", material: "stone", raw: { ...r, sides: r.sides.slice() } });
+    }
+    return out;
+  }
   window.__build = {
+    pieces: listPieces,
+    get version() { return B.version; },
     _t: { copyPick: () => copyPick(), stamp: () => stamp(), topWalk, rebuild },
     key(e) {
       if (e.code === "AltLeft" || e.code === "AltRight") B.alt = true;

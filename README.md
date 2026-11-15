@@ -12,9 +12,12 @@ Peaceful by default: the old combat is switched off, not removed (`localStorage.
 
 ## Layout
 
+See `ARCHITECTURE.md` for how the simulation, world and rendering fit together, and `docs/V1_PLAN.md` for where the game is going.
+
 `npm install && npm run build` writes `dist/index.html`, a single self-contained page.
 
 - `src/engine.js`: the world engine, as ordinary readable source (about 2,800 lines, imports three.js r187; `build.sh` bundles it). It is the main prototype's source as of the build the Build Mode page was taken from, with every engine patch made for build mode, nature and lighting ported in. It replaces the earlier `src/engine.js`, which was that build's minified bundle prettified and patched in place; the port was checked token for token against it. Four functions that the patches rewrote wholesale (`makeAtlas`, `buildPine`, `tubeTiled`, `groundTint`) still carry short local names from the bundle.
+- `src/sim/`: the deterministic simulation (clock, saving, and each simulated system as it lands). Runs in the page and headlessly: `npm test`.
 - `src/build.js`: build mode (walls, roofs, castle kit, paths, copy, save, furniture).
 - `src/touch.js`: mobile dual-stick controls and build buttons.
 - `src/nature.js`: ground cover, ivy, fallen logs, insects, animals, unified soft lighting, pine level of detail.

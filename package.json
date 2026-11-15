@@ -1,14 +1,16 @@
 {
-  "name": "homesteadsimgame-build-mode",
+  "name": "homesteadsimgame",
   "version": "1.0.0",
   "private": true,
-  "description": "World Engine prototype, Build Mode branch: single-file HTML build",
+  "description": "Homestead: a browser homesteading sim. Single-file HTML build.",
   "scripts": {
-    "build": "sh build.sh"
+    "build": "sh build.sh",
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "esbuild": "^0.28.2",
     "prettier": "^3.10.1",
     "three": "^0.187.0"
-  }
+  },
+  "type": "module"
 }

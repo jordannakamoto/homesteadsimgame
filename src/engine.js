@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createGameSim, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -68,8 +69,12 @@ let SEED = 1337;
 {
   const m = /^#seed-(\d+)$/.exec(location.hash || '');
   if (m) SEED = parseInt(m[1], 10) >>> 0;
+  else { try { const last = localStorage.getItem('homestead:last-seed'); if (last) SEED = parseInt(last, 10) >>> 0; } catch (e) { /* no storage */ } }
 }
 let noise;
+// The simulation owns world time and every simulated system; the engine draws it. See ARCHITECTURE.md.
+let sim = createGameSim(SEED);
+const simCtl = { speed: 1, dirty: false, saveT: 0 };
 function fbm(x, z, oct) {
   let a = 1, f = 1, s = 0, n = 0;
   for (let o = 0; o < oct; o++) { s += a * noise(x * f, z * f); n += a; a *= 0.5; f *= 2.03; }
@@ -122,7 +127,13 @@ const world = {
   queue: [],
   fallers: [], logs: [], pickups: [], shakes: [],
   wood: 0, stone: 0, kills: 0,
-  time: 0.34,
+  // time of day as a fraction (0 = midnight), read from the simulation. Setting it moves time
+  // forward to the next moment the clock shows that time; time never runs backwards.
+  get time() { return sim.dayFraction(); },
+  set time(f) {
+    const d = (((f - sim.dayFraction()) % 1) + 1) % 1;
+    if (d > 1e-9) sim.advance(d * 86400 + 1e-6);
+  },
 };
 const ckey = (cx, cz) => cx + ',' + cz;
 function getDelta(gx, gz) {
@@ -1633,6 +1644,11 @@ window.addEventListener('keydown', (e) => {
     if (e.code === 'Digit3') setTool('raise');
     if (e.code === 'Digit4') setTool('level');
   }
+  if (player.tool !== 'build') {                             // build mode uses these keys itself; its speed buttons still work
+    if (e.code === 'Semicolon') stepSpeed(-1);
+    if (e.code === 'Quote') stepSpeed(1);
+    if (e.code === 'Backquote') setSpeed(simCtl.speed ? 0 : 1);
+  }
   if (e.code === 'KeyG') setQuality(quality.level === 'high' ? 'low' : 'high');
   if (e.code === 'KeyH') { const h = document.getElementById('help'); h.hidden = !h.hidden; }
   if (e.altKey || ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'AltLeft', 'AltRight'].includes(e.code)) e.preventDefault();
@@ -1956,9 +1972,51 @@ function updateSky() {
 let hudDirty = true;
 const el = (id) => document.getElementById(id);
 function clock() {
-  const m = Math.floor(world.time * 24 * 60);
-  return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60 - (m % 60) % 10).padStart(2, '0');
+  const t = clockText(sim.state.t);
+  return t.slice(0, 4) + '0';          // shown to the ten minutes
 }
+function setSpeed(v) {
+  simCtl.speed = SPEEDS.includes(v) ? v : 1;
+  for (const b of document.querySelectorAll('#speed button')) b.setAttribute('aria-pressed', +b.dataset.speed === simCtl.speed ? 'true' : 'false');
+}
+function stepSpeed(d) { setSpeed(SPEEDS[clamp(SPEEDS.indexOf(simCtl.speed) + d, 0, SPEEDS.length - 1)]); }
+for (const b of document.querySelectorAll('#speed button')) b.addEventListener('click', () => { setSpeed(+b.dataset.speed); canvas.focus(); });
+
+// ---------------------------------------------------------- saving
+// One save per world seed: the simulation state plus what the engine owns (terrain edits, felled
+// trees, stock, where the player stood). Buildings are saved by build mode under the same seed.
+const SAVE_KEY = 'homestead:save:', LAST_KEY = 'homestead:last-seed';
+function saveData() {
+  const edits = {};
+  for (const [k, a] of world.edits) edits[k] = f32ToBase64(a);
+  return makeSave(sim.serialize(), {
+    edits, removed: [...world.removed], wood: world.wood, stone: world.stone,
+    player: { x: player.x, z: player.z }, cam: { yaw: cam.yaw, pitch: cam.pitch, dist: cam.dist },
+  });
+}
+function saveGame() {
+  try {
+    localStorage.setItem(SAVE_KEY + SEED, JSON.stringify(saveData()));
+    localStorage.setItem(LAST_KEY, String(SEED));
+    return true;
+  } catch (e) { return false; }      // storage full or unavailable: the game carries on unsaved
+}
+// Reads this seed's save into the world. Call before chunks are built. Returns true if one was applied.
+function applySave(raw) {
+  let save;
+  try { save = readSave(raw); } catch (e) { console.warn('Save not loaded: ' + e.message); return false; }
+  if ((save.sim.seed >>> 0) !== SEED) return false;
+  sim.load(save.sim);
+  const w = save.world || {};
+  for (const k in (w.edits || {})) world.edits.set(k, base64ToF32(w.edits[k]));
+  for (const id of (w.removed || [])) world.removed.add(id);
+  world.wood = w.wood || 0; world.stone = w.stone || 0;
+  if (w.player) { player.x = w.player.x; player.z = w.player.z; }
+  if (w.cam) { cam.yaw = cam.prevYaw = w.cam.yaw; cam.pitch = w.cam.pitch; cam.dist = w.cam.dist; }
+  return true;
+}
+window.addEventListener('pagehide', saveGame);
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveGame(); });
 function setQuality(q) {
   quality.level = q;
   const hi = q === 'high';
@@ -1968,12 +2026,13 @@ function setQuality(q) {
   el('quality').textContent = hi ? 'High' : 'Low';
 }
 el('quality').addEventListener('click', () => { setQuality(quality.level === 'high' ? 'low' : 'high'); canvas.focus(); });
-el('newworld').addEventListener('click', () => { resetWorld((Math.random() * 1e6) | 0); canvas.focus(); });
+el('newworld').addEventListener('click', () => { saveGame(); resetWorld((Math.random() * 1e6) | 0); canvas.focus(); });
 el('helpbtn').addEventListener('click', () => { el('help').hidden = true; canvas.focus(); });
 
 function resetWorld(seed) {
   SEED = seed >>> 0;
   noise = makeSimplex(SEED);
+  sim = createGameSim(SEED);
   clearEnemies();
   if (window.__build) window.__build.reset();
   for (const c of world.chunks.values()) c.dispose();
@@ -1988,13 +2047,17 @@ function resetWorld(seed) {
   for (const a of arrows) scene.remove(a.mesh);
   arrows.length = 0;
   player.x = 0; player.z = 0;
-  updateChunks(0, 0, 1e9);
-  player.y = heightAt(0, 0);
-  cam.tx = 0; cam.tz = 0; cam.ty = player.y;
+  let raw = null;
+  try { raw = localStorage.getItem(SAVE_KEY + SEED); } catch (e) { /* no storage here */ }
+  if (raw) applySave(raw);
+  updateChunks(player.x, player.z, 1e9);
+  player.y = heightAt(player.x, player.z);
+  cam.tx = player.x; cam.tz = player.z; cam.ty = player.y;
   spawnEnemy('start|e0', 12, 10, 0, 'start');
   spawnEnemy('start|e1', -16, 13, 1, 'start');
   setMsg('');
   el('seed').textContent = String(SEED);
+  setSpeed(simCtl.speed);
   try { history.replaceState(null, '', '#seed-' + SEED); } catch (err) { /* hash not writable here */ }
   hudDirty = true;
 }
@@ -2721,7 +2784,10 @@ function step(dt) {
     if (ax > 0.18) cam.yaw -= Math.sign(mouse.x) * ((ax - 0.18) / 0.82) * 2.8 * dt;
     cam.aimPitch = clamp(0.25 - mouse.y * 0.5, -0.28, 0.9);
   }
-  world.time = (world.time + dt / (keys.KeyT ? 8 : 600)) % 1;
+  // hand real time to the simulation; it advances in fixed ticks, a bounded number per frame
+  sim.advance(dt * WORLD_SECONDS_PER_REAL_SECOND * (keys.KeyT ? Math.max(simCtl.speed, 100) : simCtl.speed), 24);
+  simCtl.saveT += dt;
+  if (simCtl.saveT > 20) { simCtl.saveT = 0; saveGame(); }
   updateChunks(player.x, player.z, 5);
   updatePlayer(dt);
   updateEnemies(dt);
@@ -2762,6 +2828,7 @@ function frame(now) {
     fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0;
     el('fps').textContent = String(Math.round(fps));
     el('clock').textContent = clock();
+    el('day').textContent = String(sim.day());
     slowFor = fps < 27 ? slowFor + 0.5 : 0;
     if (slowFor >= 3 && quality.level === 'high' && !autoDropped) { autoDropped = true; setQuality('low'); }
     hudDirty = true;
@@ -2786,6 +2853,7 @@ setTool('axe');
 lockUi();
 window.__game = {
   pm, get seed() { return SEED; },
+  get sim() { return sim; }, saveGame, saveData, setSpeed, get speed() { return simCtl.speed; },
   enemies, spawnEnemy, arrows, fireArrow, MOVES, startMove, juice, updateHud, waveHeight, depthState, lockQuality: () => { autoDropped = true; }, world, player, cam, keys, mouse, cursor, step, render, heightAt, fellTree, applyBrush, setQuality, renderer, THREE,
   camera, scene, setTool, fade: addWind, burst, editGet: getDelta, editSet: setDelta, baseHeight, chunkSize: CS, treeKinds: TREE, refreshLock: lockUi, forestAt,
   light: SKY, noise: fbm, palette: PAL, quality: () => quality.level, composer: () => composer, treeGeo, pineLite: pineLiteGeo, markStockDirty: () => { hudDirty = true; },
