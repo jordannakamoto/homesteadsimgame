@@ -427,7 +427,7 @@ function designChecks(buses, verts, wires, circuits, ctrls, nounOf, issue) {
     B.nomV = V;
   }
   for (const w of wires) {
-    if (w.v < 0) continue;
+    if (w.v < 0 || !buses[w.bus].designW) continue;
     const B = buses[w.bus], V = B.nomV * B.vf[w.v], I = B.designW[w.v] / V;
     w.designA = I; w.designDropPct = dropPercent(I, w.spec, w.lengthM, V);
     const between = 'from the ' + nounOf(w.from) + ' to the ' + nounOf(w.to);
@@ -608,7 +608,7 @@ function step(ctx) {
     // charge controllers: what each could deliver to the battery bus this minute
     let pvAvail = 0;
     for (const k of c.ctrls) {
-      k.avail = 0; k.inW = 0;
+      k.avail = 0; k.inW = 0; k.pvLoss = 0;
       if (k.disabled || !k.panels.length || !lit) continue;
       const PB = k.pvBus;
       PB.inj.fill(0);
@@ -638,6 +638,10 @@ function step(ctx) {
       const want = gs.manual || !!gs.autoOn;
       const fuelW = ((gs.fuelL / dtH - d.idleLph) / d.lPerKWh) * 1000;
       gs.running = want && fuelW > 0;
+      if (want && !gs.running && gs.fuelL > 0) {   // less than a minute of idling left: it sputters and stops
+        gs.fuelUsedL += gs.fuelL; led.fuelL += gs.fuelL; gs.fuelL = 0; gs.manual = false; gs.autoOn = false;
+        ctx.emit('electrical.outOfFuel', { id: g.pieceId });
+      }
       g.avail = gs.running ? Math.min(d.ratedW, fuelW) : 0;
       genAvail += g.avail;
     }
