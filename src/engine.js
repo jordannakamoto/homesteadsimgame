@@ -1660,12 +1660,23 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => { keys[e.code] = false; if (e.code === 'AltLeft' || e.code === 'AltRight') e.preventDefault(); });
 window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouse.left = mouse.right = false; });
 const locked = () => document.pointerLockElement === canvas;
+// A browser refuses to capture the mouse for a second or so after Esc, and that refusal used to switch the game to
+// edge-steering for good. Now a refusal just means "click again"; edge-steering is only the fallback where capture
+// has never worked on this page and has been refused three times running.
+let lockEver = false, lockMisses = 0, lockLastMiss = 0;
+function lockRefused() {
+  const now = performance.now();
+  if (now - lockLastMiss < 50) return;                  // one refusal reports twice (promise and event)
+  lockLastMiss = now; lockMisses++;
+  if (!lockEver && lockMisses >= 3) juice.lockFailed = true;
+  lockUi();
+}
 function lockUi() {
   const b = el('lock');
   b.hidden = locked() || player.tool === 'build';
   b.textContent = juice.lockFailed
     ? 'Mouse capture is not available here. Push the mouse toward the left or right edge to turn.'
-    : 'Click the view to take control. Esc frees the mouse.';
+    : lockMisses ? 'Click the view again to take control.' : 'Click the view to take control. Esc frees the mouse.';
 }
 function syncButtons(e) {
   const left = !!(e.buttons & 1);
@@ -1680,16 +1691,16 @@ canvas.addEventListener('pointerdown', (e) => {
     if (e.button === 0) mouse.swallow = true;
     try {
       const pr = canvas.requestPointerLock();
-      if (pr && pr.catch) pr.catch(() => { juice.lockFailed = true; lockUi(); });
-    } catch (err) { juice.lockFailed = true; lockUi(); }
+      if (pr && pr.catch) pr.catch(lockRefused);
+    } catch (err) { lockRefused(); }
   }
   syncButtons(e);
 });
 canvas.addEventListener('pointerup', syncButtons);
 canvas.addEventListener('pointercancel', () => { mouse.left = mouse.right = false; });
 canvas.addEventListener('pointerleave', () => { mouse.inside = false; });
-document.addEventListener('pointerlockchange', () => { lockUi(); if (!locked()) { mouse.left = mouse.right = false; } });
-document.addEventListener('pointerlockerror', () => { juice.lockFailed = true; lockUi(); });
+document.addEventListener('pointerlockchange', () => { if (locked()) { lockEver = true; lockMisses = 0; lockLastMiss = 0; juice.lockFailed = false; } lockUi(); if (!locked()) { mouse.left = mouse.right = false; } });
+document.addEventListener('pointerlockerror', lockRefused);
 canvas.addEventListener('pointermove', (e) => {
   syncButtons(e);
   const r = canvas.getBoundingClientRect();
