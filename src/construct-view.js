@@ -169,6 +169,15 @@
     const main = [];
     for (const mid of freshOf(id)) { const m = g.byId.get(mid); m && m.draw !== 0 && main.push(m); }
     if (w && w.layer === 'main' && w.m.draw !== 0) main.push(w.m);
+    // something too big for one load (siding, roofing) grows as the loads arrive
+    for (const mid in pr.members) {
+      const pm = pr.members[mid];
+      if (pm.built || !(pm.got > 1e-6) || !(pm.need > 0)) continue;
+      const m = g.byId.get(mid);
+      if (!m || m.draw === 0) continue;
+      const f = Math.min(1, pm.got / pm.need), sg = m.n[1] < -0.3 ? -1 : 1, sh = (-sg * m.section.d * (1 - f)) / 2;
+      main.push({ id: mid + ':part', col: m.col, a: [m.a[0] + m.n[0] * sh, m.a[1] + m.n[1] * sh, m.a[2] + m.n[2] * sh], b: [m.b[0] + m.n[0] * sh, m.b[1] + m.n[1] * sh, m.b[2] + m.n[2] * sh], n: m.n, section: { b: m.section.b, d: m.section.d * f } });
+    }
     asm.setSolid(id, 'main', main, 96);
     for (const st of C.STAGES) {
       if (!st.flat) continue;
@@ -342,7 +351,7 @@
       const pr = S().progress[j.id];
       if (r.installed.length) {
         if (j.layer === 'main') freshOf(j.id).add(j.memberId);
-        if (j.kind === 'site' || j.kind === 'door' || j.kind === 'window' || freshOf(j.id).size >= 16) { flush(j.id); if (j.kind === 'site') V.terrainV = (V.terrainV || 0) + 1; }
+        if (j.kind === 'site' || j.kind === 'door' || j.kind === 'window' || freshOf(j.id).size >= 40) { flush(j.id); if (j.kind === 'site') V.terrainV = (V.terrainV || 0) + 1; }
         moments(pr, j, r);
       } else if (r.partial.length) { const q = r.partial[0]; flash(plain(lineOf(pr, j.memberId).label) + ': ' + Math.round((100 * q.got) / q.need) + '% there. Fetch more.'); }
       redraw(j.id);
@@ -438,6 +447,12 @@
       W.tick(dt, speed);
     }
     if (V.working && !V.working.partial && V.working.m.draw !== 0) asm.lift(V.working.id, V.working.layer, V.working.memberId, 0.24 * (1 - W.progress()));
+    // the character's arms: a blow for each beat, both up under a wall, one up under a load
+    const P = G.player, pose = V.pose || (V.pose = { kind: '', k: 0 });
+    if (V.raise && !V.raise.landed) pose.kind = 'lift';
+    else if (W.job) { pose.kind = 'hammer'; const ph = Math.min(1, W.t / C.WORK.beatS); pose.k = ph < 0.75 ? 0 : (ph - 0.75) * 4; }
+    else pose.kind = s.carried ? 'carry' : '';
+    P.work = pose.kind ? pose : null;
     // hand finished pieces back to build mode once the hammer rests
     V.idleT = W.job ? 0 : V.idleT + dt;
     if (V.idleT > 0.45) for (const [id, f] of V.fresh) if (f.size && !V.flushing.some((q) => q.id === id)) flush(id);

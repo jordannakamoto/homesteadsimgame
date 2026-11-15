@@ -2772,6 +2772,11 @@ function updatePlayer(dt) {
   } else if (P.parry) { const up = P.parry.t < 0.24 ? 1 : 1 - (P.parry.t - 0.24) / 0.21; armL = armR = -1.25 * up; lean = -0.08 * up; }
   else if (P.aiming) { armL = -1.55; armR = -1.5; twist = 0.45; pullR = charge; }
   else if (P.digging) armR = -1.2 + Math.sin(U.time.value * 14) * 0.5;
+  else if (P.work) {                                      // set by add-ons: hammering (phase 0..1 of a blow), lifting, carrying
+    if (P.work.kind === 'hammer') { armR = -2.3 + 1.7 * P.work.k; lean = 0.1 + 0.12 * P.work.k; }
+    else if (P.work.kind === 'lift') { armL = armR = -2.5; lean = -0.12; }
+    else if (P.work.kind === 'carry') armR = -2.0 + armR * 0.2;
+  }
   pm.legL.rotation.x = legL; pm.legR.rotation.x = legR;
   pm.armL.rotation.x = armL; pm.armR.rotation.x = armR;
   pm.armR.position.z = -0.22 * pullR;
