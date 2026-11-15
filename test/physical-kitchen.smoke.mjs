@@ -145,7 +145,10 @@ try {
   assert.equal(await page.evaluate(() => __game.cooking.active), false);
   await page.evaluate(() => {
     __game.setSpeed(10);
-    for (let i = 0; i < 240; i++) __game.step(1 / 60);
+    for (let i = 0; i < 1200; i++) {
+      __game.step(1 / 60);
+      if (__game.sim.state.sys.physicalKitchen.objects.some(o => o.kind === 'carrot' && o.cooked >= 0.8 && o.burn < 0.6)) break;
+    }
     __game.setSpeed(0);
   });
   st = await state();
@@ -174,8 +177,8 @@ try {
   await page.mouse.move(dial.x, dial.y + 140, { steps: 8 });
   await page.mouse.up();
   assert.equal((await state()).power, 0);
-  const mealPiece = (await state()).objects.filter(o => o.kind === 'carrot').sort((a,b) => a.burn-b.burn)[0];
-  assert.ok(mealPiece.cooked >= 0.8 && mealPiece.burn < 0.6, 'food actually cooked');
+  const mealPiece = (await state()).objects.find(o => o.kind === 'carrot' && o.cooked >= 0.8 && o.burn < 0.6);
+  assert.ok(mealPiece, 'at least one physical piece actually cooked');
   const mealOffset = await begin(mealPiece.id);
   await dragTo(mealOffset, { x: 0.05, z: 0.8 });
   await page.mouse.up(); await step(120);

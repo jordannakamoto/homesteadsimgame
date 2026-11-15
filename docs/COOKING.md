@@ -38,3 +38,7 @@ Poses, velocities, cut solids, mass, heat, doneness and spoilage age are saved. 
 ## Follow-ups
 
 Playtest mouse ergonomics first. Add trackpad/touch controls, clearer hand/knife feedback and sound, safe constrained tilting/pouring, more sliceable ingredient shapes, a physical pot and liquids, and dish recognition from actual contents. Benchmark larger fields and kitchens on target integrated graphics before increasing the active-body cap. The camera still needs occlusion handling inside tight player-built rooms.
+
+### Integration with current main (PR #2)
+
+Preserved thermal, chickens, construction and equipment updates when resolving the system registration conflict. Combined suite: 136/137 passed on the first run; the remaining weather wall-time bound passed in isolation after browser checks finished (2.69 s, versus 2.63 s on unchanged main). Both the general page smoke and physical cooking smoke passed. Cooking smoke now waits, with a bounded timeout, for an edible piece and selects that piece rather than assuming all differently sized pieces finish at a fixed time.
