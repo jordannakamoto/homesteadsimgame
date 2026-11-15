@@ -2052,6 +2052,7 @@ function syncSite() {
   if (build.version === simCtl.siteV) return;
   const version = build.version;
   sim.commandNow('site.setPieces', { pieces: mapPieces(build.pieces()) });
+  sim.commandNow('structure.recheck');          // judge the building as it now stands, even while time is paused
   simCtl.siteV = version;
 }
 function saveData() {

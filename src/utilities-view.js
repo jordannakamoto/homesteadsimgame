@@ -52,6 +52,18 @@
       });
     }
     h += row("Outside", n(out, 1) + " °C", "");
+    // structure
+    const st = S.structure;
+    h += `<h3>Structure</h3>`;
+    const members = st ? Object.keys(st.members || {}).length : 0;
+    if (!st || !members) h += `<p class="utnone">Nothing built yet. When there is, this says how hard each part is working and what would fail first.</p>`;
+    else {
+      const w0 = st.worst, u = w0 && Number.isFinite(w0.utilisation) ? w0.utilisation : 0;
+      const word = u >= 1 ? "overloaded" : u >= 0.85 ? "near its limit" : u >= 0.5 ? "working comfortably" : "lightly loaded";
+      h += `<div class="utrow"><span class="utl">Hardest worked</span><span class="utv">${n(Math.min(u, 9.99) * 100)}%</span>${meter(u)}<span class="utn">${word}${w0 && w0.governs ? ", limited by " + esc(String(w0.governs)) : ""}</span></div>`;
+      const list = (st.issues || []).slice().sort((a, b) => (b.severity === "fail") - (a.severity === "fail") || (b.utilisation || 0) - (a.utilisation || 0));
+      h += list.length ? issues(list) : `<p class="utnone">No problems found: under a heavy snow and a strong gust, everything holds.</p>`;
+    }
     return h;
   }
   function render(force) {
