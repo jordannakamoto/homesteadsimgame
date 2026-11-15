@@ -212,7 +212,7 @@ function fresh() {
     tanks: {}, catchments: {}, pumps: {}, taps: {}, wells: {}, heaters: {}, pressureTanks: {}, firstFlush: {}, pipes: {},
     greywater: { storedL: 0, toGroundL: 0, toSewerL: 0, tanks: {} }, diverters: {},
     ground: {}, draws: [], results: {}, issues: [], loadsSent: {}, frost: { indexCs: 0, depthM: 0 },
-    today: { day: -1, collectedL: 0, usedL: 0, overflowL: 0 }, totals: zeroLedger(), nextDraw: 1 };
+    today: { day: -1, collectedL: 0, usedL: 0, overflowL: 0 }, totals: zeroLedger(), nextDraw: 1, issuesDirty: false };
 }
 const tankHeight = (f) => f.spec.heightM;
 
@@ -255,7 +255,7 @@ function sync(s, site, ctx) {
   for (const id of Object.keys(s.loadsSent)) {
     if (!net.fx.has(id)) { if (s.loadsSent[id].on && ctx.sim.handlers.has('electrical.setLoad')) ctx.sim.command('electrical.setLoad', { id, ratedW: 0, on: false, priority: 9 }); delete s.loadsSent[id]; }
   }
-  s.issuesDirty = true;
+  s.issuesDirty = !net.empty;
 }
 
 // ---------------------------------------------------------------------------------------- the step
@@ -672,7 +672,8 @@ function ptankStep(R, id) {
   if (why) return;
   // the pump pushes against the tank's present pressure; it stops at cut-out, or where the pump can push no harder
   const q = solveLmin(sourceSurfaceM(R, up), (f.p.y0 || 0) + ptankHeadM(pt, f.spec), up.pumps, net, up.K, null);
-  if (q <= 1e-6) { pt.refill = false; return; }
+  const qMax = up.pumps.reduce((a, id) => Math.min(a, net.fx.get(id).spec.maxLmin), Infinity);
+  if (q <= 0.05 * qMax) { pt.refill = false; return; }        // the switch cuts out as the pump nears its limit
   const L = Math.min(q * minutes, pt.drawdownL - pt.storedL, sourceAvailL(R, up)), tin = sourceTempC(R, up);
   if (L <= 0) return;
   withdraw(R, up, L); flowThrough(R, up.pipes, L, tin); noteFlow(R, up, L / minutes);
