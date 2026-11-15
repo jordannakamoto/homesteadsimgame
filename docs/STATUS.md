@@ -39,3 +39,18 @@ Things decided on the owner's behalf that are easy to reverse. Say so if any is 
 
 - Wave tags could not be pushed from the build environment; waves are identified by commit instead.
 - Iteration 2a was split across waves B and C.
+
+## Orchestrator notes (for resuming the run)
+
+Wave C agents, launched 14 Nov about 21:55 Pacific. Resume a stopped one with SendMessage to its id; each works in `/home/claude/wt-<name>` on branch `iter/<name>`.
+
+| Iteration | Worktree | Agent id |
+|---|---|---|
+| 3 structure | `wt-03-structure` | `ac42fcd07389e8bfb` |
+| 4 thermal | `wt-04-thermal` | `a1ed4e1a9cafe5d67` |
+| 6 electrical | `wt-06-electrical` | `a8d26ca299cbd8bc9` |
+| 7 water | `wt-07-water` | `a794eb67a6f7cff9d` |
+| 13 chickens | `wt-13-chickens` | `a194e2272cd6e5656` |
+| 2a second half | `wt-02b-build` | `a4d4f2abc82ad3b82` |
+
+After all six merge, the orchestrator still owes: fixture catalogs merged into `src/sim/fixtures.js` and the supplier, the catalog passed to build mode, `__game.addFixtures`, `src/overlays.js`, the fun check and the wave C playtest notes.
