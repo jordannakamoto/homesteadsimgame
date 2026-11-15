@@ -13,7 +13,7 @@ page.setDefaultTimeout(120000);
 await page.goto('file://' + process.cwd() + '/dist/index.html', { waitUntil: 'domcontentloaded', timeout: 120000 });
 await wait(8000);
 await G((Q) => { __game.lockQuality(); __game.setQuality(Q); __game.setSpeed(1); document.getElementById('help').hidden = true; }, process.env.Q || 'low');
-await page.keyboard.press('KeyK'); await wait(300);
+await page.keyboard.press('KeyH'); await wait(300);
 await page.$eval('#ckbody button[data-act="starter"]', (b) => b.click()); await wait(200);
 await G(() => { const s = __game.sim; s.commandNow('chickens.buy', { breed: 'rir', count: 2, ageWeeks: 30 }); s.commandNow('chickens.buy', { breed: 'leghorn', count: 1, ageWeeks: 30 }); s.commandNow('chickens.buy', { breed: 'rock', count: 1, ageWeeks: 30 }); s.commandNow('chickens.buy', { breed: 'australorp', count: 1, ageWeeks: 30 }); s.commandNow('chickens.buy', { breed: 'wyandotte', count: 1, ageWeeks: 30 }); s.commandNow('chickens.buy', { breed: 'pekin', count: 1, ageWeeks: 30 }); s.commandNow('chickens.buy', { breed: 'rir', count: 1, ageWeeks: 40, sex: 'rooster' }); });
 await page.$eval('#ckbody button[data-act="feed"]', (b) => b.click()); await wait(100);
