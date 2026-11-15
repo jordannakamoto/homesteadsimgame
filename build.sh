@@ -4,7 +4,8 @@ set -e
 cd "$(dirname "$0")"
 mkdir -p dist
 min() { npx esbuild "src/$1.js" --minify-whitespace --charset=utf8 --log-level=warning "$2" > "dist/$1.min.js"; }
-min engine --legal-comments=inline
+# the engine is ordinary module source: bundle it with three.js into one script
+npx esbuild src/engine.js --bundle --minify --format=iife --target=es2020 --charset=utf8 --legal-comments=inline --log-level=warning > dist/engine.min.js
 for m in build touch nature relight fxpost fxhost fx; do min $m --legal-comments=eof; done
 python3 - <<'P'
 r = lambda p: open(p, encoding='utf-8').read()
