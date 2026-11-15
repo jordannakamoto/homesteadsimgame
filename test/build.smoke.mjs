@@ -21,6 +21,7 @@ async function open(opts) {
   const G = (fn, arg) => page.evaluate(fn, arg);
   await G(() => {
     const g = __game; g.lockQuality(); g.setQuality('low'); localStorage.clear(); __build.reset();
+    g.sim.commandNow('construction.setOption', { key: 'sandbox', value: true });   // this test draws buildings that are built at once
     const r = g.renderer; window.__draw = r.render.bind(r); r.render = () => {};
     window.__step = (n = 2) => { for (let i = 0; i < n; i++) g.step(1 / 60); };
   });

@@ -75,7 +75,11 @@ export function deliver(s, deliveryId, layout) {
   return { ok: true, delivery: d, stacks };
 }
 
-function dropEmpty(s) { s.stacks = s.stacks.filter((k) => k.qty > EPS); }
+// an empty stack is gone; so is one down to sawdust (which is written off as spent)
+function dropEmpty(s) {
+  for (const k of s.stacks) if (k.qty > 0 && k.qty <= 1e-4) { const L = led(s, k.itemId); L.spent = round6(L.spent + k.qty); k.qty = 0; }
+  s.stacks = s.stacks.filter((k) => k.qty > EPS);
+}
 
 // Take from a stack into the hands. One kind of item is carried at a time; the load is limited by mass
 // (limitKg), but one whole unit can always be lifted (minQty). want: how much to end up holding, at most.

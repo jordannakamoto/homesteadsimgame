@@ -121,6 +121,26 @@ export function wanted(s, itemId) {
   }
   return round6(n);
 }
+// an armful of an item: whole pieces for the members that want it, as many as fit in `cap` units (part of one
+// if even a single piece is too heavy); Infinity when nothing wants it
+export function armful(s, itemId, cap) {
+  let sum = 0, any = false;
+  for (const sid in s.progress) {
+    const pr = s.progress[sid], open = {};
+    for (const id in pr.members) {
+      const m = pr.members[id];
+      if (m.built || !m.line || pr.lines[m.line].itemId !== itemId) continue;
+      if (open[m.stage] === undefined) open[m.stage] = stageOpen(pr, m.stage);
+      if (!open[m.stage]) continue;
+      const r = m.need - m.got;
+      if (r <= 1e-6) continue;
+      any = true;
+      if (sum + r <= cap + 1e-6) sum += r;
+      else return sum > 0 ? round6(sum) : cap;
+    }
+  }
+  return any ? round6(sum) : Infinity;
+}
 // a stage as the Build panel shows it
 export function stageView(s, pr, stage) {
   const def = C.STAGE[stage], t = pr.tally[stage] || [0, 0];
@@ -300,9 +320,9 @@ function pickUp(ctx, p) {
   if (isSupply(st.itemId)) return { ok: false, reason: 'stays by the stacks' };
   const it = item(st.itemId), tools = (ctx.get('stock') || {}).tools || [];
   const have = s.carried && s.carried.itemId === st.itemId ? s.carried.qty : 0;
-  const w = wanted(s, st.itemId);
-  const want = p.qty > 0 ? have + p.qty : w > have + 1e-6 ? w : Infinity;
-  const r = SUP.takeFromStack(s, st.id, { massKgPerUnit: it.massKgPerUnit, limitKg: C.carryLimitKg(tools), want, minQty: it.unit === 'each' ? 1 : 0 });
+  const limitKg = C.carryLimitKg(tools), minQty = it.unit === 'each' ? 1 : 0, cap = Math.max(minQty, limitKg / it.massKgPerUnit);
+  const want = p.qty > 0 ? have + p.qty : armful(s, st.itemId, cap);
+  const r = SUP.takeFromStack(s, st.id, { massKgPerUnit: it.massKgPerUnit, limitKg, want, minQty });
   if (r.ok) ctx.emit('construction.carry', { itemId: r.itemId, qty: r.carried.qty });
   return r;
 }
@@ -422,5 +442,5 @@ export const constructionSystem = () => ({
     'construction.setOption': (c, p) => { if (!p || !(p.key in c.s.options)) return { ok: false, reason: 'unknown option' }; c.s.options[p.key] = !!p.value; if (p.key === 'sandbox') c.emit('construction.sandbox', { on: !!p.value }); return { ok: true }; },
     'construction.seeCard': (c, p) => { c.s.tutorial.seen[p.stage] = true; return { ok: true }; },
   },
-  api: { content: C, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, tutorialStep, carriedMassKg, imbalance: SUP.imbalance },
+  api: { content: C, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance },
 });

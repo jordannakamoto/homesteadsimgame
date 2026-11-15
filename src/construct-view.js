@@ -281,7 +281,7 @@
     if (stack) {
       if (C.SITE_SUPPLY.includes(stack.itemId)) return { kind: 'hint', text: plain(CAT[stack.itemId].name) + ': used up as you build' };
       if (!c) return { kind: 'pick', stack };
-      if (c.itemId === stack.itemId) return api.wanted(s, c.itemId) > c.qty + 1e-6 && api.carriedMassKg(s) < C.carryLimitKg(G.sim.state.sys.stock.tools) - 0.5 ? { kind: 'pick', stack, more: true } : { kind: 'back', stack };
+      if (c.itemId === stack.itemId) { const it = CAT[c.itemId], a = api.armful(s, c.itemId, Math.max(it.unit === 'each' ? 1 : 0, C.carryLimitKg(G.sim.state.sys.stock.tools) / it.massKgPerUnit)); return a !== Infinity && a > c.qty + 1e-4 ? { kind: 'pick', stack, more: true } : { kind: 'back', stack }; }
       return { kind: 'swap', stack };
     }
     if (c) return pr ? { kind: 'hint', text: 'Nothing here needs ' + stackName(c.itemId) + ' yet', drop: true } : { kind: 'drop' };
@@ -503,6 +503,7 @@
     if (!v) return pr.done ? null : { k: pr.name, title: 'Waiting', line: 'Nothing can go in just now.' };
     const out = { k: pr.name + ' · ' + C.STAGE_ORDER.filter((q) => pl.view.stages.some((w) => w.id === q)).indexOf(v.id) + ' of ' + pl.view.stages.length + ' stages done', title: v.name, stage: v.id, what: v.what, why: v.why };
     out.k = pr.name + ' · stage ' + (pl.view.stages.indexOf(v) + 1) + ' of ' + pl.view.stages.length;
+    if (Object.values(pr.lines).every((l) => l.ordered <= 1e-9) && pl.view.toOrderUsd > 0) return { ...out, line: 'Order the materials. While they are on their way, level the ground: stand on the plan and hold <kbd>F</kbd>.', btn: ['order:all', 'Order everything, ' + money(pl.view.toOrderUsd)], target: at };
     if (V.auto && V.auto.id === pr.id) return { ...out, line: (V.auto.guided ? 'Building. ' : 'Working until it is done. ') + '<kbd>F</kbd> stops.', target: at };
     if (pl.raise) return { ...out, line: 'The frame is ready. Stand by it and hold <kbd>F</kbd> to raise the wall.', target: at };
     const first = pl.inst.find((id) => pr.members[id].stage === v.id) || pl.inst[0], ln = first ? lineOf(pr, first) : null;
@@ -520,6 +521,7 @@
   }
   function drawNext() {
     const a = nextAction(), s = S();
+    V.anyOpen = inProgress().length > 0;
     V.target = a && a.target ? a.target : null;
     // a card with the reason, once for each stage as it opens
     const card = a && a.stage && s.options.cards && !s.tutorial.seen[a.stage] ? a.stage : null;
@@ -589,12 +591,13 @@
     // the one obvious next action
     h += '<div class="cvtop">';
     if (nx) {
-      if (nx.toOrderUsd > 0 && nx.status === 'not-ordered') h += `<button type="button" class="go" data-act="order:${nx.id}">Order this stage, ${money(nx.toOrderUsd)}</button>`;
+      if (Object.values(pr.lines).every((l) => l.ordered <= 1e-9) && v.toOrderUsd > 0) h += `<button type="button" class="go" data-act="order:all">Order everything, ${money(v.toOrderUsd)}</button><button type="button" data-act="order:${(v.stages.find((q) => q.toOrderUsd > 0) || nx).id}">Only the first stage, ${money((v.stages.find((q) => q.toOrderUsd > 0) || nx).toOrderUsd)}</button>`;
+      else if (nx.toOrderUsd > 0 && nx.status === 'not-ordered') h += `<button type="button" class="go" data-act="order:${nx.id}">Order this stage, ${money(nx.toOrderUsd)}</button>`;
       else if (nx.status === 'ordered') h += `<button type="button" disabled>Delivery on its way</button>`;
       else if (V.auto && V.auto.id === pr.id) h += `<button type="button" class="go" data-act="stop">Stop working</button>`;
       else if (pr.level === 'guided') h += `<button type="button" class="go" data-act="auto:${nx.id}">${esc(nx.verb)}</button>`;
       else h += `<button type="button" class="go" data-act="auto:${nx.id}" title="Your character keeps working this stage, fetching from the stacks. F stops.">Work until done: ${esc(low(nx.name))}</button>`;
-      if (v.toOrderUsd > (nx.status === 'not-ordered' ? nx.toOrderUsd : 0) + 1) h += `<button type="button" data-act="order:all">Order everything, ${money(v.toOrderUsd)}</button>`;
+      if (!Object.values(pr.lines).every((l) => l.ordered <= 1e-9) && v.toOrderUsd > (nx.status === 'not-ordered' ? nx.toOrderUsd : 0) + 1) h += `<button type="button" data-act="order:all">Order everything, ${money(v.toOrderUsd)}</button>`;
     }
     h += '</div>';
     h += `<div class="cvopts"><span>How hands-on:</span><div class="cvseg">${[['guided', 'Guided', 'One press builds a stage while you watch'], ['hands-on', 'Hands-on', 'Carry the materials and hold F to work'], ['piece', 'Piece by piece', 'Click each piece to set it yourself']].map((q) => `<button type="button" data-act="level:${q[0]}" aria-pressed="${pr.level === q[0]}" title="${q[2]}">${q[1]}</button>`).join('')}</div>${pr.level === 'hands-on' ? `<label title="Press F by the building once and it keeps going, fetching from the stacks"><input type="checkbox" data-opt="auto"${s.options.auto ? ' checked' : ''}>Work until done</label>` : ''}</div>`;
@@ -715,7 +718,7 @@
     for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, 0]]) { const lx = (a * p.w) / 2, lz = (b * p.l) / 2, y = G.heightAt(p.x + lx * c + lz * s, p.z - lx * s + lz * c); lo = Math.min(lo, y); hi = Math.max(hi, y); }
     p.why = '';
     if (lo < -0.4) p.why = 'Too wet here: choose dry ground';
-    else if (p.kind === 'plan' && hi - lo > 1.1) p.why = 'Too steep here: choose flatter ground';
+    else if (p.kind === 'plan' && hi - lo > 0.75 * Math.max(p.w, p.l)) p.why = 'Too steep here: choose flatter ground';
     else if (Math.hypot(p.x - P.x, p.z - P.z) > 60) p.why = 'Too far away';
     else if (p.kind === 'plan') for (const st of V.structs.values()) if (Math.hypot(st.x - p.x, st.z - p.z) < st.r + Math.hypot(p.w, p.l) / 2 + 0.5) p.why = 'Too close to another building';
     p.ok = !p.why;
@@ -737,7 +740,7 @@
     V.bv = -1; sync();
     // deliveries land beside it, on the side nearest where you stand
     const st = V.structs.get(r.struct), P = G.player;
-    if (st) { const side = P.x >= st.x ? 1 : -1; cmd('setDropPoint', { x: st.x + side * (st.r + 1.6) - (side < 0 ? 4.5 : 0), z: st.z - 0.4 }); }
+    if (st) { const side = P.x >= st.x ? 1 : -1, half = Math.max(p.w, p.l) / 2 + 1.7; cmd('setDropPoint', { x: st.x + side * half - (side < 0 ? 4.5 : 0), z: st.z - 0.4 }); }
     note(p.name + ' staked out', 'Open the Build panel (N) to order the materials.');
     openPanel();
   }
@@ -754,7 +757,7 @@
     const t = V.target, P = G.player;
     arrow.visible = !!t && Math.hypot(t.x - P.x, t.z - P.z) > 2.2 && P.tool !== 'build';
     if (arrow.visible) { arrow.position.set(t.x, G.heightAt(t.x, t.z) + t.y + 0.14 * Math.sin(bob * 3.2), t.z); arrow.rotation.y = bob * 1.4; }
-    const d = S().dropPoint, show = !!d && inProgress().length > 0 && !S().options.sandbox;
+    const d = S().dropPoint, show = !!d && V.anyOpen && !S().options.sandbox;
     if (flag.visible !== show) flag.visible = show;
     if (show && (flag.position.x !== d.x - 0.9 || flag.position.z !== d.z - 3.3)) flag.position.set(d.x - 0.9, G.heightAt(d.x - 0.9, d.z - 3.3), d.z - 3.3);
   }
@@ -774,15 +777,37 @@
     const s = S();
     drawStacks();
     if (V.placing) tickPlacing();
-    V.ctx = context();
-    const f = !!G.keys.KeyF;
-    if (f && !V.fWas && G.player.tool !== 'build') press(V.ctx);
-    V.fWas = f;
+    {
+      // what F would do is worked out again only when something changed or you have moved
+      const P = G.player, c = s.carried, sig = V.rev * 4 + (c ? 1 : 0) + (V.auto ? 2 : 0);
+      if (sig !== V.ctxSig || Math.abs(P.x - V.ctxX) + Math.abs(P.z - V.ctxZ) > 0.12 || P.tool !== V.ctxTool || !!V.placing !== V.ctxPl) {
+        V.ctxSig = sig; V.ctxX = P.x; V.ctxZ = P.z; V.ctxTool = P.tool; V.ctxPl = !!V.placing;
+        V.ctx = context();
+      }
+    }
+    if (V.fTap) { V.fTap = false; if (G.player.tool !== 'build') press(V.ctx); }
     if (!s.options.sandbox) tickWork(dt);
     glow(V.ctx);
+    {
+      const pr = current(), flatNow = pr && !pr.done && C.STAGE[pr.stage] && C.STAGE[pr.stage].flat ? '-' : null;
+      if (flatNow !== V.gstage) { V.gstage = flatNow; B.showStage(flatNow); }
+      // come in closer while the hammer is going, and drift back out afterwards
+      const cam = G.cam, busy = !!(W.job || V.raise);
+      if (V.camSet !== undefined && Math.abs(cam.dist - V.camSet) > 0.05) V.camHome = V.camSet = undefined;      // the player moved the camera: leave it be
+      if (busy) { V.camIdle = 0; if (V.camHome === undefined && cam.dist > 15.5) V.camHome = cam.dist; }
+      else V.camIdle = (V.camIdle || 0) + dt;
+      if (V.camHome !== undefined) {
+        const want = busy || V.camIdle < 2.2 ? 15 : V.camHome;
+        cam.dist += (want - cam.dist) * (1 - Math.exp(-(busy ? 2.2 : 1.4) * dt));
+        V.camSet = cam.dist;
+        if (!busy && V.camIdle >= 2.2 && Math.abs(cam.dist - V.camHome) < 0.08) { cam.dist = V.camHome; V.camHome = V.camSet = undefined; }
+      }
+    }
     asm.update(dt); carry.update(dt);
     updatePrompt(dt);
-    drawNext(); drawPanel(); drawMarks(dt);
+    V.nextT = (V.nextT || 0) + dt;
+    if (V.nextRev !== V.rev || V.nextT > 0.5 || V.nextCtx !== V.ctx) { V.nextRev = V.rev; V.nextT = 0; V.nextCtx = V.ctx; drawNext(); }
+    drawPanel(); drawMarks(dt);
     if (V.bannerT > 0) { V.bannerT -= dt; if (V.bannerT <= 0.5 && !banner.classList.contains('out')) banner.classList.add('out'); if (V.bannerT <= 0) banner.hidden = true; }
     if (V.sayT > 0) { V.sayT -= dt; if (V.sayT <= 0) say(''); }
     const sand = $('cvsand'), inPlan = G.player.tool === 'build';
@@ -804,6 +829,7 @@
     if (e.code === 'Escape') { if (V.placing) { endPlacing(); e.stopImmediatePropagation(); } else if (!panel.hidden) closePanel(); return; }
     if (G.player.tool === 'build') return;
     if (e.code === 'KeyN') panel.hidden ? openPanel() : closePanel();
+    else if (e.code === 'KeyF') V.fTap = true;
   }, true);
   canvas.addEventListener('pointermove', (e) => { ptr.x = e.clientX; ptr.y = e.clientY; ptr.has = true; }, true);
   canvas.addEventListener('pointerdown', (e) => {
@@ -828,7 +854,7 @@
   }, true);
   canvas.addEventListener('wheel', (e) => { if (!V.placing) return; e.stopImmediatePropagation(); e.preventDefault(); V.placing.yaw += (e.deltaY > 0 ? 1 : -1) * Math.PI / 12; }, { capture: true, passive: false });
   canvas.addEventListener('contextmenu', (e) => { if (V.placing) e.preventDefault(); }, true);
-  { const b = $('cvact'); const down = (e) => { e.preventDefault(); G.keys.KeyF = true; sounds.wake(); }, up = () => { G.keys.KeyF = false; };
+  { const b = $('cvact'); const down = (e) => { e.preventDefault(); G.keys.KeyF = true; V.fTap = true; sounds.wake(); }, up = () => { G.keys.KeyF = false; };
     b.addEventListener('pointerdown', down); b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('pointerleave', up); }
 
   // for tests and the console
