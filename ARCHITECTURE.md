@@ -13,7 +13,8 @@ The game is one self-contained HTML page built by `build.sh`: `src/engine.js` is
 | `src/nature.js` | ~1,200 | Ground cover, insects, animals, foliage lighting, pine level of detail | Keep. Purely visual. |
 | `src/fxpost.js` | ~250 | The single post-processing pass (High quality only) | Keep. No new full-screen passes. |
 | `src/fx.js`, `src/fxhost.js` | ~840 | Fires, smoke, tree variety, procedural characters | Keep. Purely visual. |
-| `src/touch.js` | ~280 | Dual-stick touch controls and touch build buttons | Keep. |
+| `src/touch.js` | ~280 | Dual-stick touch controls | Keep. |
+| `src/buildui.js` | ~330 | Build mode's interface (2a): tool palette, options strip and property inspector, live dimensions | Draws only what `__build.view()` describes. |
 
 Findings that shaped the plan:
 
@@ -78,29 +79,35 @@ Findings that shaped the plan:
 
 ## The piece interface
 
-Structure, heat, salvage, contractors and blueprints all need to read buildings without knowing how build mode stores them. They read **pieces**: every built element as plain data.
+Structure, heat, salvage, contractors and blueprints all need to read buildings without knowing how build mode stores them. They read **pieces**: every built element as plain data. As built in iteration 2a:
 
 ```
 piece = {
-  id,          // stable within a session; becomes persistent in 2a
-  struct,      // the structure it belongs to
-  kind,        // "wall" | "floor" | "roof" | "door" | "window" | "post" | "beam" | "stair" | "tower" | "foundation" | "fixture"
-  type,        // build mode's own style name (appearance and shape)
-  material,    // id in the materials registry (iteration 2). Today: build mode's appearance name.
-  a, b,        // end points or opposite corners in world metres { x, z }
-  y0, y1,      // bottom and top in world metres
-  length, height, thickness, area,   // whichever apply, in metres and square metres
-  layers,      // (2a) for assemblies: [{ material, thickness }] from outside to inside, e.g. siding, sheathing, stud bay with insulation, lining
-  openings,    // (2a) for walls: doors and windows cut into this piece
-  supports,    // (3) ids of pieces this one bears on
-  condition,   // (18) 0..1 wear, for used and salvaged components
+  id,          // "p12": persistent. Survives save and load, undo and redo, and never shifts when other pieces come or go.
+               // Parts of one element share its id with a suffix: "p8.0" a roof plane, "p8.g0" its gable infill, "p8.rb" its ridge beam,
+               // "p3.s4" a tower side, "p3.f0" a tower floor, "p3.r" its roof, "p3.st" its stair, "p5.fd" the footing under floor p5, "p7+p9" the beam between two pillars.
+  struct,      // the structure it belongs to (persistent number); storey: its storey there (-1 cellar, 0 ground, 1..)
+  kind,        // "wall" | "floor" | "roof" | "door" | "window" | "post" | "beam" | "stair" | "tower" | "foundation" | "path" | "fixture"
+  type,        // build mode's own name: wall "wall" | "rail" | "parapet" | "rampart" | "gable"; roof "gable" | "hip" | "shed" | "flat" | "cone" | "dome" | "pyramid";
+               // door "door" | "door2" | "gate" | "railgate"; window "window".."window4"; post "pillar" | "chimney"; stair "straight" | "spiral"; fixture: the furniture name
+  material,    // build mode's appearance name until the orchestrator maps it through APPEARANCE_MATERIAL
+  a, b,        // world metres { x, z }: wall and beam ends, a roof plane's eave edge, a stair's foot and head, opposite corners of a floor; a point piece has a = b
+  y0, y1,      // bottom and top in world metres (right for upper storeys, stretched storeys, raised floors and turned structures)
+  length, height, thickness, area,   // whichever apply, metres and square metres. A wall's area is its whole face; netArea leaves out its openings.
+  layers,      // walls, floors, roofs, doors, windows: [{ material, thickness, role }] from the outside in (floors from the underside up)
+  openings,    // walls: [{ id, kind: "door" | "window" | "opening", type, offset (m along the wall from a), width, sill, height, y0, y1, area, fill }]
+               // doors and windows are also pieces of their own, with wall: the id of the wall they are in. An "opening" is an open arch: no id, no piece.
+  // floors: outline and holes (world corner loops), perimeter. Roof planes: footprint, pitchDeg, planArea, eaveY, ridgeY, facing { x, z } (downslope), roof: the roof's id.
+  // towers: radius, sides, storeys, parts: [ids]; their parts carry tower: id. Fixtures: name, width, depth, rotationRad. Paths: width.
 }
 ```
 
-- `window.__build.pieces()` returns the current list; `window.__build.version` changes whenever any structure changes, so systems can cache.
-- **Version 0 (now):** floors, grid walls, doors, windows, free-angle walls and pillars come out with real dimensions and positions. Roofs and towers come out as `raw` records. Materials are appearance names.
-- **Iteration 2** replaces appearance names with registry material ids carrying density, strength, stiffness, thermal conductivity, heat capacity and cost.
-- **Iteration 2a** owns the full version: persistent ids, roofs and towers as proper pieces, layered assemblies, openings, and a notification when pieces change. Structure (3) and thermal (4) code against the shape above, not against build mode internals.
+- `window.__build.pieces()` returns the list (cached until something changes: treat it as read only); `piece(id)` finds one; `quantities(list?)` totals wall length, floor and roof area and counts.
+- `window.__build.version` changes whenever any structure changes; `onChange(fn)` calls `fn(version)` at most once a frame when it has, and returns a function that stops it.
+- `window.__build.serialize()` gives every building as plain JSON (`{ format: "homestead-buildings", v: 2, nextStruct, nextPiece, structs }`) and `restore(data)` puts it back exactly, ids included; version 1 saves (no ids) load and are given ids. Build mode still keeps its own copy under `world-engine-build:1:<seed>`; the world save can take over by calling these two.
+- **How identity works.** Roofs, towers, stairs, pillars, paths and furniture store their id. Walls and floors are stored as 1 m edges and tiles, so a wall piece is a straight run of edges of one kind and material, and a floor piece is a connected area of one surface. Each run or area keeps the id most of its parts already had; a part split off (or a wall repainted in part) is a new piece. Changing a door or window to another type makes a new piece.
+- **Layers.** Each appearance implies a default build-up (`window.__build.ASSEMBLIES`; the plain material names used are in `LAYER_MATERIALS` for the registry to map). `setLayers(id, layers | null)` stores a different build-up for one piece; it is saved with the building and follows the piece through copies and splits.
+- Not yet: `supports` (iteration 3) and `condition` (18). A chimney is a `post` of type `chimney`. Tower landings above the ground floor report the inner deck as `outline` and the landing strip as `landingArea`.
 - A piece is the same piece for its whole life: built, removed, stored, sold, reinstalled. Its properties never change with where it is.
 
 ## Wave B contracts
@@ -139,7 +146,7 @@ Owns `src/build.js`, `src/touch.js`, the build markup and styles in `template/he
 Add-ons and tests reach the game only through these. Add a name here rather than reaching into internals.
 
 - `window.__game`: engine. New in wave A: `sim` (the live simulation), `saveGame()`, `saveData()`, `setSpeed(n)`, `speed`.
-- `window.__build`: build mode. New in wave A: `pieces()`, `version`.
+- `window.__build`: build mode. New in wave A: `pieces()`, `version`. New in 2a: `piece(id)`, `quantities()`, `onChange(fn)`, `serialize()`, `restore(data)`, `setLayers()`, and for its own interface (`src/buildui.js`) `view()` and `choose(id, value)`.
 - `window.__nature`: ground cover and wildlife.
 
 ## Module layout and ownership for the waves
@@ -150,6 +157,7 @@ New simulation code goes in `src/sim/<system>.js`, one system per file, register
 
 - `npm test`: headless simulation tests under `test/*.test.mjs` (Node's test runner, no browser). Runs in seconds.
 - `node test/page.smoke.mjs`: loads the built page in a headless browser and checks that it loads without errors, Low and High quality render, build mode opens, time controls work, a save survives a reload, and the simulation's frame cost is in budget.
+- `node test/build.smoke.mjs`: builds a house in build mode through pointer events and checks the piece list, typed sizes, selection and remodeling, undo, the save round trip, and the bar on a phone.
 - Frame rate itself can only be judged on a real GPU; the smoke test measures the simulation's cost per frame instead.
 
 ## Dormant and archived

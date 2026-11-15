@@ -11,7 +11,7 @@ A browser homestead builder (Stardew-style direction) on a Valheim-style voxel w
 
 ## Build and test
 - `npm install && sh build.sh` writes `dist/index.html`, one self-contained page.
-- Test headlessly before pushing: `npm test` (simulation, seconds) and `node test/page.smoke.mjs` (the built page: loads with no errors, build mode opens, Low and High quality work, saves survive a reload).
+- Test headlessly before pushing: `npm test` (simulation, seconds) and `node test/page.smoke.mjs` (the built page: loads with no errors, build mode opens, Low and High quality work, saves survive a reload). After touching build mode also run `node test/build.smoke.mjs`.
 
 ## The live page
 - The game page is the claude.ai artifact "Homestead" (formerly "World Engine Prototype"; slug `17909dd9-2610-496f-be32-0d354df886eb`).
@@ -21,7 +21,7 @@ A browser homestead builder (Stardew-style direction) on a Valheim-style voxel w
 - `ARCHITECTURE.md`: the layers, the simulation rules and the interfaces. `docs/V1_PLAN.md`: the plan and vision. `docs/PLAYTEST.md`: what each wave added.
 - `src/sim/`: the simulation. All world truth that changes over time lives here: deterministic, fixed ticks, seeded randomness, no DOM or three.js. One system per file, registered in `src/sim/index.js`.
 - `src/engine.js`: world, terrain, trees, grass, water, player, tools, day and night. Ordinary source with real names; edit it directly.
-- `src/build.js`: build mode and furniture. `src/touch.js`: touch controls. `src/nature.js`: ground cover, shrubs, insects, animals, soft foliage lighting.
+- `src/build.js`: build mode, furniture and the piece interface. `src/buildui.js`: build mode's bar, options strip and inspector. `src/touch.js`: touch controls. `src/nature.js`: ground cover, shrubs, insects, animals, soft foliage lighting.
 - `src/fxpost.js`: the one post pass (occlusion, depth of field, sun shafts, haze, grade). `src/fxhost.js` + `src/fx.js`: fires, smoke, tree variety, characters.
 - Add-ons reach the engine only through `window.__game`, `window.__build` and `window.__nature`. Add a name there rather than reaching into engine internals.
 

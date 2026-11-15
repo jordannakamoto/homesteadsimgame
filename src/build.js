@@ -5476,6 +5476,7 @@
     typedClear();
     // point to point: the next wall or stretch of path starts where this one ended
     if (S && d && d.mode === "click" && (B.tool === "wall" || B.tool === "path") && end) B.drag = { F: S, a: end, t: performance.now(), mode: "click", rel: Math.atan2(end.j - a.j, end.i - a.i) };
+    hint();
     touchUi();
   }
   // Touch: the aim point sits a little above the finger so the piece is not hidden under it.

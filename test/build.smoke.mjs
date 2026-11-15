@@ -112,6 +112,11 @@ async function open(opts) {
   // saving: exact round trip, ids included
   const rt = await G(() => { const a = JSON.stringify(__build.serialize()), ids = __build.pieces().map((p) => p.id).join(), pj = JSON.stringify(__build.pieces()); __build.restore(JSON.parse(a)); return { same: a === JSON.stringify(__build.serialize()), ids: ids === __build.pieces().map((p) => p.id).join(), pieces: pj === JSON.stringify(__build.pieces()) }; });
   check('serialize and restore round-trip exactly, piece for piece and id for id', rt.same && rt.ids && rt.pieces, JSON.stringify(rt));
+  // a save from before pieces had ids still loads, and its pieces are given ids
+  const old = await G(() => { const d = JSON.parse(JSON.stringify(__build.serialize())), keep = JSON.stringify(d), n = __build.pieces().length; const v1 = { v: 1, structs: d.structs.map((s) => { delete s.ids; delete s.id; s.roofs.forEach((r) => delete r.id); s.segs = s.segs.map((x) => x.slice(0, 6)); return s; }) }; __build.restore(v1); const got = __build.pieces(), ok = got.length === n && got.every((p) => /^p\d/.test(p.id)) && new Set(got.map((p) => p.id)).size === n; __build.restore(JSON.parse(keep)); return ok; });
+  check('a version 1 save (no ids) loads and every piece gets an id', old);
+  const cost = await G(() => { const t = performance.now(); for (let i = 0; i < 300; i++) __build.update(1 / 144); return (performance.now() - t) / 300; });
+  check('build mode costs little when nothing moves', cost < 0.5, cost.toFixed(3) + ' ms a frame');
   let fired = 0;
   await G(() => { window.__n = 0; window.__off = __build.onChange(() => window.__n++); });
   await page.keyboard.press('KeyP'); await click(await at(-2, 1)); await step(3);
@@ -144,6 +149,15 @@ async function open(opts) {
   check('typing a length in the inspector sets a wall to exactly that', hasLen && near(set.length, 4.25, 1e-9), set && String(set.length));
   await page.keyboard.press('Delete'); await step(2);
   check('Delete removes the selection', !(await pieces('wall')).some((w) => w.free));
+
+  // a marquee over open ground takes everything inside it; Delete and undo work on the group
+  await page.keyboard.press('KeyV'); await step(2);
+  const m0 = await at(-1.5, -1.5), m1 = await at(6.5, 5.5);
+  await move(m0); await page.mouse.down(); await step(1); await page.mouse.move((m0[0] + m1[0]) / 2, (m0[1] + m1[1]) / 2); await step(1); await move(m1); await page.mouse.up(); await step(3);
+  const marq = (await G(() => __build.selection())).length;
+  check('dragging over open ground selects the pieces inside', marq >= 5, marq + ' selected');
+  check('a group shows its quantities', await G(() => /walls 18 m/.test(__build.view().groups[0].text) && /floor 20/.test(__build.view().groups[0].text)), await G(() => __build.view().groups[0].text));
+  await page.keyboard.press('Escape'); await step(2);
 
   // measuring
   await page.keyboard.press('KeyY'); await click(await at(0, 0)); await click(await at(5, 0));
