@@ -214,7 +214,12 @@ function resize() {
   renderer.setPixelRatio(pr);
   renderer.setSize(w, h, false);
   camera.aspect = w / h; camera.updateProjectionMatrix();
-  if (composer) { composer.setPixelRatio(pr); composer.setSize(w, h); }
+  if (composer) {
+    // Low draws directly to the canvas. Shrinking disposes unused post-process GPU
+    // storage; the passes retain their settings and resize when High is selected.
+    composer.setPixelRatio(pr);
+    composer.setSize(quality.level === 'high' ? w : 1, quality.level === 'high' ? h : 1);
+  }
 }
 window.addEventListener('resize', resize);
 

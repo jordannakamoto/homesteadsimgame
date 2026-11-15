@@ -66,3 +66,11 @@ Rapier is a candidate for loose logs, carried objects that are dropped, and vehi
 `npm test` passes 46 tests and `npm run build` produces the single-page build. Coverage includes the new chunk-stream reset, budget and boundary cases and immediate state replacement. The build smoke test also checks that a paused save captures edited geometry without waiting for a frame.
 
 The Chromium headless shell with SwiftShader passed the desktop and touch build smoke checks and the page smoke's gameplay assertions, including Low/High rendering, pause, fast-forward and save/reload. The test required a local launcher adaptation because stock Chromium could not create its process singleton socket in this environment. The standalone page screenshot timed out. The build smoke captured desktop and phone screenshots. No integrated-GPU frame-time result is available from this environment.
+
+## Low-quality GPU memory
+
+The renderer now shrinks the composer's unused targets to 1×1 while Low is selected. Three.js disposes their existing GPU storage on resize, including the bloom and atmosphere intermediates. High restores viewport-sized targets and the existing pass settings. The scene still renders to the full-resolution canvas in Low.
+
+At 1280×720 with seed 1337 in Chromium/SwiftShader, switching High to Low previously kept 31 GPU textures allocated. The updated renderer retains 11, releasing 20 unused textures. Three High/Low round-trips returned to 31 textures each time, with zero byte differences between the original and restored High frame. Resizing while Low was active and restoring High also passed. These are allocation counts and pixel checks, with no FPS or byte-memory claim.
+
+Run `EXPECT_LOW_RELEASE=1 node bench/renderer-memory.mjs` after building. Set `PLAYWRIGHT_MODULE` and `CHROMIUM_PATH` to existing installations when required. Passing a built HTML file as the first argument allows the same checks against a baseline; omit `EXPECT_LOW_RELEASE` for the earlier build.
