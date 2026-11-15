@@ -7173,7 +7173,7 @@
       S.group.add(mesh);
       S.memMeshes.push(mesh);
     });
-    if (st.shell) {
+    if (st.shell && !S.noShell) {
       const ga = buildGeo(st.shell, S.depth),
         g = ga.main,
         mesh = new T.Mesh(g.build(), shellMat),
@@ -8405,6 +8405,13 @@
       return { matrix: S.group.matrixWorld, y0: S.y0, list: membersOf(S).list, planned: S.plan };
     },
     memberLook: () => ({ geo: boxGeo, mat: memMat, colors: MCOL }),
+    // the pale shell of everything still unbuilt: shown for a plan nobody has started, hidden once work is under way
+    setShell(structId, on) {
+      const S = B.structs.find((O) => O.id === structId);
+      if (!S || !!S.noShell === !on) return;
+      S.noShell = !on;
+      B.dirty.add(S);
+    },
     removeStruct(structId) {
       const S = B.structs.find((O) => O.id === structId);
       if (!S) return false;

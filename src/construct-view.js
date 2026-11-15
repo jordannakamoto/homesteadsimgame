@@ -181,6 +181,7 @@
       asm.setSolid(id, cur, list, 48);
     }
     V.glowSig = '';
+    B.setShell(id, !Object.values(pr.tally).some((t) => t[0] > 0));
     braces(id);
   }
   // a raised wall is held by a temporary brace until the sheathing is on
@@ -218,7 +219,7 @@
   }
 
   // ------------------------------------------------------------------ stacks and the load in the arms
-  const COLORS = { lumber: 0xdcbc8c, boards: 0xd6b27c, osb: 0xc9a468, block: 0xb5b2aa, box: 0x8a6f4a, wrap: 0xe8ecea, felt: 0x3a3d43, shingle: 0x50555e, batt: 0xf1bcc8, door: 0x9a6b3f, pane: 0xbcd6e4, bag: 0xb9b4a6 };
+  const COLORS = { lumber: 0xdcbc8c, boards: 0xd6b27c, osb: 0xc9a468, block: 0xb5b2aa, box: 0x8a6f4a, wrap: 0xe8ecea, felt: 0x3a3d43, shingle: 0x50555e, batt: 0xf1bcc8, door: 0x8a6240, pane: 0xa9c6d6, bag: 0xb9b4a6 };
   function describe(itemId, qty) {
     const it = CAT[itemId], f = C.itemForm(itemId), d = (it && it.dims) || {};
     const n = (per) => Math.max(1, Math.min(140, Math.ceil(qty / per - 0.02)));
@@ -799,13 +800,20 @@
       if (flatNow !== V.gstage) { V.gstage = flatNow; B.showStage(flatNow); }
       // come in closer while the hammer is going, and drift back out afterwards
       const cam = G.cam, busy = !!(W.job || V.raise);
-      if (V.camSet !== undefined && Math.abs(cam.dist - V.camSet) > 0.05) V.camHome = V.camSet = undefined;      // the player moved the camera: leave it be
+      if (V.camSet !== undefined && Math.abs(cam.dist - V.camSet) > 0.05) V.camHome = V.camSet = V.pitchHome = undefined;      // the player moved the camera: leave it be
       if (busy) { V.camIdle = 0; if (V.camHome === undefined && cam.dist > 15.5) V.camHome = cam.dist; }
       else V.camIdle = (V.camIdle || 0) + dt;
       if (V.camHome !== undefined) {
         const want = busy || V.camIdle < 2.2 ? 15 : V.camHome;
         cam.dist += (want - cam.dist) * (1 - Math.exp(-(busy ? 2.2 : 1.4) * dt));
         V.camSet = cam.dist;
+        // lower the view while a wall goes up, so that it is seen rising
+        if (V.raise && !V.raise.landed) { if (V.pitchHome === undefined && cam.pitch > 0.7) V.pitchHome = cam.pitch; }
+        if (V.pitchHome !== undefined) {
+          const wp = V.raise || V.camIdle < 1.2 ? 0.62 : V.pitchHome;
+          cam.pitch += (wp - cam.pitch) * (1 - Math.exp(-1.8 * dt));
+          if (!V.raise && V.camIdle >= 1.2 && Math.abs(cam.pitch - V.pitchHome) < 0.01) { cam.pitch = V.pitchHome; V.pitchHome = undefined; }
+        }
         if (!busy && V.camIdle >= 2.2 && Math.abs(cam.dist - V.camHome) < 0.08) { cam.dist = V.camHome; V.camHome = V.camSet = undefined; }
       }
     }
