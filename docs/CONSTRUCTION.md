@@ -96,6 +96,35 @@ Each step shows one short card at the moment it is needed: a sentence of what to
 
 Finishing the shed opens the small cabin plan and the choices that go with it.
 
+## Below ground: trenches, pipes and wires
+
+Houses need water in, waste out and power across the yard, and most of that goes underground. The owner raised this after the first playtest. It follows the same rule as the rest: real reasons, simple hands.
+
+**One tool: the trench.** Draw a line on the ground from here to there. It appears as a ghost trench at the right depth. Dig it (a shovel is slow and honest; a rented trencher or mini excavator is fast), lay what goes in it, and backfill. The terrain really changes while it is open, using the engine's existing digging.
+
+**What goes in a trench, and the one thing to know about each**
+
+| Run | The rule the player learns | How the game helps |
+|---|---|---|
+| Water supply | Bury it below the frost line or it freezes | The trench ghost is drawn at frost depth for the climate; a shallower trench shows an amber "this will freeze in winter" |
+| Power | Wire outdoors goes in conduit, and thicker wire for longer runs | The run picks conduit automatically and suggests the gauge for its length and load |
+| Sewage | Waste runs downhill: the pipe must fall all the way, about 2 cm per metre | The ghost shows the fall with arrows and deepens along its length; a run that would have to climb is refused with the reason |
+| Drainage | Water must be led away from the foundation | A perimeter drain option on foundations, shown working in rain |
+
+Water and power can share a trench. Sewage gets its own.
+
+**Dealing with waste: three honest choices**
+
+- **Composting toilet.** No pipes, no water, makes compost. The off-grid default and the first one unlocked.
+- **Greywater to the garden.** Sink and shower water run to a mulch basin and water a tree. Simple, and it closes a loop.
+- **Septic system.** A buried tank and a drain field sized to the household and the soil. The grown-up option for a full house with flush toilets: more digging, more money, no maintenance for years.
+
+**Order matters here too.** Pipes under a slab go in before the concrete is poured; pipes and wires inside walls go in after framing and before insulation and lining. The stage list has "services" at those points, and the Build panel says so at the right moment ("Run your pipes now: once the slab is poured you cannot").
+
+**Seeing it.** An underground view fades the ground and shows every buried run in colour (blue water, brown waste, yellow power), with depth and fall. It is the same overlay system as heat and structure.
+
+**Kept simple on purpose.** No pipe fittings, glue or individual joints; no vent stacks; no percolation test beyond a soil class. A run is one piece with a length, a diameter and a depth.
+
 ## The store
 
 - Organised by job: Foundation, Framing, Roof, Weatherproofing, Insulation, Windows and doors, Power, Water, Animals, Tools.
