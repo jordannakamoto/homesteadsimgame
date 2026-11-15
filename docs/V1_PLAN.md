@@ -97,6 +97,18 @@ Assisted building: draw a wall, room or roof as one gesture and have the framing
 Touch: the same tools work with the mobile build menus.
 Playtest: Build a small house with a pitched roof, a round room and a cellar in a few minutes without consulting anything, then set one wall to an exact typed length.
 
+## The hands rule (15 Nov, owner)
+
+After playing the garden and seeing where construction and hook-ups were heading, the owner set one rule for every physical job in the game:
+
+- **In the body, mouse-aimed.** The character does the work. The mouse picks a spot within arm's reach. Nothing physical is done to the world from the sky.
+- **Hands-on gestures with Nintendo simplicity.** "A combination of hands-on gestures and simplified Nintendo style, like how in Zelda you hold items over your head." The player makes the real motion (pull the hoe, tip the can, set the stud, swing the hammer, push the wall up, pump the handle), but each is one clear, forgiving gesture with big readable feedback, chunky items carried visibly, and a held-overhead beat for milestones.
+- **Doing it is how you learn it.** "We want to lay stuff by hand so the player learns how to build structures in real life." Construction, plumbing and wiring are done piece by piece with the hands, in real order.
+- **Design tools are for planning only.** Plan mode draws the building; a hook-up view plans the runs. Neither does the work.
+- **Never a chore.** Gestures cover swathes, holding repeats, and any learned job can be handed to "work until done", a helper or a machine.
+
+This applies to farming (being rebuilt), construction (being adapted), wiring and plumbing (next), animals, and the kitchen (already physical).
+
 ## Direction change after the first playtest (14 Nov, owner)
 
 The owner's verdict on wave B: build mode "is more like a design mode"; foundations and walls need to be more realistic; it should "actually feel like building with lumber"; the supplier is "a bit overwhelming"; the owner has never built anything and the game should teach it; weather must be readable by eye, because "the player plays visually". Decisions taken, for a general gaming audience:

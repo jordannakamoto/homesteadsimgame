@@ -129,6 +129,14 @@ Water and power can share a trench. Sewage gets its own.
 
 Requested by the owner: an intuitive way to lay wiring and pipes. Today the Equip tool joins equipment by dragging from one small port to another, which works but assumes the player knows what joins to what. The redesign makes hook-ups a mode of their own and lets the game carry the knowledge.
 
+**Revised 15 Nov: the work is done by hand.** The owner judged the first plan here "not quite there" for Nintendo-level intuition plus real-world gestures. The Hook-up view below becomes the *planning* layer: it shows what joins to what and marks the route. The work is then done in the body, like building:
+
+- **Wire:** carry a spool, press at the first terminal to fix the end, walk the route and the cable pays out behind you, staple it along studs with a tap of the hammer, cut, and push the end into the next terminal. Terminals are big and colour-matched; a wrong one will not take the wire and says why in a few words.
+- **Pipe:** carry lengths to the trench or wall, set each into the last with a push and a quarter turn, the joint clicks. Fittings are automatic. Open the valve and watch water arrive.
+- **Dig the trench yourself** with the shovel (pull strokes, like the hoe) or a rented trencher you walk behind.
+- **Switch it on.** Throwing the breaker or opening the valve is a physical act with an immediate visible result: the light comes on, the tap runs.
+- "Hook it up for me" remains for players who have done it once, and for contractors.
+
 **A Hook-up view.** One button in Build. The world dims, buildings go see-through, and only utilities stay bright: equipment, existing runs, and every free connection point as a large coloured socket. Yellow is power, blue is clean water, brown is waste, grey is flue. Buried runs show through the ground.
 
 **Click, click.** Click a socket, and every socket it can sensibly join lights up while the rest fade. Click one of those and the run draws itself: along the wall and under the floor indoors, as a trench line outdoors. No dragging, no aiming at small dots.

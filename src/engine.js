@@ -2043,12 +2043,32 @@ for (const b of document.querySelectorAll('#speed button')) b.addEventListener('
 // trees, stock, where the player stood, and editable build data).
 const NEW_WORLD_YEAR_DAYS = 20;          // five days a season. The player can change it in the weather panel.
 const SAVE_KEY = 'homestead:save:', LAST_KEY = 'homestead:last-seed';
+// Every new plot comes with an old dug well, a hand pump and a spigot a few steps from where you arrive,
+// so there is water from the first minute without power or plumbing.
+function placeStartingWell(build) {
+  if (!build.addFixtures || !build.connect || build.pieces().length) return;
+  let best = null;
+  for (let i = 0; i < 24; i++) {                       // the flattest dry spot in a ring around the arrival point
+    const a = (i / 24) * Math.PI * 2, r = 7 + (i % 3) * 2, x = player.x + Math.cos(a) * r, z = player.z + Math.sin(a) * r;
+    const h = heightAt(x, z), slope = Math.abs(heightAt(x + 1.5, z) - h) + Math.abs(heightAt(x, z + 1.5) - h);
+    if (h > SEA + 0.4 && (!best || slope < best.slope)) best = { x, z, slope };
+  }
+  if (!best) return;
+  const [well, pump, tap] = build.addFixtures([
+    { fixture: 'well_dug', x: best.x, z: best.z },
+    { fixture: 'hand_pump', x: best.x + 0.9, z: best.z, y: heightAt(best.x + 0.9, best.z) + 0.6 },
+    { fixture: 'tap_hose_bib', x: best.x + 1.6, z: best.z, y: heightAt(best.x + 1.6, best.z) + 0.5 },
+  ]);
+  if (well && pump) build.connect(well, 'out', pump, 'in');
+  if (pump && tap) build.connect(pump, 'out', tap, 'in');
+}
 function syncSite() {
   // hand build mode the real equipment catalog once it has loaded
   if (!simCtl.catalogSet && window.__build && window.__build.setFixtureCatalog) { window.__build.setFixtureCatalog(PLACEABLE_FIXTURES); simCtl.catalogSet = true; }
   const build = window.__build;
   if (!build) return;
   build.ensureLoaded();
+  if (simCtl.newWorld) { simCtl.newWorld = false; placeStartingWell(build); }
   if (build.version === simCtl.siteV) return;
   const version = build.version;
   sim.commandNow('site.setPieces', { pieces: mapPieces(build.pieces()) });
@@ -2122,7 +2142,7 @@ function resetWorld(seed) {
   player.x = 0; player.z = 0;
   let raw = null;
   try { raw = localStorage.getItem(SAVE_KEY + SEED); } catch (e) { /* no storage here */ }
-  if (!(raw && applySave(raw))) sim.setYearDays(NEW_WORLD_YEAR_DAYS);   // a new world gets the short year; saved worlds keep theirs
+  if (!(raw && applySave(raw))) { sim.setYearDays(NEW_WORLD_YEAR_DAYS); simCtl.newWorld = true; }   // a new world gets the short year and a well; saved worlds keep theirs
   chunkStream.update(player.x, player.z, Infinity);
   player.y = heightAt(player.x, player.z);
   cam.tx = player.x; cam.tz = player.z; cam.ty = player.y;
