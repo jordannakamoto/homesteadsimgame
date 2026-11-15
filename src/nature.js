@@ -586,15 +586,15 @@
     mat.onBeforeCompile = (sh, rnd) => {
       before && before(sh, rnd);
       sh.fragmentShader = sh.fragmentShader.replace("#include <lights_fragment_begin>", a).replace("#include <lights_lambert_pars_fragment>", b);
-      // each tuft is shaded toward its foot, down to the tone of the ground it stands on, so blade and soil
-      // read as one surface. (This used to punch a dot pattern through the foot instead, which showed as speckles.)
+      // each tuft fades at its foot into the colour of the soil it stands in, so there is no hard line where
+      // blade meets ground and the two read as one surface. (This used to punch a dot pattern through the foot instead, which showed as speckles.)
       if (kind === "grass")
         sh.fragmentShader = sh.fragmentShader.replace(
           "#include <alphatest_fragment>",
-          "#include <alphatest_fragment>\n\t#ifdef USE_MAP\n\tdiffuseColor.rgb *= mix( 0.93, 1.0, smoothstep( 0.0, 0.5, vMapUv.y ) );\n\t#endif",
+          "#include <alphatest_fragment>\n\t#ifdef USE_MAP\n\tdiffuseColor.rgb = mix( vColor.rgb * vec3( 0.82, 0.8, 0.86 ), diffuseColor.rgb, smoothstep( 0.0, 0.42, vMapUv.y ) );\n\t#endif",
         );
     };
-    mat.customProgramCacheKey = () => (keyBefore ? keyBefore.call(mat) : "") + "soft2" + floor + kind;
+    mat.customProgramCacheKey = () => (keyBefore ? keyBefore.call(mat) : "") + "soft3" + floor + kind;
     mat.needsUpdate = true;
   }
   function dispose(ch) {
