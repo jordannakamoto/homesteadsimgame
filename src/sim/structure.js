@@ -659,7 +659,7 @@ export function solveStructure(pieces, env) {
         }
         e.apex = (p.type === 'gable' || p.type === 'hip') && roofN.get(p.roof) > 1;
         const surf = (s, x) => e.eaveY + ((s.ox + s.dx * x - e.ax) * e.vx + (s.oz + s.dz * x - e.az) * e.vz) * e.tan;
-        res = runStrips(e, strips, fr, q, 180, e.cos, (c, x, s) => { const y = surf(s, x); return c.cls === 'beam' ? y >= c.y0 - TOLY && y <= c.y1 + TOLY : c.p.type === 'gable' ? false : Math.abs(c.y1 - y) <= TOLY || (c.y1 > y && c.y0 < y - 0.5); }, 'roof');
+        res = runStrips(e, strips, fr, q, 180, e.cos, (c, x, s) => { const y = surf(s, x); return c.cls === 'beam' ? y >= c.y0 - TOLY && y <= c.y1 + TOLY : c.p.type === 'gable' ? y >= c.y0 - 0.1 && y <= c.y1 + TOLY : Math.abs(c.y1 - y) <= TOLY || (c.y1 > y && c.y0 < y - 0.5); }, 'roof');
       } else {
         strips = areaStrips(e, e.explicit ? e.rafters : null, fr, RAFTER_S, (c) => (c.cls === 'beam' ? c.y1 <= e.eaveY + 0.15 : true) && c.y1 >= e.eaveY - 0.45);
         res = runStrips(e, strips, fr, q, 180, 1, () => true, 'roof');
@@ -907,15 +907,24 @@ export function solveStructure(pieces, env) {
         const prev = racking[w.id]; if (prev && prev.utilisation >= r3(cap(u))) continue;
         racking[w.id] = { demandN: r0(f), capacityN: r0(w.rack.cap), utilisation: r3(cap(u)), swayMm: r3(sway * 1000), braced: !!w.rack.braced, ok: u <= 1 && !(w.rack.framed && !w.rack.braced) };   // nailed joints alone are never counted as bracing
       }
-      const half = (ext1 - ext0) / 2, Mo = F * (top - base) / 2, Mr = 0.6 * dead * half, uo = Mr > 0 ? Mo / Mr : 0;
-      if (uo > 1 && half > 0.3) { const g = list.find((e) => e.cls === 'ground') || walls[0]; if (!issues.some((i) => i.pieceId === g.id && i.governs === 'overturning')) issue(g.id, 'warn', 'overturning', uo, `This building is light for its height: a ${Math.round(env.gustMs)} m/s storm gust pushes on it with about ${kN(F)} kN, enough to tip it unless it is held down.`, 'Anchor it to its foundation, make it wider or lower, or add weight low down.'); }
-    }
-    for (const w of walls) {
-      const r = racking[w.id]; if (!r) continue; const m = members[w.id];
-      if (!r.ok) {
-        issue(w.id, 'warn', 'racking', r.utilisation, w.rack.framed && !w.rack.braced ? `This wall is a bare frame: studs and plates with nothing across them. Nothing stops it leaning over sideways like a folding parallelogram, and in a storm gust it would sway about ${Math.round(r.swayMm)} mm.` : `In a ${Math.round(env.gustMs)} m/s storm gust this wall line must resist about ${kN(r.demandN)} kN of sideways push along its length, and its ${w.rack.framed ? 'boarding' : 'fabric'} is good for ${kN(r.capacityN)} kN: it would lean (rack) about ${Math.round(r.swayMm)} mm.`, w.rack.framed && !w.rack.braced ? 'Nail sheathing sheets across the studs, or let in a diagonal brace.' : 'Sheathe it with plywood or OSB sheets, add a diagonal brace, or add a cross wall to share the wind.');
-        if (m && r.utilisation > m.utilisation && r.utilisation > 1) { m.utilisation = r.utilisation; m.governs = 'racking'; m.demand = r.demandN; m.capacity = r.capacityN; m.unit = 'N'; m.ok = false; }
+      // Overturning. A warning only if the wind's moment beats the building's whole weight about its downwind edge, that is, if it
+      // would really tip when simply strapped to its blocks. With the usual 0.6 reserve on dead load not met it is a note, not an alarm.
+      const half = (ext1 - ext0) / 2, Mo = F * (top - base) / 2, uo = dead * half > 0 ? Mo / (dead * half) : 0, g = list.find((e) => e.cls === 'ground') || walls[0];
+      if (half > 0.3 && uo > 0.6 && !issues.some((i) => i.pieceId === g.id && i.governs === 'overturning')) {
+        if (uo > 1) issue(g.id, 'warn', 'overturning', uo, `This building is too light for its height: a ${Math.round(env.gustMs)} m/s storm gust pushes on it with about ${kN(F)} kN, more than its whole weight can resist. It would tip over.`, 'Anchor it into the ground, make it wider or lower, or add weight low down.');
+        else issue(g.id, 'info', 'overturning', uo, `This is a light building: in a ${Math.round(env.gustMs)} m/s storm gust the wind uses ${Math.round(uo * 100)} % of what its own weight resists before tipping. It stands, with less margin than builders like.`, 'Strap it to its foundation blocks, as sheds usually are.');
       }
+    }
+    // one sentence for the walls that share a fault, on the wall that sways most
+    for (const bare of [true, false]) {
+      const bad = walls.filter((w) => racking[w.id] && !racking[w.id].ok && (w.rack.framed && !w.rack.braced) === bare).sort((a, b) => racking[b.id].swayMm - racking[a.id].swayMm || a.i - b.i);
+      if (!bad.length) continue;
+      const w = bad[0], r = racking[w.id], n = bad.length, N = ['', 'This wall', 'Two walls', 'Three walls', 'Four walls'][n] || `${n} walls`, one = n === 1, u = Math.max(...bad.map((x) => racking[x.id].utilisation));
+      issues.push({ pieceId: w.id, pieceIds: bad.map((x) => x.id), severity: 'warn', governs: 'racking', utilisation: r3(cap(u)),
+        reason: bare ? `${N} ${one ? 'is a bare frame' : 'are bare frames'}: studs and plates with nothing across them. Nothing stops ${one ? 'it' : 'them'} leaning over sideways like a folding parallelogram, and in a storm gust ${one ? 'it' : 'the worst'} would sway about ${Math.round(r.swayMm)} mm.`
+          : `In a ${Math.round(env.gustMs)} m/s storm gust ${one ? 'this wall line' : N.toLowerCase()} must resist more sideways push along ${one ? 'its' : 'their'} length than ${one ? 'its' : 'their'} ${w.rack.framed ? 'boarding' : 'fabric'} is good for (${kN(r.demandN)} kN against ${kN(r.capacityN)} kN on the worst): ${one ? 'it' : 'they'} would lean (rack) about ${Math.round(r.swayMm)} mm.`,
+        fix: bare ? 'Nail sheathing sheets across the studs, or let in a diagonal brace.' : 'Sheathe with plywood or OSB sheets, add a diagonal brace, or add a cross wall to share the wind.' });
+      for (const x of bad) { const m = members[x.id], q = racking[x.id]; if (m && q.utilisation > m.utilisation && q.utilisation > 1) { m.utilisation = q.utilisation; m.governs = 'racking'; m.demand = q.demandN; m.capacity = q.capacityN; m.unit = 'N'; m.ok = false; } }
     }
   }
   for (const e of els) if (e.cls === 'wall' && members[e.id]) members[e.id].load.windN = r0(e.wind);
@@ -985,7 +994,7 @@ export function overlayData(state) {
     if (!memo || memo.pieces !== site.pieces || memo.version !== site.version) memo = { pieces: site.pieces, version: site.version, out: solveStructure(site.pieces, environment(state.sys.weather, s.site)) };
     s = { ...s, ...memo.out, version: site.version };
   }
-  const worstOf = {}; for (const i of s.issues) if (!worstOf[i.pieceId] || (i.severity === 'fail' && worstOf[i.pieceId] !== 'fail')) worstOf[i.pieceId] = i.severity === 'info' ? (worstOf[i.pieceId] || 'ok') : i.severity;
+  const worstOf = {}; for (const i of s.issues) for (const id of i.pieceIds || [i.pieceId]) if (!worstOf[id] || (i.severity === 'fail' && worstOf[id] !== 'fail')) worstOf[id] = i.severity === 'info' ? (worstOf[id] || 'ok') : i.severity;
   const pieces = {};
   for (const id in s.members) { const m = s.members[id], r = s.racking[id]; pieces[id] = { utilisation: m.utilisation, status: worstOf[id] || (m.utilisation > 1 ? 'warn' : 'ok'), governs: m.governs, supports: m.supports, ...(r ? { swayMm: r.swayMm, braced: r.braced } : {}) }; }
   for (const id in worstOf) if (!pieces[id]) pieces[id] = { utilisation: 0, status: worstOf[id], governs: null, supports: [] };

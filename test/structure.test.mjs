@@ -1,6 +1,7 @@
 // Structural loads, checked against statics worked by hand, span tables and a real house. node --test test/
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createGameSim, analyseBeam, joistCheck, maxSpan, columnCapacity, designValues, designSnowKPa, solveStructure, structureEnvironment,
   structureOverlayData, swayNow, SOILS, makeSave, readSave } from '../src/sim/index.js';
 import { house, setSite } from './helpers/pieces.mjs';
@@ -339,6 +340,32 @@ test('a cabin framed by the real generator (src/framing.js) is judged member by 
   assert.ok(noHead.issues.some((x) => x.pieceId === 'wf' && /no header over it/.test(x.reason)));
   // on peat the same six pier blocks sink
   assert.ok(solve(all, { soil: 'peat' }).issues.some((x) => x.governs === 'bearing' && /pier presses/i.test(x.reason)));
+});
+
+test('the tutorial shed and the cabin, dumped from the real game, stand as built: no false alarms', () => {
+  const load = (n) => JSON.parse(readFileSync(new URL(`./helpers/${n}.json`, import.meta.url), 'utf8')).pieces;
+  const shed = load('shed'), cabin = load('cabin'), s = solve(shed), c = solve(cabin);
+  for (const [name, r] of [['shed', s], ['cabin', c]]) {
+    finiteDeep(r); assert.equal(r.issues.filter((x) => x.governs === 'unsupported').length, 0, name + ': ' + JSON.stringify(r.issues));
+    assert.equal(r.issues.filter((x) => x.severity !== 'info').length, 0, name + ': ' + JSON.stringify(r.issues));
+    assert.ok(r.worst.utilisation < 1 && r.worst.utilisation > 0.3, name + ' worst ' + JSON.stringify(r.worst));
+    assert.equal(r.totals.unsupportedN, 0); assert.ok(Math.abs(r.totals.groundN - r.totals.appliedN) < 0.01 * r.totals.appliedN);
+    for (const f of Object.values(r.foundations)) assert.ok(f.ok && f.bearingKPa < 125);
+  }
+  // the single-pitch roof rests on the low wall and on the infill wall under its high edge, sharing the snow between them
+  assert.deepEqual(s.members['p1.0.rf2'].supports.sort(), ['p1.g2', 'p3']); assert.ok(s.members['p1.0'].ok);
+  assert.ok(s.members.p3.load.snowN > 0.45 * s.members['p1.0'].load.snowN && s.members.p3.load.snowN < 0.7 * s.members['p1.0'].load.snowN);
+  assert.ok(s.members.p7.load.snowN > 0.3 * s.members['p1.0'].load.snowN);
+  // the six pier blocks: 0.3 x 0.3 m each, and no one of them carries more than about a quarter of the building
+  assert.equal(Object.keys(s.foundations).length, 6); const T = s.totals.appliedN;
+  for (const id of Object.keys(s.foundations)) { const l = s.members[id].load, sum = l.deadN + l.liveN + l.snowN; assert.ok(sum > 0.09 * T && sum < 0.27 * T, id + ' carries ' + sum); }
+  // a light shed is noted, not alarmed: it would not tip on its own weight
+  const tip = s.issues.find((x) => x.governs === 'overturning'); if (tip) assert.equal(tip.severity, 'info');
+  // before the sheathing goes on, the bare walls are named once, with the largest sway
+  const kids = new Set(shed.filter((p) => p.kind === 'sheathing' || p.kind === 'cladding' || p.kind === 'lining').filter((p) => shed.find((q) => q.id === p.parent && q.kind === 'wall' && q.type === 'wall')).map((p) => p.id));
+  const bare = solve(shed.map((p) => (kids.has(p.id) ? { ...p, built: false } : p))), rk = bare.issues.filter((x) => x.governs === 'racking');
+  assert.equal(rk.length, 1, JSON.stringify(rk)); assert.equal(rk[0].pieceIds.length, 4); assert.match(rk[0].reason, /^Four walls are bare frames/);
+  const sways = rk[0].pieceIds.map((id) => bare.racking[id].swayMm); assert.match(rk[0].reason, new RegExp(`about ${Math.round(Math.max(...sways))} mm`)); assert.equal(rk[0].severity, 'warn');
 });
 
 // ------------------------------------------------------------------ the system: when it works, saving, cost
