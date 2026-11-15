@@ -217,6 +217,8 @@
   window.addEventListener("keydown", (e) => {
     if (e.code === "KeyY" && !e.repeat && G.player.tool !== "build" && !(e.target && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName))) setOpen(!open);
   });
+  const yearSel = $("wxyear");
+  if (yearSel) yearSel.addEventListener("change", () => { if (G.setYearDays) G.setYearDays(+yearSel.value); const v = document.getElementById("view"); if (v) v.focus(); });
   const sel = $("wxclimate");
   if (sel) {
     sel.addEventListener("change", () => {
@@ -236,7 +238,7 @@
     const w = W(),
       C = G.calendar;
     if (!w || !C) return;
-    const t = G.sim.state.t,
+    const t = G.sim.calendarT ? G.sim.calendarT() : G.sim.state.t,
       doy = C.dayOfYear(t),
       m = C.monthOf(doy),
       sea = C.season(t, w.site);
@@ -259,6 +261,7 @@
     put("wxd-sol", Math.round(w.solar.globalHorizontalWm2) + " W/m²");
     put("wxd-soil", f1(w.groundTempC) + " °C (" + cf(w.groundTempC) + " °F)");
     if (sel && document.activeElement !== sel && sel.value !== w.site.climate) sel.value = w.site.climate;
+    if (yearSel && document.activeElement !== yearSel && +yearSel.value !== G.sim.state.yearDays) yearSel.value = String(G.sim.state.yearDays);
     put("wxd-lat", Math.abs(w.site.latitudeDeg).toFixed(1) + "° " + (w.site.latitudeDeg >= 0 ? "N" : "S"));
   }
 

@@ -7,14 +7,14 @@
 //   - no wall clock, no frame time, no DOM, no three.js in here
 //   - player actions enter as commands and are applied at the start of the next tick
 
-import { TICK, START_T, dayFraction, dayIndex } from './time.js';
+import { TICK, START_T, dayFraction, dayIndex, calendarT, YEAR_DAYS_REAL } from './time.js';
 import { stream } from './rng.js';
 
 export const STATE_VERSION = 1;
 
 export function createSim({ seed = 1, systems = [], record = false } = {}) {
   const sim = {
-    state: { v: STATE_VERSION, seed: seed >>> 0, tick: 0, t: START_T, rng: {}, sys: {} },
+    state: { v: STATE_VERSION, seed: seed >>> 0, tick: 0, t: START_T, lifeT: START_T, yearDays: YEAR_DAYS_REAL, rng: {}, sys: {} },
     systems: [],
     handlers: new Map(),
     queue: [],              // commands waiting for the next tick
@@ -41,6 +41,9 @@ export function createSim({ seed = 1, systems = [], record = false } = {}) {
     const st = S();
     return {
       sim, state: st, t: st.t, tick: st.tick, dt,
+      // seasonal clock (see time.js): use lifeDt and lifeT for growth, ageing and other slow processes
+      lifeScale: YEAR_DAYS_REAL / st.yearDays, lifeDt: dt * (YEAR_DAYS_REAL / st.yearDays), lifeT: st.lifeT,
+      ct: calendarT(st.t, st.lifeT),                 // pass this, not t, to the calendar functions
       get s() { return st.sys[sys.name]; },
       set s(v) { st.sys[sys.name] = v; },
       get: (name) => st.sys[name],                    // read another system's state
@@ -79,7 +82,7 @@ export function createSim({ seed = 1, systems = [], record = false } = {}) {
     for (const sys of sim.systems) {
       if (sys.step && st.tick % sys.every === 0) sys.step(ctxFor(sys));
     }
-    st.tick++; st.t += TICK;
+    st.tick++; st.t += TICK; st.lifeT += TICK * (YEAR_DAYS_REAL / st.yearDays);
   }
 
   // Advance by world seconds. Whole ticks only; the remainder waits. maxTicks bounds the work
@@ -96,6 +99,16 @@ export function createSim({ seed = 1, systems = [], record = false } = {}) {
   sim.runTicks = (n) => { for (let i = 0; i < n; i++) tickOnce(); };
   sim.runDays = (d) => sim.runTicks(Math.round((d * 86400) / TICK));
 
+  // the timestamp to give calendar functions (date from the seasonal clock, time of day from the clock)
+  sim.calendarT = () => calendarT(S().t + sim.acc, S().lifeT);
+  sim.lifeScale = () => YEAR_DAYS_REAL / S().yearDays;
+  // Length of the year in days: a world option. Takes effect from now on; nothing already grown is undone.
+  sim.setYearDays = (days) => {
+    const d = Math.round(+days);
+    if (!(d >= 4 && d <= 365)) throw new Error('year length must be 4 to 365 days');
+    if (sim.recorded) sim.recorded.push({ tick: S().tick, name: 'time.setYearDays', payload: { days: d } });
+    S().yearDays = d; emit('time.yearDays', { days: d });
+  };
   sim.dayFraction = () => dayFraction(S().t + sim.acc);   // includes the sub-tick remainder so the sun moves smoothly
   sim.day = () => dayIndex(S().t) + 1;
 
@@ -103,6 +116,8 @@ export function createSim({ seed = 1, systems = [], record = false } = {}) {
   sim.load = (state) => {
     sim.state = JSON.parse(JSON.stringify(state));
     sim.acc = 0; sim.queue = [];
+    if (S().lifeT === undefined) S().lifeT = S().t;          // saves from before the seasonal clock
+    if (!S().yearDays) S().yearDays = YEAR_DAYS_REAL;
     for (const sys of sim.systems) if (S().sys[sys.name] === undefined) S().sys[sys.name] = sys.init ? sys.init(ctxFor(sys)) : {};
     emit('loaded', null);
   };

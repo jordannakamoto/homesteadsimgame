@@ -1983,7 +1983,7 @@ function towardOvercast(c, target, k) {
 function updateSky() {
   if (window.__game && !window.__game.calendar) window.__game.calendar = calendar;
   const wx = sim.state.sys.weather, site = (wx && wx.site) || SKY.site;
-  const sp = calendar.sunPosition(sim.state.t + sim.acc, site);
+  const sp = calendar.sunPosition(sim.calendarT(), site);
   const e = Math.sin(sp.elevationRad);
   const dayF = smoothstep(0.02, 0.4, e), nightF = 1 - smoothstep(-0.22, 0.06, e);
   const goldF = clamp(1 - dayF - nightF, 0, 1);
@@ -2040,6 +2040,7 @@ for (const b of document.querySelectorAll('#speed button')) b.addEventListener('
 // ---------------------------------------------------------- saving
 // One save per world seed: the simulation state plus what the engine owns (terrain edits, felled
 // trees, stock, where the player stood, and editable build data).
+const NEW_WORLD_YEAR_DAYS = 20;          // five days a season. The player can change it in the weather panel.
 const SAVE_KEY = 'homestead:save:', LAST_KEY = 'homestead:last-seed';
 function syncSite() {
   const build = window.__build;
@@ -2116,7 +2117,7 @@ function resetWorld(seed) {
   player.x = 0; player.z = 0;
   let raw = null;
   try { raw = localStorage.getItem(SAVE_KEY + SEED); } catch (e) { /* no storage here */ }
-  if (raw) applySave(raw);
+  if (!(raw && applySave(raw))) sim.setYearDays(NEW_WORLD_YEAR_DAYS);   // a new world gets the short year; saved worlds keep theirs
   chunkStream.update(player.x, player.z, Infinity);
   player.y = heightAt(player.x, player.z);
   cam.tx = player.x; cam.tz = player.z; cam.ty = player.y;
@@ -2922,7 +2923,7 @@ setTool('axe');
 lockUi();
 window.__game = {
   pm, get seed() { return SEED; },
-  get sim() { return sim; }, savedBuilds: () => simCtl.builds, powerAvailable: () => false,
+  get sim() { return sim; }, setYearDays: (d) => { sim.setYearDays(d); saveGame(); }, savedBuilds: () => simCtl.builds, powerAvailable: () => false,
   stock: {
     MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, stockMassKg, canAfford, toolAvailable,
     get state() { return stockState(); },
