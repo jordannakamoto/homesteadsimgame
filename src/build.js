@@ -2314,7 +2314,7 @@
     return m;
   }
   const wallMat = new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide });
-  G.fade(wallMat, 0, 1, 0, true);
+  fadeB(wallMat);
   texel(wallMat);
   G.renderer.localClippingEnabled = true;
   // warm light that comes on when you are home
@@ -2323,7 +2323,7 @@
   function makeWallMat(plane, near, sideA, sideB) {
     // a wall is cut only where it is both above waist height and between the camera and you
     const m = new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide, clippingPlanes: [plane, near, sideA, sideB], clipIntersection: true, clipShadows: true });
-    G.fade(m, 0, 1, 0, true);
+    fadeB(m);
     return texel(m);
   }
   const doorMat = new T.MeshLambertMaterial({ color: 0x6f4d2c });
@@ -2344,7 +2344,7 @@
   })();
   function makeRoofMat() {
     const m = new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide, alphaHash: true });
-    G.fade(m, 0, 1, 0, true);
+    fadeB(m);
     return texel(m);
   }
   const ghostOpts = { transparent: true, opacity: 0.5, depthTest: false, depthWrite: false, fog: false, side: T.DoubleSide };
@@ -2548,6 +2548,16 @@
 
   // after a structure changes, the terrain chunks under it are refreshed (a moment later, so a drag does it once)
   // to hide or bring back the grass and ground cover beneath its floors and paths
+  // Building materials take the engine's see-through circle (the dithered hole that shows you behind things), but
+  // with their own radius: indoors the dollhouse cut already opens the wall in the way, and the two together
+  // punched a second, speckled hole through walls and roof. So the circle is switched off for buildings while you
+  // are inside one; trees keep theirs.
+  const fadeRB = { value: 1 };
+  function fadeB(m) {
+    G.fade(m, 0, 1, 0, true);
+    const f = m.onBeforeCompile;
+    m.onBeforeCompile = (sh, r) => { f(sh, r); sh.uniforms.uFadeR = fadeRB; };
+  }
   const COVER_TAPS = [[0, 0], [0.3, 0], [-0.3, 0], [0, 0.3], [0, -0.3]];
   const coverDirty = new Set();
   let coverT = 0;
@@ -7248,6 +7258,7 @@
           break;
         }
       }
+      fadeRB.value = homeY !== null ? 1e-4 : G.fadeR ? G.fadeR.value : 1;
       for (const S of B.structs) {
         const [lx, lz] = toLocal(S, P.x, P.z);
         const sameHome = homeY !== null && Math.abs(S.y0 - homeY) < 0.4 && Math.hypot(P.x - S.cx, P.z - S.cz) < S.rad + 5;
