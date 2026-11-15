@@ -330,6 +330,7 @@ function compile(pieces, s) {
   for (const B of buses) buildTree(B, verts, circuits, issue);
   for (const w of wires) { const e = edges.find((q) => q.wire === w); if (e && e.child !== undefined) { w.bus = verts[e.a].bus; w.v = e.child; } }
   for (const br of breakers) { const e = edges.find((q) => q.breaker === br); if (e && e.child !== undefined) { br.bus = verts[e.a].bus; br.v = e.child; } }
+  for (const B of buses) { B.wires = wires.filter((w) => w.bus === B.idx && w.v >= 0); B.breakers = breakers.filter((b) => b.bus === B.idx && b.v >= 0); }
   const local = (gv) => verts[gv].local;
   for (const c of circuits) {
     c.order = c.loads.slice().sort((a, b) => b.priority - a.priority || (a.id < b.id ? -1 : 1));
@@ -358,7 +359,7 @@ function compile(pieces, s) {
     const az = set(p, 'azimuthDeg', ms.azimuthDeg !== undefined ? ms.azimuthDeg : md ? md.azimuthDeg : 180);
     pn.tiltRad = clamp(tilt, 0, 90) * RAD; pn.azRad = az * RAD; pn.cosT = Math.cos(pn.tiltRad); pn.sinT = Math.sin(pn.tiltRad);
   }
-  designChecks(buses, verts, wires, circuits, nounOf, issue);
+  designChecks(buses, verts, wires, circuits, ctrls, nounOf, issue);
   return { empty: false, buses, verts, wires, breakers, circuits, panels, ctrls, bats, invs, gens, loads, issues, fx, main };
 }
 const mainScore = (c) => c.bats.reduce((a, b) => a + b.def.capacityWh, 0) + c.invs.reduce((a, i) => a + i.def.ratedW, 0) + c.gens.reduce((a, g) => a + g.def.ratedW, 0);
@@ -400,26 +401,29 @@ function buildTree(B, verts, circuits, issue) {
 }
 
 // Design currents (everything on at its rating), checked once when the wiring changes.
-function designChecks(buses, verts, wires, circuits, nounOf, issue) {
+function designChecks(buses, verts, wires, circuits, ctrls, nounOf, issue) {
   for (const B of buses) {
     if (B.type === 'mixed' || B.type === 'none') continue;
     const c = circuits.find((q) => q.dc === B || q.ac === B);
-    const sink = new Float64Array(B.n), src = new Float64Array(B.n), n120 = new Int32Array(B.n), n240 = new Int32Array(B.n);
+    // two design cases, each with its own flows: (a) every load and inverter at its rating, supplied
+    // by the batteries in proportion to capacity; (b) every controller, panel and generator at its
+    // rating, taken up by the batteries (or the slack device). An edge must carry the larger.
+    const fa = new Float64Array(B.n), fb = new Float64Array(B.n), n120 = new Int32Array(B.n), n240 = new Int32Array(B.n);
     let V = B.type === 'ac' ? AC_V : c ? c.classV : 12;
-    if (B.type === 'pv') { const t = B.terms.find((q) => q.role === 'panel'); V = t ? t.def.vmpV : 18; }
+    if (B.type === 'pv') { const t = B.terms.find((q) => q.role === 'panel'), k = ctrls.find((q) => q.pvBus === B); V = t ? t.def.vmpV * (k ? k.series : 1) : 18; }
+    let sinks = 0, srcs = 0;
+    const batT = c && c.dc === B ? c.bats : [], capSum = batT.reduce((x, b) => x + b.def.capacityWh, 0);
     for (const t of B.terms) {
       const lv = verts[t.v].local, d = t.def;
-      if (t.role === 'load') { sink[lv] += t.p.settings && t.p.settings.ratedW !== undefined ? t.p.settings.ratedW : d.ratedW || 0; if (d.voltageV === 240) n240[lv]++; else n120[lv]++; }
-      else if (t.role === 'inv_dc') sink[lv] += d.ratedW / d.eff100;
-      else if (t.role === 'ctrl_dc') src[lv] += d.maxOutputA * V;
-      else if (t.role === 'panel') src[lv] += d.ratedW;
-      else if (t.role === 'gen') src[lv] += d.ratedW;
+      if (t.role === 'load') { const w = t.p.settings && t.p.settings.ratedW !== undefined ? t.p.settings.ratedW : d.ratedW || 0; fa[lv] += w; sinks += w; if (d.voltageV === 240) n240[lv]++; else n120[lv]++; }
+      else if (t.role === 'inv_dc') { fa[lv] += d.ratedW / d.eff100; sinks += d.ratedW / d.eff100; }
+      else if (t.role === 'ctrl_dc') { fb[lv] -= d.maxOutputA * V; srcs += d.maxOutputA * V; }
+      else if (t.role === 'panel' || t.role === 'gen') { fb[lv] -= d.ratedW; srcs += d.ratedW; }
     }
-    for (const v of B.order) {
-      const p = B.parent[v]; sink[p] += sink[v]; src[p] += src[v]; n120[p] += n120[v]; n240[p] += n240[v];
-    }
+    for (const b of batT) { const lv = verts[b.v].local, sh = b.def.capacityWh / capSum; fa[lv] -= sinks * sh; fb[lv] += srcs * sh; }
+    for (const v of B.order) { const p = B.parent[v]; fa[p] += fa[v]; fb[p] += fb[v]; n120[p] += n120[v]; n240[p] += n240[v]; }
     if (B.type === 'ac') for (const v of B.order) if (n240[v] > 0 && n120[v] === 0) B.vf[v] = 2;
-    B.designW = Float64Array.from({ length: B.n }, (_, i) => Math.max(sink[i], src[i]));
+    B.designW = Float64Array.from({ length: B.n }, (_, i) => Math.max(Math.abs(fa[i]), Math.abs(fb[i])));
     B.nomV = V;
   }
   for (const w of wires) {
@@ -456,6 +460,8 @@ function pass(B) {
 }
 
 // ------------------------------------------------------------------------------------------- state
+const LEDGER_KEYS = ['generatedWh', 'usedWh', 'wastedWh', 'dischargedWh', 'chargedWh', 'generatorWh', 'wireLossWh', 'inverterLossWh', 'unservedWh', 'fuelL',
+  'arrayWh', 'controllerLossWh', 'pvWireLossWh', 'batteryLossWh', 'selfDischargeWh'];
 const ledger = (day) => ({ day, generatedWh: 0, usedWh: 0, wastedWh: 0, dischargedWh: 0, chargedWh: 0, generatorWh: 0, wireLossWh: 0,
   inverterLossWh: 0, unservedWh: 0, fuelL: 0, arrayWh: 0, controllerLossWh: 0, pvWireLossWh: 0, batteryLossWh: 0, selfDischargeWh: 0 });
 function initState(ctx) {
@@ -534,8 +540,8 @@ function step(ctx) {
   const W = ctx.get('weather') || {}, O = s.weatherOverride;
   const airC = O && O.tempC !== undefined ? O.tempC : W.tempC !== undefined ? W.tempC : 15;
   const hour = dayFraction(tMid) * 24, minute = Math.floor(t / 60);
-  const led = { generatedWh: 0, usedWh: 0, wastedWh: 0, dischargedWh: 0, chargedWh: 0, generatorWh: 0, wireLossWh: 0, inverterLossWh: 0,
-    unservedWh: 0, fuelL: 0, arrayWh: 0, controllerLossWh: 0, pvWireLossWh: 0, batteryLossWh: 0, selfDischargeWh: 0 };
+  const led = T.led || (T.led = ledger(0));
+  for (const k of LEDGER_KEYS) led[k] = 0;
 
   // ---- solar
   const site0 = (W.site) || { latitudeDeg: 45 };
@@ -661,31 +667,28 @@ function step(ctx) {
     // generator running through an inverter-charger it passes the generator through instead
     let idle = 0; for (const i of c.invs) idle += i.def.idleW;
     const invDown = c.invs.length > 0 && pvAvail + Dmax < idle && !(genAvail > 0 && c.charger);
-    const ctx2 = { c, busV, pvAvail, Dmax, DmaxP, Cmax, genAvail, socUsable, invDown };
-    let r = evaluate(ctx2, false);
+    const ctx2 = c.X || (c.X = { r: { margin: 0, why: null, invOut: 0, invLoss: 0, genOut: 0, needDc0: 0, pvUsed: 0, wireLoss: 0, chargerDc: 0 } });
+    ctx2.c = c; ctx2.busV = busV; ctx2.pvAvail = pvAvail; ctx2.Dmax = Dmax; ctx2.DmaxP = DmaxP; ctx2.Cmax = Cmax; ctx2.genAvail = genAvail; ctx2.invDown = invDown;
     let short = null;
-    if (r.margin < -1e-6) {
-      short = r.why;
-      if (pvAvail + Dmax + genAvail <= 0) { for (let i = 0; i < n; i++) served[i] = 0; short = 'energy'; r = evaluate(ctx2, false); }
+    const m0 = evaluate(ctx2, false);
+    if (m0.margin < -1e-6) {
+      short = m0.why;
+      for (let i = 0; i < n; i++) served[i] = 0;
+      if (pvAvail + Dmax + genAvail <= 0) short = 'energy';
       else {
-        for (let i = 0; i < n; i++) served[i] = 0;
-        r = evaluate(ctx2, false);
+        let base = evaluate(ctx2, false).margin;   // margin with everything kept so far
         for (let i = 0; i < n; i++) {
           if (demand[i] <= 0) continue;
           served[i] = 1;
-          const r1 = evaluate(ctx2, false);
-          if (r1.margin >= -1e-6) { r = r1; continue; }
-          short = r1.why;
-          served[i] = 0;
+          const r1 = evaluate(ctx2, false), m1 = r1.margin, why = r1.why;
+          if (m1 >= -1e-6) { base = m1; continue; }
+          short = why; served[i] = 0;
           // the battery's energy, not its power, is the limit: this load runs for part of the minute
-          if (r1.why === 'energy' && Dmax < DmaxP) {
-            const r0 = evaluate(ctx2, false), x = clamp(r0.margin / (r0.margin - r1.margin), 0, 1);
-            served[i] = x; const rx = evaluate(ctx2, false);
-            if (rx.margin < -1e-6) served[i] = 0;
-            r = evaluate(ctx2, false);
+          if (why === 'energy' && Dmax < DmaxP && base > 0) {
+            served[i] = clamp(base / (base - m1), 0, 1);
+            if (evaluate(ctx2, false).margin < -1e-6) served[i] = 0;
             break;
           }
-          r = evaluate(ctx2, false);
         }
       }
     }
@@ -761,7 +764,7 @@ function step(ctx) {
   }
   if (tripped) s.topoKey = topoKeyOf(s);
   // books
-  for (const k in led) { s.today[k] += led[k]; s.totals[k] += led[k]; }
+  for (const k of LEDGER_KEYS) { s.today[k] += led[k]; s.totals[k] += led[k]; }
   s.busV = T.main ? s.circuits[T.main.idx].busV : 0;
   s.generationW = genAll; s.solarAvailableW = solarAvail; s.demandW = demandAll; s.unservedW = unservedAll;
   if (fresh || ctx.tick % ISSUE_EVERY === 0 || tripped) s.issues = issuesNow(s, T);
@@ -851,19 +854,19 @@ function evaluate(X, final) {
     }
   } else if (final) pvUsed = 0;
   if (final && c.ac && c.acRootGen) acLoss = c.ac.totalLoss;
-  return { margin, why, invOut, invLoss, genOut, needDc0, pvUsed, wireLoss: dcLoss + acLoss, chargerDc };
+  const r = X.r;
+  r.margin = margin; r.why = why; r.invOut = invOut; r.invLoss = invLoss; r.genOut = genOut; r.needDc0 = needDc0; r.pvUsed = pvUsed; r.wireLoss = dcLoss + acLoss; r.chargerDc = chargerDc;
+  return r;
 }
 
 // Currents, drops and losses of every wire and breaker on a bus, from the last pass. scale: share of
 // the potential flow actually taken (for panel wires when the controller is holding back).
 function wireFlows(T, s, B, scale) {
-  for (const w of T.wires) {
-    if (w.bus !== B.idx || w.v < 0) continue;
+  for (const w of B.wires) {
     const ws = s.wires[w.id], V = B.V * B.vf[w.v], P = B.acc[w.v] * scale, I = Math.abs(P) / V;
     ws.currentA = r3(I); ws.powerW = r3(P); ws.lossW = r3(B.loss[w.v] * scale * scale); ws.dropPct = r3(dropPercent(I, w.spec, w.lengthM, V)); ws.ok = I <= w.spec.ampacityA;
   }
-  for (const br of T.breakers) {
-    if (br.bus !== B.idx || br.v < 0) continue;
+  for (const br of B.breakers) {
     s.breakers[br.id].currentA = Math.abs(B.acc[br.v] * scale) / (B.V * B.vf[br.v]);
   }
 }
