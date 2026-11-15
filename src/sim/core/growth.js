@@ -79,6 +79,8 @@ export function advance(p, r, env, ev = { flags: 0 }) {
   if (st !== p.stage) { p.stage = st; ev.flags |= EV_STAGE; }
   // frost: only what is above ground can freeze
   p.frostBurn = Math.max(0, p.frostBurn - env.days / 10);
+  // env.coldestC (optional): a colder night that only counts if it kills (a short year's climate check)
+  if (p.emerged && env.coldestC != null && env.coldestC <= r.frost.killC) { p.dead = 'frost'; p.lai = 0; ev.flags |= EV_KILLED | EV_FROST; return 0; }
   if (p.emerged && env.minC < r.frost.damageC) {
     if (env.minC <= r.frost.killC) { p.dead = 'frost'; p.lai = 0; ev.flags |= EV_KILLED | EV_FROST; return 0; }
     const f = (r.frost.damageC - env.minC) / (r.frost.damageC - r.frost.killC);

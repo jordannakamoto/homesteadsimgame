@@ -68,7 +68,7 @@ const lifeOf = (state) => (state && state.yearDays ? 365 / state.yearDays : 1);
 function fresh() {
   return {
     v: STATE_V, field: makeField(CELL_M), plants: {}, nextPlant: 1, can: { litres: 0 }, packets: {},
-    acc: { h: 0, temps: [10, 10, 10], minC: [99, 99, 99], rsMJ: [0, 0, 0] }, soilC: null, last: null, pending: [], carryKg: {},
+    acc: { h: 0, temps: [10, 10, 10], minC: [99, 99, 99], rsMJ: [0, 0, 0], rs24: new Array(24).fill(0) }, soilC: null, last: null, pending: [], carryKg: {},
     totals: { rainL: 0, irrigL: 0, evapL: 0, transpL: 0, drainL: 0, runoffL: 0, nInit: 0, nIn: 0, nFixed: 0, nLeached: 0, nRemoved: 0, nExported: 0, harvestKg: {} },
   };
 }
@@ -153,7 +153,6 @@ const plantList = (s) => cacheOf(s).list;
 const plantsChanged = (s) => listCache.delete(s.plants);
 
 // ---------------------------------------------------------------------------------------- the soil step (hourly)
-const K_DAY = 1 - Math.exp(-1 / 24);
 const _out = { evap: 0, transp: 0, drain: 0, ks: 1 };
 const _inp = { et0: 0, kcb: 0, cover: 0, mulch: 0, mulchCut: MULCH.evapCut, rootFrac: 0, p: 0.5, weedKc: 0, frozen: false };
 function soilStep(ctx, s) {
@@ -181,7 +180,6 @@ function soilStep(ctx, s) {
   const calm = clamp(1 - wind / 4, 0, 1), plantC = ghi > 0 ? tC : tC - 3 * (1 - cloud) * calm;
   const A = s.acc, slot = A.h % 3;
   A.temps[slot] = tC; A.minC[slot] = plantC; A.rsMJ[slot] = rsMJ; A.h++;
-  A.rsDay = (A.rsDay ?? rsMJ) + (rsMJ - (A.rsDay ?? rsMJ)) * K_DAY;   // the last day's mean hourly sunshine
   const T = s.totals;
   let cache = cacheOf(s);
   for (const bed of Object.values(s.field.groups)) {
@@ -244,7 +242,7 @@ function growthStep(ctx, s) {
   const dayH = sunTimes(ct, site).dayLengthH;
   // In a short year one three-hour step is days of the plant's life, so it grows on the average day's light,
   // not on whether these three hours happened to be night.
-  const minC = Math.min(A.minC[0], A.minC[1], A.minC[2]), rsWin = life > 1.5 ? 3 * (A.rsDay ?? 0) : A.rsMJ[0] + A.rsMJ[1] + A.rsMJ[2];
+  const minC = Math.min(A.minC[0], A.minC[1], A.minC[2]), rsWin = life > 1.5 && A.rs24 ? A.rs24.reduce((a, b) => a + b, 0) / 8 : A.rsMJ[0] + A.rsMJ[1] + A.rsMJ[2];
   const E = _env;
   E.days = dt; E.temps = A.temps; E.n = 3; E.soilC = s.soilC ?? 10; E.dayH = dayH;
   const T = s.totals;
@@ -277,7 +275,8 @@ function growthStep(ctx, s) {
     const nutrient = clamp((ns - 0.45) / 0.45, 0, 1) * pk;
     const light = (1 - (bed.shade || 0)) * (bed.cover ? COVER_LIGHT : 1);
     E.topWet = seed; E.water = ks; E.nStatus = ns; E.pk = pk; E.nutrient = nutrient; E.light = light;
-    E.minC = Math.min(minC, climMin) + (bed.cover ? COVER_FROST_C : 0);
+    E.minC = minC + (bed.cover ? COVER_FROST_C : 0);
+    E.coldestC = climMin < 98 ? climMin + (bed.cover ? COVER_FROST_C : 0) : null;
     if (snowed) E.minC = Math.max(E.minC, -2);   // under snow, plants stay near freezing whatever the air does
     E.rsMJ = rsWin * light * life;
     // weeds shade the crop: a full cover of weeds takes most of the light from a low crop, less from a tall one
@@ -669,6 +668,11 @@ export const garden = {
   step(ctx) {
     const s = ctx.s;
     if (!s || s.v !== STATE_V) { ctx.s = fresh(); return; }
+    // the last 24 hours of sunshine, kept even with no beds (one number an hour) so a bed made in a short
+    // year starts with a true day's light
+    const wl = ctx.get('weather'), A = s.acc;
+    if (!A.rs24) A.rs24 = new Array(24).fill(0);
+    A.rs24[(ctx.tick / 60) % 24 | 0] = ((wl && wl.solar && wl.solar.globalHorizontalWm2) || 0) * 0.0036;
     let any = false; for (const _ in s.field.groups) { any = true; break; }
     if (!any) { s.last = null; return; }
     soilStep(ctx, s);
