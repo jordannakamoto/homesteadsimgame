@@ -5,6 +5,7 @@ import { createSim } from './sim.js';
 import { stockSystem } from './stock.js';
 import { weather } from './weather.js';
 import { siteSystem } from './site.js';
+import { thermal } from './thermal.js';
 
 export * from './sim.js';
 export * from './time.js';
@@ -16,9 +17,11 @@ export * from './stock.js';
 export * as calendar from './calendar.js';
 export { weather, CLIMATES, conditionWord } from './weather.js';
 export * from './site.js';
+export { findRooms, roomAt, compassName } from './rooms.js';
+export { thermal, assemblyR, uValue, innerMass, roomModels, roomIdAt, overlayData as thermalOverlayData } from './thermal.js';
 
 // Systems are added here, in dependency order, as the iterations land (thermal, power...).
-export const GAME_SYSTEMS = [weather, stockSystem(), siteSystem()];
+export const GAME_SYSTEMS = [weather, stockSystem(), siteSystem(), thermal];
 
 export function createGameSim(seed, opts = {}) {
   return createSim({ seed, systems: GAME_SYSTEMS, ...opts });
