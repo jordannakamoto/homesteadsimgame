@@ -16,8 +16,7 @@ Browser homestead builder (heading toward a Stardew-style sim) on a Valheim-styl
 - `src/build.js`: build mode (walls, roofs, castle kit, paths, copy, save, furniture).
 - `src/touch.js`: mobile dual-stick controls and build buttons.
 - `src/nature.js`: ground cover, ivy, fallen logs, insects, animals, unified soft lighting, pine level of detail.
-- `src/relight.js`: screen-space ambient occlusion, colour spill, haze and grade (High quality only).
-- `src/fxpost.js`: the post pass from the `fx` add-on (depth of field, sun shafts, glow, vignette), adapted to this build's `window.__game`.
+- `src/fxpost.js`: the one post pass (High quality only): half-resolution ambient occlusion with bounce light (formerly `relight.js`, joined back with a depth-aware upsample), depth of field, sun shafts, distance haze, glow, colour grade, saturation and vignette.
 - `src/fxhost.js`: builds the `window.__fxHost` bridge `src/fx.js` expects, with a once-per-frame hook on `scene.onBeforeRender`.
 - `src/fx.js`: campfires and embers, soft smoke and particles, per-tree shape variety, and the procedural cel-shaded characters ("Models: anime / blocks" button). Its own post pass stays off here, because `fxpost.js` already installs it.
 - `fx/`: the character generator source (`fx/body/body.js`, synced into `src/fx.js` between the markers) and viewer/screenshot tools.

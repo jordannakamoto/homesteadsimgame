@@ -5,11 +5,11 @@ cd "$(dirname "$0")"
 mkdir -p dist
 min() { npx esbuild "src/$1.js" --minify-whitespace --charset=utf8 --log-level=warning "$2" > "dist/$1.min.js"; }
 min engine --legal-comments=inline
-for m in build touch nature relight fxpost fxhost fx; do min $m --legal-comments=eof; done
+for m in build touch nature fxpost fxhost fx; do min $m --legal-comments=eof; done
 python3 - <<'P'
 r = lambda p: open(p, encoding='utf-8').read()
 h, t, g = r('template/head.html'), r('template/tail.html'), r('dist/engine.min.js')
-b = '\n'.join(r('dist/%s.min.js' % m) for m in ['build', 'touch', 'nature', 'relight', 'fxpost', 'fxhost', 'fx'])
+b = '\n'.join(r('dist/%s.min.js' % m) for m in ['build', 'touch', 'nature', 'fxpost', 'fxhost', 'fx'])
 assert '</script' not in g and '</script' not in b
 open('dist/index.html', 'w', encoding='utf-8').write(h + '<script>' + g + '</script>\n<script>' + b + t)
 print('dist/index.html', len(h + g + b + t))
