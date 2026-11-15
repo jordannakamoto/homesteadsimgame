@@ -92,6 +92,14 @@ async function open(opts) {
     fs.writeFileSync(process.env.DUMP_HOUSE, JSON.stringify(await G(() => __game.sim.state.sys.site.pieces), null, 1));
   }
 
+  if (process.env.DUMP_SHED) {    // the tool shed as build mode plans it, for the headless construction tests
+    const fs = await import('node:fs');
+    const shed = await G(() => { const was = __build.constructionMode; __build.setConstructionMode(true); const r = __build.placePlan('shed', 40, 40, 0);
+      const out = { struct: r.struct, pieces: __build.pieces().filter((p) => p.struct === r.struct), materialsList: __build.materialsList(r.struct) };
+      __build.setConstructionMode(was); __build.key({ code: 'KeyZ', ctrlKey: true, preventDefault() {} }); return out; });
+    fs.writeFileSync(process.env.DUMP_SHED, JSON.stringify(shed));
+  }
+
   // a wall drawn point to point with a typed length
   await page.keyboard.press('KeyN'); await click(await at(8, 0)); await move(await at(11.2, 2.3));
   check('a wall in hand shows its length and angle, with a field to type in', await G(() => { const d = __build.state.ov.dims; return d.length === 2 && d[0].field === 'a' && d[1].field === 'b' && !!document.querySelector('.bdim.field input'); }));

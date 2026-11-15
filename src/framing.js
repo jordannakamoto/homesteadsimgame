@@ -429,7 +429,8 @@
       if (!q) continue;
       const key = m.stage + "|" + q[0];
       let ln = lines.get(key);
-      if (!ln) lines.set(key, (ln = { stage: m.stage, itemId: q[1], qty: 0, unit: q[2], label: q[4], why: q[5], count: 0 }));
+      if (!ln) lines.set(key, (ln = { key, stage: m.stage, itemId: q[1], qty: 0, unit: q[2], label: q[4], why: q[5], count: 0, members: [] }));
+      ln.members.push([m.id, r3(q[3])]);
       if (q[6]) ln.missing = q[6];
       ln.qty += q[3];
       ln.count++;
@@ -439,7 +440,7 @@
     }
     for (const [key, kg] of nails) {
       const [stage, item] = key.split("|");
-      lines.set(key, { stage, itemId: item, qty: kg, unit: "kg", label: item === "nails_framing" ? "Framing nails" : "Screws", why: item === "nails_framing" ? "Hold the frame together. Bought by weight and used up as you build." : "Fix the sheets down. Bought by weight and used up as you build.", count: 0 });
+      lines.set(key, { key, members: [], stage, itemId: item, qty: kg, unit: "kg", label: item === "nails_framing" ? "Framing nails" : "Screws", why: item === "nails_framing" ? "Hold the frame together. Bought by weight and used up as you build." : "Fix the sheets down. Bought by weight and used up as you build.", count: 0 });
     }
     const out = [...lines.values()];
     for (const ln of out) {
