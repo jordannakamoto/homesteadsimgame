@@ -125,6 +125,28 @@ Water and power can share a trench. Sewage gets its own.
 
 **Kept simple on purpose.** No pipe fittings, glue or individual joints; no vent stacks; no percolation test beyond a soil class. A run is one piece with a length, a diameter and a depth.
 
+## Hooking things up: wires and pipes
+
+Requested by the owner: an intuitive way to lay wiring and pipes. Today the Equip tool joins equipment by dragging from one small port to another, which works but assumes the player knows what joins to what. The redesign makes hook-ups a mode of their own and lets the game carry the knowledge.
+
+**A Hook-up view.** One button in Build. The world dims, buildings go see-through, and only utilities stay bright: equipment, existing runs, and every free connection point as a large coloured socket. Yellow is power, blue is clean water, brown is waste, grey is flue. Buried runs show through the ground.
+
+**Click, click.** Click a socket, and every socket it can sensibly join lights up while the rest fade. Click one of those and the run draws itself: along the wall and under the floor indoors, as a trench line outdoors. No dragging, no aiming at small dots.
+
+**The game picks the size and says why.** A new run gets the right wire gauge or pipe diameter for its length and load, with one line of reason ("8 AWG: 30 A over 4 m at 12 V"). The player can change it; a bad choice turns the run amber with the reason and the fix, live.
+
+**What usually comes next.** Hovering a socket names its usual partner in plain words: "A panel goes to a charge controller", "A tank's outlet goes to a pump or straight to a tap below it".
+
+**Carry on and branch.** After a run lands, the next click continues from there. Clicking the middle of an existing run makes a branch.
+
+**"Hook it up for me."** Select a group of equipment and one button joins it in the standard arrangement, drawing each run in turn with a one-line caption of what it is for. This is the default for kits and the way a beginner learns the pattern; they can then undo any run and do it by hand.
+
+**Kits.** The store sells starter sets that arrive as one delivery and place as a group: a cabin solar kit (panel, controller, battery, fuse, two lights), a rain barrel kit (gutter, downpipe, barrel, tap), a gravity shower kit.
+
+**A picture of the system.** The Home panel draws each system as a simple one-line diagram: sun to panel to battery to loads, with live numbers on each link; roof to tank to taps. Clicking a part of the diagram shows where it is in the world.
+
+**Honest rules stay.** Wire ampacity, voltage drop, gravity head, pipe friction, frost depth and sewer fall are all still checked. The interface carries them so the player does not have to know them first.
+
 ## Renting machines
 
 Requested by the owner: the machines people commonly rent when building a house. Renting is how real owner-builders do the heavy jobs, and it gives the game a pleasant kind of planning: you have the machine for the day, so line the work up.

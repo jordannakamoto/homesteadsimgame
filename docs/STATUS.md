@@ -35,6 +35,7 @@ The scope roughly doubled after the first playtest. These rules put landing each
 | C-int | Partly done: real equipment catalog in the Equip tool, power and water running in play, a Home panel. Still owed: store pricing for equipment, overlays in the world, engine and game folders. Wave C made playable; files moved into engine and game folders: equipment catalog in the store, fixture placement wired to power and water, overlays for structure, heat, power and water | Not started | |
 | F1 | In progress. **Farming, first playable: soil water, growth model, twelve crops, beds, sowing, watering, harvest, the first-salad card** (from owner feedback; `docs/FARMING.md`). Runs alongside wave C and D1 because it does not touch build mode | Not started | |
 | D1 | **2c construction and 2d store and plan book: the first shed, end to end** (from owner feedback) | In progress | |
+| D1b | 6a hook-ups: intuitive wiring and piping (from owner feedback), right after construction lands | Not started | |
 | D2 | 1a weather you can see, 5 heating and moisture, 5b camp and journal | Not started | |
 | D3 | 7a groundworks, 7b rented machines, 8 soil and irrigation, 14 chicken lifecycle | Not started | |
 | D4 | 5a interiors, 18 salvage and renovation | Not started | |
@@ -54,6 +55,8 @@ Things decided on the owner's behalf that are easy to reverse. Say so if any is 
 
 ## Deviations from the plan
 
+- **The run sat idle from about 03:00 to 11:15 on 15 Nov.** The usage limit stopped the three running agents at about 03:00, and the orchestrator had not scheduled a check-in past 03:10, so nothing restarted them at the 06:30 reset. Rule from now on: a check-in is always scheduled before a turn ends, and one is always set for just after the next usage reset.
+
 - The run stopped from about 7:25pm to 8:35pm Pacific on 14 Nov when the usage limit was reached, then restarted itself.
 - Another session pushed two fixes to `main` during wave B (dollhouse view, potted plant on High); they are merged in.
 
@@ -72,7 +75,7 @@ State at 02:10 Pacific, 15 Nov. Usage window runs to 06:30. Keep at most four ag
 | 2a second half (framing, stages, materials list, plans, fixtures) | `wt-02b-build` | `a4d4f2abc82ad3b82` | Merged, live. Not done: log, timber frame, A-frame, 2D plan view, placing single members by hand |
 | F1 farming | `wt-f1-farming` | `aff01250a5f1dc736` | Running |
 | 4 thermal | `wt-04-thermal` | `a1ed4e1a9cafe5d67` | Merged (headless) |
-| 3 structure | `wt-03-structure` | `ac42fcd07389e8bfb` | Resumed 02:35 |
+| 3 structure | `wt-03-structure` | `ac42fcd07389e8bfb` | Finished 11:35; to merge |
 | 2c construction and 2d store: the first shed | `wt-2c-construction` | `a167a5466628b76ba` | Started 02:45 |
 
 Also on `main` from other sessions: the kitchen (cooking, key K, `docs/COOKING.md`), terrain streaming and save fixes, `docs/FOUNDATIONS.md` (Steam and co-op plan). Unmerged branch `renderer-low-memory` is left for the owner to decide.
