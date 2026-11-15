@@ -382,13 +382,18 @@
     };
     const G = o.goblin, HS = G ? 1.6 : 1.75;            // head size against a 1.6-unit body; goblins larger still
     const TW = 1.04, TD = 1.1, AT = 1.14, LT = 1.16, LEG = 0.72, TOR = 0.84, BX = 0.82, GOLD = '#d4b057'; // stout build: wider torso, thicker limbs, shorter legs
+    // 'homestead' style: work clothes instead of the fantasy kit. Shirt tucked into bib overalls, sleeves rolled
+    // to the elbow, bare forearms and hands, plain boots, a neckerchief, and a straw hat hung on the back.
+    const HOME = o.style === 'homestead' && !G;
+    const CUFF = HOME ? shade(o.sleeve, 0.8) : GOLD, WRIST = HOME ? o.skin : GOLD, STRAW = '#d8ba6c';
     const hipY = 0.8, hipX = 0.086, kneeY = 0.43, shY = 1.27, shX = 0.176, elbow = 0.25, wrist = 0.47, chestY = 1.05, neckY = 1.33, HC0 = 1.47, HY = HC0 + (HS - 1) * 0.1;
     const zl = (y) => o.lean * Math.max(0, y - hipY);
     const defs = [[-1, 0, hipY, 0], [0, 0, chestY, zl(chestY)], [1, 0, neckY, zl(neckY)], [1, -shX, shY, zl(shY)], [3, -shX, shY - elbow, zl(shY)], [1, shX, shY, zl(shY)], [5, shX, shY - elbow, zl(shY)], [0, -hipX, hipY, 0], [7, -hipX, kneeY, 0], [0, hipX, hipY, 0], [9, hipX, kneeY, 0]];
     const bl = (y, a, b) => Math.min(1, Math.max(0, (y - a) / (b - a)));
     // ---- torso ----
     const wide = (y, k) => 1 + (k - 1) * bl(1.335 - y, 0, 0.04);
-    const tr = (y, rx, zf, zb, color, e) => ({ c: [0, y, zl(y)], rx: rx * wide(y, TW), rzf: zf * wide(y, TD), rzb: zb * wide(y, TD), color, k: color === T_ ? 0.82 + 0.18 * bl(y, 0.58, 1.1) : 0, e: e || 0.92, w: [1, bl(y, hipY + 0.04, chestY + 0.06), 0] });
+    const tr = (y, rx, zf, zb, color, e) => { if (HOME && y < 0.968) { color = o.pants; if (y < 0.918) { const f = y < 0.76 ? 0.22 : 0.5 + 0.4 * bl(y, 0.56, 0.9); rx *= f; zf *= f; zb *= f; } } return tr0(y, rx, zf, zb, color, e); };
+    const tr0 = (y, rx, zf, zb, color, e) => ({ c: [0, y, zl(y)], rx: rx * wide(y, TW), rzf: zf * wide(y, TD), rzb: zb * wide(y, TD), color, k: color === T_ ? 0.82 + 0.18 * bl(y, 0.58, 1.1) : 0, e: e || 0.92, w: [1, bl(y, hipY + 0.04, chestY + 0.06), 0] });
     const T_ = o.tunic;
     const HEM = G ? shade(T_, 1.5) : GOLD;
     tube([tr(0.555, 0.01, 0.01, 0.01, HEM), tr(0.56, 0.222, 0.16, 0.182, HEM), tr(0.59, 0.217, 0.157, 0.178, HEM), tr(0.595, 0.216, 0.156, 0.177, T_), tr(0.66, 0.2, 0.146, 0.164, T_), tr(0.74, 0.182, 0.133, 0.148, T_), tr(0.82, 0.166, 0.122, 0.134, T_), tr(0.915, 0.132, 0.1, 0.106, T_), tr(0.92, 0.136, 0.104, 0.11, o.belt), tr(0.965, 0.134, 0.103, 0.108, o.belt), tr(0.97, 0.122, 0.092, 0.097, T_),
@@ -398,16 +403,16 @@
       // ---- arm ----
       const ua = s < 0 ? 3 : 5, fa = ua + 1, x = s * shX, z = zl(shY);
       const ar = (d, rx, rz, color, w, dx) => { const k = d > 0.47 ? 1.2 : AT; return { c: [x + (dx || 0) * s, shY - d, z], rx: rx * k, rz: rz * k, color, w }; };
-      const SL = o.sleeve, K = o.glove || o.skin, BR = o.glove || o.accent, US = G ? o.sleeve : (o.shirt || '#d6ccb6');
-      tube([ar(-0.03, 0.004, 0.004, SL, [1, 0.6, ua], -0.03), ar(-0.022, 0.03, 0.036, SL, [1, 0.55, ua], -0.024), ar(0.005, 0.045, 0.05, SL, [1, 0.3, ua], -0.01), ar(0.05, 0.047, 0.051, SL, [ua]), ar(0.12, 0.047, 0.051, SL, [ua]), ar(0.165, 0.046, 0.05, SL, [ua]), ar(0.168, 0.048, 0.052, G ? SL : GOLD, [ua]), ar(0.19, 0.047, 0.051, G ? SL : GOLD, [ua, 0.85, fa]), ar(0.193, 0.039, 0.042, US, [ua, 0.85, fa]),
-        ar(elbow - 0.02, 0.038, 0.04, US, [ua, 0.6, fa]), ar(elbow + 0.02, 0.038, 0.04, US, [ua, 0.3, fa]), ar(0.31, 0.039, 0.042, US, [fa]), ar(0.335, 0.037, 0.04, US, [fa]), ar(0.34, 0.042, 0.045, BR, [fa]), ar(0.4, 0.038, 0.04, BR, [fa]), ar(0.455, 0.035, 0.037, BR, [fa]), ar(0.46, 0.037, 0.039, G ? shade(BR, 1.3) : GOLD, [fa]), ar(0.469, 0.036, 0.038, G ? shade(BR, 1.3) : GOLD, [fa]), ar(0.4695, 0.024, 0.027, K, [fa]),
+      const SL = o.sleeve, K = o.glove || o.skin, BR = HOME ? o.skin : o.glove || o.accent, US = G ? o.sleeve : HOME ? o.skin : (o.shirt || '#d6ccb6');
+      tube([ar(-0.03, 0.004, 0.004, SL, [1, 0.6, ua], -0.03), ar(-0.022, 0.03, 0.036, SL, [1, 0.55, ua], -0.024), ar(0.005, 0.045, 0.05, SL, [1, 0.3, ua], -0.01), ar(0.05, 0.047, 0.051, SL, [ua]), ar(0.12, 0.047, 0.051, SL, [ua]), ar(0.165, 0.046, 0.05, SL, [ua]), ar(0.168, 0.048, 0.052, G ? SL : CUFF, [ua]), ar(0.19, 0.047, 0.051, G ? SL : CUFF, [ua, 0.85, fa]), ar(0.193, 0.039, 0.042, US, [ua, 0.85, fa]),
+        ar(elbow - 0.02, 0.038, 0.04, US, [ua, 0.6, fa]), ar(elbow + 0.02, 0.038, 0.04, US, [ua, 0.3, fa]), ar(0.31, 0.039, 0.042, US, [fa]), ar(0.335, 0.037, 0.04, US, [fa]), ar(0.34, 0.042, 0.045, BR, [fa]), ar(0.4, 0.038, 0.04, BR, [fa]), ar(0.455, 0.035, 0.037, BR, [fa]), ar(0.46, 0.037, 0.039, G ? shade(BR, 1.3) : WRIST, [fa]), ar(0.469, 0.036, 0.038, G ? shade(BR, 1.3) : WRIST, [fa]), ar(0.4695, 0.024, 0.027, K, [fa]),
         ar(wrist + 0.02, 0.02, 0.03, K, [fa]), ar(wrist + 0.06, 0.02, 0.037, K, [fa]), ar(wrist + 0.1, 0.017, 0.032, K, [fa]), ar(wrist + 0.135, 0.011, 0.02, K, [fa]), ar(wrist + 0.142, 0.003, 0.004, K, [fa])], 10);
       lock([[x, shY - wrist - 0.03, z + 0.027], [x - s * 0.008, shY - wrist - 0.065, z + 0.052], [x - s * 0.012, shY - wrist - 0.1, z + 0.056]], 0.014, 0.014, K, fa, 5);
       // ---- leg and boot ----
       const th = s < 0 ? 7 : 9, sh = th + 1, lx = s * hipX, PA = o.pants, BT = o.boot;
       const lr = (y, rx, zf, zb, color, w, dx) => { const boot = color !== PA, k = boot ? 1.42 : LT; return { c: [lx + (dx || 0) * s, y, 0], rx: rx * k, rzf: zf * (boot && y < 0.07 ? 1.18 : k), rzb: zb * k, color, k: !boot ? 0.8 + 0.2 * bl(0.74 - y, 0, 0.2) : 0, w }; };
       tube([lr(0.9, 0.004, 0.004, 0.004, PA, [0, 0.7, th]), lr(0.88, 0.055, 0.07, 0.075, PA, [0, 0.6, th], -0.005), lr(0.8, 0.068, 0.08, 0.085, PA, [0, 0.2, th]), lr(0.7, 0.072, 0.08, 0.08, PA, [th]), lr(0.58, 0.066, 0.068, 0.068, PA, [th]), lr(kneeY + 0.06, 0.056, 0.06, 0.055, PA, [th, 0.85, sh]),
-        lr(kneeY, 0.053, 0.058, 0.052, PA, [th, 0.5, sh]), lr(kneeY - 0.045, 0.051, 0.05, 0.055, PA, [th, 0.15, sh]), lr(0.39, 0.05, 0.048, 0.058, PA, [sh]), lr(0.4, 0.05, 0.05, 0.056, G ? shade(BT, 1.7) : GOLD, [sh]), lr(0.405, 0.06, 0.06, 0.068, G ? shade(BT, 1.7) : GOLD, [sh]), lr(0.39, 0.061, 0.061, 0.069, G ? shade(BT, 1.7) : GOLD, [sh]), lr(0.386, 0.061, 0.061, 0.069, shade(BT, 1.7), [sh]), lr(0.345, 0.062, 0.062, 0.07, shade(BT, 1.7), [sh]), lr(0.34, 0.054, 0.052, 0.064, BT, [sh]), lr(0.22, 0.044, 0.043, 0.05, BT, [sh]),
+        lr(kneeY, 0.053, 0.058, 0.052, PA, [th, 0.5, sh]), lr(kneeY - 0.045, 0.051, 0.05, 0.055, PA, [th, 0.15, sh]), lr(0.39, 0.05, 0.048, 0.058, PA, [sh]), lr(0.4, 0.05, 0.05, 0.056, G ? shade(BT, 1.7) : HOME ? shade(BT, 1.35) : GOLD, [sh]), lr(0.405, 0.06, 0.06, 0.068, G ? shade(BT, 1.7) : HOME ? shade(BT, 1.35) : GOLD, [sh]), lr(0.39, 0.061, 0.061, 0.069, G ? shade(BT, 1.7) : HOME ? shade(BT, 1.35) : GOLD, [sh]), lr(0.386, 0.061, 0.061, 0.069, shade(BT, 1.7), [sh]), lr(0.345, 0.062, 0.062, 0.07, shade(BT, 1.7), [sh]), lr(0.34, 0.054, 0.052, 0.064, BT, [sh]), lr(0.22, 0.044, 0.043, 0.05, BT, [sh]),
         lr(0.11, 0.038, 0.04, 0.04, BT, [sh]), lr(0.06, 0.042, 0.075, 0.045, BT, [sh]), lr(0.02, 0.046, 0.14, 0.05, BT, [sh]), lr(0.0, 0.04, 0.13, 0.044, shade(BT, 0.7), [sh]), lr(-0.002, 0.004, 0.02, 0.004, shade(BT, 0.7), [sh])], 10);
     }
     // ---- head ----
@@ -503,9 +508,34 @@
     const TF = [[0.56, 0.16], [0.6, 0.156], [0.66, 0.146], [0.74, 0.133], [0.82, 0.122], [0.915, 0.1], [0.92, 0.104], [0.965, 0.103], [0.97, 0.092], [1.04, 0.099], [1.12, 0.116], [1.2, 0.114], [1.255, 0.096], [1.29, 0.078]];
     const torsoFront = (y) => { let i = 0; while (i < TF.length - 2 && TF[i + 1][0] < y) i++; const t = bl(y, TF[i][0], TF[i + 1][0]); return zl(y) + (TF[i][1] + (TF[i + 1][1] - TF[i][1]) * t) * wide(y, TD); };
     const tw = (y) => [1, bl(y, hipY + 0.04, chestY + 0.06), 0];
-    if (!G) {
+    if (!G && !HOME) {
       blob([0, 0.942, zl(0.942) + 0.104 * TD + 0.004], [0.03, 0.028, 0.013], GOLD, 0, 6);                       // belt buckle
       blob([0.13 * TW, 0.875, zl(0.875) + 0.06], [0.04, 0.05, 0.036], shade(o.belt, 1.25), 0, 6);                    // belt pouch
+    }
+    if (HOME) {
+      const OV = o.pants, SEAM = shade(o.pants, 0.78), BRASS = '#c9a24a';
+      const TB = [[0.92, 0.11], [1.04, 0.098], [1.12, 0.104], [1.2, 0.104], [1.255, 0.098], [1.29, 0.088], [1.312, 0.072]];
+      const torsoBack = (y) => { let i = 0; while (i < TB.length - 2 && TB[i + 1][0] < y) i++; const t = bl(y, TB[i][0], TB[i + 1][0]); return zl(y) - (TB[i][1] + (TB[i + 1][1] - TB[i][1]) * t) * wide(y, TD); };
+      // bib: a panel up the chest with a darker top hem, a pocket and two brass buttons
+      { const rs = [], ys = [0.93, 0.936, 0.99, 1.06, 1.13, 1.18, 1.2, 1.206];
+        ys.forEach((y, i) => { const edge = i === 0 || i === ys.length - 1; rs.push({ c: [0, y, torsoFront(y) + 0.004], rx: edge ? 0.004 : 0.092 - 0.012 * bl(y, 0.95, 1.2), rz: edge ? 0.002 : 0.01, color: y > 1.17 ? SEAM : OV, w: tw(y) }); });
+        tube(rs, 8); }
+      blob([0, 1.075, torsoFront(1.075) + 0.013], [0.036, 0.03, 0.006], SEAM, 1, 6);
+      for (const s of [-1, 1]) {
+        blob([s * 0.066, 1.178, torsoFront(1.178) + 0.016], [0.011, 0.011, 0.006], BRASS, 1, 6);
+        // straps: up the chest, over the shoulder, and down the back to the waist
+        const fr = [], bk = [];
+        for (const y of [1.17, 1.176, 1.22, 1.26, 1.295, 1.3]) fr.push({ c: [s * (0.068 - 0.006 * bl(y, 1.17, 1.3)), y, torsoFront(Math.min(y, 1.29)) - 0.012 * bl(y, 1.26, 1.3) + 0.004], rx: y === 1.17 || y === 1.3 ? 0.003 : 0.016, rz: y === 1.17 || y === 1.3 ? 0.002 : 0.008, color: OV, w: tw(y) });
+        tube(fr, 6);
+        for (const y of [0.955, 0.961, 1.04, 1.12, 1.2, 1.26, 1.295, 1.3]) bk.push({ c: [s * (0.03 + 0.032 * bl(y, 0.96, 1.3)), y, torsoBack(y) - 0.004], rx: y === 0.955 || y === 1.3 ? 0.003 : 0.016, rz: y === 0.955 || y === 1.3 ? 0.002 : 0.008, color: OV, w: tw(y) });
+        tube(bk, 6);
+        blob([s * 0.062, 1.306, zl(1.306) - 0.004], [0.017, 0.011, 0.082], OV, 1, 6);
+      }
+      // straw hat hung on the back by its cord: brim, crown and band
+      const hy = 1.16, hz = zl(hy) - 0.175;
+      blob([0, hy, hz], [0.175, 0.175, 0.02], STRAW, 1, 14);
+      blob([0, hy, hz - 0.034], [0.09, 0.09, 0.05], shade(STRAW, 0.93), 1, 12);
+      blob([0, hy, hz - 0.016], [0.096, 0.096, 0.016], o.accent, 1, 12);
     }
     if (o.tabard) { const rs = [], ys = [0.596, 0.604, 0.66, 0.74, 0.82, 0.9, 0.918, 0.967, 0.975, 1.04, 1.12, 1.2, 1.25, 1.256];
       ys.forEach((y, i) => { const belt = y > 0.91 && y < 0.972, edge = i === 0 || i === ys.length - 1; rs.push({ c: [0, y, torsoFront(y) + 0.003], rx: edge ? 0.004 : (belt ? 0.062 : 0.058) * (y < 0.75 ? 1.15 : 1), rz: edge ? 0.002 : 0.009, color: belt ? o.belt : o.tabard, w: tw(y) }); });
@@ -611,7 +641,6 @@
     outline.onBeforeCompile = (sh) => { sh.vertexShader = sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += normal * 0.0038;'); };
     return { outline, toon(faceTex) { const m = new T.MeshToonMaterial({ vertexColors: true, gradientMap: ramp, map: faceTex, alphaTest: 0.5 }); m.onBeforeCompile = patch; m.customProgramCacheKey = () => 'fxtoon2'; return m; } };
   }
-
   const charMats = charMaterials(T);
   function measure(rig) {
     const body = rig.body, arm = limbBox(rig.armL) || limbBox(rig.armR), leg = limbBox(rig.legL) || limbBox(rig.legR);
@@ -653,7 +682,7 @@
     const accent = pal.accent || shadeOf(pal.tunic, 1.35), look = { cape: null, tabard: null, pauldron: null, glove: null, eyeType: n % 4, mouthType: (n * 3 + 1) % 4 };
     if (!P.enemy) {
       look.glove = '#5b4030';
-      if (g.pm === rig) { look.cape = shadeOf(accent, 0.88); look.tabard = '#e4dcc8'; look.eyeType = 0; look.mouthType = 2; }      // the player: cape and tabard
+      if (g.pm === rig) { Object.assign(look, { style: 'homestead', glove: null, tunic: '#e6dcc6', sleeve: '#e6dcc6', pants: '#4d74a6', boot: '#6f4a2b', accent: '#c8472f', eyeType: 1, mouthType: 1 }); }      // the player: a homesteader in overalls
       else if (ally && ally.kind === 0) { look.pauldron = '#7f8892'; look.eyeType = 3; look.mouthType = 3; }                             // the Guardian: steel shoulders
       else { look.cape = shadeOf(pal.tunic, 0.6); look.eyeType = 1; look.mouthType = 1; }                                                // the Archer and anyone else: a plain cloak
     }

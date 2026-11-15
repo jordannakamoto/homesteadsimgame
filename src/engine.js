@@ -92,6 +92,11 @@ function baseHeight(x, z) {
   h = lerp(h, Math.max(h, 3.2), f);
   return h;
 }
+// The game is a peaceful homestead builder by default. The old action-RPG combat (enemies, combat HUD) is kept
+// behind a switch: run localStorage.setItem('combat', '1') in the console and reload to bring it back.
+let COMBAT = false;
+try { COMBAT = localStorage.getItem('combat') === '1'; } catch (e) {}
+document.body.classList.toggle('peaceful', !COMBAT);
 // Patchy ground colour: leaf litter under trees, dry and lush patches in the open, bare earth here and there.
 var groundTintPal = null;
 function groundTint(c, x, z, f, blades) {
@@ -1112,6 +1117,9 @@ class Chunk {
         _c.copy(PAL.meadow).lerp(PAL.forest, smoothstep(-0.1, 0.35, g.f));
         groundTint(_c, this.ox + g.lx, this.oz + g.lz, g.f, 1);
         _c.lerp(PAL.sand, (1 - smoothstep(0.7, 1.5, g.hb)) * 0.7).multiplyScalar(v);
+        // darker tufts gather in loose drifts, with a few strays, so the sward has depth instead of one flat tone
+        const drift = smoothstep(0.08, 0.3, fbm((this.ox + g.lx) * 0.55 + 31, (this.oz + g.lz) * 0.55 - 17, 2)), stray = (i * 2654435761 >>> 0) % 100;
+        if (stray < 6 + 34 * drift) _c.multiplyScalar(0.66 + 0.14 * (stray % 7) / 6);
         this.grassMesh.setColorAt(i, _c);
       });
       this.group.add(this.grassMesh);
@@ -1388,6 +1396,15 @@ const pm = {};
   const a1 = mk(0.13, 0.5, 0.13, 0x2a6b73); a1.position.y = -0.25; pm.armL.add(a1);
   const a2 = mk(0.13, 0.5, 0.13, 0x2a6b73); a2.position.y = -0.25; pm.armR.add(a2);
   for (const arm of [pm.armL, pm.armR]) {
+    if (!COMBAT) {
+      // a homesteader carries one hatchet, in the right hand
+      if (arm === pm.armR) {
+        const haft = mk(0.04, 0.04, 0.46, 0x7a5230); haft.position.set(0, -0.5, 0.16);
+        const head = mk(0.035, 0.17, 0.11, 0x9aa2a8); head.position.set(0, -0.545, 0.34);
+        arm.add(haft, head);
+      }
+      continue;
+    }
     const grip = mk(0.05, 0.05, 0.14, 0x5a3b22); grip.position.set(0, -0.5, 0.02);
     const blade = mk(0.035, 0.09, 0.5, 0xcfd6dc); blade.position.set(0, -0.5, 0.32);
     arm.add(grip, blade);
@@ -2205,11 +2222,6 @@ const MOVES = {
   slam: { wind: 1.05, hold: [0, 0], dmg: 24, reach: 2.8, arc: 1.3, parry: false, rec: 1.2 },
 };
 const MOVESET = [['jab', 'swing', 'swing', 'delay'], ['swing', 'delay', 'slam', 'jab']];
-// The game is a peaceful homestead builder by default. The old action-RPG combat (enemies, combat HUD) is kept
-// behind a switch: run localStorage.setItem('combat', '1') in the console and reload to bring it back.
-let COMBAT = false;
-try { COMBAT = localStorage.getItem('combat') === '1'; } catch (e) {}
-document.body.classList.toggle('peaceful', !COMBAT);
 function spawnEnemy(id, x, z, kind, chunkKey) {
   if (!COMBAT) return;
   const m = makeEnemy(kind);
