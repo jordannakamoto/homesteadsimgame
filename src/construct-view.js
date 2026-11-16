@@ -420,11 +420,12 @@
       const K = G.keys, fwd = K.KeyW || K.ArrowUp, back = K.KeyS || K.ArrowDown, side = K.KeyA || K.KeyD || K.ArrowLeft || K.ArrowRight || K.Space;
       cl2.age = (cl2.age || 0) + dt;
       cl2.dir = fwd ? 1 : back || cl2.e ? -1 : 0;
-      if (side && !fwd && cl2.t < 0.2 && cl2.age > 0.4) { cl2.dir = -1; cl2.t = 0; }       // stepping off the bottom
+      if (side && !fwd && cl2.t < 0.2 && cl2.age > 0.15) { cl2.dir = -1; cl2.t = 0; }       // stepping off the bottom
     }
-    cl2.t = Math.max(0, Math.min(1, cl2.t + (cl2.dir * dt * LAD.climbMps) / Math.max(1, q.len)));
+    const ease = 0.4 + 0.6 * Math.min(1, Math.min(cl2.t, 1 - cl2.t) / 0.15);      // slight ease at both ends
+    cl2.t = Math.max(0, Math.min(1, cl2.t + (cl2.dir * dt * LAD.climbMps * ease) / Math.max(1, q.len)));
     if (cl2.t >= 1 && !cl2.top) { cl2.top = true; V.rev++; } else if (cl2.t < 1) cl2.top = false;
-    if (cl2.t <= 0 && cl2.dir < 0 && cl2.age > 0.4) { V.climb = null; P.climbY = null; V.ladCool = 0.9; V.rev++; return; }
+    if (cl2.t <= 0 && cl2.dir < 0 && cl2.age > 0.15) { V.climb = null; P.climbY = null; V.ladCool = 0.9; V.rev++; return; }
     const reachOut = Math.max(0, ladD - 0.38) * cl2.t;
     P.x = q.fx + Math.sin(L.yaw) * reachOut; P.z = q.fz + Math.cos(L.yaw) * reachOut;
     P.climbY = q.fy + (top - q.fy) * cl2.t;

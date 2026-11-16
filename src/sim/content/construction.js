@@ -51,7 +51,7 @@ export const ITEMS_CONSTRUCTION = Object.freeze({
 });
 
 // ---- the ladder: it comes with the shed order (a line of the top-plates stage), is leaned by hand and climbed
-export const LADDER = Object.freeze({ itemId: 'ladder', stage: 'site', lenM: 3.9, footOutM: 0.95, reachUpM: 2.2, climbMps: 1.5, topBelowM: 0.9, why: 'Anything higher than you can reach from the ground is worked from a ladder: the top plates, the roof.' });
+export const LADDER = Object.freeze({ itemId: 'ladder', stage: 'site', lenM: 3.9, footOutM: 0.95, reachUpM: 2.2, climbMps: 4.5, topBelowM: 0.9, why: 'Anything higher than you can reach from the ground is worked from a ladder: the top plates, the roof.' });
 
 // ---- learn once, then sweep: after nailing a few of a kind by hand, that kind is learned and is set and nailed as you sweep along its run
 export const LEARN = Object.freeze({
