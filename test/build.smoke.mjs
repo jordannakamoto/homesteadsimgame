@@ -21,6 +21,8 @@ async function open(opts) {
   const G = (fn, arg) => page.evaluate(fn, arg);
   await G(() => {
     const g = __game; g.lockQuality(); g.setQuality('low'); localStorage.clear(); __build.reset();
+    g.sim.commandNow('construction.setOption', { key: 'sandbox', value: true });   // this test draws buildings that are built at once
+    __build.setFixtureCatalog(null);     // and places the demonstration equipment, not the game's catalog
     const r = g.renderer; window.__draw = r.render.bind(r); r.render = () => {};
     window.__step = (n = 2) => { for (let i = 0; i < n; i++) g.step(1 / 60); };
   });
@@ -90,6 +92,14 @@ async function open(opts) {
   if (process.env.DUMP_HOUSE) {   // refresh the fixture the simulation tests use: a real small house as the simulation sees it
     const fs = await import('node:fs'); await step(3);
     fs.writeFileSync(process.env.DUMP_HOUSE, JSON.stringify(await G(() => __game.sim.state.sys.site.pieces), null, 1));
+  }
+
+  if (process.env.DUMP_SHED) {    // the tool shed as build mode plans it, for the headless construction tests
+    const fs = await import('node:fs');
+    const shed = await G(() => { const was = __build.constructionMode; __build.setConstructionMode(true); const r = __build.placePlan('shed', 40, 40, 0);
+      const out = { struct: r.struct, pieces: __build.pieces().filter((p) => p.struct === r.struct), materialsList: __build.materialsList(r.struct) };
+      __build.setConstructionMode(was); __build.key({ code: 'KeyZ', ctrlKey: true, preventDefault() {} }); return out; });
+    fs.writeFileSync(process.env.DUMP_SHED, JSON.stringify(shed));
   }
 
   // a wall drawn point to point with a typed length

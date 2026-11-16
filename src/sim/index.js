@@ -11,6 +11,7 @@ import { water } from './water.js';
 import { electrical } from './electrical.js';
 import { thermal } from './thermal.js';
 import { chickensSystem } from './chickens.js';
+import { constructionSystem } from './construction.js';
 import { structure } from './structure.js';
 import { garden } from './garden.js';
 import { createPartsSystem } from './core/parts.js';
@@ -38,6 +39,9 @@ export { findRooms, roomAt, compassName } from './rooms.js';
 export { thermal, assemblyR, uValue, innerMass, roomModels, roomIdAt, overlayData as thermalOverlayData } from './thermal.js';
 export { chickensSystem, BREEDS, FIXTURES_CHICKENS, ITEMS_CHICKENS, ITEM_CATEGORIES_CHICKENS, overlayData as chickensOverlayData } from './chickens.js';
 export * as animals from './animals.js';
+export { constructionSystem, CONSTRUCTION_CATALOG, buildingView as constructionView } from './construction.js';
+export { ITEMS_CONSTRUCTION } from './content/construction.js';
+export * as supply from './core/supply.js';
 export { structure, solveStructure, environment as structureEnvironment, overlayData as structureOverlayData, swayNow, designValues, analyseBeam, joistCheck, maxSpan, columnCapacity, designSnowKPa, SOILS as GROUND_SOILS } from './structure.js';
 export * from './fixtures.js';
 export { createPartsSystem, ROTATIONS as PART_ROTATIONS, rotationTo } from './core/parts.js';
@@ -49,7 +53,7 @@ export * from './content/plumbing-parts.js';
 // Kit parts fitted by hand (generic), then plumbing, which compiles them for water, which runs after both.
 const partsSystem = createPartsSystem({ name: 'parts', stepM: PLUMBING_STEP_M, kinds: PLUMBING_KINDS, mates: PLUMBING_MATES });
 const plumbing = plumbingSystem({ kinds: PLUMBING_KINDS, mates: PLUMBING_MATES, stepM: PLUMBING_STEP_M, material: PLUMBING_PIPE, kit: STARTER_KIT });
-export const GAME_SYSTEMS = [weather, stockSystem(), siteSystem(), structure, electrical, partsSystem, plumbing, water, thermal, cookingSystem(), chickensSystem(), physicalKitchenSystem(), garden];
+export const GAME_SYSTEMS = [weather, stockSystem(), siteSystem(), structure, electrical, partsSystem, plumbing, water, thermal, cookingSystem(), chickensSystem(), physicalKitchenSystem(), garden, constructionSystem()];
 
 export function createGameSim(seed, opts = {}) {
   return createSim({ seed, systems: GAME_SYSTEMS, ...opts });

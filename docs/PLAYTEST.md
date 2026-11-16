@@ -324,3 +324,46 @@ Water, electricity and room heat are merged and tested headlessly. They become p
 - No sound yet. No delivery: the kit is simply on the bench (`__waterHands.spawnKit()` in the console gives another).
 - The tap and leaks run on world time (a minute of flow every 0.8 s at 1×), so the barrel empties fast; a pump stroke is one litre.
 - No touch controls for Hands. The garden's Water tool still refills the can for free.
+
+## Wave D1 — Construction: the first shed, raised by hand (iteration 2c)
+
+**What is new**
+
+- **Build panel (L, or the Build button on the left).** The plan book offers the tool shed (the small cabin opens when the shed is finished). Choose it, and a ghost of the whole plan follows the pointer: the wheel or Q / E turns it, a click sets it down, red means the ground will not do.
+- **Stages in order**, each with what it is, why it exists, its materials in plain words with cost, its state, and one next action. A note on the left of the screen always says what to do next, and an arrow in the world points at it.
+- **Order one stage or everything.** A delivery takes about an hour of game time (under a minute; "Instant deliveries" is an option) and lands as stacks beside the building: lumber, sheets, pier blocks, rolls, bundles, boxes, the door leaning on a trestle.
+- **By hand, at arm's reach.** A ring on the ground shows where your hands are (the pointer, held within about 2 m of you). Point at a stack and click (or E) for an armful by weight: eight studs on the shoulder, one sheet overhead, one pier block. The first time, a line says what the piece is.
+- **Set, then nail.** With the right material, the open places within reach glow. Point at one and click: the piece swings into place and sits loose. Click it again to strike: two blows seat a stud, three a sheet, two stamps level a pier block. Holding the button keeps a steady rhythm: set, strike, strike, next. A wrong material says what the place needs.
+- **Walls are framed flat on the deck and tilted up**: hold the button and push the mouse up (or just hold): it comes up heavy and lands with a thud, and gets a brace until the sheathing is on.
+- **Moments:** the deck, each wall up, framed, the first rafter, dried in, the door, finished.
+- **How hands-on** is a choice per building, any time: Guided (one press a stage) or Hands-on. "Work until done" keeps a stage going while you watch.
+- **The first project card, "Build your first shed"**, is ticked when it is finished; the cabin plan and drawing your own plans open.
+- **Sandbox** (in the Build panel, and a button in Plan mode) gives back instant building. Saves with buildings load as they were.
+- The tool bar's B is now labelled Plan. Start money is $4,000 (the shed's materials are about $2,850).
+
+**Try this**
+
+1. Press L, choose the tool shed, set it down on open ground near you.
+2. Order everything. While it is on its way, stand on the plan and hold the mouse button (or E) to dig it level the ground.
+3. Follow the note on the left: pier blocks, beams, joists, the deck, four walls up, plates, rafters, the roof.
+4. Save or reload at any point: stacks, the load in your arms and a half-framed wall come back as they were.
+5. Switch a later stage to Guided, or tick "Work until done".
+
+**Measured** (the end-to-end test, a player who never hesitates): hands-on to a roof in about 4 to 5 minutes of play, the whole shed in about 7; Guided about 2. A person reading the notes should take about twice that.
+
+**Known gaps**
+
+- Building by hand works with the ordinary tools out (axe and so on); it stands down while the Garden or Hands tool is out. It should move into the Hands tool.
+- The end-to-end test builds the foundation, floor and four walls by hand and uses "Work until done" from the top plates on; the roof by hand has only been tried informally.
+- With all four walls up, the way in and out is the door opening.
+
+- Sound is switched off by default (the Sound box in the Build panel turns it on); it has not been tuned.
+- Aiming and the reach ring are construction's own (`createReach` in `src/engine/carry.js`), not yet `window.__hands`; the two should be merged.
+- Wrap, door, insulation and lining use the same set-and-nail motion; they have no special gesture yet.
+- No delivery truck: the stacks drop in with a bump.
+- Stacks sit level on sloping ground and can land on things already there; they are not solid.
+- "Work until done" fetches from the stacks without walking: the character stays put and the armful appears.
+- A piece too heavy for one load (siding, roofing) goes in over several trips and only appears when the last load arrives.
+- The cabin has not been played through; drawn plans become buildings in progress but walls that are not stick-framed are not handled.
+- The nail gun and the wheelbarrow are in the content but not yet in the store.
+- After the roof is on, the view from above hides the walls being sheathed.
