@@ -59,7 +59,7 @@ export const ITEMS_CONSTRUCTION = Object.freeze({
 });
 
 // ---- the ladder: it comes with the shed order (a line of the top-plates stage), is leaned by hand and climbed
-export const LADDER = Object.freeze({ itemId: 'ladder', stage: 'site', lenM: 3.9, footOutM: 0.95, reachUpM: 2.2, climbMps: 4.5, topBelowM: 0.9, why: 'Anything higher than you can reach from the ground is worked from a ladder: the top plates, the roof.' });
+export const LADDER = Object.freeze({ itemId: 'ladder', stage: 'site', with: Object.freeze(['wall-frame', 'top-plates', 'roof-frame', 'roof-deck', 'roofing', 'sheathing', 'wrap', 'cladding']), lenM: 3.9, footOutM: 0.95, reachUpM: 2.2, climbMps: 4.5, topBelowM: 0.9, why: 'Anything higher than you can reach from the ground is worked from a ladder: the top plates, the roof.' });
 
 // ---- learn once, then sweep: after nailing a few of a kind by hand, that kind is learned and is set and nailed as you sweep along its run
 export const LEARN = Object.freeze({
@@ -110,6 +110,43 @@ export function packSheets(areas, held = [], sheetA = SHEET.areaM2, minKeep = SH
     }
   }
   return { sheets, from, left: pool };
+}
+
+// ---- lumber comes in stock lengths (8, 10, 12, 14, 16, 18 and 20 ft), not by the metre to any length. Each piece is cut
+// from a stick with the saw: from a kept offcut if one is long enough, else from a new stick of the shortest stock length
+// that holds it. What is left is kept as an offcut (cripples and short pieces come out of them) or, under minKeepM, is
+// scrap. A saw cut takes kerfM. A piece longer than the longest stock is spliced from two in the plan (src/framing.js).
+export const STICK = Object.freeze({ stocksM: Object.freeze([2.4, 3.0, 3.6, 4.2, 4.8, 5.4, 6.0]), kerfM: 0.003, minKeepM: 0.3, ft: Object.freeze({ 2.4: 8, 3: 10, 3.6: 12, 4.2: 14, 4.8: 16, 5.4: 18, 6: 20 }) });
+export const isStickItem = (itemId) => /^lumber_/.test(itemId);
+// the stock length a new stick for a piece this long is bought as
+export function stockFor(len, stocks = STICK.stocksM) {
+  for (const L of stocks) if (L >= len - 1e-9) return L;
+  return Math.ceil((len - 1e-9) / 0.6) * 0.6;                 // a special long order
+}
+// What is left of a stick of length L after a piece of length len is cut from it (no cut, no kerf, when it fits exactly).
+export const restAfter = (L, len, kerf = STICK.kerfM) => (L - len < 1e-6 ? 0 : Math.max(0, L - len - kerf));
+// The cut list: pieces [{ id, len }] cut longest first, each from the shortest offcut that holds it, else from a new
+// stick (whose rest joins the offcuts). held: offcut lengths already on hand. Returns
+// { metres (of new sticks), sticks: [stock length, ...], assign: { [id]: { how: 'offcut' | 'new', stock } }, left: offcuts after, waste }
+export function packSticks(pieces, held = [], { stocks = STICK.stocksM, kerf = STICK.kerfM, minKeep = STICK.minKeepM } = {}) {
+  const pool = held.map((L) => ({ L, own: null })).sort((a, b) => a.L - b.L), assign = {}, sticks = [];
+  let metres = 0, waste = 0;
+  const order = pieces.map((p, i) => i).sort((i, j) => pieces[j].len - pieces[i].len || i - j);
+  for (const i of order) {
+    const p = pieces[i], len = p.len;
+    let k = pool.findIndex((o) => o.L >= len - 1e-9), rest;
+    if (k >= 0) { const o = pool.splice(k, 1)[0]; rest = restAfter(o.L, len, kerf); waste += o.L - len - rest; assign[p.id] = { how: o.own === null ? 'offcut' : 'new', stock: o.own === null ? o.L : o.own, of: o.stick }; }
+    else { const L = stockFor(len, stocks); metres += L; sticks.push(L); rest = restAfter(L, len, kerf); waste += L - len - rest; assign[p.id] = { how: 'new', stock: L, of: sticks.length - 1 }; k = { own: L, stick: sticks.length - 1 }; }
+    if (rest >= minKeep) { pool.push({ L: Math.round(rest * 1e6) / 1e6, own: k && k.own !== undefined ? k.own : null, stick: k && k.stick }); pool.sort((a, b) => a.L - b.L); }
+    else waste += rest;
+  }
+  return { metres: Math.round(metres * 1e6) / 1e6, sticks, assign, left: pool.map((o) => o.L), waste: Math.round(waste * 1e6) / 1e6 };
+}
+// "12 x 3.0 m (10 ft), 2 x 4.8 m (16 ft)": a list of stock lengths, counted
+export function stickCount(sticks) {
+  const n = {};
+  for (const L of sticks) n[L] = (n[L] || 0) + 1;
+  return Object.keys(n).map(Number).sort((a, b) => a - b).map((L) => ({ lenM: L, n: n[L], ft: STICK.ft[L] || Math.round(L / 0.3048) }));
 }
 
 // ---- deliveries

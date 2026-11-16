@@ -153,7 +153,8 @@ export function quoteStage(pr, stage) {
   const lines = [];
   for (const key in pr.lines) {
     const ln = pr.lines[key];
-    if (stage !== 'all' && ln.stage !== stage) continue;
+    // the ladder belongs to the first stage, but any order for work at height brings it if it has not come yet
+    if (stage !== 'all' && ln.stage !== stage && !(key === LADDER_KEY && C.LADDER.with.includes(stage))) continue;
     const qty = round6(ln.qty - ln.ordered);
     if (qty > 1e-6) lines.push({ itemId: ln.itemId, qty, key });
   }
@@ -337,22 +338,28 @@ function takeLadder(ctx) {
   ctx.emit('construction.ladder', { up: false });
   return { ok: true };
 }
-// a build ordered before the ladder came with the order (or one lost): move its old line to the first stage and put a
-// ladder at the stacks, so "bring the ladder" always has a ladder to bring
+// Work at height always has a ladder. A building whose open work is out of reach from the ground (top plates, rafters,
+// roof, the top of the sheathing), that has had anything ordered, gets a ladder at its stacks when there is none anywhere:
+// none leaned, carried, in the barrow, on the stacks or on its way. That covers a build ordered stage by stage after the
+// site was dug (the ladder's line is in the site stage), a plan with walls but no roof, an old save, and a ladder lost.
+const isLadderAt = (s) => !!s.ladder || (s.carried && s.carried.itemId === C.LADDER.itemId) || s.stacks.some((k) => k.itemId === C.LADDER.itemId) || s.deliveries.some((d) => d.lines.some((l) => l.itemId === C.LADDER.itemId));
+export function needsHeight(pr) {
+  return C.LADDER.with.some((st) => pr.tally[st] && pr.tally[st][1] && !stageComplete(pr, st) && stageOpen(pr, st));
+}
 function ensureLadder(ctx) {
-  const s = ctx.s, oldKey = 'top-plates|ladder', L = s.ledger.ladder;
+  const s = ctx.s, oldKey = 'top-plates|ladder';
   let any = null;
   for (const id in s.progress) {
     const pr = s.progress[id];
     if (pr.lines[oldKey] && oldKey !== LADDER_KEY) { const o = pr.lines[oldKey]; delete pr.lines[oldKey]; if (!pr.lines[LADDER_KEY]) pr.lines[LADDER_KEY] = { ...o, stage: C.LADDER.stage }; }
-    if (pr.lines[LADDER_KEY] && Object.values(pr.lines).some((l) => l.ordered > 0)) any = pr;
+    if (!any && !pr.done && Object.values(pr.lines).some((l) => l.ordered > 0) && (needsHeight(pr) || (pr.lines[LADDER_KEY] && pr.lines[LADDER_KEY].ordered > 0))) any = pr;
   }
-  if (!any || (L && L.bought > 0) || s.ladder || (s.carried && s.carried.itemId === C.LADDER.itemId)) return;
-  if (s.stacks.some((k) => k.itemId === C.LADDER.itemId) || s.deliveries.some((d) => d.lines.some((l) => l.itemId === C.LADDER.itemId))) return;
-  const near = s.stacks[0], at = near ? { x: near.x - 1.6, z: near.z } : dropOf(s, any);
+  if (!any || isLadderAt(s)) return;
+  const near = s.stacks.find((k) => !k.barrow), at = near ? { x: near.x - 1.6, z: near.z } : dropOf(s, any);
   SUP.addToStacks(s, C.LADDER.itemId, 1, at.x, at.z, C.DELIVERY.layout);
-  s.ledger.ladder = { bought: 1, used: 0, spent: 0 };
-  any.lines[LADDER_KEY].ordered = 1;
+  const L = s.ledger.ladder || (s.ledger.ladder = { bought: 0, used: 0, spent: 0 });
+  L.bought = round6(L.bought + 1);
+  if (any.lines[LADDER_KEY]) any.lines[LADDER_KEY].ordered = Math.max(1, any.lines[LADDER_KEY].ordered);
   ctx.emit('construction.ladderGranted', {});
 }
 const dropOf = (s, pr) => s.dropPoint || { x: pr.x + pr.r + 2.5, z: pr.z };
@@ -404,7 +411,7 @@ function setPlan(ctx, p) {
   if (old) for (const k in old.raised) pr.raised[k] = true;
   if (!old) for (const st of C.STAGES) if (st.flat) for (const par of flatParents(pr, st.id)) if (frameReady(pr, st.id, par)) pr.raised[par] = true;
   retally(pr);
-  if (!pr.lines[LADDER_KEY] && pr.tally[C.LADDER.stage] && pr.tally['roof-frame'] && item(C.LADDER.itemId)) {   // a roof is worked from a ladder: it comes with the order
+  if (!pr.lines[LADDER_KEY] && C.LADDER.with.some((st) => pr.tally[st] && pr.tally[st][1]) && item(C.LADDER.itemId)) {   // work at height is done from a ladder: it comes with the order
     const o = old && old.lines[LADDER_KEY];
     pr.lines[LADDER_KEY] = { stage: C.LADDER.stage, itemId: C.LADDER.itemId, qty: 1, unit: 'each', label: 'Ladder', why: C.LADDER.why, count: 1, supply: false, ordered: o ? o.ordered : 0, used: o ? o.used : 0 };
   }
