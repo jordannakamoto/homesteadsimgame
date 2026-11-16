@@ -431,6 +431,36 @@
           put(kind, lx, lz, sc);
         }
     }
+    // Forest edges and shores (a separate random stream, so everything above stays exactly where it was). Real
+    // woods do not stop at a line: where the forest gives way to meadow there is a belt of scrub, brambles, saplings
+    // and long grass, densest right at the change; and a strip of lush long grass runs along the water above the
+    // reeds. Visual only, like the rest of the litter. Off with __game.look.toggle('edgeBelts').
+    if (!G.lookFlags || G.lookFlags.edgeBelts !== false) {
+      const r2 = rng(strHash(ch.key) ^ 0x7ed6e),
+        put2 = (kind, lx, lz, sc = 1) => items.push({ kind, v: Math.floor(r2() * N_VAR), lx, lz, rot: r2() * TAU, s: sc * (0.8 + 0.5 * r2()), tone: 0.82 + 0.36 * r2() });
+      for (let k = 0; k < 160; k++) {
+        const lx = r2() * size,
+          lz = r2() * size,
+          pick = r2(),
+          keep = r2(),
+          h = ch.baseLocal(lx, lz);
+        if (h < 0.3 || h > 19 || slope(lx, lz) > 0.7) continue;
+        const f = G.forestAt(ch.ox + lx, ch.oz + lz),
+          edge = Math.max(0, 1 - Math.abs(f - 0.15) / 0.09);          // peaks where meadow turns to forest
+        if (edge > 0 && keep < edge * 0.7) {
+          if (pick < 0.3) put2("bush", lx, lz);
+          else if (pick < 0.5) put2("bramble", lx, lz);
+          else if (pick < 0.68) put2("tallgrass", lx, lz, 1.1);
+          else if (pick < 0.8) put2("sapling", lx, lz);
+          else if (pick < 0.92) put2("shrub", lx, lz);
+          else put2("fern", lx, lz);
+        } else if (h > 1.3 && h < 2.3 && f < 0.16 && keep < 0.55) {
+          if (pick < 0.7) put2("tallgrass", lx, lz, 1.15);
+          else if (pick < 0.85) put2("seedgrass", lx, lz);
+          else put2("bush", lx, lz, 0.8);
+        }
+      }
+    }
     // ivy climbs some of the forest trees
     ch.ivyTrees = [];
     for (const t of ch.trees) if (G.forestAt(t.x, t.z) > 0.22 && t.type !== 1 && r() < 0.3) ch.ivyTrees.push({ t, seed: Math.floor(r() * 9999), top: 1.4 + r() * 2.4, arc: r() < 0.5 ? TAU : 2 + r() * 2.5, a0: r() * TAU });

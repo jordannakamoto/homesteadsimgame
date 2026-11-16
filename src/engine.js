@@ -1,16 +1,92 @@
 import * as THREE from 'three';
 import { createCookingView } from './cooking/view.js';
 import { createChunkStream } from './world/chunk-stream.js';
+import { createSea } from './water/sea.js';
+import { createRivers } from './water/rivers-gen.js';
+import { createRiverWater } from './water/rivers-render.js';
 import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // Safety net for every lit material: a pixel whose colour comes out as "not a number" (from a zero-length normal,
 // say) is drawn black instead. Left alone, bloom spreads a single such pixel over the whole screen.
 THREE.ShaderChunk.opaque_fragment += '\nif ( isnan( gl_FragColor.r + gl_FragColor.g + gl_FragColor.b ) ) gl_FragColor.rgb = vec3( 0.0 );\n';
+
+// Look switches (Graphics panel, or __game.look.toggle). grassShadows: tree and building shadows on grass.
+// tuftShadow: grass takes its shadow once per tuft (cheaper) instead of per pixel; same lighting either way.
+// drawOrder: trees, then grass, then terrain, so covered pixels are skipped. farGrass: 'off' (full detail
+// everywhere), 'normal' (far tufts drop cards) or 'aggressive' (far grass also thins out and ends sooner).
+// rootShade: how dark grass blades are at the root (1 = original). All of these are in the Graphics panel and are
+// remembered per browser.
+// grassClumps: grass grows in clumps with their own height, lean and colour, in broad dry and lush drifts.
+// grassBacklight: sunlight glows through the blades when you look toward the sun, strongest at the tips.
+// skyShade: ground and grass under tree crowns and down in hollows get less sky light (a baked map, no frame cost).
+// sunFog: the fog warms toward the sun and thins with height (hilltops stay clear, the far edge stays hidden).
+// grassSheen: a narrow sun highlight along the blades, brighter in gusts. farBlend: far grass takes the ground's colour.
+// crownShade: tree crowns have a lit outer shell and a darker core. camFx: film grain and a little chromatic aberration.
+// edgeBelts: scrub, brambles and saplings along forest edges and long grass along shores (nature.js, visual only).
+// toneMap: 'aces' (the original), 'agxlook' (AgX, warmer, with contrast and some saturation back), 'agx' (Blender's: rolls bright colours to white without the hue shift) or 'neutral'
+// (Khronos PBR Neutral: keeps hues and saturation, only compresses highlights).
+// taa: temporal upscaling (TAAU) in place of MSAA: the camera is jittered a fraction of a pixel each frame and the
+// frames are blended, so detail builds up over time. Replaces MSAA. Off by default: averaging jittered samples inside
+// each texel softens the nearest-filtered pixel textures, which is the look this game is built on.
+// upscaler: how a below-full-size render is enlarged. 'bicubic' (Catmull-Rom plus contrast-adaptive sharpening, the
+// default), 'fsr' (AMD FSR 1: made for smooth, photoreal, anti-aliased images; on pixel textures it smears texel
+// edges into brush strokes) or 'sharp' (area-weighted nearest: every render pixel stays a crisp block, only the
+// seams between blocks are blended, the usual way to scale pixel art by uneven amounts).
+const LOOK = { ao: false, hudBlur: true, lightBloom: false, compactHdr: false, grassShadows: true, tuftShadow: true, drawOrder: true, farGrass: 'normal', rootShade: 1, grassClumps: true, grassBacklight: true, skyShade: true, sunFog: true, grassSheen: true, farBlend: true, crownShade: true, camFx: false, upscaler: 'bicubic', toneMap: 'aces', taa: false, edgeBelts: true };
+const LOOK_KEY = 'homestead:look';
+try { const s = JSON.parse(localStorage.getItem(LOOK_KEY) || 'null'); if (s) for (const k in LOOK) if (typeof s[k] === typeof LOOK[k]) LOOK[k] = s[k]; } catch (e) { /* no storage */ }
+const saveLook = () => { try { localStorage.setItem(LOOK_KEY, JSON.stringify(LOOK)); } catch (e) { /* no storage */ } };
+
+// Sun-tinted height fog, for every material at once (three's own fog chunks, replaced). Two changes to the plain
+// distance fog: (1) where the view looks toward the sun the fog takes the sun's hue, faintly over a wide angle and
+// strongly near the sun (Inigo Quilez's trick; at noon the sun is near white so it barely shows, at golden hour it
+// glows), and (2) the fog thins with height above FOG_SUN[2] m, so hills stand clear instead of washing out, but
+// it always reaches full strength at the far edge, which hides where the world stops loading. The sun is read from
+// three's own light uniforms, so it costs no new uniform per material; FOG_SUN is one shared array (strengths).
+const FOG_SUN = new Float32Array([LOOK.sunFog ? 1 : 0, LOOK.sunFog ? 1 : 0, 4.0, 0.07]);   // warmth, height, base (m), falloff (1/m)
+for (const k of ['basic', 'lambert', 'phong', 'standard', 'physical', 'toon']) if (THREE.ShaderLib[k]) THREE.ShaderLib[k].uniforms.fogSun = { value: FOG_SUN };
+THREE.UniformsLib.fog.fogSun = { value: FOG_SUN };
+THREE.ShaderChunk.fog_pars_vertex = '#ifdef USE_FOG\n\tvarying float vFogDepth;\n\tvarying vec3 vFogView;\n#endif';
+THREE.ShaderChunk.fog_vertex = '#ifdef USE_FOG\n\tvFogDepth = - mvPosition.z;\n\tvFogView = mvPosition.xyz;\n#endif';
+THREE.ShaderChunk.fog_pars_fragment = `#ifdef USE_FOG
+	uniform vec3 fogColor;
+	uniform vec4 fogSun;
+	varying float vFogDepth;
+	varying vec3 vFogView;
+	#ifdef FOG_EXP2
+		uniform float fogDensity;
+	#else
+		uniform float fogNear;
+		uniform float fogFar;
+	#endif
+#endif`;
+THREE.ShaderChunk.fog_fragment = `#ifdef USE_FOG
+	#ifdef FOG_EXP2
+		float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );
+	#else
+		float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+	#endif
+	vec3 fogTint = fogColor;
+	{
+		float fogY = cameraPosition.y + dot( viewMatrix[ 1 ].xyz, vFogView );
+		float hAtt = exp( - max( 0.0, fogY - fogSun.z ) * fogSun.w );
+		fogFactor *= mix( 1.0, mix( hAtt, 1.0, smoothstep( 0.55, 1.0, fogFactor ) ), fogSun.y );
+	}
+	#if defined( RE_Direct ) && NUM_DIR_LIGHTS > 0
+	{
+		float sunA = max( dot( normalize( vFogView ), directionalLights[ 0 ].direction ), 0.0 );
+		vec3 sunHue = directionalLights[ 0 ].color / max( max( directionalLights[ 0 ].color.r, max( directionalLights[ 0 ].color.g, directionalLights[ 0 ].color.b ) ), 1e-3 );
+		fogTint = mix( fogTint, fogTint * sunHue * 1.3, fogSun.x * ( 0.25 * sunA * sunA + 0.75 * pow( sunA, 8.0 ) ) );
+	}
+	#endif
+	gl_FragColor.rgb = mix( gl_FragColor.rgb, fogTint, fogFactor );
+#endif`;
 
 // ============================================================ utilities
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -86,10 +162,11 @@ function fbm(x, z, oct) {
   for (let o = 0; o < oct; o++) { s += a * noise(x * f, z * f); n += a; a *= 0.5; f *= 2.03; }
   return s / n;
 }
-function baseHeight(x, z) {
+// The terrain before rivers; `coarse` leaves out the finest octave (the drainage graph routes on that).
+function rawHeight(x, z, coarse) {
   const cont = fbm(x * 0.0022, z * 0.0022, 4);
   const hills = fbm(x * 0.011 + 37, z * 0.011 - 91, 4);
-  const detail = fbm(x * 0.06 + 11, z * 0.06 + 5, 2);
+  const detail = coarse ? 0 : fbm(x * 0.06 + 11, z * 0.06 + 5, 2);
   const land = smoothstep(-0.25, 0.35, cont);
   let h = cont * 16 + 1.2 + hills * 6 * (0.35 + 0.65 * land) + detail * 0.45;
   const mmask = smoothstep(0.45, 0.8, fbm(x * 0.004 + 300, z * 0.004 + 300, 3) * 0.5 + 0.5) * land;
@@ -102,6 +179,23 @@ function baseHeight(x, z) {
   const f = Math.exp(-d2 / (22 * 22));
   h = lerp(h, Math.max(h, 3.2), f);
   return h;
+}
+// Streams and rivers (src/water/rivers-gen.js): a drainage graph per seed, carved into the terrain as stepped
+// channels. Being built: on with localStorage.setItem('rivers', '1') and a reload, until the water renders.
+let RIVERS_ON = false;
+try { RIVERS_ON = localStorage.getItem('rivers') === '1'; } catch (e) { /* no storage */ }
+let rivers = null;
+const makeRivers = () => (RIVERS_ON ? createRivers({ seed: SEED, height: (x, z) => rawHeight(x, z, true), SEA }) : null);
+const RIVER_PAL = { gravel: new THREE.Color(0x7d7461), silt: new THREE.Color(0x4f4a3a) };
+// whether x, z lies in a stream or river channel, widened by `margin` m each side
+function inChannel(x, z, margin) {
+  if (!rivers) return false;
+  const i = rivers.riverInfo(x, z);
+  return !!i && i.dist < i.w / 2 + margin;
+}
+function baseHeight(x, z) {
+  const h = rawHeight(x, z);
+  return rivers ? rivers.carve(h, x, z) : h;
 }
 // The game is a peaceful homestead builder by default. The old action-RPG combat (enemies, combat HUD) is kept
 // behind a switch: run localStorage.setItem('combat', '1') in the console and reload to bring it back.
@@ -175,11 +269,27 @@ function heightAt(x, z) {
 
 // ============================================================ renderer
 const canvas = document.getElementById('view');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
+// No antialiasing on the canvas itself: the composer antialiases (or not) in its own render target, and a
+// multisampled canvas under it was a second full-screen MSAA buffer that did nothing but cost fill.
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+const TONE_MAPS = { aces: THREE.ACESFilmicToneMapping, agxlook: THREE.CustomToneMapping, agx: THREE.AgXToneMapping, neutral: THREE.NeutralToneMapping };
+// The AgX look, three's 'custom' tone mapping: AgX for its clean roll-off to white (no ACES hue shift), then what
+// Blender's AgX looks add and three's plain AgX lacks: a slightly warm key, an S-curve for contrast, some of the
+// saturation AgX gives up, and a gentle split tone (cooler shadows, warmer highlights) after the landscape painters
+// RDR2 drew on. Used by the composer's output pass and, on Low, by every material directly.
+THREE.ShaderChunk.tonemapping_pars_fragment = THREE.ShaderChunk.tonemapping_pars_fragment.replace('vec3 CustomToneMapping( vec3 color ) { return color; }', `vec3 CustomToneMapping( vec3 color ) {
+	color *= vec3( 1.035, 1.0, 0.95 );
+	vec3 d = pow( max( AgXToneMapping( color ), vec3( 0.0 ) ), vec3( 1.0 / 2.2 ) );
+	d = mix( d, d * d * ( 3.0 - 2.0 * d ), 0.35 );
+	float l = dot( d, vec3( 0.2126, 0.7152, 0.0722 ) );
+	d = max( mix( vec3( l ), d, 1.15 ), vec3( 0.0 ) );
+	d *= mix( vec3( 0.97, 1.0, 1.04 ), vec3( 1.02, 1.0, 0.97 ), smoothstep( 0.15, 0.7, l ) );
+	return pow( d, vec3( 2.2 ) );
+}`);
+renderer.toneMapping = TONE_MAPS[LOOK.toneMap] || THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;   // three r181+ removed PCFSoftShadowMap; softness is shadow.radius now
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xa9c4d6);
@@ -198,25 +308,398 @@ scene.add(sun, sun.target);
 const hemi = new THREE.HemisphereLight(0xbcd7ff, 0x5a6b3c, 0.9);
 scene.add(hemi);
 
-let composer = null, bloom = null;
-const quality = { level: 'high' };
+// ---------------------------------------------------------- graphics settings
+// Two independent choices, saved per browser:
+//  - preset: which effects run (shadows, bloom, MSAA, how far grass reaches and thins). Ultra is for strong GPUs.
+//  - scale: render resolution as a share of the screen's. 100% is native. 85% and 70% are for slower machines:
+//    the browser stretches the image back to full size, smoothly, so it softens a little rather than going blocky.
+// At 2560x1440: 100% renders 2560x1440, 85% renders 2176x1224, 70% renders 1792x1008.
+const GFX = {
+  // shadows: 'pcf' is filtered (soft edges, width = shadowRadius in shadow-map texels), 'basic' is one hard-edged
+  // sample per pixel, which also suits the pixel art. Ultra's radius is larger to keep the same softness in metres.
+  ultra:  { label: 'Ultra',  composer: true,  msaa: 4, shadows: 'pcf',   shadowSize: 4096, shadowRadius: 5, bloom: true,  grassR: 84, grassCount: 1,    thin: null },
+  high:   { label: 'High',   composer: true,  msaa: 4, shadows: 'pcf',   shadowSize: 2048, shadowRadius: 3, bloom: true,  grassR: 84, grassCount: 1,    thin: null,           cards: [30, 46] },
+  medium: { label: 'Medium', composer: true,  msaa: 2, shadows: 'basic', shadowSize: 2048, shadowRadius: 1, bloom: false, grassR: 64, grassCount: 1,    thin: [20, 56, 0.4],  cards: [22, 34] },
+  low:    { label: 'Low',    composer: false, msaa: 0, shadows: 'off',   shadowSize: 1024, shadowRadius: 1, bloom: false, grassR: 52, grassCount: 0.45, thin: [16, 44, 0.5],  cards: [16, 26] },
+};
+const GFX_ORDER = ['ultra', 'high', 'medium', 'low'];
+const RENDER_SCALES = ['auto', 1, 0.85, 0.75, 0.67];
+const FPS_TARGETS = [60, 120, 144, 165, 240];
+const GFX_KEY = 'homestead:gfx';
+// level stays 'high' | 'low' (composer on or off) for code that already reads it
+// scale: 'auto' (hold the frame-rate target by adjusting resolution) or a fixed share of native resolution.
+// autoScale is what Auto is using right now.
+const quality = { level: 'high', preset: 'high', scale: 'auto', autoScale: 1, target: 144 };
+try {
+  const s = JSON.parse(localStorage.getItem(GFX_KEY) || 'null');
+  if (s && GFX[s.preset]) quality.preset = s.preset;
+  if (s && RENDER_SCALES.includes(s.scale)) quality.scale = s.scale;   // older saved sizes are ignored
+  if (s && FPS_TARGETS.includes(s.target)) quality.target = s.target;
+} catch (e) { /* no storage, or an unreadable value */ }
+quality.level = GFX[quality.preset].composer ? 'high' : 'low';
+const gfx = () => GFX[quality.preset];
+// 4x MSAA is part of the look on Ultra and High. msaaOverride is only for the benchmark's MSAA-off run.
+const msaaSamples = () => (LOOK.taa ? 0 : Math.min(quality.msaaOverride ?? gfx().msaa, renderer.capabilities.maxSamples));   // TAAU replaces MSAA
+
+// AO blend that fades out with the fog, so distant hazy ground isn't darkened by creases you can't see.
+const AO_BLEND_FRAGMENT = `
+  #include <packing>
+  uniform float intensity; uniform sampler2D tDiffuse; uniform sampler2D tDepth;
+  uniform float cameraNear, cameraFar, fogNear, fogFar;
+  varying vec2 vUv;
+  void main() {
+    vec4 texel = texture2D( tDiffuse, vUv );
+    float viewZ = - perspectiveDepthToViewZ( texture2D( tDepth, vUv ).r, cameraNear, cameraFar );
+    float k = intensity * ( 1.0 - smoothstep( fogNear, fogFar, viewZ ) );
+    gl_FragColor = vec4( mix( vec3( 1.0 ), texel.rgb, k ), texel.a );
+  }`;
+// Extra ambient occlusion (GTAO), a switch in the Graphics panel, off by default. It reads the depth of the main render, which already has the wind sway and the
+// alpha-cut grass and leaves, and rebuilds normals from it, instead of drawing the whole scene a second time
+// (which would also make every grass and leaf card a solid square in the AO). Runs at G.ao of full resolution.
+function makeAO(depthTexture, w, h, scale) {
+  const ao = new GTAOPass(scene, camera, Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale)),
+    { depthTexture }, { radius: 1.1, distanceExponent: 1.5, thickness: 1.2, scale: 1.0, samples: 16 }, { radius: 6, samples: 12 });
+  ao.blendIntensity = 0.9;
+  const bm = ao.blendMaterial;
+  Object.assign(bm.uniforms, { tDepth: { value: depthTexture }, cameraNear: { value: camera.near }, cameraFar: { value: camera.far },
+    fogNear: { value: 40 }, fogFar: { value: 120 } });
+  bm.fragmentShader = AO_BLEND_FRAGMENT; bm.needsUpdate = true;
+  const setSize = ao.setSize.bind(ao);
+  ao.setSize = (sw, sh) => setSize(Math.max(1, Math.round(sw * scale)), Math.max(1, Math.round(sh * scale)));
+  // The AO is computed into GTAO's own targets (output Off) and then multiplied straight into the scene buffer, with
+  // no swap. The scene's depth stays with the scene's colour, so the passes after it (the fx pass's depth of field,
+  // haze and occlusion) still read the right depth. Swapping instead left them a buffer with no scene depth, which
+  // the depth of field took as everything out of focus. Needs MSAA: see aoScale.
+  ao.output = GTAOPass.OUTPUT.Off;
+  ao.needsSwap = false;
+  // The composer swaps its two buffers, so the scene can be in either: point AO at this frame's depth.
+  const render = ao.render.bind(ao);
+  ao.render = (r, writeBuffer, readBuffer, dt, mask) => {
+    const d = readBuffer.depthTexture;
+    if (d && ao.depthTexture !== d) {
+      ao.depthTexture = d;
+      ao.gtaoMaterial.uniforms.tDepth.value = d; ao.pdMaterial.uniforms.tDepth.value = d;
+      ao.depthRenderMaterial.uniforms.tDepth.value = d; bm.uniforms.tDepth.value = d;
+    }
+    bm.uniforms.cameraNear.value = camera.near; bm.uniforms.cameraFar.value = camera.far;
+    bm.uniforms.fogNear.value = scene.fog.near; bm.uniforms.fogFar.value = scene.fog.far;
+    render(r, writeBuffer, readBuffer, dt, mask);
+    bm.uniforms.intensity.value = ao.blendIntensity;
+    bm.uniforms.tDiffuse.value = ao.pdRenderTarget.texture;
+    ao._renderPass(r, bm, readBuffer);                  // multiply blend, no clear
+  };
+  return ao;
+}
+// Compact HDR buffers (a switch): the composer's colour buffers in R11F_G11F_B10F, 32 bits a sample instead of the
+// 64 of half-float RGBA. Same brightness range for bloom, no alpha (the canvas is opaque), a little less precision.
+// With 4x MSAA this halves most of the memory traffic of drawing and resolving the scene. Offered only where the
+// GPU can render it with multisampling; checked once here.
+const compactHdrOK = (() => {
+  const gl = renderer.getContext();
+  try {
+    if (!gl.getExtension('EXT_color_buffer_float')) return false;
+    const counts = gl.getInternalformatParameter(gl.RENDERBUFFER, gl.R11F_G11F_B10F, gl.SAMPLES);
+    if (!counts || !Array.from(counts).some((n) => n >= 4)) return false;
+    const rb = gl.createRenderbuffer(), fb = gl.createFramebuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
+    gl.renderbufferStorageMultisample(gl.RENDERBUFFER, 4, gl.R11F_G11F_B10F, 4, 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, rb);
+    const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+    gl.deleteFramebuffer(fb); gl.deleteRenderbuffer(rb);
+    return ok;
+  } catch (e) { return false; }
+})();
+const hdrFormat = () => (LOOK.compactHdr && compactHdrOK
+  ? { format: THREE.RGBFormat, type: THREE.UnsignedInt101111Type }
+  : { format: THREE.RGBAFormat, type: THREE.HalfFloatType });
+let composer = null, bloom = null, ao = null;
+// extra AO resolution by preset: full on Ultra, half on High and Medium, none on Low. Only with MSAA: the AO darkens
+// the scene buffer in place while reading its depth, which without MSAA is attached to that same buffer.
+const aoScale = () => (LOOK.ao && msaaSamples() > 0 ? ({ ultra: 1, high: 0.5, medium: 0.5 })[quality.preset] || 0 : 0);
+// One composer for the whole session, built at start-up even on Low (as before). Add-ons put their own passes into
+// it (fxpost.js and fx.js both claim it once, through composer.__fx), so it is never replaced: graphics settings
+// change it in place, and leave every pass they didn't add where it is.
 function buildComposer() {
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
-  const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
+  const samples = msaaSamples();
+  const rt = new THREE.WebGLRenderTarget(size.x, size.y, { ...hdrFormat(), samples });
   composer = new EffectComposer(renderer, rt);
+  composer.msaa = samples;
   composer.addPass(new RenderPass(scene, camera));
+  // notes which buffer holds this frame's scene depth, for TAAU's reprojection (draws nothing)
+  composer.addPass({ enabled: true, needsSwap: false, clear: false, renderToScreen: false, setSize() {}, dispose() {}, render(r, w, read) { taa.depth = read.depthTexture; } });
   bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.3, 0.7, 0.92);
+  // Lighter bloom (a switch): the glow chain starts from a quarter-resolution image instead of half
+  const bloomSize = bloom.setSize.bind(bloom);
+  bloom.setSize = (w, h) => (LOOK.lightBloom ? bloomSize(Math.max(2, Math.round(w / 2)), Math.max(2, Math.round(h / 2))) : bloomSize(w, h));
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 }
+function syncComposer() {
+  if (!composer) buildComposer();
+  const G = gfx();
+  // MSAA and buffer format: changed on the same two buffers (three rebuilds their GPU storage on next use)
+  const n = msaaSamples(), fmt = hdrFormat();
+  if (composer.msaa !== n || composer.renderTarget1.texture.type !== fmt.type) {
+    for (const t of [composer.renderTarget1, composer.renderTarget2]) { t.samples = n; t.texture.format = fmt.format; t.texture.type = fmt.type; t.dispose(); }
+    composer.msaa = n;
+  }
+  bloom.enabled = G.bloom;
+  if (LOOK.taa) for (const t of [composer.renderTarget1, composer.renderTarget2]) if (!t.depthTexture) { t.depthTexture = new THREE.DepthTexture(t.width, t.height); t.dispose(); }
+  // extra AO: right after the scene pass. It needs scene depth, which the fx add-ons may already have added.
+  const aoK = aoScale();
+  if (ao && ao.scaleK !== aoK) { composer.removePass(ao); ao.dispose(); ao = null; }
+  if (aoK && !ao) {
+    for (const t of [composer.renderTarget1, composer.renderTarget2]) if (!t.depthTexture) { t.depthTexture = new THREE.DepthTexture(t.width, t.height); t.dispose(); }
+    ao = makeAO(composer.renderTarget1.depthTexture, composer.renderTarget1.width, composer.renderTarget1.height, aoK);
+    ao.scaleK = aoK;
+    composer.insertPass(ao, composer.passes.indexOf(composer.passes.find((p) => p instanceof RenderPass)) + 1);
+  }
+  // with the extra AO on, the water writes depth, so AO sees the water's surface rather than the lake bed under it
+  water.material.depthWrite = !!aoK; riverWater.material.depthWrite = !!aoK;
+}
+// Render resolution. With the composer (Ultra, High, Medium) the canvas stays at full resolution and the 3D scene
+// is rendered at renderScale() of it, then enlarged by the upscaler below. On Low, which draws straight to the
+// canvas, the canvas itself is made smaller and the browser stretches it.
+const renderScale = () => (quality.scale === 'auto' ? quality.autoScale : quality.scale);
+const viaComposer = () => quality.level === 'high' && !!composer;
 function resize() {
   const w = canvas.clientWidth || window.innerWidth, h = canvas.clientHeight || window.innerHeight;
-  const pr = quality.level === 'high' ? Math.min(window.devicePixelRatio || 1, 1.5) : 1;
-  renderer.setPixelRatio(pr);
+  const base = Math.min(window.devicePixelRatio || 1, 1.5), k = renderScale(), vc = viaComposer();
+  renderer.setPixelRatio(vc ? base : base * k);
   renderer.setSize(w, h, false);
   camera.aspect = w / h; camera.updateProjectionMatrix();
-  if (composer) { composer.setPixelRatio(pr); composer.setSize(w, h); }
+  if (composer) { composer.setPixelRatio(base * (vc ? k : 1)); composer.setSize(w, h); }
+  upscaler.on = vc && (k < 0.999 || LOOK.camFx || LOOK.taa);   // also at full size for the camera effects or TAAU
+  taa.reset();
 }
+// Upscaler: enlarges the finished frame to the screen with a sharp bicubic filter (Catmull-Rom) and then sharpens it
+// against the neighbouring source pixels, more where the image is soft and less where it already has contrast, and
+// never past the neighbours' range, so edges stay crisp without halos (the idea of AMD's FSR 1 / CAS). The input is
+// the composer's output, already tone-mapped and in display colour, which is where sharpening behaves.
+const upscaler = (() => {
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { tSrc: { value: null }, uSrcSize: { value: new THREE.Vector2(1, 1) }, uDstSize: { value: new THREE.Vector2(1, 1) }, uSharp: { value: 0.4 },
+      uMode: { value: 0 }, uGrain: { value: 0 }, uCA: { value: 0 }, uSeed: { value: 0 } },
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: `
+      uniform sampler2D tSrc; uniform vec2 uSrcSize, uDstSize; uniform float uSharp, uMode, uGrain, uCA, uSeed;
+      varying vec2 vUv;
+      vec3 tap(vec2 uv) { return texture2D(tSrc, uv).rgb; }
+      vec3 fetch(ivec2 p) { return texelFetch(tSrc, clamp(p, ivec2(0), ivec2(uSrcSize) - 1), 0).rgb; }
+      // AMD FidelityFX Super Resolution 1 in one pass, after atyuwen's mobile version (MIT, (c) 2021 atyuwen, based on
+      // AMD's ffx_fsr1.h, MIT): EASU, an edge-directed Lanczos-like upscale over 12 source pixels, with RCAS sharpening
+      // folded in from the 5-pixel cross. RCAS's denoise term is on: where the cross is busy (grass, leaves) it
+      // sharpens less, so clean edges (buildings, fences, the player) get crisp and foliage does not turn to static.
+      // WebGL2 has no textureGather, so the 12 taps are plain texel fetches.
+      void easuTap(inout vec3 aC, inout float aW, vec2 off, vec2 dir, vec2 len, float lob, float clp, vec3 c) {
+        vec2 v = vec2(dot(off, dir), dot(off, vec2(-dir.y, dir.x))) * len;
+        float d2 = min(dot(v, v), clp);
+        float wB = 0.4 * d2 - 1.0, wA = lob * d2 - 1.0;
+        wB *= wB; wA *= wA;
+        float w = (1.5625 * wB - 0.5625) * wA;
+        aC += c * w; aW += w;
+      }
+      vec3 fsr1() {
+        vec2 pp = gl_FragCoord.xy * (uSrcSize / uDstSize) - 0.5;
+        vec2 tc = (pp + 0.5) / uSrcSize, px = 1.0 / uSrcSize;
+        vec3 sA = tap(tc - vec2(0.0, px.y)), sB = tap(tc - vec2(px.x, 0.0)), sC = tap(tc), sD = tap(tc + vec2(px.x, 0.0)), sE = tap(tc + vec2(0.0, px.y));
+        // RCAS from the cross: the strongest sharpening that cannot push any channel outside [0, 1]
+        vec3 mn4 = min(min(sA, sB), min(sD, sE)), mx4 = max(max(sA, sB), max(sD, sE));
+        vec3 hitMin = mn4 / (4.0 * max(mx4, vec3(1e-4))), hitMax = (1.0 - mx4) / min(4.0 * mn4 - 4.0, vec3(-1e-4));
+        vec3 lobeC = max(-hitMin, hitMax);
+        float lA = sA.r * 0.5 + sA.g, lB = sB.r * 0.5 + sB.g, lC = sC.r * 0.5 + sC.g, lD = sD.r * 0.5 + sD.g, lE = sE.r * 0.5 + sE.g;
+        float nz = 0.25 * (lA + lB + lD + lE) - lC;
+        nz = clamp(abs(nz) / max(max(max(lA, lB), max(lC, max(lD, lE))) - min(min(lA, lB), min(lC, min(lD, lE))), 1e-4), 0.0, 1.0);
+        float lobe = max(-0.1875, min(max(lobeC.r, max(lobeC.g, lobeC.b)), 0.0)) * uSharp * (1.0 - 0.5 * nz);
+        float rcpL = 1.0 / (4.0 * lobe + 1.0);
+        vec3 contrast = lobe * (sA + sB + sD + sE) * rcpL;
+        // EASU direction and length from the luma cross
+        float dc = lD - lC, cb = lC - lB, dirX = lD - lB;
+        float lenX = clamp(abs(dirX) / max(max(abs(dc), abs(cb)), 1e-5), 0.0, 1.0); lenX *= lenX;
+        float ec = lE - lC, ca = lC - lA, dirY = lE - lA;
+        float lenY = clamp(abs(dirY) / max(max(abs(ec), abs(ca)), 1e-5), 0.0, 1.0);
+        float len = lenY * lenY + lenX;
+        vec2 dir = vec2(dirX, dirY);
+        float dirR = dot(dir, dir);
+        if (dirR < 1.0 / 64.0) return contrast + sC * rcpL;
+        dir *= inversesqrt(dirR);
+        len *= 0.5; len *= len;
+        float stretch = dot(dir, dir) / max(abs(dir.x), abs(dir.y));
+        vec2 len2 = vec2(1.0 + (stretch - 1.0) * len, 1.0 - 0.5 * len);
+        float lob = 0.5 + ((1.0 / 4.0 - 0.04) - 0.5) * len, clp = 1.0 / lob;
+        vec2 fp = floor(pp), f = pp - fp;
+        ivec2 ip = ivec2(fp);
+        vec3 aC = vec3(0.0); float aW = 0.0;
+        easuTap(aC, aW, vec2(0.0, -1.0) - f, dir, len2, lob, clp, fetch(ip + ivec2(0, -1)));
+        easuTap(aC, aW, vec2(1.0, -1.0) - f, dir, len2, lob, clp, fetch(ip + ivec2(1, -1)));
+        easuTap(aC, aW, vec2(-1.0, 1.0) - f, dir, len2, lob, clp, fetch(ip + ivec2(-1, 1)));
+        easuTap(aC, aW, vec2(0.0, 1.0) - f, dir, len2, lob, clp, fetch(ip + ivec2(0, 1)));
+        easuTap(aC, aW, vec2(0.0, 0.0) - f, dir, len2, lob, clp, fetch(ip));
+        easuTap(aC, aW, vec2(-1.0, 0.0) - f, dir, len2, lob, clp, fetch(ip + ivec2(-1, 0)));
+        easuTap(aC, aW, vec2(1.0, 1.0) - f, dir, len2, lob, clp, fetch(ip + ivec2(1, 1)));
+        easuTap(aC, aW, vec2(2.0, 1.0) - f, dir, len2, lob, clp, fetch(ip + ivec2(2, 1)));
+        easuTap(aC, aW, vec2(2.0, 0.0) - f, dir, len2, lob, clp, fetch(ip + ivec2(2, 0)));
+        easuTap(aC, aW, vec2(1.0, 0.0) - f, dir, len2, lob, clp, fetch(ip + ivec2(1, 0)));
+        easuTap(aC, aW, vec2(1.0, 2.0) - f, dir, len2, lob, clp, fetch(ip + ivec2(1, 2)));
+        easuTap(aC, aW, vec2(0.0, 2.0) - f, dir, len2, lob, clp, fetch(ip + ivec2(0, 2)));
+        // EASU's own deringing: stay within the four nearest source pixels
+        vec3 c4 = fetch(ip), c5 = fetch(ip + ivec2(1, 0)), c6 = fetch(ip + ivec2(0, 1)), c7 = fetch(ip + ivec2(1, 1));
+        vec3 e = clamp(aC / aW, min(min(c4, c5), min(c6, c7)), max(max(c4, c5), max(c6, c7)));
+        return contrast + e * rcpL;
+      }
+      // camera: a little chromatic aberration toward the corners and fine film grain, stronger in the shadows
+      vec3 cameraFx(vec3 c) {
+        if (uCA > 0.0) {
+          vec2 d = vUv - 0.5, o = d * dot(d, d) * uCA;
+          c.r = mix(c.r, tap(vUv - o).r, 0.85); c.b = mix(c.b, tap(vUv + o).b, 0.85);
+        }
+        if (uGrain > 0.0) {
+          float n = fract(sin(dot(gl_FragCoord.xy + uSeed * vec2(37.0, 17.0), vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
+          float l = dot(c, vec3(0.299, 0.587, 0.114));
+          c += n * uGrain * (1.2 - l);
+        }
+        return c;
+      }
+      void main() {
+        // sharp pixels: nearest within each render pixel, a one-screen-pixel blend only across the seam between two
+        if (uMode > 1.5) {
+          vec2 t = vUv * uSrcSize, sc = uDstSize / uSrcSize, d = fract(t) - 0.5, r = 0.5 - 0.5 / sc;
+          vec2 c = floor(t) + (d - clamp(d, -r, r)) * sc + 0.5;
+          gl_FragColor = vec4(cameraFx(tap(c / uSrcSize)), 1.0); return;
+        }
+        if (uMode > 0.5) { gl_FragColor = vec4(cameraFx(fsr1()), 1.0); return; }
+        // Catmull-Rom from nine bilinear taps
+        vec2 sp = vUv * uSrcSize, t1 = floor(sp - 0.5) + 0.5, f = sp - t1;
+        vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f)), w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+        vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f)), w3 = f * f * (-0.5 + 0.5 * f);
+        vec2 w12 = w1 + w2, o12 = w2 / w12;
+        vec2 p0 = (t1 - 1.0) / uSrcSize, p3 = (t1 + 2.0) / uSrcSize, p12 = (t1 + o12) / uSrcSize;
+        vec3 c = tap(vec2(p0.x, p0.y)) * w0.x * w0.y + tap(vec2(p12.x, p0.y)) * w12.x * w0.y + tap(vec2(p3.x, p0.y)) * w3.x * w0.y
+               + tap(vec2(p0.x, p12.y)) * w0.x * w12.y + tap(vec2(p12.x, p12.y)) * w12.x * w12.y + tap(vec2(p3.x, p12.y)) * w3.x * w12.y
+               + tap(vec2(p0.x, p3.y)) * w0.x * w3.y + tap(vec2(p12.x, p3.y)) * w12.x * w3.y + tap(vec2(p3.x, p3.y)) * w3.x * w3.y;
+        // contrast-adaptive sharpening against the four neighbouring source pixels
+        vec2 px = 1.0 / uSrcSize;
+        vec3 n = tap(vUv - vec2(0.0, px.y)), s = tap(vUv + vec2(0.0, px.y)), e = tap(vUv + vec2(px.x, 0.0)), w = tap(vUv - vec2(px.x, 0.0));
+        vec3 mn = min(min(min(n, s), min(e, w)), c), mx = max(max(max(n, s), max(e, w)), c);
+        vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, vec3(1e-4)), 0.0, 1.0)) * uSharp;
+        vec3 res = c + (c * 4.0 - (n + s + e + w)) * amp * 0.25;
+        gl_FragColor = vec4(cameraFx(clamp(res, mn, mx)), 1.0);
+      }`,
+    depthTest: false, depthWrite: false, toneMapped: false,
+  });
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+  quad.frustumCulled = false;
+  const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), _dst = new THREE.Vector2();
+  return {
+    on: false, material: mat,
+    draw(rt, sharpOverride) {
+      mat.uniforms.tSrc.value = rt.texture;
+      mat.uniforms.uSrcSize.value.set(rt.width, rt.height);
+      renderer.getDrawingBufferSize(_dst); mat.uniforms.uDstSize.value.copy(_dst);
+      const k = renderScale(), up = k < 0.999;
+      // the chosen upscaler when enlarging; the bicubic path at 1:1, where it is an exact copy
+      const fsr = LOOK.upscaler === 'fsr';
+      mat.uniforms.uMode.value = !up ? 0 : fsr ? 1 : LOOK.upscaler === 'sharp' ? 2 : 0;
+      // sharpen more the further the image is enlarged; nothing at 1:1 (only here for the camera effects)
+      mat.uniforms.uSharp.value = !up ? 0 : fsr ? Math.min(1, 0.55 + 1.2 * (1 - k)) : Math.min(0.85, 0.3 + 1.6 * (1 - k));
+      if (sharpOverride !== undefined) { mat.uniforms.uMode.value = 0; mat.uniforms.uSharp.value = sharpOverride; }
+      mat.uniforms.uGrain.value = LOOK.camFx ? 0.035 : 0;
+      mat.uniforms.uCA.value = LOOK.camFx ? 0.012 : 0;
+      mat.uniforms.uSeed.value = (mat.uniforms.uSeed.value + 1) % 64;
+      renderer.setRenderTarget(null);
+      renderer.render(quad, cam);
+    },
+  };
+})();
+// Temporal upscaling (TAAU), a switch (LOOK.taa). Each frame the camera is shifted by a sub-pixel amount from a
+// 16-step Halton sequence, so successive frames sample the scene at different points inside each pixel. The finished
+// frame (after bloom, the fx pass and tone mapping) is then resolved at screen resolution: each screen pixel takes
+// the render pixels around it, weighted by how close their actual sample points fell (a Gaussian close to
+// Blackman-Harris), and blends that with last frame's result found by reprojection through the scene depth. Last
+// frame's colour is first clipped to the range of the current neighbourhood (variance clipping in YCoCg), which is
+// what stops ghosting. Only the camera's motion is reprojected; things that move on their own (wind in the grass,
+// the player, animals) rely on that clipping and a faster blend where the image moves. The result is lightly
+// sharpened on the way to the screen. History is kept in half floats at screen size, two buffers swapped each frame.
+const taa = (() => {
+  const halton = (i, b) => { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; };
+  const SEQ = Array.from({ length: 16 }, (_, i) => [halton(i + 1, 2) - 0.5, halton(i + 1, 3) - 0.5]);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { tCur: { value: null }, tDepth: { value: null }, tHist: { value: null }, uCurSize: { value: new THREE.Vector2() }, uDstSize: { value: new THREE.Vector2() },
+      uJitter: { value: new THREE.Vector2() }, uInvVP: { value: new THREE.Matrix4() }, uPrevVP: { value: new THREE.Matrix4() }, uValid: { value: 0 }, uDbg: { value: 0 } },
+    vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: `
+      uniform sampler2D tCur, tDepth, tHist; uniform vec2 uCurSize, uDstSize, uJitter; uniform mat4 uInvVP, uPrevVP; uniform float uValid, uDbg;
+      vec3 toYC(vec3 c) { return vec3(0.25 * c.r + 0.5 * c.g + 0.25 * c.b, 0.5 * c.r - 0.5 * c.b, -0.25 * c.r + 0.5 * c.g - 0.25 * c.b); }
+      vec3 toRGB(vec3 c) { return vec3(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z); }
+      void main() {
+        vec2 uv = gl_FragCoord.xy / uDstSize, ip = uv * uCurSize;
+        ivec2 b = ivec2(floor(ip)), mx = ivec2(uCurSize) - 1;
+        vec3 sum = vec3(0.0), m1 = vec3(0.0), m2 = vec3(0.0); float wsum = 0.0, wmax = 0.0;
+        for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+          ivec2 q = clamp(b + ivec2(x, y), ivec2(0), mx);
+          vec3 c = texelFetch(tCur, q, 0).rgb, yc = toYC(c);
+          m1 += yc; m2 += yc * yc;
+          vec2 d = vec2(q) + 0.5 + uJitter - ip;          // where this render pixel really sampled, from here
+          float w = exp(-2.29 * dot(d, d));
+          sum += c * w; wsum += w; wmax = max(wmax, w);
+        }
+        vec3 cur = sum / max(wsum, 1e-4);
+        if (uDbg > 0.5) { gl_FragColor = vec4(texelFetch(tCur, clamp(b, ivec2(0), mx), 0).rgb, 1.0); return; }
+        vec3 mu = m1 / 9.0, sg = sqrt(max(m2 / 9.0 - mu * mu, 0.0));
+        // where this point was on screen last frame: through this frame's depth into the world, then last frame's camera
+        float z = texture2D(tDepth, uv).r;
+        vec4 wp = uInvVP * vec4(uv * 2.0 - 1.0, z * 2.0 - 1.0, 1.0); wp /= wp.w;
+        vec4 pc = uPrevVP * wp; vec2 puv = pc.xy / pc.w * 0.5 + 0.5;
+        if (uValid < 0.5 || any(lessThan(puv, vec2(0.0))) || any(greaterThan(puv, vec2(1.0)))) { gl_FragColor = vec4(cur, 1.0); return; }
+        vec3 h = toYC(texture2D(tHist, puv).rgb);
+        // clip the history toward the neighbourhood's mean, into its box of mean +- 1.1 standard deviations
+        vec3 lo = mu - 1.1 * sg, hi = mu + 1.1 * sg, cen = 0.5 * (lo + hi), ext = max(0.5 * (hi - lo), vec3(1e-4));
+        vec3 dv = (h - cen) / ext; float m = max(abs(dv.x), max(abs(dv.y), abs(dv.z)));
+        if (m > 1.0) h = cen + (h - cen) / m;
+        float vel = length((puv - uv) * uDstSize);
+        float a = clamp(0.05 + 0.1 * wmax + 0.15 * clamp(vel / 6.0, 0.0, 1.0), 0.04, 0.4);
+        gl_FragColor = vec4(mix(toRGB(h), cur, a), 1.0);
+      }`,
+    depthTest: false, depthWrite: false, toneMapped: false,
+  });
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat); quad.frustumCulled = false;
+  const qcam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const hist = [null, null], projU = new THREE.Matrix4(), vp = new THREE.Matrix4(), prevVP = new THREE.Matrix4(), dst = new THREE.Vector2();
+  let cur = 0, frame = 0, valid = false;
+  const T = {
+    depth: null,
+    // debugging aids from the console (__game.taa): noHistory, noJitter, nearest, noSharpen
+    reset() { valid = false; },
+    // before the scene renders: remember the unjittered projection, then shift the view by this frame's sub-pixel step
+    begin(rw, rh) {
+      camera.updateProjectionMatrix(); projU.copy(camera.projectionMatrix);
+      const j = T.noJitter ? [0, 0] : SEQ[frame % SEQ.length];
+      mat.uniforms.uJitter.value.set(j[0], -j[1]);       // the view offset counts y down, the shader up
+      camera.setViewOffset(rw, rh, j[0], j[1], rw, rh);
+    },
+    end() { camera.clearViewOffset(); },
+    resolve(src) {
+      renderer.getDrawingBufferSize(dst);
+      if (!hist[0] || hist[0].width !== dst.x || hist[0].height !== dst.y) {
+        for (let i = 0; i < 2; i++) { if (hist[i]) hist[i].dispose(); hist[i] = new THREE.WebGLRenderTarget(dst.x, dst.y, { type: THREE.HalfFloatType, depthBuffer: false }); }
+        valid = false;
+      }
+      vp.multiplyMatrices(projU, camera.matrixWorldInverse);
+      const u = mat.uniforms;
+      u.tCur.value = src.texture; u.tDepth.value = T.depth; u.tHist.value = hist[cur].texture;
+      u.uCurSize.value.set(src.width, src.height); u.uDstSize.value.copy(dst);
+      u.uInvVP.value.copy(vp).invert(); u.uPrevVP.value.copy(prevVP); u.uValid.value = valid && T.depth && !T.noHistory ? 1 : 0; u.uDbg.value = T.nearest ? 1 : 0;
+      const out = hist[1 - cur];
+      renderer.setRenderTarget(out); renderer.render(quad, qcam);
+      upscaler.draw(out, T.noSharpen ? 0 : 0.45);                          // to the screen, lightly sharpened, with the camera effects
+      prevVP.copy(vp); cur = 1 - cur; frame++; valid = true;
+    },
+  };
+  return T;
+})();
 window.addEventListener('resize', resize);
 
 // ============================================================ shared uniforms and materials
@@ -225,7 +708,32 @@ const U = {
   playerPx: { value: new THREE.Vector2() },
   playerDepth: { value: 0 },
   fadeR: { value: 100 },
+  grassLod: { value: new THREE.Vector4(0, 0, 1e5, 2e5) },   // player x, z; thinning starts, thinning ends (m)
+  grassMin: { value: 1 },                                     // share of tufts still drawn where thinning ends
+  grassCards: { value: new THREE.Vector2(1e5, 2e5) },          // beyond x m a tuft drops its third card, beyond y its second
+  grassLook: { value: new THREE.Vector4(LOOK.grassClumps ? 1 : 0, LOOK.grassBacklight ? 1 : 0, LOOK.grassSheen ? 1 : 0, LOOK.farBlend ? 1 : 0) },   // clumps, backlight, sheen, far blend (0 = off)
+  skyMap: { value: null },                                    // SKY_MAP below
+  skyK: { value: LOOK.skyShade ? 1 : 0 },                     // how much of it applies (0 = off)
 };
+// Sky visibility map, the RDR2 idea in miniature: a top-down texture, 1 texel per metre, wrapped every 512 m, holding
+// how much of the sky each spot of ground sees (255 = all of it). Tree crowns overhead and hillsides around it lower
+// it. Each chunk bakes its own 32 x 32 texels when it loads and again when a tree falls or the ground is dug, so it
+// costs nothing per frame. Terrain and grass read it once per vertex and dim their sky light by it, which is what
+// darkens a forest floor and the bottom of a hollow. Only the loaded 7 x 7 chunks (224 m) are ever in it, so the
+// 512 m wrap never puts two loaded places on the same texel.
+const SKY_MAP_SIZE = 512;
+const skyMapData = new Uint8Array(SKY_MAP_SIZE * SKY_MAP_SIZE).fill(255);
+const skyMap = new THREE.DataTexture(skyMapData, SKY_MAP_SIZE, SKY_MAP_SIZE, THREE.RedFormat, THREE.UnsignedByteType);
+skyMap.wrapS = skyMap.wrapT = THREE.RepeatWrapping;
+skyMap.magFilter = skyMap.minFilter = THREE.LinearFilter; skyMap.generateMipmaps = false;
+skyMap.needsUpdate = true;
+U.skyMap.value = skyMap;
+// sky light (three's indirect light) times the visibility, and a little of the sun too, since in this engine shade
+// is never fully dark (nature.js lets some sun into shadow) and that leak is really sky light as well
+const SKY_PARS_V = '\nuniform sampler2D uSkyMap; uniform float uSkyK; varying float vSkyVis;';
+const SKY_V = (xz) => `\nvSkyVis = mix(1.0, texture(uSkyMap, (${xz} + 0.5) / ${SKY_MAP_SIZE}.0).r, uSkyK);`;
+const SKY_PARS_F = '\nvarying float vSkyVis;';
+const SKY_F = '\nreflectedLight.indirectDiffuse *= vSkyVis; reflectedLight.directDiffuse *= mix(1.0, vSkyVis, 0.35);\n#include <aomap_fragment>';
 function makePixelTexture() {
   const c = document.createElement('canvas'); c.width = c.height = 64;
   const g = c.getContext('2d'); const img = g.createImageData(64, 64);
@@ -248,18 +756,157 @@ function makePixelTexture() {
 }
 const pixelTex = makePixelTexture();
 
-// Wind sway (and optional see-through fade around the player) injected into a Lambert material.
-function addWind(mat, y0, yr, amp, fade, upNormal) {
-  mat.customProgramCacheKey = () => 'wind' + (fade ? 1 : 0) + (upNormal ? 1 : 0);
+// Distance thinning for grass, tuft by tuft. Beyond uGrassLod.z metres from the player a growing share of tufts
+// is dropped, down to uGrassMin of them kept at uGrassLod.w. A dropped tuft is moved behind the far plane, so it
+// costs no pixels. Which tufts go is fixed by where they stand, so the sward thins smoothly with no seam at chunk edges.
+// Far tufts are also simplified: each is three crossed cards (flowers two), and past uGrassCards.x it drops its
+// third card, past uGrassCards.y its second, each tuft at its own distance (spread over 8 m) so there is no line.
+const GRASS_LOD_GLSL = `
+  #ifdef USE_INSTANCING
+  {
+    vec2 ip = instanceMatrix[3].xz;
+    float gd = distance(ip, uGrassLod.xy);
+    float keep = mix(1.0, uGrassMin, smoothstep(uGrassLod.z, uGrassLod.w, gd));
+    float pick = fract(52.9829189 * fract(dot(ip, vec2(0.06711056, 0.00583715))));
+    int card = gl_VertexID / 4;
+    float cd = gd - pick * 8.0;
+    if (pick > keep || (card == 2 && cd > uGrassCards.x) || (card == 1 && cd > uGrassCards.y)) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+  }
+  #endif`;
+// One shadow reading per grass tuft, taken in the vertex shader a little above the tuft's root, instead of a
+// filtered shadow lookup for every grass pixel. Grass normals all point straight up, so the light is already the
+// same across a tuft; only the shadow varied, and now that is per tuft too, which reads as pixel art anyway.
+// Written against three r187: directional shadow maps are depth textures, read through sampler2DShadow for
+// PCF and as plain depth for BasicShadowMap. The sampler is declared here exactly as the fragment shader
+// declares it, so both stages share the one uniform three already fills in.
+const TUFT_SHADOW_PARS_GLSL = `
+  #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
+    #if defined( SHADOWMAP_TYPE_PCF )
+      uniform sampler2DShadow directionalShadowMap[ NUM_DIR_LIGHT_SHADOWS ];
+    #else
+      uniform sampler2D directionalShadowMap[ NUM_DIR_LIGHT_SHADOWS ];
+    #endif
+    varying float vTuftShadow;
+  #endif`;
+const TUFT_SHADOW_GLSL = `
+  #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
+  {
+    #ifdef USE_INSTANCING
+      vec4 root = modelMatrix * instanceMatrix * vec4( 0.0, 0.2, 0.0, 1.0 );
+    #else
+      vec4 root = modelMatrix * vec4( 0.0, 0.2, 0.0, 1.0 );
+    #endif
+    DirectionalLightShadow ls = directionalLightShadows[ 0 ];
+    vec4 sc = directionalShadowMatrix[ 0 ] * ( root + vec4( 0.0, ls.shadowNormalBias, 0.0, 0.0 ) );
+    sc.xyz /= sc.w;
+    #ifdef USE_REVERSED_DEPTH_BUFFER
+      sc.z -= ls.shadowBias;
+    #else
+      sc.z += ls.shadowBias;
+    #endif
+    float s = 1.0;
+    if ( sc.x >= 0.0 && sc.x <= 1.0 && sc.y >= 0.0 && sc.y <= 1.0 && sc.z <= 1.0 ) {
+      #if defined( SHADOWMAP_TYPE_PCF )
+        // four hardware-filtered taps around the root: tufts at a shadow's edge come out half shaded
+        vec2 o = ls.shadowRadius / ls.shadowMapSize;
+        s = 0.25 * (
+          texture( directionalShadowMap[ 0 ], vec3( sc.xy + vec2( o.x, 0.35 * o.y ), sc.z ) ) +
+          texture( directionalShadowMap[ 0 ], vec3( sc.xy + vec2( -0.35 * o.x, o.y ), sc.z ) ) +
+          texture( directionalShadowMap[ 0 ], vec3( sc.xy - vec2( o.x, 0.35 * o.y ), sc.z ) ) +
+          texture( directionalShadowMap[ 0 ], vec3( sc.xy - vec2( -0.35 * o.x, o.y ), sc.z ) ) );
+      #else
+        float d = texture( directionalShadowMap[ 0 ], sc.xy ).r;
+        #ifdef USE_REVERSED_DEPTH_BUFFER
+          s = step( d, sc.z );
+        #else
+          s = step( sc.z, d );
+        #endif
+      #endif
+    }
+    vTuftShadow = mix( 1.0, s, ls.shadowIntensity );
+  }
+  #endif`;
+// The fragment shader keeps three's light loop untouched (nature.js rewrites it to soften and tint shade), and
+// only the directional shadow lookup inside it is redirected to the tuft's reading, by a macro defined after
+// three's getShadow function. Whatever the loop does with the shadow value, it now gets it per tuft.
+const TUFT_SHADOW_FRAG_GLSL = `
+#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
+  varying float vTuftShadow;
+  #define getShadow( shadowMap, shadowMapSize, shadowIntensity, shadowBias, shadowRadius, shadowCoord ) vTuftShadow
+#endif`;
+// Clumps, after Ghost of Tsushima: real grass grows in clumps, so each tuft belongs to the nearest of a set of
+// jittered points about 3.4 m apart (a Voronoi cell). A clump is taller or shorter as a whole, tallest in its
+// middle, and its tufts splay outward at the edge. Its colour runs from lush to straw, set by the clump and by
+// broad drifts across the field, so a meadow reads as patches of green and dry grass as in RDR2 and KCD2.
+// Flowers keep their colour. Strength uGrassLook.x (0 = off, no change at all).
+const CLUMP_GLSL = `
+  vec2 cLean = vec2(0.0); float cH = 1.0; vClumpTint = vec3(1.0); vBladeR = 1.0; vBladeN = vec3(0.0, 1.0, 0.0);
+  vGrassTip = clamp((position.y - uWind.x) / uWind.y, 0.0, 1.0) * (uv.x < 0.5 ? 1.0 : 0.5);
+  #ifdef USE_INSTANCING
+  vBladeR = 0.3 + 0.7 * fract(sin(dot(instanceMatrix[3].xz, vec2(12.9898, 78.233)) + float(gl_VertexID / 4) * 1.71) * 43758.5453);
+  if (uGrassLook.x > 0.0) {
+    vec2 cip = instanceMatrix[3].xz;
+    vec2 cg = floor(cip / 3.4);
+    float cBest = 1e9; vec2 cCtr = cip; vec2 cR = vec2(0.5);
+    for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+      vec2 c = cg + vec2(float(i), float(j));
+      vec2 r = fract(sin(vec2(dot(c, vec2(127.1, 311.7)), dot(c, vec2(269.5, 183.3)))) * 43758.5453);
+      vec2 p = (c + 0.15 + 0.7 * r) * 3.4, dp = p - cip;
+      float d = dot(dp, dp);
+      if (d < cBest) { cBest = d; cCtr = p; cR = r; }
+    }
+    float cd = sqrt(cBest), ck = uGrassLook.x;
+    cH = mix(1.0, mix(0.72, 1.3, cR.x) * (1.1 - 0.22 * smoothstep(0.4, 2.2, cd)), ck);
+    cLean = ck * 0.16 * (cip - cCtr) / (cd + 0.35) * smoothstep(0.2, 1.6, cd);
+    float drift = sin(cip.x * 0.071 + 1.7 * sin(cip.y * 0.053)) * sin(cip.y * 0.083 + 1.3 * sin(cip.x * 0.047));
+    float dry = clamp(0.42 + 0.42 * drift + 0.5 * (cR.y - 0.5), 0.0, 1.0);
+    vec3 tint = mix(vec3(0.84, 1.0, 0.86), vec3(1.3, 1.12, 0.62), dry) * mix(0.88, 1.08, cR.x);
+    vClumpTint = mix(vec3(1.0), tint, ck * step(uv.x, 0.5));
+  }
+  #endif
+  transformed.y *= cH;`;
+// Light through the blades: grass is thin, so looking toward the sun it glows, saturated, brightest at the tips
+// (the golden-hour meadow of RDR2 and KCD2). Added after three's light loop, from the sun as that loop left it,
+// shadow included, so shaded grass does not glow. Strength uGrassLook.y (0 = off).
+const BACKLIGHT_GLSL = `
+  #if NUM_DIR_LIGHTS > 0
+  if (uGrassLook.y > 0.0) {
+    float bA = saturate(dot(normalize(-vViewPosition), directLight.direction));
+    float bMax = max(diffuseColor.r, max(diffuseColor.g, diffuseColor.b));
+    vec3 bC = diffuseColor.rgb * diffuseColor.rgb / max(bMax, 1e-4);
+    reflectedLight.directDiffuse += uGrassLook.y * vGrassTip * sqrt(vGrassTip) * (0.15 + 1.6 * pow(bA, 3.0)) * directLight.color * BRDF_Lambert(bC);
+  }
+  // Sheen: blades that face the sun catch it. Each blade has its own facing (vBladeN, mostly sideways, turned by the
+  // wind), and catches light by how squarely it faces the sun, on a dome along the blade, brighter in gusts. It does
+  // not depend on where the camera is, so it stays put as the view moves and only the wind moves it. Tinted by the
+  // grass itself rather than white, and faint: a glint of green-gold, not a metallic shine.
+  if (uGrassLook.z > 0.0) {
+    float sp = pow(saturate(dot(normalize(vBladeN), directLight.direction)), 6.0) * sin(3.14159 * clamp(vGrassTip, 0.0, 1.0)) * vBladeR * (0.3 + 0.8 * vGust);
+    vec3 sc = mix(diffuseColor.rgb / max(max(diffuseColor.r, max(diffuseColor.g, diffuseColor.b)), 1e-3), vec3(1.0), 0.2);
+    reflectedLight.directDiffuse += uGrassLook.z * 0.03 * sp * directLight.color * sc;
+  }
+  #endif`;
+// Far grass takes the colour of the ground under it (the soil tint the tuft's foot already fades to), so where
+// distant tufts thin out the gaps and the grass match. Strength uGrassLook.w.
+const FARBLEND_GLSL = `
+  diffuseColor.rgb = mix(diffuseColor.rgb, vColor.rgb * vec3(0.82, 0.8, 0.86), uGrassLook.w * 0.55 * vFar);`;
+// Wind sway injected into a Lambert material, with options: a see-through fade around the player (fade), normals
+// kept straight up (upNormal), and the grass extras (grass): distance thinning and one shadow reading per tuft.
+function addWind(mat, y0, yr, amp, fade, upNormal, grass) {
+  const lod = grass, tuftOn = () => grass && LOOK.tuftShadow;
+  mat.customProgramCacheKey = () => 'wind' + (fade ? 1 : 0) + (upNormal ? 1 : 0) + (lod ? 1 : 0) + (tuftOn() ? 1 : 0);
   mat.onBeforeCompile = (sh) => {
+    const tuft = tuftOn();
     sh.uniforms.uTime = U.time;
     sh.uniforms.uWind = { value: new THREE.Vector3(y0, yr, amp) };
     sh.uniforms.uPlayerPx = U.playerPx;
     sh.uniforms.uPlayerDepth = U.playerDepth;
     sh.uniforms.uFadeR = U.fadeR;
+    if (lod) { sh.uniforms.uGrassLod = U.grassLod; sh.uniforms.uGrassMin = U.grassMin; sh.uniforms.uGrassCards = U.grassCards; sh.uniforms.uGrassLook = U.grassLook; sh.uniforms.uSkyMap = U.skyMap; sh.uniforms.uSkyK = U.skyK; }
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform float uTime; uniform vec3 uWind; varying float vCamDepth;')
+      .replace('#include <common>', '#include <common>\nuniform float uTime; uniform vec3 uWind; varying float vCamDepth;' + (lod ? '\nuniform vec4 uGrassLod; uniform float uGrassMin; uniform vec2 uGrassCards; uniform vec4 uGrassLook; varying vec3 vClumpTint; varying float vGrassTip; varying float vGust; varying float vBladeR; varying float vFar; varying vec3 vBladeN;' + SKY_PARS_V : ''))
       .replace('#include <begin_vertex>', `#include <begin_vertex>
+        ${lod ? CLUMP_GLSL : 'vec2 cLean = vec2(0.0);'}
         #ifdef USE_INSTANCING
           vec3 wp = (instanceMatrix * vec4(position, 1.0)).xyz;
         #else
@@ -270,10 +917,12 @@ function addWind(mat, y0, yr, amp, fade, upNormal) {
         float g1 = sin(wp.x * 0.11 + wp.z * 0.07 - uTime * 1.25);
         float g2 = sin(wp.x * 0.043 - wp.z * 0.061 - uTime * 0.55 + 1.3);
         float gust = 0.5 + 0.5 * (0.6 * g1 + 0.4 * g2);
-        gust *= gust;
+        gust *= gust;${lod ? ' vGust = gust;' : ''}
         float sw = hk * uWind.z * (0.3 + 1.5 * gust);
         float ph = uTime * 1.6 + wp.x * 0.21 + wp.z * 0.17;
-        vec2 dw = vec2(0.9 * gust + 0.45 * sin(ph) + 0.2 * sin(ph * 2.3 + 1.7), 0.55 * gust + 0.4 * cos(ph * 0.8) + 0.2 * sin(ph * 1.9)) * sw;
+        vec2 dw = vec2(0.9 * gust + 0.45 * sin(ph) + 0.2 * sin(ph * 2.3 + 1.7), 0.55 * gust + 0.4 * cos(ph * 0.8) + 0.2 * sin(ph * 1.9)) * sw + cLean * hk;${lod ? `
+        { float aB = fract(vBladeR * 7.31) * 6.2832; vec2 wv = vec2(0.9 * gust + 0.45 * sin(ph), 0.55 * gust + 0.4 * cos(ph * 0.8));
+          vBladeN = normalize(mat3(viewMatrix) * vec3(cos(aB) + wv.x, 0.35, sin(aB) + wv.y)); }` : ''}
         #ifdef USE_INSTANCING
           vec3 ax = instanceMatrix[0].xyz, az = instanceMatrix[2].xyz;
           transformed.x += dot(vec3(dw.x, 0.0, dw.y), ax) / dot(ax, ax);
@@ -286,7 +935,21 @@ function addWind(mat, y0, yr, amp, fade, upNormal) {
         float fl = sin(uTime * 3.3 + position.x * 2.1 + position.z * 1.7 + wp.x * 0.6) + 0.5 * sin(uTime * 7.1 + position.z * 5.3 + position.y * 3.0);
         transformed.y += fl * tipk * (0.02 + 0.06 * gust);
         transformed.xz += vec2(cos(position.y * 3.0 + uTime * 4.7), sin(position.x * 3.0 + uTime * 5.3)) * tipk * 0.018 * (0.4 + gust);`)
-      .replace('#include <project_vertex>', '#include <project_vertex>\nvCamDepth = -mvPosition.z;');
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvCamDepth = -mvPosition.z;' + (lod ? GRASS_LOD_GLSL + '\n#ifdef USE_INSTANCING' + SKY_V('instanceMatrix[3].xz') + '\nvFar = smoothstep(uGrassLod.z, uGrassLod.w, distance(instanceMatrix[3].xz, uGrassLod.xy));\n#else\nvSkyVis = 1.0; vFar = 0.0;\n#endif' : ''));
+    if (tuft) {
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <shadowmap_pars_vertex>', '#include <shadowmap_pars_vertex>' + TUFT_SHADOW_PARS_GLSL)
+        .replace('#include <shadowmap_vertex>', '#include <shadowmap_vertex>' + TUFT_SHADOW_GLSL);
+      sh.fragmentShader = sh.fragmentShader.replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>' + TUFT_SHADOW_FRAG_GLSL);
+    }
+    if (lod) {
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform vec4 uGrassLook; varying vec3 vClumpTint; varying float vGrassTip; varying float vGust; varying float vBladeR; varying float vFar; varying vec3 vBladeN;' + SKY_PARS_F)
+        .replace('#include <aomap_fragment>', SKY_F)
+        .replace('#include <alphatest_fragment>', '#include <alphatest_fragment>' + FARBLEND_GLSL)
+        .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= vClumpTint;')
+        .replace('#include <lights_fragment_begin>', '#include <lights_fragment_begin>' + BACKLIGHT_GLSL);
+    }
     if (upNormal) sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\nnormal = normalize(vNormal);');
     if (fade) {
       sh.fragmentShader = sh.fragmentShader
@@ -304,6 +967,13 @@ function addWind(mat, y0, yr, amp, fade, upNormal) {
   };
 }
 const terrainMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: pixelTex });
+terrainMat.onBeforeCompile = (sh) => {
+  sh.uniforms.uSkyMap = U.skyMap; sh.uniforms.uSkyK = U.skyK;
+  sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>' + SKY_PARS_V)
+    .replace('#include <project_vertex>', '#include <project_vertex>' + SKY_V('(modelMatrix * vec4(transformed, 1.0)).xz'));
+  sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>' + SKY_PARS_F).replace('#include <aomap_fragment>', SKY_F);
+};
+terrainMat.customProgramCacheKey = () => 'terrain-sky1';
 const solidMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: pixelTex });
 
 // ============================================================ geometry library
@@ -697,6 +1367,33 @@ function finish(B) {
   g.computeBoundingSphere();
   return g;
 }
+// Crown shading: inside a tree, leaves and limbs are lit by less sky than the outer shell. For each vertex, how far
+// out it sits compared with the outermost vertex at its height (0.5 m bands), and how low in the tree it is, set a
+// darkening baked into the vertex colours: a lit shell, a dark core, a darker underside. The trunk below the crown
+// is the outermost thing at its height, so it is left alone. The original colours are kept to switch it off.
+function crownShade(g) {
+  const pos = g.attributes.position.array, n = pos.length / 3, band = new Map();
+  let y0 = Infinity, y1 = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const y = pos[i * 3 + 1], r = Math.hypot(pos[i * 3], pos[i * 3 + 2]), b = Math.floor(y * 2);
+    band.set(b, Math.max(band.get(b) || 0, r)); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+  }
+  const ao = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const y = pos[i * 3 + 1], r = Math.hypot(pos[i * 3], pos[i * 3 + 2]), b = Math.floor(y * 2);
+    const rm = Math.max(band.get(b - 1) || 0, band.get(b) || 0, band.get(b + 1) || 0);
+    const open = rm > 0.6 ? r / rm : 1;                        // bands no wider than a trunk are not crown
+    ao[i] = lerp(0.55, 1, smoothstep(0.1, 0.95, open)) * lerp(0.82, 1, smoothstep(y0 + 0.3 * (y1 - y0), y1, y));
+  }
+  g.userData.baseCol = Float32Array.from(g.attributes.color.array);
+  g.userData.crownAo = ao;
+}
+function applyCrownShade(g, on) {
+  const c = g.attributes.color.array, b = g.userData.baseCol, ao = g.userData.crownAo;
+  if (!b) return;
+  for (let i = 0; i < ao.length; i++) { const k = on ? ao[i] : 1; c[i * 3] = b[i * 3] * k; c[i * 3 + 1] = b[i * 3 + 1] * k; c[i * 3 + 2] = b[i * 3 + 2] * k; }
+  g.attributes.color.needsUpdate = true;
+}
 // a canopy of leaf cards scattered through an ellipsoid, shaded as one rounded mass
 function canopy(B, r, C, rad, n, sMin, sMax, dark, light, anchors) {
   const nFn = (p) => v3((p.x - C.x) / rad.x, (p.y - C.y) / rad.y + 0.7, (p.z - C.z) / rad.z).normalize();
@@ -892,6 +1589,7 @@ const TREE = [
 ];
 const treeGeo = [buildPine(), buildBirch(), buildOak()];
 const pineLiteGeo = buildPine(1);      // a cheaper pine for the distance
+for (const g of [...treeGeo, pineLiteGeo]) { crownShade(g); applyCrownShade(g, LOOK.crownShade); }
 // ---- felled trunks: the same trunk the standing tree had, whole and then as two halves
 function trunkPiece(type, y0, y1) {
   const T = TRUNK[type], src = T.pts;
@@ -956,9 +1654,18 @@ const rockGeo = (() => {
   return paint(g, (c, x, y) => c.copy(a).lerp(b, smoothstep(-0.3, 0.8, y)));
 })();
 // ---- grass: textured tufts tinted to the ground colour, plus flower patches
+// How much darker a grass blade is at its root than at its tip: 1 = the original fade (roots at about half the
+// tips' brightness), lower values lift the roots toward the tips, 0 = evenly lit. The tips never change.
+// Change it live with __game.look.grassRootShade(k).
+let GRASS_ROOT_SHADE = LOOK.rootShade;   // 1 is the original look
 function makeGrassTex() {
   const c = document.createElement('canvas'); c.width = 64; c.height = 32;
-  const g = c.getContext('2d'); const img = g.createImageData(64, 32); const d = img.data;
+  const g = c.getContext('2d');
+  const t = new THREE.CanvasTexture(c);
+  // repaint(shade) redraws the same blades (same random sequence) with a root-to-tip fade of strength shade.
+  // (Not called k: the blade loop below has its own k, which once shadowed it and blackened the roots.)
+  t.userData.repaint = (shade) => {
+  const img = g.createImageData(64, 32); const d = img.data;
   const r = mulberry32(606);
   const put = (x, y, l) => {
     x = Math.round(x); if (x < 0 || y < 0 || x >= 64 || y >= 32) return;
@@ -969,7 +1676,7 @@ function makeGrassTex() {
     const bx = 3 + k * 2.1 + (r() - 0.5) * 2, hgt = 13 + r() * 18, lean = (r() - 0.5) * 9, tone = 0.86 + 0.14 * r();
     for (let y = 0; y < hgt; y++) {
       const t = y / hgt, x = bx + lean * t * t, hw = 1.5 * (1 - t) + 0.3;
-      for (let px = Math.ceil(x - hw); px <= x + hw; px++) if (px >= 1 && px <= 30) put(px, 31 - y, tone * (0.66 + 0.34 * t));
+      for (let px = Math.ceil(x - hw); px <= x + hw; px++) if (px >= 1 && px <= 30) put(px, 31 - y, tone * (1.0 - 0.34 * shade * (1.0 - t)));
     }
   }
   for (let k = 0; k < 4; k++) {                        // flowers (right tile)
@@ -979,14 +1686,16 @@ function makeGrassTex() {
     for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (Math.abs(dx) + Math.abs(dy) <= 2) put(cx + dx, cy + dy, dx === 0 && dy === 0 ? 0.75 : 1);
   }
   g.putImageData(img, 0, 0);
-  const t = new THREE.CanvasTexture(c);
+  t.needsUpdate = true;
+  };
+  t.userData.repaint(GRASS_ROOT_SHADE);
   t.magFilter = THREE.NearestFilter; t.minFilter = THREE.LinearFilter; t.generateMipmaps = false;
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 const grassTex = makeGrassTex();
 const grassMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: grassTex, alphaTest: 0.5, alphaToCoverage: true, side: THREE.DoubleSide });
-addWind(grassMat, 0.0, 0.6, 0.11, false, true);   // a light breeze: the sward stirs, it does not thrash
+addWind(grassMat, 0.0, 0.6, 0.11, false, true, true);   // a light breeze: the sward stirs, it does not thrash; thins with distance
 function tuftGeo(cards, w, h, u0, u1, lean) {
   const pos = [], nor = [], uv = [], colr = [], idx = [];
   for (let k = 0; k < cards; k++) {
@@ -995,7 +1704,7 @@ function tuftGeo(cards, w, h, u0, u1, lean) {
     const b = pos.length / 3;
     pos.push(-dx * w / 2, 0, -dz * w / 2, dx * w / 2, 0, dz * w / 2, dx * w * 0.58 + lx, h, dz * w * 0.58 + lz, -dx * w * 0.58 + lx, h, -dz * w * 0.58 + lz);
     uv.push(u0, 0, u1, 0, u1, 1, u0, 1);
-    colr.push(0.88, 0.9, 0.84, 0.88, 0.9, 0.84, 1.13, 1.16, 0.98, 1.13, 1.16, 0.98);
+    colr.push(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);       // filled by shadeTuft
     for (let i = 0; i < 4; i++) nor.push(0, 1, 0);
     idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
   }
@@ -1007,8 +1716,25 @@ function tuftGeo(cards, w, h, u0, u1, lean) {
   g.setIndex(idx);
   return g;
 }
+// Vertex colours of a tuft: the tips are always (1.13, 1.16, 0.98); the foot is the original (0.88, 0.9, 0.84) at
+// GRASS_ROOT_SHADE 1 and rises toward the tips' colour as it goes down.
+function shadeTuft(geo, k) {
+  const c = geo.attributes.color, tip = [1.13, 1.16, 0.98], foot = [0.88, 0.9, 0.84];
+  for (let i = 0; i < c.count; i++) {
+    const f = i % 4 < 2 ? k : 0;                           // each card: two foot vertices, then two tip vertices
+    c.setXYZ(i, tip[0] - f * (tip[0] - foot[0]), tip[1] - f * (tip[1] - foot[1]), tip[2] - f * (tip[2] - foot[2]));
+  }
+  c.needsUpdate = true;
+}
 const grassGeo = tuftGeo(3, 0.8, 0.62, 0.01, 0.49, 0.14);
 const flowerGeo = tuftGeo(2, 0.5, 0.7, 0.52, 0.99, 0.0);
+shadeTuft(grassGeo, GRASS_ROOT_SHADE); shadeTuft(flowerGeo, GRASS_ROOT_SHADE);
+function setGrassRootShade(k) {
+  GRASS_ROOT_SHADE = clamp(+k || 0, 0, 1);
+  grassTex.userData.repaint(GRASS_ROOT_SHADE);
+  shadeTuft(grassGeo, GRASS_ROOT_SHADE); shadeTuft(flowerGeo, GRASS_ROOT_SHADE);
+  return GRASS_ROOT_SHADE;
+}
 const FLOWER_COLORS = [col(0xffffff), col(0xffd84a), col(0xc7a2ff), col(0xff9ec4), col(0x9fd3ff)];
 
 // terrain palette (linear)
@@ -1064,6 +1790,10 @@ class Chunk {
     geo.setIndex(new THREE.BufferAttribute(idx, 1));
     this.terrain = new THREE.Mesh(geo, terrainMat);
     this.terrain.receiveShadow = true;
+    // Draw order for opaque things, near to the ground: trees first, then grass, then the bare terrain last, so pixels
+    // already covered by a canopy or a tuft are skipped instead of shaded and then painted over. (three would
+    // otherwise draw in material order, which put the terrain first, under everything.) Nothing looks different.
+    this.terrain.renderOrder = LOOK.drawOrder ? 2 : 0;
     this.group.add(this.terrain);
     this.populate();
     this.refresh();
@@ -1093,7 +1823,7 @@ class Chunk {
       const spawnClear = x * x + z * z < 49;
       let d = 0.03 + 0.6 * smoothstep(0.0, 0.45, f);
       d *= 1 - smoothstep(17, 24, hb);
-      if (hb < 1.3 || sl > 1.5 || spawnClear) d = 0;
+      if (hb < 1.3 || sl > 1.5 || spawnClear || inChannel(x, z, 1.0)) d = 0;
       if (r < d) {
         const type = (f > 0.25 || hb > 12) ? (r2 < 0.85 ? PINE : BIRCH) : (r2 < 0.5 ? BIRCH : r2 < 0.85 ? OAK : PINE);
         const id = this.key + '|t' + this.trees.length;
@@ -1113,6 +1843,7 @@ class Chunk {
       if (!list.length) { this.treeMeshes.push(null); continue; }
       const mesh = new THREE.InstancedMesh(treeGeo[t], treeMat, list.length);
       mesh.castShadow = true; mesh.receiveShadow = true; mesh.customDepthMaterial = treeDepthMat;
+      mesh.renderOrder = LOOK.drawOrder ? -1 : 0;
       list.forEach((tr, i) => {
         tr.slot = i;
         const v = 0.74 + 0.42 * ((hash2(i, t, this.cx * 31 + this.cz) & 255) / 255);
@@ -1133,7 +1864,7 @@ class Chunk {
     for (let i = 0; i < GRASS_PER_CHUNK; i++) {
       const lx = grng() * CS, lz = grng() * CS, a = grng(), b = grng();
       const hb = this.baseLocal(lx, lz);
-      if (hb < 1.25 || hb > 19) continue;
+      if (hb < 1.25 || hb > 19 || inChannel(this.ox + lx, this.oz + lz, 0.15)) continue;
       const sl = Math.hypot(this.baseLocal(lx + 0.5, lz) - this.baseLocal(lx - 0.5, lz), this.baseLocal(lx, lz + 0.5) - this.baseLocal(lx, lz - 0.5));
       if (sl > 0.72) continue;
       const f = this.forest[Math.round(lz) * N + Math.round(lx)];
@@ -1143,7 +1874,8 @@ class Chunk {
     this.grass = gs;
     if (gs.length) {
       this.grassMesh = new THREE.InstancedMesh(grassGeo, grassMat, gs.length);
-      this.grassMesh.receiveShadow = true;
+      this.grassMesh.receiveShadow = LOOK.grassShadows;
+      this.grassMesh.renderOrder = LOOK.drawOrder ? 1 : 0;
       gs.forEach((g, i) => {
         const v = 0.97 + 0.06 * ((i * 7919) % 100) / 100;
         _c.copy(PAL.meadow).lerp(PAL.forest, smoothstep(-0.1, 0.35, g.f));
@@ -1172,7 +1904,8 @@ class Chunk {
     this.flowers = fl;
     if (fl.length) {
       this.flowerMesh = new THREE.InstancedMesh(flowerGeo, grassMat, fl.length);
-      this.flowerMesh.receiveShadow = true;
+      this.flowerMesh.receiveShadow = LOOK.grassShadows;
+      this.flowerMesh.renderOrder = LOOK.drawOrder ? 1 : 0;
       fl.forEach((g, i) => this.flowerMesh.setColorAt(i, FLOWER_COLORS[g.ci]));
       this.group.add(this.flowerMesh);
     }
@@ -1206,6 +1939,7 @@ class Chunk {
     mesh.instanceMatrix.needsUpdate = true;
   }
   rebuildStumps() {
+    markShade(this);
     if (window.__nature) window.__nature.refresh(this);
     if (this.stumpMesh) { this.group.remove(this.stumpMesh); this.stumpMesh.dispose(); this.stumpMesh = null; }
     const dead = this.trees.filter((t) => !t.alive);
@@ -1228,6 +1962,7 @@ class Chunk {
     for (let j = 0; j < P; j++) for (let i = 0; i < P; i++) {
       h[j * P + i] = base[j * P + i] + getDelta(this.ox + i - 1, this.oz + j - 1);
     }
+    this.skyT = null;                      // the ground changed: its horizons are baked again
     const geo = this.terrain.geometry;
     const pos = geo.attributes.position.array, nor = geo.attributes.normal.array, colr = geo.attributes.color.array;
     for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
@@ -1252,6 +1987,14 @@ class Chunk {
       }
       const dd = clamp(Math.abs(delta) * 1.6, 0, 1) * 0.85;
       if (dd > 0) _c.lerp(PAL.dirt, dd);
+      // stream beds: wet gravel in the channel, darker silt just under the banks
+      if (rivers) {
+        const ri = rivers.riverInfo(this.ox + i, this.oz + j);
+        if (ri && ri.dist < ri.w / 2 + 1.2) {
+          const bed = 1 - smoothstep(ri.w / 2 - 0.4, ri.w / 2 + 1.0, ri.dist);
+          _c.lerp(ri.riffle ? RIVER_PAL.gravel : RIVER_PAL.silt, bed * 0.85);
+        }
+      }
       const v = 0.96 + 0.08 * ((hash2(this.ox + i, this.oz + j, SEED) & 255) / 255);
       colr[k * 3] = _c.r * v; colr[k * 3 + 1] = _c.g * v; colr[k * 3 + 2] = _c.b * v;
     }
@@ -1296,6 +2039,7 @@ class Chunk {
     geo.attributes.normal.needsUpdate = true;
     geo.attributes.color.needsUpdate = true;
     geo.computeBoundingSphere();
+    if (rivers) riverWater.refresh(this, rivers);
     for (const tr of this.trees) this.treeMeshes[tr.type].setMatrixAt(tr.slot, this.treeMatrix(tr, _m));
     for (const mesh of this.treeMeshes) if (mesh) { mesh.instanceMatrix.needsUpdate = true; mesh.computeBoundingSphere(); }
     if (this.rockMesh) {
@@ -1321,6 +2065,8 @@ class Chunk {
     this.rebuildStumps();
   }
   dispose() {
+    clearShade(this);
+    riverWater.dispose(this);
     scene.remove(this.group);
     clearEnemies((e) => e.chunkKey === this.key);
     this.terrain.geometry.dispose();
@@ -1331,6 +2077,67 @@ class Chunk {
     if (this.flowerMesh) this.flowerMesh.dispose();
     if (this.stumpMesh) this.stumpMesh.dispose();
   }
+}
+
+// ---------------------------------------------------------- sky visibility bake (see SKY_MAP above)
+// Crown radius of each tree kind at scale 1, from its geometry, and how much sky a crown hides (birch is airy).
+const CROWN = treeGeo.map((g, t) => { g.computeBoundingBox(); const b = g.boundingBox; return { r: 0.8 * Math.max(b.max.x, -b.min.x, b.max.z, -b.min.z), k: [0.8, 0.5, 0.9][t] }; });
+const shadeDirty = new Set();
+// a chunk changed (loaded, a tree fell, the ground was dug): it and its neighbours bake again, since crowns overhang
+function markShade(ch) { for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) shadeDirty.add(ckey(ch.cx + dx, ch.cz + dz)); }
+// Horizons, on a 4 m grid over the chunk: in 8 directions, how high the ground rises within 10 m. A spot whose
+// horizon stands at angle a sees roughly (1 - sin a) of the sky that way; averaged, and kept gentle.
+function bakeHorizon(ch) {
+  const t = new Float32Array(81);
+  for (let gj = 0; gj <= 8; gj++) for (let gi = 0; gi <= 8; gi++) {
+    const x = ch.ox + gi * 4, z = ch.oz + gj * 4, h0 = heightAt(x, z) + 0.3;
+    let occ = 0;
+    for (let d = 0; d < 8; d++) {
+      const dx = Math.cos(d * Math.PI / 4), dz = Math.sin(d * Math.PI / 4);
+      let m = 0;
+      for (const s of [2, 5, 10]) m = Math.max(m, (heightAt(x + dx * s, z + dz * s) - h0) / s);
+      occ += m / Math.sqrt(1 + m * m);
+    }
+    t[gj * 9 + gi] = 1 - 0.8 * occ / 8;
+  }
+  return t;
+}
+function bakeShade(ch) {
+  if (!ch.skyT) ch.skyT = bakeHorizon(ch);
+  const dens = new Float32Array(CS * CS);
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    const nb = world.chunks.get(ckey(ch.cx + dx, ch.cz + dz));
+    if (!nb || !nb.trees) continue;
+    for (const tr of nb.trees) {
+      if (!tr.alive) continue;
+      const cr = CROWN[tr.type], r = cr.r * tr.scale, lx = tr.x - ch.ox, lz = tr.z - ch.oz, reach = r * 1.3;
+      if (lx < -reach || lz < -reach || lx > CS + reach || lz > CS + reach) continue;
+      for (let j = Math.max(0, Math.ceil(lz - reach)); j <= Math.min(CS - 1, Math.floor(lz + reach)); j++)
+        for (let i = Math.max(0, Math.ceil(lx - reach)); i <= Math.min(CS - 1, Math.floor(lx + reach)); i++) {
+          const d = Math.hypot(i - lx, j - lz);
+          if (d < reach) dens[j * CS + i] += cr.k * (1 - smoothstep(0.35 * r, reach, d));
+        }
+    }
+  }
+  const t = ch.skyT, x0 = ((ch.ox % SKY_MAP_SIZE) + SKY_MAP_SIZE) % SKY_MAP_SIZE, z0 = ((ch.oz % SKY_MAP_SIZE) + SKY_MAP_SIZE) % SKY_MAP_SIZE;
+  for (let j = 0; j < CS; j++) for (let i = 0; i < CS; i++) {
+    const gi = Math.min(7, i >> 2), gj = Math.min(7, j >> 2), fx = (i - gi * 4) / 4, fz = (j - gj * 4) / 4;
+    const hz = lerp(lerp(t[gj * 9 + gi], t[gj * 9 + gi + 1], fx), lerp(t[gj * 9 + gi + 9], t[gj * 9 + gi + 10], fx), fz);
+    const v = clamp(hz * Math.exp(-1.2 * dens[j * CS + i]), 0.22, 1);
+    skyMapData[(z0 + j) * SKY_MAP_SIZE + x0 + i] = Math.round(v * 255);
+  }
+}
+function clearShade(ch) {
+  const x0 = ((ch.ox % SKY_MAP_SIZE) + SKY_MAP_SIZE) % SKY_MAP_SIZE, z0 = ((ch.oz % SKY_MAP_SIZE) + SKY_MAP_SIZE) % SKY_MAP_SIZE;
+  for (let j = 0; j < CS; j++) skyMapData.fill(255, (z0 + j) * SKY_MAP_SIZE + x0, (z0 + j) * SKY_MAP_SIZE + x0 + CS);
+  skyMap.needsUpdate = true;
+}
+// once a frame: bake whatever changed, then upload the map (256 KB) once
+function processShade() {
+  if (!shadeDirty.size) return;
+  for (const k of shadeDirty) { const ch = world.chunks.get(k); if (ch && ch.trees) bakeShade(ch); }
+  shadeDirty.clear();
+  skyMap.needsUpdate = true;
 }
 
 const chunkStream = createChunkStream({
@@ -1666,7 +2473,7 @@ window.addEventListener('keydown', (e) => {
     if (e.code === 'Quote') stepSpeed(1);
     if (e.code === 'Backquote') setSpeed(simCtl.speed ? 0 : 1);
   }
-  if (e.code === 'KeyG') setQuality(quality.level === 'high' ? 'low' : 'high');
+  if (e.code === 'KeyG') cycleQuality();
   if (e.code === 'KeyH') { const h = document.getElementById('help'); h.hidden = !h.hidden; }
   if (e.altKey || ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'AltLeft', 'AltRight'].includes(e.code)) e.preventDefault();
 });
@@ -1779,164 +2586,11 @@ function updateAim() {
 }
 
 // ============================================================ water, motes, sky
-// ---- water: depth-tinted, foamy at the shore, waves shared between shader and game logic
-const WAVES = [[0.8, 0.6, 17, 0.11, 1.1], [-0.5, 0.86, 11, 0.07, 1.3], [0.95, -0.3, 7, 0.04, 1.6]];
-const RIPPLES = [[0.3, 0.95, 3.1, 0.018, 2.0], [-0.9, 0.4, 2.2, 0.012, 2.4], [0.6, -0.8, 1.4, 0.007, 2.9], [-0.2, -0.98, 0.9, 0.004, 3.3]];
-function waveHeight(x, z) {
-  let h = 0; const t = U.time.value;
-  for (const w of WAVES) h += w[3] * Math.sin((x * w[0] + z * w[1]) * (6.2832 / w[2]) + t * w[4]);
-  return SEA + h;
-}
-// Water depth around the player, baked from the terrain heights into a small texture.
-// This replaces a depth pre-pass: shore foam and depth colour cost one texture read.
-const DM = 256;
-const depthData = new Uint8Array(DM * DM);
-const depthTex = new THREE.DataTexture(depthData, DM, DM, THREE.RedFormat, THREE.UnsignedByteType);
-depthTex.magFilter = depthTex.minFilter = THREE.LinearFilter;
-const depthState = { ox: 1e9, oz: 1e9, dirty: true, wait: 0, origin: new THREE.Vector2() };
-function updateDepthMap(dt) {
-  depthState.wait -= dt;
-  const ox = Math.round(player.x / 16) * 16 - DM / 2, oz = Math.round(player.z / 16) * 16 - DM / 2;
-  if (ox !== depthState.ox || oz !== depthState.oz) depthState.dirty = true;
-  if (!depthState.dirty || depthState.wait > 0) return;
-  depthState.dirty = false; depthState.wait = 0.12; depthState.ox = ox; depthState.oz = oz;
-  depthData.fill(255);
-  for (const c of world.chunks.values()) {
-    const i0 = c.ox - ox, j0 = c.oz - oz;
-    if (i0 >= DM || j0 >= DM || i0 + CS <= 0 || j0 + CS <= 0) continue;
-    for (let lj = 0; lj < CS; lj++) {
-      const j = j0 + lj; if (j < 0 || j >= DM) continue;
-      for (let li = 0; li < CS; li++) {
-        const i = i0 + li; if (i < 0 || i >= DM) continue;
-        depthData[j * DM + i] = clamp(((SEA - c.h[(lj + 1) * P + li + 1]) + 1) / 9 * 255, 0, 255);
-      }
-    }
-  }
-  depthTex.needsUpdate = true;
-  depthState.origin.set(ox, oz);
-}
-// tileable water detail: RG = wavelet slope, B = ridged noise used for foam and caustics
-function makeWaterTex() {
-  const S = 256, data = new Uint8Array(S * S * 4), r = mulberry32(911);
-  const mk = (n, kmax, pw) => {
-    const w = [];
-    for (let i = 0; i < n; i++) {
-      let kx = 0, ky = 0;
-      while (kx === 0 && ky === 0) { kx = Math.round((r() * 2 - 1) * kmax); ky = Math.round((r() * 2 - 1) * kmax); }
-      w.push([kx, ky, r() * 6.2832, 1 / Math.pow(Math.hypot(kx, ky), pw)]);
-    }
-    return w;
-  };
-  const A = mk(22, 9, 1.1), Bw = mk(16, 7, 0.9);
-  const gx = new Float32Array(S * S), gy = new Float32Array(S * S), nn = new Float32Array(S * S);
-  let gmax = 0, sq = 0;
-  const tw = 6.2832 / S;
-  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-    let ax = 0, ay = 0, n = 0;
-    for (const w of A) { const c = w[3] * Math.cos((w[0] * x + w[1] * y) * tw + w[2]); ax += c * w[0]; ay += c * w[1]; }
-    for (const w of Bw) n += w[3] * Math.sin((w[0] * x + w[1] * y) * tw + w[2]);
-    const i = y * S + x; gx[i] = ax; gy[i] = ay; nn[i] = n;
-    gmax = Math.max(gmax, Math.abs(ax), Math.abs(ay)); sq += n * n;
-  }
-  const rms = Math.sqrt(sq / (S * S));
-  for (let i = 0; i < S * S; i++) {
-    data[i * 4] = clamp((gx[i] / gmax) * 127 + 128, 0, 255);
-    data[i * 4 + 1] = clamp((gy[i] / gmax) * 127 + 128, 0, 255);
-    data[i * 4 + 2] = clamp(1 - Math.abs(nn[i]) / (rms * 1.7), 0, 1) * 255;
-    data[i * 4 + 3] = 255;
-  }
-  const t = new THREE.DataTexture(data, S, S, THREE.RGBAFormat, THREE.UnsignedByteType);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true;
-  t.needsUpdate = true;
-  return t;
-}
-const glslWaves = (list, withHeight) => list.map((w) => {
-  const k = (6.2832 / w[2]).toFixed(4);
-  return `ph = dot(p, vec2(${w[0].toFixed(3)}, ${w[1].toFixed(3)})) * ${k} + uTime * ${w[4].toFixed(2)};` +
-    (withHeight ? ` h += ${w[3].toFixed(4)} * sin(ph);` : ` g += ${(w[3]).toFixed(4)} * ${k} * cos(ph) * vec2(${w[0].toFixed(3)}, ${w[1].toFixed(3)});`);
-}).join('\n');
-const waterUniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
-  uTime: { value: 0 }, uDepth: { value: null }, uTex: { value: null }, uDepthOrigin: { value: new THREE.Vector2() },
-  uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uSunCol: { value: new THREE.Color() }, uAmb: { value: new THREE.Color() },
-  uSky: { value: new THREE.Color() }, uZenith: { value: new THREE.Color() }, uShallow: { value: col(0x2fa79c) }, uDeep: { value: col(0x06283f) },
-}]);
-waterUniforms.uTime = U.time;
-waterUniforms.uDepth.value = depthTex;
-waterUniforms.uTex.value = makeWaterTex();
-waterUniforms.uDepthOrigin.value = depthState.origin;
-const water = (() => {
-  const g = new THREE.PlaneGeometry(288, 288, 180, 180); g.rotateX(-Math.PI / 2);
-  const mat = new THREE.ShaderMaterial({
-    uniforms: waterUniforms, fog: true, transparent: true, depthWrite: false,
-    vertexShader: `
-      uniform float uTime; uniform sampler2D uDepth; uniform vec2 uDepthOrigin;
-      varying vec3 vWorld;
-      #include <fog_pars_vertex>
-      void main() {
-        vec4 wp = modelMatrix * vec4(position, 1.0);
-        float depth = texture2D(uDepth, (wp.xz - uDepthOrigin + 0.5) / ${DM}.0).r * 9.0 - 1.0;
-        vec2 p = wp.xz; float h = 0.0; float ph;
-        ${glslWaves(WAVES, true)}
-        wp.y += h * (0.2 + 0.8 * smoothstep(0.0, 2.5, depth));
-        vWorld = wp.xyz;
-        vec4 mvPosition = viewMatrix * wp;
-        gl_Position = projectionMatrix * mvPosition;
-        #include <fog_vertex>
-      }`,
-    fragmentShader: `
-      uniform float uTime; uniform sampler2D uDepth; uniform sampler2D uTex; uniform vec2 uDepthOrigin;
-      uniform vec3 uSunDir, uSunCol, uAmb, uSky, uZenith, uShallow, uDeep;
-      varying vec3 vWorld;
-      #include <common>
-      #include <fog_pars_fragment>
-      void main() {
-        float depth = texture2D(uDepth, (vWorld.xz - uDepthOrigin + 0.5) / ${DM}.0).r * 9.0 - 1.0;
-        vec2 p = vWorld.xz; vec2 g = vec2(0.0); float ph;
-        ${glslWaves(WAVES, false)}
-        // three scrolling layers of wavelets, the classic layered-normal-map trick
-        vec2 d1 = texture2D(uTex, p * 0.035 + uTime * vec2(0.010, 0.006)).rg - 0.5;
-        vec2 d2 = texture2D(uTex, p * 0.083 + uTime * vec2(-0.017, 0.012)).rg - 0.5;
-        vec2 d3 = texture2D(uTex, p * 0.21 + uTime * vec2(0.025, -0.03)).rg - 0.5;
-        float calm = 0.45 + 0.55 * smoothstep(0.0, 2.0, depth);
-        g += (d1 * 0.6 + d2 * 0.42 + d3 * 0.24) * calm;
-        vec3 N = normalize(vec3(-g.x, 1.0, -g.y));
-        vec3 V = normalize(cameraPosition - vWorld);
-        vec3 R = reflect(-V, N); R.y = abs(R.y);
-        float fres = 0.07 + 0.93 * pow(1.0 - max(dot(N, V), 0.0), 4.0);
-        vec3 sky = mix(uSky, uZenith, pow(clamp(R.y, 0.0, 1.0), 0.7));
-        float sd = max(dot(R, uSunDir), 0.0);
-        vec3 sunR = uSunCol * (pow(sd, 900.0) * 60.0 + pow(sd, 60.0) * 0.9);
-        float absorb = 1.0 - exp(-max(depth, 0.0) * 0.8);
-        float ndl = max(dot(N, uSunDir), 0.0);
-        vec3 lightC = uSunCol * (0.35 + 0.65 * ndl) + uAmb;
-        vec3 body = mix(uShallow, uDeep, absorb) * lightC;
-        // caustics seen through the shallows
-        float ca = texture2D(uTex, p * 0.075 + uTime * vec2(0.02, 0.011) + g * 0.3).b * texture2D(uTex, p * 0.11 - uTime * vec2(0.014, 0.021)).b;
-        body += uSunCol * uShallow * pow(ca, 2.0) * 3.0 * (1.0 - absorb) * smoothstep(0.02, 0.5, depth);
-        vec3 color = mix(body, sky, fres) + sunR;
-        float alpha = max(mix(0.28, 0.985, absorb), fres);
-        // lacy shore foam that thickens toward the waterline, plus one drifting line further out
-        float fnz = texture2D(uTex, p * 0.14 + uTime * vec2(0.012, 0.02)).b * 0.6 + texture2D(uTex, p * 0.31 - uTime * vec2(0.02, 0.012)).b * 0.4;
-        float lap = 0.14 * sin(uTime * 0.8 + p.x * 0.09 + p.y * 0.06);
-        float shore = 1.0 - smoothstep(0.0, 0.6 + lap, depth);
-        float th = 1.0 - shore * 1.02;
-        float foam = smoothstep(th, th + 0.22, fnz) * smoothstep(0.0, 0.08, shore);
-        float d0 = 1.1 + 0.45 * sin(uTime * 0.45 + p.x * 0.05);
-        foam = max(foam, smoothstep(0.62, 0.9, fnz) * (1.0 - smoothstep(0.0, 0.4, abs(depth - d0))) * 0.65);
-        color = mix(color, lightC * 0.92, foam);
-        alpha = max(alpha, foam * 0.85) * smoothstep(-0.18, 0.03, depth);
-        gl_FragColor = vec4(color, clamp(alpha + dot(sunR, vec3(0.3)), 0.0, 1.0));
-        #include <tonemapping_fragment>
-        #include <colorspace_fragment>
-        #include <fog_fragment>
-      }`,
-  });
-  const m = new THREE.Mesh(g, mat);
-  m.position.y = SEA; m.frustumCulled = false;
-  scene.add(m);
-  return m;
-})();
+// ---- water: the sea plane and its depth map live in src/water/ (sea.js)
+const sea = createSea({ U, scene, world, player, CS, P, SEA, clamp, mulberry32 });
+const { waveHeight, depthState, updateDepthMap, uniforms: waterUniforms, mesh: water } = sea;
+// ---- streams and rivers: their own water and shader (src/water/rivers-render.js), one mesh per chunk they cross
+const riverWater = createRiverWater({ U, sea, CS, P, SEA });
 const MOTES = 140;
 const motes = (() => {
   const g = new THREE.BufferGeometry();
@@ -2115,21 +2769,232 @@ function applySave(raw) {
 }
 window.addEventListener('pagehide', saveGame);
 document.addEventListener('visibilitychange', () => { if (document.hidden) saveGame(); });
-function setQuality(q) {
-  quality.level = q;
-  const hi = q === 'high';
-  renderer.shadowMap.enabled = hi; sun.castShadow = hi;
-  if (hi && !composer) buildComposer();
+const SHADOW_TYPES = { pcf: THREE.PCFShadowMap, basic: THREE.BasicShadowMap };
+// Puts the current preset and render scale into effect. Safe to call at any time.
+function applyGfx() {
+  const G = gfx();
+  quality.level = G.composer ? 'high' : 'low';
+  // Shadows. three (r187) rebuilds the map and recompiles materials by itself when the type changes, and
+  // turning castShadow on or off recompiles too; only a new size needs the old map thrown away here.
+  const on = G.shadows !== 'off';
+  renderer.shadowMap.enabled = on; sun.castShadow = on;
+  if (on) renderer.shadowMap.type = SHADOW_TYPES[G.shadows];
+  sun.shadow.radius = G.shadowRadius;
+  if (sun.shadow.mapSize.x !== G.shadowSize) {
+    sun.shadow.mapSize.set(G.shadowSize, G.shadowSize);
+    if (sun.shadow.map) { sun.shadow.map.depthTexture?.dispose(); sun.shadow.map.dispose(); sun.shadow.map = null; }
+  }
+  // alpha-to-coverage only does anything with MSAA; without it, plain alpha testing is cheaper and keeps edges hard
+  const a2c = msaaSamples() > 0;
+  for (const m of [grassMat, treeMat]) if (m.alphaToCoverage !== a2c) { m.alphaToCoverage = a2c; m.needsUpdate = true; }
+  syncComposer();
+  // with AO on, the water writes depth, so AO sees the water's surface rather than the lake bed under it
   resize();
-  el('quality').textContent = hi ? 'High' : 'Low';
+  el('quality').textContent = G.label;
+  if (window.__gfxPanel) window.__gfxPanel.refresh();
 }
-el('quality').addEventListener('click', () => { setQuality(quality.level === 'high' ? 'low' : 'high'); canvas.focus(); });
+function saveGfx() {
+  try { localStorage.setItem(GFX_KEY, JSON.stringify({ preset: quality.preset, scale: quality.scale, target: quality.target })); } catch (e) { /* no storage */ }
+}
+// setQuality('ultra' | 'high' | 'medium' | 'low'). The old 'high' / 'low' calls still work.
+function setQuality(q, save) {
+  if (!GFX[q]) return;
+  quality.preset = q; applyGfx();
+  if (save) saveGfx();
+}
+function setRenderScale(n, save) {
+  if (!RENDER_SCALES.includes(n)) return;
+  quality.scale = n; applyGfx();
+  if (save) saveGfx();
+}
+const cycleQuality = () => setQuality(GFX_ORDER[(GFX_ORDER.indexOf(quality.preset) + 1) % GFX_ORDER.length], true);
+const cycleRenderScale = () => setRenderScale(RENDER_SCALES[(RENDER_SCALES.indexOf(quality.scale) + 1) % RENDER_SCALES.length], true);
+el('quality').title = 'Graphics quality: Ultra, High, Medium, Low (G)';
+el('quality').addEventListener('click', () => { cycleQuality(); canvas.focus(); });
+// ---------------------------------------------------------- Graphics panel
+// Every graphics setting and switch in one place, opened from the Graphics button in the top bar.
+function setLook(key, value) {
+  LOOK[key] = value; saveLook();
+  if (key === 'drawOrder') for (const c of world.chunks.values()) {
+    if (c.terrain) c.terrain.renderOrder = value ? 2 : 0;
+    for (const m of c.treeMeshes || []) if (m) m.renderOrder = value ? -1 : 0;
+    for (const m of [c.grassMesh, c.flowerMesh]) if (m) m.renderOrder = value ? 1 : 0;
+  }
+  if (key === 'tuftShadow') grassMat.needsUpdate = true;
+  if (key === 'ao') applyGfx();
+  if (key === 'lightBloom') resize();
+  if (key === 'compactHdr') syncComposer();
+  if (key === 'hudBlur') applyHudBlur();
+  if (key === 'grassShadows') for (const c of world.chunks.values()) for (const m of [c.grassMesh, c.flowerMesh]) if (m) m.receiveShadow = value;
+  if (key === 'rootShade') setGrassRootShade(value);
+  if (key === 'grassClumps' || key === 'grassBacklight') U.grassLook.value.set(LOOK.grassClumps ? 1 : 0, LOOK.grassBacklight ? 1 : 0, LOOK.grassSheen ? 1 : 0, LOOK.farBlend ? 1 : 0);
+  if (key === 'skyShade') U.skyK.value = value ? 1 : 0;
+  if (key === 'grassSheen' || key === 'farBlend') U.grassLook.value.set(LOOK.grassClumps ? 1 : 0, LOOK.grassBacklight ? 1 : 0, LOOK.grassSheen ? 1 : 0, LOOK.farBlend ? 1 : 0);
+  if (key === 'sunFog') { FOG_SUN[0] = FOG_SUN[1] = value ? 1 : 0; }
+  if (key === 'crownShade') for (const g of [...treeGeo, pineLiteGeo]) applyCrownShade(g, value);
+  if (key === 'camFx') resize();
+  if (key === 'edgeBelts' && window.__nature) for (const c of world.chunks.values()) { c.litterItems = null; window.__nature.refresh(c); }
+  if (key === 'taa') { applyGfx(); resize(); }      // MSAA off or back on, and the resolve path
+  if (key === 'toneMap') {
+    renderer.toneMapping = TONE_MAPS[value] || THREE.ACESFilmicToneMapping;   // the composer's output pass follows it by itself
+    if (!viaComposer()) scene.traverse((o) => { for (const m of o.material ? [].concat(o.material) : []) m.needsUpdate = true; });
+  }
+}
+// HUD blur (a switch): the panels' frosted glass. The browser redoes that blur behind every panel each frame, at full
+// screen resolution, outside the game's own GPU timing; off, the panels stay see-through without blurring.
+const hudBlurStyle = document.createElement('style');
+hudBlurStyle.textContent = '.panel, #status, #vitals, #tools { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }';
+function applyHudBlur() { if (LOOK.hudBlur) hudBlurStyle.remove(); else document.head.appendChild(hudBlurStyle); }
+applyHudBlur();
+const gfxPanel = (() => {
+  const css = document.createElement('style');
+  css.textContent = `
+#gfxsettings { top: 72px; right: 16px; width: 360px; max-height: calc(100% - 96px); overflow: auto; z-index: 30; font-size: 13px; }
+#gfxsettings[hidden] { display: none; }
+#gfxsettings .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+#gfxsettings h2 { font-size: 16px; margin: 0; }
+#gfxsettings .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 7px 0; }
+#gfxsettings .seg { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+#gfxsettings .seg button { padding: 3px 8px; }
+#gfxsettings button[aria-pressed="true"] { border-color: var(--accent); background: rgba(226, 182, 90, 0.18); color: var(--accent); }
+#gfxsettings .sec { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--panel-edge); color: var(--ink-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+#gfxsettings label.chk { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; margin: 7px 0; }
+#gfxsettings label.chk input { margin-top: 2px; }
+#gfxsettings label.chk.off { opacity: 0.45; }
+#gfxsettings .hint { display: block; color: var(--ink-dim); font-size: 11px; }
+#gfxsettings input[type=range] { width: 130px; }
+#gfxsettings pre { white-space: pre-wrap; font-size: 11px; line-height: 1.35; max-height: 240px; overflow: auto; background: rgba(0, 0, 0, 0.28); padding: 8px; border-radius: 6px; margin: 6px 0 0; }`;
+  document.head.appendChild(css);
+  const box = document.createElement('div');
+  box.id = 'gfxsettings'; box.className = 'panel'; box.hidden = true;
+  document.body.appendChild(box);
+  const q = el('quality');
+  const open = q.cloneNode(false);
+  open.id = 'gfxopen'; open.removeAttribute('aria-label'); open.title = 'Graphics settings and switches'; open.textContent = 'Graphics';
+  q.after(open);
+  open.addEventListener('click', () => { box.hidden = !box.hidden; if (!box.hidden) refresh(); canvas.focus(); });
+  let benchText = '';
+  // live numbers while the panel is open: fps, frame time, GPU time, JavaScript time, render resolution
+  const statsEl = document.createElement('div');
+  statsEl.className = 'hint'; statsEl.style.fontVariantNumeric = 'tabular-nums'; statsEl.style.marginBottom = '6px';
+  const stats = (st) => {
+    if (box.hidden) return;
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+    if (viaComposer()) size.multiplyScalar(renderScale());
+    statsEl.textContent = `${Math.round(st.fps)} fps · frame ${(1000 / st.fps).toFixed(1)} ms · GPU ${st.gpu > 0 ? st.gpu.toFixed(1) + ' ms' : 'n/a'}`
+      + ` · JS ${st.js.toFixed(1)} ms · ${Math.round(size.x)}×${Math.round(size.y)} (${Math.round(renderScale() * 100)}%)`;
+  };
+  const h = (tag, props, ...kids) => { const e = document.createElement(tag); Object.assign(e, props || {}); for (const k of kids) e.append(k); return e; };
+  const seg = (label, opts, current, pick) => h('div', { className: 'row' }, h('span', { textContent: label }),
+    h('div', { className: 'seg' }, ...opts.map(([v, text]) => { const b = h('button', { type: 'button', textContent: text }); b.setAttribute('aria-pressed', String(v === current)); b.addEventListener('click', () => { pick(v); refresh(); canvas.focus(); }); return b; })));
+  const chk = (key, label, hint, enabled = true) => {
+    const i = h('input', { type: 'checkbox', checked: !!LOOK[key], disabled: !enabled });
+    i.addEventListener('change', () => { setLook(key, i.checked); refresh(); canvas.focus(); });
+    return h('label', { className: 'chk' + (enabled ? '' : ' off') }, i, h('span', {}, label, h('span', { className: 'hint', textContent: hint })));
+  };
+  function refresh() {
+    if (box.hidden) return;
+    // sit just below the top bar, which wraps to two rows in narrow windows
+    const bar = el('status').getBoundingClientRect();
+    box.style.top = Math.round(bar.bottom + 8) + 'px';
+    box.style.maxHeight = 'calc(100% - ' + Math.round(bar.bottom + 24) + 'px)';
+    const fx = window.__game && window.__game.fx, fxOn = window.__fxInfo ? __fxInfo().pass : false;
+    const fxMode = !fx ? null : !fxOn ? 'off' : fx.cfg.relight ? 'full' : 'no relight';
+    const close = h('button', { type: 'button', textContent: 'Close' });
+    close.addEventListener('click', () => { box.hidden = true; canvas.focus(); });
+    const up = h('select', {}, ...[['bicubic', 'Bicubic + sharpen'], ['sharp', 'Sharp pixels'], ['fsr', 'FSR 1']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.upscaler === v })));
+    up.addEventListener('change', () => { setLook('upscaler', up.value); canvas.focus(); });
+    const tm = h('select', {}, ...[['aces', 'ACES (original)'], ['agxlook', 'AgX look'], ['agx', 'AgX'], ['neutral', 'Neutral']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.toneMap === v })));
+    tm.addEventListener('change', () => { setLook('toneMap', tm.value); canvas.focus(); });
+    const rs = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: LOOK.rootShade });
+    const rsVal = h('span', { textContent: LOOK.rootShade.toFixed(2) });
+    rs.addEventListener('input', () => { setLook('rootShade', +rs.value); rsVal.textContent = (+rs.value).toFixed(2); });
+    rs.addEventListener('change', () => canvas.focus());
+    const fs = h('button', { type: 'button', textContent: document.fullscreenElement ? 'Exit full screen' : 'Full screen' });
+    fs.addEventListener('click', () => el('fullscreen').click());
+    const run = h('button', { type: 'button', textContent: 'Run benchmark' });
+    run.addEventListener('click', async () => {
+      box.hidden = true; canvas.focus();                      // the panel itself costs a little to draw: keep it out of the numbers
+      const r = await perf.bench();
+      benchText = r ? r.text : benchText;
+      box.hidden = false; refresh();
+    });
+    const copy = h('button', { type: 'button', textContent: 'Copy' });
+    copy.addEventListener('click', async () => { try { await navigator.clipboard.writeText(benchText); copy.textContent = 'Copied'; } catch (e) { copy.textContent = 'Select and copy by hand'; } });
+    box.replaceChildren(
+      h('div', { className: 'head' }, h('h2', { textContent: 'Graphics' }), close),
+      statsEl,
+      seg('Quality', GFX_ORDER.map((k) => [k, GFX[k].label]), quality.preset, (k) => setQuality(k, true)),
+      seg('Resolution', RENDER_SCALES.map((v) => [v, v === 'auto' ? 'Auto' : Math.round(v * 100) + '%']), quality.scale, (v) => setRenderScale(v, true)),
+      quality.scale === 'auto' ? seg('Target fps', FPS_TARGETS.map((v) => [v, String(v)]), quality.target, (v) => { quality.target = v; saveGfx(); }) : '',
+      h('div', { className: 'hint', textContent: quality.level !== 'high' ? 'Low draws straight to the screen: lower resolution there is a plain stretch.'
+        : (quality.scale === 'auto' ? 'Auto: rendering at ' + Math.round(renderScale() * 100) + '% to hold ' + quality.target + ' fps. ' : '')
+          + 'Below 100%, the 3D view is enlarged with a sharpening upscaler; the HUD stays sharp.' }),
+      fxMode ? seg('Lighting', [['full', 'Full'], ['no relight', 'No relight'], ['off', 'Off']], fxMode, (m) => { fx.setLighting(m); try { localStorage.setItem('fx-lighting', m); } catch (e) {} }) : '',
+      h('div', { className: 'row' }, h('span', { textContent: 'Screen' }), fs),
+      h('div', { className: 'sec', textContent: 'Grass and trees' }),
+      chk('drawOrder', 'Draw trees, then grass, then ground', 'Skips pixels that end up covered. Looks the same, runs faster.'),
+      seg('Far grass', [['off', 'Full'], ['normal', 'Simplified'], ['aggressive', 'Aggressive']], LOOK.farGrass, (v) => setLook('farGrass', v)),
+      h('div', { className: 'hint', textContent: 'Simplified: tufts past about 30 m use fewer cards. Aggressive: fewer cards from 12 m, thinning to a quarter by 46 m, no grass past 56 m; the ground colour shows through. Mostly matters zoomed out.' }),
+      chk('tuftShadow', 'One shadow per grass tuft', 'Cheaper than per pixel; shadow edges fall tuft by tuft.'),
+      chk('grassShadows', 'Shadows on grass', 'Tree and building shadows fall on the grass.'),
+      h('div', { className: 'sec', textContent: 'Speed' }),
+      chk('hudBlur', 'Frosted glass behind HUD panels', 'The browser re-blurs the scene behind every panel each frame, at full resolution. Off: panels stay see-through without the blur.'),
+      compactHdrOK ? chk('compactHdr', 'Compact HDR buffers', 'Scene buffers at 32 bits a sample instead of 64: about half the memory traffic with 4x MSAA. Rarely, slight banding in smooth dark gradients.') : '',
+      chk('lightBloom', 'Lighter bloom', 'Starts the glow from a quarter-resolution image instead of half. Looks nearly the same.'),
+      h('div', { className: 'sec', textContent: 'Look' }),
+      (() => {
+        // streams change the terrain itself, so switching them saves and reloads the world
+        const i = h('input', { type: 'checkbox', checked: RIVERS_ON });
+        i.addEventListener('change', () => { try { localStorage.setItem('rivers', i.checked ? '1' : '0'); } catch (e) { /* no storage */ } saveGame(); location.reload(); });
+        return h('label', { className: 'chk' }, i, h('span', {}, 'Streams and rivers (in development)', h('span', { className: 'hint', textContent: 'Streams carved into the land, with water of their own. Changes the terrain, so the world saves and reloads.' })));
+      })(),
+      chk('grassClumps', 'Grass in clumps', 'Patches with their own height, lean and colour, in drifts of green and dry grass.'),
+      chk('grassBacklight', 'Sun through grass', 'Looking toward the sun, the blades glow, brightest at the tips.'),
+      chk('grassSheen', 'Grass sheen', 'Blades that face the sun catch a faint green-gold glint, moving with the wind, not the camera.'),
+      chk('farBlend', 'Far grass blends into the ground', 'Distant grass takes the colour of the ground under it, so thinning does not show.'),
+      chk('edgeBelts', 'Forest edges and shores', 'A belt of scrub, brambles and saplings where forest meets meadow, and long grass along the water. Looks only; trees are where they were.'),
+      chk('crownShade', 'Tree crowns: lit shell, dark core', 'Leaves inside and under a crown are darker than the outer ones.'),
+      chk('sunFog', 'Fog warms toward the sun', 'The fog takes the sun\'s colour where you look toward it and thins with height, so hills stay clear.'),
+      chk('camFx', 'Camera: film grain and lens fringing', 'Fine grain, stronger in shadows, and a little colour fringing toward the corners.'),
+      chk('taa', 'Temporal upscaling (TAAU), experimental', 'Blends frames from a jittered camera in place of MSAA. Smooths edges and shimmer, but softens the pixel textures. Off: MSAA as before.'),
+      chk('skyShade', 'Shade under trees and in hollows', 'Ground and grass beneath tree crowns and down in dips see less sky, so forest floors darken. Baked, no frame cost.'),
+      chk('ao', 'Extra ambient occlusion', 'A second, stronger occlusion on top of the Lighting pass (Ultra full, High and Medium half resolution).'),
+      h('div', { className: 'row' }, h('span', {}, 'Upscaler', h('span', { className: 'hint', textContent: 'How a below-full-size render is enlarged. Sharp pixels keeps each pixel a crisp block. FSR 1 is made for photoreal images and smears pixel textures.' })), up),
+      h('div', { className: 'row' }, h('span', {}, 'Tone mapping', h('span', { className: 'hint', textContent: 'How bright light is fitted to the screen. AgX rolls bright colours to white without ACES\'s hue shift; Neutral keeps colours as painted.' })), tm),
+      h('div', { className: 'row' }, h('span', {}, 'Grass root shade', h('span', { className: 'hint', textContent: '1 is the original; lower lifts the roots, tips unchanged.' })), h('span', {}, rs, ' ', rsVal)),
+      h('div', { className: 'sec', textContent: 'Benchmark' }),
+      h('div', { className: 'row' }, h('span', { className: 'hint', textContent: 'About 20 s. Stand somewhere typical and leave the controls alone.' }), run),
+      benchText ? h('div', {}, h('pre', { textContent: benchText }), copy) : '',
+    );
+  }
+  window.__gfxPanel = { refresh, stats, get open() { return !box.hidden; }, show: () => { box.hidden = false; refresh(); } };
+  return window.__gfxPanel;
+})();
+// Full screen. Browsers allow it only from a click; inside an embedded viewer it may be refused, and the button says so.
+(() => {
+  const q = el('quality');
+  const b = q.cloneNode(false);
+  b.id = 'fullscreen'; b.removeAttribute('aria-label'); b.title = 'Full screen (Esc leaves it)';
+  q.after(b);
+  const label = () => { b.textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen'; };
+  b.addEventListener('click', async () => {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+    } catch (e) { b.textContent = 'Full screen not allowed here'; setTimeout(label, 2500); }
+    canvas.focus();
+  });
+  document.addEventListener('fullscreenchange', () => { label(); resize(); });
+  label();
+})();
 el('newworld').addEventListener('click', () => { saveGame(); resetWorld((Math.random() * 1e6) | 0); canvas.focus(); });
 el('helpbtn').addEventListener('click', () => { el('help').hidden = true; canvas.focus(); });
 
 function resetWorld(seed) {
   SEED = seed >>> 0;
   noise = makeSimplex(SEED);
+  rivers = makeRivers();
   sim = createGameSim(SEED); simCtl.builds = null; simCtl.siteV = -1;
   clearEnemies();
   if (window.__game?.cooking?.active) window.__game.cooking.close();
@@ -2857,6 +3722,7 @@ function updateCamera(dt) {
   scene.fog.near = lerp(cam.dist + 16, 28, k); scene.fog.far = lerp(cam.dist + 96, 122, k);
   // screen position of the player, for the see-through fade on trees
   const size = renderer.getDrawingBufferSize(_v2);
+  if (viaComposer()) size.multiplyScalar(renderScale());     // the scene is drawn at render resolution
   _proj.set(player.x, player.y + 0.9, player.z).project(camera);
   U.playerPx.value.set((_proj.x * 0.5 + 0.5) * size.x, (_proj.y * 0.5 + 0.5) * size.y);
   _proj.set(player.x, player.y + 0.9, player.z).applyMatrix4(camera.matrixWorldInverse);
@@ -2926,25 +3792,216 @@ function step(dt) {
   updateSky();
   if (window.__build) window.__build.update(dt);
   for (let i = 0; i < stepHooks.length; i++) stepHooks[i](dt);    // add-ons that must move with the world (construction)
-  // grass only near the player
-  const gr = quality.level === 'high' ? 84 : 52;
+  // grass only near the player, thinning toward the edge of its reach (the thinning itself happens in the shader)
+  const G = gfx();
+  // far grass: Simplified uses the preset's distances; Aggressive drops cards from 12 m, thins to a quarter of the
+  // tufts between 18 and 46 m (each tuft at its own distance, so there is no line) and stops grass at 56 m
+  const fg = LOOK.farGrass, aggr = fg === 'aggressive';
+  const thin = aggr ? [18, 46, 0.25] : G.thin, cards = fg === 'off' ? null : aggr ? [12, 22] : G.cards;
+  const reach = aggr ? Math.min(G.grassR, 56) : G.grassR;
+  U.grassLod.value.set(player.x, player.z, thin ? thin[0] : 1e5, thin ? thin[1] : 2e5);
+  U.grassMin.value = thin ? thin[2] : 1;
+  if (cards) U.grassCards.value.set(cards[0], cards[1]); else U.grassCards.value.set(1e5, 2e5);
   for (const c of world.chunks.values()) {
-    const near = Math.hypot(c.ox + CS / 2 - player.x, c.oz + CS / 2 - player.z) < gr;
-    if (c.grassMesh) { c.grassMesh.visible = near; c.grassMesh.count = quality.level === 'high' ? c.grass.length : Math.ceil(c.grass.length * 0.45); }
+    const near = Math.hypot(c.ox + CS / 2 - player.x, c.oz + CS / 2 - player.z) < reach;
+    if (c.grassMesh) { c.grassMesh.visible = near; c.grassMesh.count = Math.ceil(c.grass.length * G.grassCount); }
     if (c.flowerMesh) c.flowerMesh.visible = near;
     if (c.litter) c.litter.visible = near;
   }
 }
-function render() {
-  if (quality.level === 'high' && composer) composer.render();
-  else renderer.render(scene, camera);
+// Auto resolution: once a second, compare the GPU's frame time (or, without a GPU timer, the frame interval) with
+// the budget for the target frame rate, and move the render scale toward what fits: down quickly when over budget
+// (time goes roughly with pixel count, the square of the scale), back up in small steps when there is room.
+const autoRes = { t: 0, changed: 0 };
+function autoResolution(now) {
+  const on = quality.scale === 'auto' && viaComposer() && !perf.busy;
+  perf.setLive((on || (window.__gfxPanel && window.__gfxPanel.open)) && !perf.busy);
+  if (!on || now - autoRes.t < 1000) return;
+  autoRes.t = now;
+  const m = perf.liveStats(), ms = perf.available ? m.gpu : m.cpu;
+  if (!(ms > 0)) return;
+  const budget = 1000 / quality.target * (perf.available ? 0.9 : 1);
+  let k = quality.autoScale;
+  if (ms > budget * 1.03) k = Math.max(0.6, k * Math.max(0.85, Math.sqrt(budget / ms)));
+  else if (now - autoRes.changed > 3000 && (perf.available ? ms < budget * 0.78 : ms <= budget * 1.01)) k = Math.min(1, k + 0.04);
+  k = Math.round(k * 50) / 50;
+  if (Math.abs(k - quality.autoScale) >= 0.02 && now - autoRes.changed > 1500) {
+    quality.autoScale = k; autoRes.changed = now; resize(); perf.resetLive();
+    if (window.__gfxPanel) window.__gfxPanel.refresh();
+  }
 }
+function render() {
+  processShade();
+  if (viaComposer()) {
+    const useTaa = LOOK.taa;
+    if (useTaa) taa.begin(composer.renderTarget1.width, composer.renderTarget1.height);
+    composer.renderToScreen = !upscaler.on;            // when upscaling, the composer finishes into its own buffer
+    composer.render();
+    if (useTaa) { taa.end(); taa.resolve(composer.readBuffer); } else if (upscaler.on) upscaler.draw(composer.readBuffer);
+  } else renderer.render(scene, camera);
+}
+
+// ============================================================ GPU timing and benchmark
+// Run __game.bench() in the console. For about ten seconds it times how long the GPU spends on each frame
+// (vsync doesn't hide it, unlike fps), first with everything on and then with each system switched off in turn,
+// and prints what each one costs. Stand somewhere typical, a meadow with trees in view, and leave the controls
+// alone while it runs. With EXT_disjoint_timer_query_webgl2 (Chrome and Edge on desktop) it reads the GPU's own
+// timer. Without it (Safari, Firefox) frame intervals are all it can see, and vsync pins those to the refresh rate,
+// so it draws each frame several times over until a frame no longer fits in one refresh and divides by the count.
+// That number is the CPU and GPU cost of drawing a frame together, whichever is the slower.
+// At 144 fps the whole frame has to fit in 6.9 ms.
+const perf = (() => {
+  const gl = renderer.getContext();
+  const ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+  const pending = [], gpu = [], cpu = [];
+  let collecting = false, lastT = 0, calls = 0, tris = 0, repeat = 1, live = false, liveT = 0;
+  const liveGpu = [], liveCpu = [];
+  function timed(fn) {
+    if (!collecting && live) {                          // Auto resolution: time every frame, cheaply
+      const now = performance.now();
+      if (liveT) { liveCpu.push(now - liveT); if (liveCpu.length > 240) liveCpu.shift(); }
+      liveT = now;
+      let q = null;
+      if (ext) { q = gl.createQuery(); gl.beginQuery(ext.TIME_ELAPSED_EXT, q); }
+      fn();
+      if (q) { gl.endQuery(ext.TIME_ELAPSED_EXT); pending.push(q); }
+      return;
+    }
+    if (!collecting) { fn(); return; }
+    const now = performance.now();
+    if (lastT) cpu.push(now - lastT);
+    lastT = now;
+    renderer.info.autoReset = false; renderer.info.reset();
+    let q = null;
+    if (ext) { q = gl.createQuery(); gl.beginQuery(ext.TIME_ELAPSED_EXT, q); }
+    fn();
+    calls = renderer.info.render.calls; tris = renderer.info.render.triangles;
+    for (let i = 1; i < repeat; i++) fn();              // no GPU timer: draw the frame again to get past vsync
+    if (q) { gl.endQuery(ext.TIME_ELAPSED_EXT); pending.push(q); }
+    renderer.info.autoReset = true;
+  }
+  function poll() {
+    if (!ext || !pending.length) return;
+    const disjoint = gl.getParameter(ext.GPU_DISJOINT_EXT);
+    while (pending.length && gl.getQueryParameter(pending[0], gl.QUERY_RESULT_AVAILABLE)) {
+      const q = pending.shift();
+      if (!disjoint) {
+        const ms = gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6;
+        if (collecting) gpu.push(ms); else { liveGpu.push(ms); if (liveGpu.length > 240) liveGpu.shift(); }
+      }
+      gl.deleteQuery(q);
+    }
+  }
+  const frames = (n) => new Promise((done) => { let k = 0; const f = () => (++k >= n ? done() : requestAnimationFrame(f)); requestAnimationFrame(f); });
+  const median = (a) => { if (!a.length) return NaN; const b = [...a].sort((x, y) => x - y); return b[b.length >> 1]; };
+  async function measure(warm = 45, n = ext ? 150 : 60) {
+    collecting = true; lastT = 0;
+    await frames(warm);                                 // let shaders compile and the GPU settle
+    gpu.length = cpu.length = 0;
+    await frames(n);
+    collecting = false;
+    await frames(8); poll();                           // collect the last query results
+    return { gpu: median(gpu), cpu: median(cpu), calls, tris };
+  }
+  // No GPU timer: find how many draws per frame it takes for the frame time to clearly pass the refresh interval.
+  async function calibrate() {
+    repeat = 1;
+    const refresh = (await measure(30, 60)).cpu;
+    for (repeat = 2; repeat <= 32; repeat *= 2) {
+      setMsg(`Benchmarking: calibrating (${repeat} draws per frame). Hands off.`);
+      if ((await measure(15, 40)).cpu > refresh * 1.8) return { refresh, ok: true };
+    }
+    repeat = 32;
+    return { refresh, ok: false };
+  }
+  const hide = (m) => { const was = m.visible; m.visible = false; return () => { m.visible = was; }; };
+  const TESTS = [
+    ['everything on', () => () => {}],
+    ['grass + flowers off', () => hide(grassMat)],
+    ['trees + logs off', () => hide(treeMat)],         // also takes them out of the shadow map
+    ['terrain off', () => hide(terrainMat)],
+    ['water off', () => { water.visible = false; return () => { water.visible = true; }; }],
+    ['shadow-map pass off', () => { renderer.shadowMap.autoUpdate = false; return () => { renderer.shadowMap.autoUpdate = true; }; }],
+    ['bloom off', () => { if (!bloom || quality.level !== 'high') return null; const was = bloom.enabled; bloom.enabled = false; return () => { bloom.enabled = was; }; }],
+    ['extra AO off', () => { if (!ao) return null; ao.enabled = false; return () => { ao.enabled = true; }; }],
+    ['compact HDR buffers on', () => { if (LOOK.compactHdr || !compactHdrOK || quality.level !== 'high') return null; setLook('compactHdr', true); return () => setLook('compactHdr', false); }],
+    ['draw order off', () => { if (!LOOK.drawOrder) return null; setLook('drawOrder', false); return () => setLook('drawOrder', true); }],
+    ['grass clumps, backlight, sheen, far blend off', () => { const v = U.grassLook.value, was = v.clone(); if (!v.x && !v.y && !v.z && !v.w) return null; v.set(0, 0, 0, 0); return () => v.copy(was); }],
+    ['TAAU on (MSAA off)', () => { if (LOOK.taa || quality.level !== 'high') return null; setLook('taa', true); return () => setLook('taa', false); }],
+    ['FSR 1 upscaler', () => { const was = LOOK.upscaler; if (was === 'fsr' || !upscaler.on || renderScale() > 0.999) return null; LOOK.upscaler = 'fsr'; return () => { LOOK.upscaler = was; }; }],
+    ['far grass at full detail', () => { const was = LOOK.farGrass; if (was === 'off') return null; setLook('farGrass', 'off'); return () => setLook('farGrass', was); }],
+    // your fx pass (src/fxpost.js): the whole pass, then its heavier parts one at a time
+    ...(() => {
+      const fx = () => window.__game && window.__game.fx, on = () => !!(fx() && window.__fxInfo && __fxInfo().pass && quality.level === 'high');
+      const cfgOff = (key) => () => { if (!on()) return null; const c = fx().cfg, was = c[key]; c[key] = 0; return () => { c[key] = was; }; };
+      return [
+        ['fx pass off', () => {
+          if (!on()) return null;
+          const relight = fx().cfg.relight;
+          fx().setLighting('off');
+          return () => fx().setLighting(relight ? 'full' : 'no relight');
+        }],
+        ['fx AO + bounce off', cfgOff('ao')],
+        ['fx depth of field off', cfgOff('dof')],
+        ['fx sun shafts off', cfgOff('shafts')],
+      ];
+    })(),
+    ['MSAA off', () => {
+      if (quality.level !== 'high' || !msaaSamples()) return null;
+      quality.msaaOverride = 0; syncComposer();
+      return () => { quality.msaaOverride = null; syncComposer(); };
+    }],
+  ];
+  let running = false;
+  async function bench() {
+    if (running) return null;
+    running = true;
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+    const head = `${gl.getParameter(gl.RENDERER)} | ${size.x}x${size.y} | ${gfx().label}, MSAA ${msaaSamples()}x, ` +
+      `shadows ${gfx().shadows} ${gfx().shadowSize}, resolution ${quality.scale === 'auto' ? 'auto, now ' : ''}${Math.round(renderScale() * 100)}%`;
+    const rows = [];
+    let base = null, method = 'GPU timer';
+    try {
+      if (!ext) {
+        const c = await calibrate();
+        method = `no GPU timer in this browser: frame drawn ${repeat}x and timed (CPU+GPU), refresh interval ${c.refresh.toFixed(2)} ms` +
+          (c.ok ? '' : '. WARNING: could not get past vsync even at 32x, so these numbers are not reliable');
+      }
+      for (let i = 0; i < TESTS.length; i++) {
+        const [name, setup] = TESTS[i];
+        setMsg(`Benchmarking ${i + 1}/${TESTS.length}: ${name}. Hands off for a few seconds.`);
+        const undo = setup();
+        if (!undo) continue;                             // not running in this preset
+        let r;
+        try { r = await measure(); } finally { undo(); }
+        const ms = ext ? r.gpu : r.cpu / repeat;
+        if (!base) base = ms;
+        rows.push({ test: name, 'frame ms': +ms.toFixed(2), 'saves ms': i ? +(base - ms).toFixed(2) : '', 'draw calls': r.calls, triangles: r.tris });
+      }
+    } finally { setMsg(''); running = false; repeat = 1; }
+    console.log('%cBenchmark ' + head + '\n' + method, 'font-weight:bold');
+    console.table(rows);
+    const text = head + '\n' + method + '\n' + rows.map((r) => `${r.test}: ${r['frame ms']} ms` + (r['saves ms'] !== '' ? ` (saves ${r['saves ms']})` : '') + `, ${r['draw calls']} calls, ${r.triangles} tris`).join('\n');
+    console.log(text);                                  // plain text, easy to copy and paste
+    return { head, method, rows, text };
+  }
+  return {
+    timed, poll, bench, get available() { return !!ext; }, get busy() { return running; },
+    setLive(on) { if (on !== live) { live = on; liveT = 0; liveGpu.length = liveCpu.length = 0; } },
+    liveStats() { return { gpu: median(liveGpu.slice(-120)), cpu: median(liveCpu.slice(-120)) }; },
+    resetLive() { liveGpu.length = liveCpu.length = 0; liveT = 0; },
+    js: [],                                              // main-thread milliseconds per frame (update + draw calls)
+  };
+})();
 function frame(now) {
   const raw = (now - last) / 1000; last = now;
   let dt = clamp(raw, 0, 0.05);     // the first frame's timestamp can precede start-up, so never step backwards
   if (juice.hitStop > 0) { juice.hitStop -= raw; dt *= 0.06; }   // a few frames of freeze when a hit lands
+  const t0 = performance.now();
   step(dt);
-  render();
+  perf.timed(render);
+  perf.js.push(performance.now() - t0); if (perf.js.length > 120) perf.js.shift();
+  perf.poll();
   updateHud();
   fpsAcc += raw; fpsN++;
   if (fpsAcc >= 0.5) {
@@ -2952,8 +4009,18 @@ function frame(now) {
     el('fps').textContent = String(Math.round(fps));
     el('clock').textContent = clock();
     el('day').textContent = String(sim.day());
+    // a machine that can't keep up steps down one preset at a time (not saved, so the player's choice comes back
+    // next visit). The pause after each step lets the shaders recompile without counting as slowness.
+    autoResolution(now);
+    if (window.__gfxPanel && window.__gfxPanel.open) {
+      const js = [...perf.js].sort((a, b) => a - b)[perf.js.length >> 1] || 0;
+      window.__gfxPanel.stats({ fps, gpu: perf.liveStats().gpu, js });
+    }
     slowFor = fps < 27 ? slowFor + 0.5 : 0;
-    if (slowFor >= 3 && quality.level === 'high' && !autoDropped) { autoDropped = true; setQuality('low'); }
+    if (slowFor >= 3 && quality.preset !== 'low' && !autoDropped) {
+      setQuality(GFX_ORDER[GFX_ORDER.indexOf(quality.preset) + 1]);
+      slowFor = -4;
+    }
     hudDirty = true;
   }
   if (hudDirty) {
@@ -2970,8 +4037,7 @@ window.addEventListener('error', (e) => {
   const b = el('err'); b.textContent = 'Something went wrong: ' + e.message; b.hidden = false;
 });
 resize();
-buildComposer();
-resize();
+applyGfx();
 resetWorld(SEED);
 setTool('axe');
 lockUi();
@@ -2986,8 +4052,27 @@ window.__game = {
   },
   saveGame, saveData, setSpeed, get speed() { return simCtl.speed; },
   enemies, spawnEnemy, arrows, fireArrow, MOVES, startMove, juice, updateHud, waveHeight, depthState, lockQuality: () => { autoDropped = true; }, world, player, cam, keys, mouse, cursor, step, render, heightAt, fellTree, applyBrush, setQuality, renderer, THREE,
-  camera, scene, setTool, fade: addWind, fadeR: U.fadeR, burst, editGet: getDelta, editSet: setDelta, baseHeight, chunkSize: CS, treeKinds: TREE, refreshLock: lockUi, forestAt,
-  light: SKY, noise: fbm, palette: PAL, quality: () => quality.level, composer: () => composer, treeGeo, pineLite: pineLiteGeo, markStockDirty: () => { hudDirty = true; },
+  taa, lookFlags: LOOK, get rivers() { return rivers; }, riverWater, camera, scene, setTool, fade: addWind, fadeR: U.fadeR, burst, editGet: getDelta, editSet: setDelta, baseHeight, chunkSize: CS, treeKinds: TREE, refreshLock: lockUi, forestAt,
+  light: SKY, noise: fbm, palette: PAL, quality: () => quality.level, composer: () => composer,
+  graphics: { presets: GFX, get preset() { return quality.preset; }, get scale() { return quality.scale; }, get renderScale() { return renderScale(); }, setRenderScale }, bench: perf.bench,
+  // Look switches from the console: __game.look.grassRootShade(0..1), __game.look.toggle('ao' | 'grassShadows' | 'tuftShadow' | 'drawOrder'),
+  // __game.look.farGrass('off' | 'normal' | 'aggressive').
+  look: {
+    get ao() { return ao; },
+    // bake the whole sky-visibility map again now; returns how long it took (ms)
+    rebakeShade: () => { const t0 = performance.now(); for (const c of world.chunks.values()) { c.skyT = null; markShade(c); } processShade(); return +(performance.now() - t0).toFixed(1); },
+    upscaler: (v) => { if (['bicubic', 'sharp', 'fsr'].includes(v)) setLook('upscaler', v); return LOOK.upscaler; },
+    toneMap: (v) => { if (['aces', 'agxlook', 'agx', 'neutral'].includes(v)) setLook('toneMap', v); return LOOK.toneMap; },
+    farGrass: (v) => { if (['off', 'normal', 'aggressive'].includes(v)) setLook('farGrass', v); return LOOK.farGrass; },
+    grassRootShade: (k) => { setLook('rootShade', Math.min(1, Math.max(0, +k || 0))); return LOOK.rootShade; },                // 1 = the original roots, lower lifts the roots only (tips unchanged)
+    toggle(what) {
+      if (what === 'tuftShadow') { setLook('tuftShadow', !LOOK.tuftShadow); return LOOK.tuftShadow; }
+      if (what === 'grassShadows') { setLook('grassShadows', !LOOK.grassShadows); return LOOK.grassShadows; }
+      if (what === 'ao' || what === 'drawOrder' || what === 'grassClumps' || what === 'grassBacklight' || what === 'skyShade' || ['sunFog', 'grassSheen', 'farBlend', 'crownShade', 'camFx', 'taa', 'edgeBelts'].includes(what)) { setLook(what, !LOOK[what]); return LOOK[what]; }
+      return null;
+    },
+  },
+  treeGeo, pineLite: pineLiteGeo, markStockDirty: () => { hudDirty = true; },
   garden: gardenRead,
   handPose: null, sea: SEA,
   // the sky as reflections see it (world sun direction and colour, horizon and zenith), kept up to date each frame
