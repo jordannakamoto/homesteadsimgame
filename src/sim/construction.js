@@ -29,7 +29,7 @@ export function initConstruction() {
     progress: {},
     unlocked: [...C.UNLOCKS[0].opens],
     tutorial: { card: false, shed: null, seen: {}, done: false },
-    options: { sandbox: false, instant: false, cards: true, auto: false, mute: false },
+    options: { sandbox: false, instant: false, cards: true, auto: false, mute: true },   // sound is off until it has been tuned
     finished: 0,
   };
 }

@@ -241,11 +241,68 @@ Water, electricity and room heat are merged and tested headlessly. They become p
 - Is the Home panel enough to understand what your power and water are doing, or do you want to see it in the world?
 - Is wiring by dragging between ports clear?
 
+## F2: gardening with your hands (branch `iter/f2-garden-hands`)
+
+**What changed**
+
+- The nine-button palette and working the ground from above are gone. Key 5 puts you in gardening stance with a hotbar of things to hold (Hands, Hoe, Can, seed packets, Straw, Compost, Seed box); the mouse aims within arm's reach of the character.
+- No Bed tool and no hold-to-dig: you till by pulling the hoe through the grass. Each stroke turns a strip; a second pass makes fine, furrowed soil. Worked ground that touches becomes one bed.
+- The can is lifted by holding and poured by dragging down to tip it. It is filled at the pump, a tap or tank, or by dipping in a pond.
+- Seed is dropped by clicking or by dragging along the row; root crops are pulled upward, leaves cut with a swipe, fruit clicked. The first of each crop is held up overhead.
+- A name tag by the marker says what a plant is and the one thing it needs. F opens the full card, N the almanac. The first-salad cards are rewritten for the gestures.
+- Old saves: existing beds and plants load as fully worked soil and look as before.
+
+**Try this**
+
+1. Press 5. With the hoe, press ahead of you and drag back; do three strips side by side, each twice. Time it: a small bed should be dug, sown and watered in under a minute.
+2. Seed box, radish, then drag along a row. Can (3): hold, drag down, walk the row.
+3. Empty the can and fill it at the pump by the well.
+4. Run time forward, then pull a radish with Hands (1).
+
+**Questions**
+
+- Does the pull of the hoe feel like work in a good way, and is two strokes the right number?
+- Is tipping by dragging down natural, or would you rather hold the right button?
+- Is the overhead moment charming or in the way?
+
+**Known gaps**
+
+- The hoe is hard to see from the high camera when it points away from you; the character has no two-handed grip.
+- The pump refill is the simplest working version (in `src/garden-view.js`: `fixtureNear`, `drawFrom`, `settleDraw` and the `fill` branch); the handle does not move.
+- Produce goes straight to the stores after the overhead moment: there is no basket to carry.
+- Peas, tomatoes and beans are picked a plant at a time, not fruit by fruit.
+
+## F1 — farming, first playable (branch `iter/f1-farming`)
+
+**What is new**
+
+- A Garden tool on the tool bar (key 5) with a palette: Bed, Sow, Water, Hoe, Harvest, Inspect, Mulch, Compost, Almanac. Right-drag turns the view while gardening; the mouse stays free.
+- Beds: drag on the grass to mark one out (snapped to 30 cm squares, live size and area), then hold on it to dig. The grass goes and a mounded bed of soil appears.
+- Twelve crops grown on real warmth, light, water and soil: radish, lettuce, peas, potato, tomato (as transplants), bush bean, carrot, winter squash, kale, garlic, sweet corn, wheat. Seed cards say when to sow here, in plain words, and buy the packet if you have none.
+- Soil darkens when wet and pales as it dries; plants wilt when thirsty, yellow when short of nitrogen, brown when frost-burnt, and lettuce bolts in heat.
+- Inspect any plant or bed for what it is, a calendar strip from sowing to harvest (ahead or behind the seed packet), and the reason for its state. Details toggle for the numbers.
+- Almanac (N): typical last and first frost for this climate, what to sow now and soon, what is ready, and tonight's frost risk with a "Cover the beds" button (row covers keep about 2 C of frost off).
+- Harvests go to your stores (potatoes, carrots and tomatoes as the kitchen's own ingredients). The "Grow your first salad" project card and four short, skippable tips.
+
+**Try this**
+
+1. Press 5, draw a small bed, hold to dig it, sow radish on one half and lettuce on the other, water it until the soil is dark.
+2. Run 100x or 1000x and watch the seedlings come up. Inspect a radish. Harvest when ready.
+3. Plant tomatoes in early spring and watch the almanac's frost warnings; leave one bed uncovered.
+4. Stop watering a bed in midsummer and see it pale and wilt; inspect a plant for the reason.
+
+**Known gaps**
+
+- Watering refills free from anywhere ("Refill"); the hose and drip lines are not wired to tanks and taps in the interface yet (the simulation can already draw from the water system).
+- No pests, diseases or seed saving. Mulch and compost are in, rotation advice shows in the bed card; hilling and staking are not separate actions.
+- In a short year (the 20-day default) the weather model is far cloudier than in a real year, so crops yield about half; this is the weather system's, reported for a fix.
+- The supplier also lists the garden's produce for sale.
+
 ## Wave D1 — Construction: the first shed, raised by hand (iteration 2c)
 
 **What is new**
 
-- **Build panel (N, or the Build button on the left).** The plan book offers the tool shed (the small cabin opens when the shed is finished). Choose it, and a ghost of the whole plan follows the pointer: the wheel or Q / E turns it, a click sets it down, red means the ground will not do.
+- **Build panel (L, or the Build button on the left).** The plan book offers the tool shed (the small cabin opens when the shed is finished). Choose it, and a ghost of the whole plan follows the pointer: the wheel or Q / E turns it, a click sets it down, red means the ground will not do.
 - **Stages in order**, each with what it is, why it exists, its materials in plain words with cost, its state, and one next action. A note on the left of the screen always says what to do next, and an arrow in the world points at it.
 - **Order one stage or everything.** A delivery takes about an hour of game time (under a minute; "Instant deliveries" is an option) and lands as stacks beside the building: lumber, sheets, pier blocks, rolls, bundles, boxes, the door leaning on a trestle.
 - **Carry (F).** Walk to a stack and press F for an armful by weight (about 30 kg: eight studs, one sheet, one pier block). It shows on the shoulder and you walk a little slower.
@@ -259,7 +316,7 @@ Water, electricity and room heat are merged and tested headlessly. They become p
 
 **Try this**
 
-1. Press N, choose the tool shed, set it down on open ground near you.
+1. Press L, choose the tool shed, set it down on open ground near you.
 2. Order everything. While it is on its way, stand on the plan and hold F to level the ground.
 3. Follow the note on the left: pier blocks, beams, joists, the deck, four walls up, plates, rafters, the roof.
 4. Save or reload at any point: stacks, the load in your arms and a half-framed wall come back as they were.

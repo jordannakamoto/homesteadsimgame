@@ -1,6 +1,6 @@
 // The gate: build the tutorial shed from bare ground through real input, as a player would.
 //   node test/shed.e2e.mjs        (needs dist/index.html and Playwright)
-// Part 1, Hands-on: open the Build panel (N), choose the tool shed, set it down with the pointer, order the kit,
+// Part 1, Hands-on: open the Build panel (L), choose the tool shed, set it down with the pointer, order the kit,
 // level the site while the delivery is on its way, then walk to the stacks (W), point and click to pick up, walk back,
 // point at each glowing place and hold the mouse button to set the piece and nail it,
 // stage by stage, tilting each wall up; a save and reload in the middle of framing; "Work until done" for the long
@@ -71,8 +71,8 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
   await tick(20);
   check('a new world is in construction mode, with the first-shed card in the projects', await G(() => __build.constructionMode && __game.sim.state.sys.stock.projects.some((p) => p.id === 'first-shed' && p.status === 'open')));
   check('the note on the left points at the plan book', await G(() => /first shed/i.test(document.getElementById('cvnext').innerText)));
-  await page.keyboard.press('KeyN'); await tick(2);
-  check('N opens the Build panel on the plan book: the shed is offered, the cabin is locked', await G(() => !document.getElementById('cv').hidden && !!document.querySelector('#cvbody button[data-act="place:shed"]') && !document.querySelector('#cvbody button[data-act="place:cabin"]') && /Finish your first shed/.test(document.getElementById('cvbody').innerText)));
+  await page.keyboard.press('KeyL'); await tick(2);
+  check('L opens the Build panel on the plan book: the shed is offered, the cabin is locked', await G(() => !document.getElementById('cv').hidden && !!document.querySelector('#cvbody button[data-act="place:shed"]') && !document.querySelector('#cvbody button[data-act="place:cabin"]') && /Finish your first shed/.test(document.getElementById('cvbody').innerText)));
   await shot('01-plan-book');
   await page.click('#cvbody button[data-act="place:shed"]'); await tick(2);
   await page.mouse.move(700, 300); await tick(2);
@@ -90,8 +90,8 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
   s = await state();
   check('ordering everything takes exactly its price and a delivery is on its way', Math.abs(before - s.money - cost) < 0.011 && s.deliveries === 1 && s.stacks === 0 && cost > 1500 && cost < 3500, '$' + cost);
   check('ordering again buys nothing more', await G(() => { const m = __game.sim.state.sys.stock.money; __construct.act('order:all'); return __game.sim.state.sys.stock.money === m; }));
-  await page.keyboard.press('KeyN'); await tick(2);
-  check('N closes the panel', await G(() => document.getElementById('cv').hidden));
+  await page.keyboard.press('KeyL'); await tick(2);
+  check('L closes the panel', await G(() => document.getElementById('cv').hidden));
   // level the site while the delivery is on its way
   await walkTo(s.shed, 1.5);
   s = await state();
@@ -188,9 +188,9 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
   check('built walls now stop the player; the deck carries them', await G(() => { const st = __build.structs()[0]; const e = { x: st.x + 5, z: st.z, y: st.y0 }; let hit = false; for (let i = 0; i < 80; i++) { const was = e.x; e.x -= 0.1; __build.collide(e, 0.28, true); if (Math.abs(e.x - (was - 0.1)) > 1e-6) hit = true; } return hit && __build.ground(st.x, st.z, st.y0 + 0.2, -50) > st.y0; }));
   await shot('11-dried-in');
   // the long stages: work until done
-  await page.keyboard.press('KeyN'); await tick(2);
+  await page.keyboard.press('KeyL'); await tick(2);
   await page.click('#cvbody input[data-opt="auto"]'); await tick(2);
-  await page.keyboard.press('KeyN'); await tick(2);
+  await page.keyboard.press('KeyL'); await tick(2);
   for (let guard = 0; guard < 60; guard++) {
     s = await state();
     if (s.done) break;
@@ -208,7 +208,7 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
   check('money: only the order was paid for', Math.abs(4000 - cost - end.money) < 0.011, '$' + end.money);
   check('nothing conjured or lost: bought = stacks + built + used up', Object.keys(end.off).length === 0 && end.carried === null, 'left over: ' + (end.left.join(', ') || 'nothing'));
   check('the project card is ticked and the cabin and drawing are unlocked', end.card === 'done' && end.unlocked.includes('plan:cabin') && end.unlocked.includes('plan:draw') && end.step === 14);
-  await page.keyboard.press('KeyN'); await tick(2);
+  await page.keyboard.press('KeyL'); await tick(2);
   await page.click('#cvbody button[data-act="book"]'); await tick(2);
   check('the plan book now offers the cabin', await G(() => !!document.querySelector('#cvbody button[data-act="place:cabin"]')));
   check('a second reload keeps the finished shed', await (async () => { await G(() => __game.saveGame()); await T.page.reload({ waitUntil: 'domcontentloaded', timeout: 120000 }); await T.boot(); await tick(6); return G(() => __build.structs().length === 1 && __build.structs()[0].planned === 0 && Object.values(__game.sim.state.sys.construction.progress)[0].done); })());
@@ -220,7 +220,7 @@ let guidedAll = 0;
 {
   const { ctx, page, G, tick, shot, state, walkTo } = await open();
   await tick(20);
-  await page.keyboard.press('KeyN'); await tick(2);
+  await page.keyboard.press('KeyL'); await tick(2);
   await page.click('#cvbody button[data-act="place:shed"]'); await tick(2);
   await page.mouse.move(700, 300); await tick(2); await page.mouse.click(700, 300); await tick(4);
   await page.click('#cvbody button[data-act="level:guided"]'); await tick(2);
@@ -228,7 +228,7 @@ let guidedAll = 0;
   await page.click('#cvbody button[data-act="order:all"]'); await tick(30);
   let s = await state();
   check('guided: with instant deliveries the stacks are there at once', s.stacks >= 14 && s.deliveries === 0);
-  await page.keyboard.press('KeyN'); await tick(2);
+  await page.keyboard.press('KeyL'); await tick(2);
   const t0 = s.played;
   await walkTo(s.shed, s.shed.r);
   let presses = 0;

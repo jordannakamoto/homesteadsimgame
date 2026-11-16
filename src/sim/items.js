@@ -12,6 +12,7 @@
 
 import { MATERIALS } from './materials.js';
 import { INGREDIENTS, foodId } from './food-catalog.js';
+import { ITEMS_GARDEN, GARDEN_CATEGORIES } from './content/garden-items.js';
 
 export const ITEM_UNITS = Object.freeze(['each', 'm', 'm2', 'm3', 'kg', 'L']);
 
@@ -28,6 +29,7 @@ export const ITEM_CATEGORIES = Object.freeze([
   { id: 'fasteners', name: 'Fasteners', blurb: 'Nails and screws, sold by weight' },
   { id: 'tools_hand', name: 'Hand tools', blurb: 'Work anywhere, no power needed' },
   { id: 'tools_power', name: 'Power tools', blurb: 'Need electricity' },
+  ...GARDEN_CATEGORIES,
 ]);
 export const isToolCategory = (c) => c === 'tools_hand' || c === 'tools_power';
 
@@ -150,6 +152,9 @@ for (const [id, ingredient] of Object.entries(INGREDIENTS)) {
 }
 add({ id: 'kitchen_chopper', name: 'Mechanical vegetable chopper', category: 'tools_hand',
   unit: 'each', massKg: 1.5, priceUsd: 35, blurb: 'Fast chopping and batch preparation for recipes you have cooked' });
+
+// ---- the garden: seeds, garden tools, amendments and produce (src/sim/content/garden-items.js)
+for (const g of ITEMS_GARDEN) add(g);
 
 export const ITEMS = Object.freeze(Object.fromEntries(list.map((i) => [i.id, i])));
 export const item = (id) => ITEMS[id];

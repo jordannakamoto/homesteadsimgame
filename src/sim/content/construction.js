@@ -120,7 +120,7 @@ export const ALL_UNLOCKS = Object.freeze([...new Set(UNLOCKS.flatMap((u) => u.op
 export const FIRST_SHED = Object.freeze({
   projectId: 'first-shed',
   title: 'Build your first shed',
-  blurb: 'Open the Build panel (N) and choose the tool shed. The panel always shows the next step and why it comes next: place it, order the kit, and raise it from pier blocks to roof.',
+  blurb: 'Open the Build panel (L) and choose the tool shed. The panel always shows the next step and why it comes next: place it, order the kit, and raise it from pier blocks to roof.',
   steps: Object.freeze([
     { n: 1, does: 'Choose where the shed goes', teaches: 'Buildings start as a plan on the ground.', until: 'placed' },
     { n: 2, does: 'Order the shed kit', teaches: 'How much material a small building is, and what each stack is.', until: 'ordered' },

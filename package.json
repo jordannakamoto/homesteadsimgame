@@ -8,6 +8,7 @@
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.21.0",
     "esbuild": "^0.28.2",
     "prettier": "^3.10.1",
     "three": "^0.187.0"

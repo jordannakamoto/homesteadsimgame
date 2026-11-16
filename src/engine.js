@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createCookingView } from './cooking/view.js';
 import { createChunkStream } from './world/chunk-stream.js';
-import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND } from './sim/index.js';
+import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -1426,7 +1426,7 @@ const pm = {};
       if (arm === pm.armR) {
         const haft = mk(0.04, 0.04, 0.46, 0x7a5230); haft.position.set(0, -0.5, 0.16);
         const head = mk(0.035, 0.17, 0.11, 0x9aa2a8); head.position.set(0, -0.545, 0.34);
-        arm.add(haft, head);
+        arm.add(haft, head); pm.hatchet = [haft, head];
       }
       continue;
     }
@@ -2043,15 +2043,36 @@ for (const b of document.querySelectorAll('#speed button')) b.addEventListener('
 // trees, stock, where the player stood, and editable build data).
 const NEW_WORLD_YEAR_DAYS = 20;          // five days a season. The player can change it in the weather panel.
 const SAVE_KEY = 'homestead:save:', LAST_KEY = 'homestead:last-seed';
+// Every new plot comes with an old dug well, a hand pump and a spigot a few steps from where you arrive,
+// so there is water from the first minute without power or plumbing.
+function placeStartingWell(build) {
+  if (!build.addFixtures || !build.connect || build.pieces().length) return;
+  let best = null;
+  for (let i = 0; i < 24; i++) {                       // the flattest dry spot in a ring around the arrival point
+    const a = (i / 24) * Math.PI * 2, r = 7 + (i % 3) * 2, x = player.x + Math.cos(a) * r, z = player.z + Math.sin(a) * r;
+    const h = heightAt(x, z), slope = Math.abs(heightAt(x + 1.5, z) - h) + Math.abs(heightAt(x, z + 1.5) - h);
+    if (h > SEA + 0.4 && (!best || slope < best.slope)) best = { x, z, slope };
+  }
+  if (!best) return;
+  const [well, pump, tap] = build.addFixtures([
+    { fixture: 'well_dug', x: best.x, z: best.z },
+    { fixture: 'hand_pump', x: best.x + 0.9, z: best.z, y: heightAt(best.x + 0.9, best.z) + 0.6 },
+    { fixture: 'tap_hose_bib', x: best.x + 1.6, z: best.z, y: heightAt(best.x + 1.6, best.z) + 0.5 },
+  ]);
+  if (well && pump) build.connect(well, 'out', pump, 'in');
+  if (pump && tap) build.connect(pump, 'out', tap, 'in');
+}
 function syncSite() {
   // hand build mode the real equipment catalog once it has loaded
   if (!simCtl.catalogSet && window.__build && window.__build.setFixtureCatalog) { window.__build.setFixtureCatalog(PLACEABLE_FIXTURES); simCtl.catalogSet = true; }
   const build = window.__build;
   if (!build) return;
   build.ensureLoaded();
+  if (simCtl.newWorld) { simCtl.newWorld = false; placeStartingWell(build); }
   if (build.version === simCtl.siteV) return;
   const version = build.version;
   sim.commandNow('site.setPieces', { pieces: mapPieces(build.pieces()) });
+  sim.commandNow('structure.recheck');          // judge the building as it now stands, even while time is paused
   simCtl.siteV = version;
 }
 function saveData() {
@@ -2121,7 +2142,7 @@ function resetWorld(seed) {
   player.x = 0; player.z = 0;
   let raw = null;
   try { raw = localStorage.getItem(SAVE_KEY + SEED); } catch (e) { /* no storage here */ }
-  if (!(raw && applySave(raw))) sim.setYearDays(NEW_WORLD_YEAR_DAYS);   // a new world gets the short year; saved worlds keep theirs
+  if (!(raw && applySave(raw))) { sim.setYearDays(NEW_WORLD_YEAR_DAYS); simCtl.newWorld = true; }   // a new world gets the short year and a well; saved worlds keep theirs
   chunkStream.update(player.x, player.z, Infinity);
   player.y = heightAt(player.x, player.z);
   cam.tx = player.x; cam.tz = player.z; cam.ty = player.y;
@@ -2635,6 +2656,7 @@ function updatePlayer(dt) {
       if (P.atk) sp *= 0.4;
       if (P.parry) sp *= 0.5;
       vx = mx * sp; vz = mz * sp;
+      if (P.pace) { vx *= P.pace; vz *= P.pace; sp *= P.pace; }   // an add-on working with the hands slows the walk
       if (!P.atk && !P.aiming && !P.charging && !P.parry) P.faceTarget = Math.atan2(mx, mz);
     }
     P.mvx = vx; P.mvz = vz;
@@ -2742,6 +2764,7 @@ function updatePlayer(dt) {
   }
   if (P.parry) { P.parry.t += dt; if (P.parry.t >= 0.45) P.parry = null; }
   mouse.click = Math.max(0, mouse.click - dt);
+  if (P.faceHold != null) P.faceTarget = P.faceHold;     // the hands add-on turns the character to what it is reaching for
   let df = P.faceTarget - P.face;
   df = Math.atan2(Math.sin(df), Math.cos(df));
   P.face += df * (1 - Math.exp(-(P.aiming || (P.atk && P.atk.kind === 'swing') ? 30 : 16) * dt));
@@ -2782,6 +2805,7 @@ function updatePlayer(dt) {
   pm.armR.position.z = -0.22 * pullR;
   pm.body.rotation.set(lean, twist, 0);
   pm.bow.visible = P.aiming;
+  if (window.__game.handPose) window.__game.handPose(pm, P, dt);   // src/engine/hands.js poses the arms and what they hold
   if (trails.cur) {
     trails.t -= dt;
     trails.cur.material.opacity = clamp(trails.t / 0.14, 0, 1) * trails.peak;
@@ -2954,6 +2978,8 @@ window.__game = {
   enemies, spawnEnemy, arrows, fireArrow, MOVES, startMove, juice, updateHud, waveHeight, depthState, lockQuality: () => { autoDropped = true; }, world, player, cam, keys, mouse, cursor, step, render, heightAt, fellTree, applyBrush, setQuality, renderer, THREE,
   camera, scene, setTool, fade: addWind, fadeR: U.fadeR, burst, editGet: getDelta, editSet: setDelta, baseHeight, chunkSize: CS, treeKinds: TREE, refreshLock: lockUi, forestAt,
   light: SKY, noise: fbm, palette: PAL, quality: () => quality.level, composer: () => composer, treeGeo, pineLite: pineLiteGeo, markStockDirty: () => { hudDirty = true; },
+  garden: gardenRead,
+  handPose: null, sea: SEA,
 };
 window.__game.cooking = createCookingView(window.__game);
 requestAnimationFrame(frame);

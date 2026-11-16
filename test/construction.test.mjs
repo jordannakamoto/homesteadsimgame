@@ -1,5 +1,5 @@
 // Construction, headless: orders, deliveries, stacks, carrying, installing by stage, taking apart.
-// The shed is the real tool shed as build mode plans it (refresh: DUMP_SHED=test/helpers/shed.json node test/build.smoke.mjs).
+// The shed is the real tool shed as build mode plans it (refresh: DUMP_SHED=tes./helpers/shed-plan.json node test/build.smoke.mjs).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -7,7 +7,7 @@ import { createGameSim, createSim, stockSystem, supply as SUP, ITEMS, ITEMS_CONS
 import * as K from '../src/sim/construction.js';
 import * as C from '../src/sim/content/construction.js';
 
-const shed = JSON.parse(readFileSync(new URL('./helpers/shed.json', import.meta.url), 'utf8'));
+const shed = JSON.parse(readFileSync(new URL('./helpers/shed-plan.json', import.meta.url), 'utf8'));
 const near = (a, b, e = 1e-6) => Math.abs(a - b) < e;
 const cs = (sim) => sim.state.sys.construction;
 const money = (sim) => sim.state.sys.stock.money;

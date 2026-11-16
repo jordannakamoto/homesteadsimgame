@@ -97,6 +97,18 @@ Assisted building: draw a wall, room or roof as one gesture and have the framing
 Touch: the same tools work with the mobile build menus.
 Playtest: Build a small house with a pitched roof, a round room and a cellar in a few minutes without consulting anything, then set one wall to an exact typed length.
 
+## The hands rule (15 Nov, owner)
+
+After playing the garden and seeing where construction and hook-ups were heading, the owner set one rule for every physical job in the game:
+
+- **In the body, mouse-aimed.** The character does the work. The mouse picks a spot within arm's reach. Nothing physical is done to the world from the sky.
+- **Hands-on gestures with Nintendo simplicity.** "A combination of hands-on gestures and simplified Nintendo style, like how in Zelda you hold items over your head." The player makes the real motion (pull the hoe, tip the can, set the stud, swing the hammer, push the wall up, pump the handle), but each is one clear, forgiving gesture with big readable feedback, chunky items carried visibly, and a held-overhead beat for milestones.
+- **Doing it is how you learn it.** "We want to lay stuff by hand so the player learns how to build structures in real life." Construction, plumbing and wiring are done piece by piece with the hands, in real order.
+- **Design tools are for planning only.** Plan mode draws the building; a hook-up view plans the runs. Neither does the work.
+- **Never a chore.** Gestures cover swathes, holding repeats, and any learned job can be handed to "work until done", a helper or a machine.
+
+This applies to farming (being rebuilt), construction (being adapted), wiring and plumbing (next), animals, and the kitchen (already physical).
+
 ## Direction change after the first playtest (14 Nov, owner)
 
 The owner's verdict on wave B: build mode "is more like a design mode"; foundations and walls need to be more realistic; it should "actually feel like building with lumber"; the supplier is "a bit overwhelming"; the owner has never built anything and the game should teach it; weather must be readable by eye, because "the player plays visually". Decisions taken, for a general gaming audience:
@@ -161,6 +173,11 @@ Playtest: Pick the shed from the plan book, order it, watch it arrive, and raise
 Needs: 2, 2c.
 Build: Replace the supplier with a store organised by job, a few items per aisle in good, better, best, each with a one-line plain description and one or two numbers that matter. The default way to buy is the plan's shopping list; browsing is secondary. Unlocks: methods and materials open when projects are finished, shown as "Finish your first shed to open cabin plans", never as a grind. A plan book of ready-made small buildings that can be placed, built and then edited. Short "how this goes together" cards for each stage, shown at the moment they are needed, skippable, never a mandatory tutorial.
 Playtest: A player who has never built anything can get from nothing to an ordered shed without wondering what any item is.
+
+### 6a. Hook-ups: an intuitive way to wire and pipe — `fable`
+Needs: 6, 7, the Equip tool, 2c (same files as build mode, so it runs after construction lands).
+Build: As designed in `docs/CONSTRUCTION.md` under "Hooking things up". A Hook-up view that dims the world and shows utilities and large coloured sockets; click-click connection with compatible sockets highlighted; runs that route themselves; automatic sizing with a one-line reason and live amber warnings; "what usually comes next" hints; continue and branch; "Hook it up for me" for a selected group; starter kits in the store; one-line system diagrams with live numbers in the Home panel. Equipment bought from the store and delivered like building materials.
+Playtest: A player who has never wired anything gets a light working off a solar panel, and a tap running off a rain barrel, without being told what joins to what.
 
 ### 7a. Groundworks: trenches, buried pipes and wires, sewage — `mid`
 Needs: 7, 6, 2c.

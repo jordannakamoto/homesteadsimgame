@@ -2,7 +2,7 @@
 // The truth is the simulation's construction system (src/sim/construction.js); the wording and rates are its
 // content (src/sim/content/construction.js); stacks and the load in the arms are drawn by src/engine/carry.js,
 // the pieces going in by src/engine/assembly.js. Build mode owns the building's shape and draws what is finished.
-// Keys: N the Build panel, F pick up / put down / hold to work. Build mode keeps its own keys while it is open.
+// Keys: L the Build panel, F pick up / put down / hold to work. Build mode keeps its own keys while it is open.
 (() => {
   const G = window.__game, B = window.__build;
   if (!G || !B || !B.structs || !window.__carry || !window.__assembly || !G.stepHooks) return;
@@ -331,7 +331,7 @@
     if (ctx.act === 'set') {
       const r = cmd('install', { structId: ctx.id, memberIds: [ctx.mid], hold: true });
       if (!r.ok) { flash(reason(r)); return; }
-      if (r.set.length) { V.swingIn = { mid: ctx.mid, id: ctx.id, layer, t: 0 }; sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); V.poseT = 0.25; V.poseKind = 'lift'; }
+      if (r.set.length) { V.swingIn = { mid: ctx.mid, id: ctx.id, layer, t: 0 }; sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); V.poseT = 0.25; V.poseKind = 'lift'; G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(wM.x, wM.y, wM.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
       else { const q = r.partial[0]; sounds.play('rustle'); flash(plain(lineOf(pr, ctx.mid).label) + ': ' + Math.round((100 * q.got) / q.need) + '% there. Fetch more.'); }
       redraw(ctx.id);
       return;
@@ -344,7 +344,9 @@
     sounds.play(last && snd === 'knock' ? 'seat' : snd, 0.94 + 0.12 * Math.random());
     if (pm.kind === 'site') G.burst(reach.x, G.heightAt(reach.x, reach.z) + 0.15, reach.z, 5, 0x6b4f35, 1.4, 2.2, 0.11, 0.6);
     else G.burst(wM.x, wM.y, wM.z, last ? 4 : 2, 0xe8d9b0, 0.6, 0.7, 0.05, 0.3);
-    G.cam.shake = Math.min(G.cam.shake + 0.012, 0.2);
+    G.cam.shake = Math.min(G.cam.shake + (last ? 0.07 : 0.035), 0.3);
+    if (G.juice) G.juice.hitStop = last ? 0.07 : 0.035;
+    V.jolt = m ? { id: ctx.id, layer, mid: ctx.mid, t: 0, built: last } : null;
     if (!last) { if (m) asm.lift(ctx.id, layer, ctx.mid, proud(ctx.mid)); return; }
     delete V.blows[ctx.mid];
     const r = cmd('install', { structId: ctx.id, memberIds: [ctx.mid] });
@@ -363,7 +365,7 @@
   const pickable = (d) => !C.SITE_SUPPLY.includes(d.itemId);
   function context() {
     const P = G.player, s = S(), c = s.carried;
-    if (P.tool === 'build' || V.placing || s.options.sandbox) return null;
+    if (P.tool === 'build' || P.tool === 'garden' || V.placing || s.options.sandbox) return null;
     if (V.auto) return { kind: 'stop', id: V.auto.id };
     const pr = nearBuilding(P.x, P.z), stack = carry.nearest(reach.x, reach.z, 1.0, pickable) || (V.wantItem && carry.nearest(P.x, P.z, 2.1, wantedStack)) || carry.nearest(P.x, P.z, 2.1, pickable) || carry.nearest(P.x, P.z, 1.3);
     if (pr) {
@@ -504,6 +506,7 @@
   function tickWork(dt) {
     const ctx = V.ctx, held = !!G.keys.KeyF || V.mDown, s = S();
     V.cool -= dt * (C.workSpeed(G.sim.state.sys.stock.tools, G.powerAvailable && G.powerAvailable()));
+    if (V.jolt) { const j = V.jolt; j.t += dt; asm.lift(j.id, j.layer, j.mid, Math.max(-0.02, (j.built ? 0 : proud(j.mid)) - 0.03 * Math.exp(-j.t * 16) * Math.cos(j.t * 46))); if (j.t > 0.28) { asm.lift(j.id, j.layer, j.mid, j.built ? 0 : proud(j.mid)); V.jolt = null; } }
     if (V.swingIn) { V.swingIn.t += dt; const w = V.swingIn; asm.lift(w.id, w.layer, w.mid, proud(w.mid)); if (w.t > 0.2) V.swingIn = null; }
     const speed = C.workSpeed(G.sim.state.sys.stock.tools, G.powerAvailable && G.powerAvailable());
     if (V.auto) {
@@ -608,7 +611,7 @@
     if (V.placing) return { k: 'Placing', title: V.placing.kind === 'drop' ? 'Delivery spot' : V.placing.name, line: 'Click the ground to set it down. The wheel or Q / E turns it.' };
     if (!pr) {
       const card = G.sim.state.sys.stock.projects.find((p) => p.id === C.FIRST_SHED.projectId);
-      if (card && card.status === 'open' && !s.tutorial.done) return { k: 'First project', title: C.FIRST_SHED.title, line: 'Press <kbd>N</kbd> and choose the tool shed.', btn: ['book', 'Open the plan book'] };
+      if (card && card.status === 'open' && !s.tutorial.done) return { k: 'First project', title: C.FIRST_SHED.title, line: 'Press <kbd>L</kbd> and choose the tool shed.', btn: ['book', 'Open the plan book'] };
       return null;
     }
     const pl = plan(pr.id), st = V.structs.get(pr.id);
@@ -858,7 +861,7 @@
     // deliveries land beside it, on the side nearest where you stand
     const st = V.structs.get(r.struct), P = G.player;
     if (st) { const side = P.x >= st.x ? 1 : -1, half = Math.max(p.w, p.l) / 2 + 1.7; cmd('setDropPoint', { x: st.x + side * half - (side < 0 ? 4.5 : 0), z: st.z - 0.4 }); }
-    note(p.name + ' staked out', 'Open the Build panel (N) to order the materials.');
+    note(p.name + ' staked out', 'Open the Build panel (L) to order the materials.');
     openPanel();
   }
 
@@ -896,7 +899,7 @@
     if (V.placing) tickPlacing();
     {
       // what F would do is worked out again only when something changed or you have moved
-      reach.update(G.player.tool !== 'build' && !V.placing && !s.options.sandbox && (!!s.carried || (!!V.ctx && V.ctx.kind !== 'stop')));
+      reach.update(G.player.tool !== 'build' && G.player.tool !== 'garden' && !V.placing && !s.options.sandbox && (!!s.carried || (!!V.ctx && V.ctx.kind !== 'stop')));
       const P = G.player, c = s.carried, sig = V.rev * 4 + (c ? 1 : 0) + (V.auto ? 2 : 0);
       if (sig !== V.ctxSig || Math.abs(reach.px - V.ctxPx) + Math.abs(reach.py - V.ctxPy) > 2 || Math.abs(reach.x - V.ctxRx) + Math.abs(reach.z - V.ctxRz) > 0.08 || Math.abs(P.x - V.ctxX) + Math.abs(P.z - V.ctxZ) > 0.12 || P.tool !== V.ctxTool || !!V.placing !== V.ctxPl) {
         V.ctxSig = sig; V.ctxPx = reach.px; V.ctxPy = reach.py; V.ctxRx = reach.x; V.ctxRz = reach.z; V.ctxX = P.x; V.ctxZ = P.z; V.ctxTool = P.tool; V.ctxPl = !!V.placing;
@@ -953,7 +956,7 @@
     if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT' || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
     if (e.code === 'Escape') { if (V.placing) { endPlacing(); e.stopImmediatePropagation(); } else if (!panel.hidden) closePanel(); return; }
     if (G.player.tool === 'build') return;
-    if (e.code === 'KeyN') panel.hidden ? openPanel() : closePanel();
+    if (e.code === 'KeyL') panel.hidden ? openPanel() : closePanel();
     else if (e.code === 'KeyF') V.fTap = true;
   }, true);
   canvas.addEventListener('pointermove', (e) => { ptr.x = e.clientX; ptr.y = e.clientY; ptr.has = true; }, true);
@@ -961,7 +964,7 @@
     ptr.x = e.clientX; ptr.y = e.clientY; ptr.has = true; sounds.wake();
     if (V.placing) { e.stopImmediatePropagation(); e.preventDefault(); if (e.button === 2) endPlacing(); else { tickPlacing(); commitPlacing(); } return; }
     // the left button is the hands: whatever F would do here
-    if (e.button === 0 && G.player.tool !== 'build' && V.ctx && V.ctx.kind !== 'hint' && V.ctx.kind !== 'drop') { e.stopImmediatePropagation(); V.mDown = true; V.fTap = true; return; }
+    if (e.button === 0 && G.player.tool !== 'build' && G.player.tool !== 'garden' && V.ctx && V.ctx.kind !== 'hint' && V.ctx.kind !== 'drop') { e.stopImmediatePropagation(); V.mDown = true; V.fTap = true; return; }
     const ctx = V.ctx;
     if (ctx && ctx.kind === 'piece' && !W.job && e.button === 0) {
       const r = canvas.getBoundingClientRect(), g = geom(ctx.id), pr = S().progress[ctx.id];

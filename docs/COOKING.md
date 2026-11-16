@@ -1,24 +1,44 @@
-# V1 cooking
+# Physical cooking prototype
 
-Press K or Kitchen to place/open the starter kitchen nearby. The camera moves into a close-up workbench view. Escape or Leave returns to exploration. Click physical ingredients or their labels, click the board to chop in one short animation, then add to the vessel. Pouring, cracking eggs and mixing animate briefly. Click the cooker to start, leave it cooking, and return to serve. Heat and elapsed world time affect readiness, quality and burning. Turn heat off to hold a finished dish; food still eventually spoils.
+The current kitchen replaces the recipe/button interface with direct manipulation. This is a deliberately narrow carrot, knife, pan and burner prototype. Existing ingredient definitions, hunger, meal inventory, spoilage, legacy recipe commands and saves remain intact; the six old recipes are not exposed as the new physical workflow.
 
-Six recipes: vegetable soup, fried eggs, roasted vegetables, pancakes, quick milk bread and pan-fried trout. Optional herbs improve quality. Stove/oven supports all methods; open fire supports simmering and frying. Recipe selection shows quantities and recommended heat. Prep cancellation returns ingredients. Packing requires an empty kitchen. Purchase a mechanical chopper from the supplier; after successfully making a recipe once, it can batch-chop that recipe's vegetables.
+## Play
 
-Meals opens the prepared-food shelf, with freshness, eating and discarding. Hunger falls by 20 points per world day without starvation damage. Eating restores fullness and can grant 10% faster stamina recovery for six world hours while fullness stays at least 60. Starter pantry supplies are granted once, including when loading a legacy save. Replenish through the supplier's Food & pantry category.
+Press **K** near the kitchen (first use places a starter bench). No cooking buttons or recipe selectors appear.
 
-## Architecture and scope
+- Left-drag the carrot, knife or pan. Releasing drops it under gravity. Drag the basket to take another carrot from pantry stock.
+- Drag the knife above a carrot, then **hold right mouse while still holding left** to lower the blade. Release right to lift it for another cut. The blade cuts where it crosses the food, rather than triggering a canned chop. Pieces have new closed geometry, independent rigid bodies and conserved mass.
+- Drop pieces into the hollow pan. Drag the pan onto any part of the hob, including partly off the burner. Its walls carry the loose ingredients through collision contacts.
+- Drag the physical stove dial upward for heat, downward to switch it off. **H** toggles a diagnostic temperature overlay on the pan. Hover food to see temperature and doneness. Normal rendering shows browning without the diagnostic colors.
+- Wheel adjusts held-object height. **Esc** leaves; heat continues with world time. Turning off the burner leaves residual pan heat. Handling works while world time is paused; heating does not.
+- Drop food onto the plate and press **E** to eat. **Delete** discards hovered food. Eating restores hunger, with a modest bonus for cooked food. Burned/spoiled pieces are refused.
 
-`src/sim/food-catalog.js` holds ingredient, recipe and cooker data. `src/sim/cooking.js` owns authoritative ingredient custody, heat, quality, meals, spoilage and hunger through commands and fixed simulation ticks. State persists through the existing save system. `src/cooking/view.js` handles camera, interactions and UI; `models.js` supplies shared low-poly geometry/materials. Existing construction and world rendering remain in place.
+Old saved prepared meals can still be eaten with E when no physical food is selected. M collects a completed legacy batch. Legacy prep ingredients are refunded on entering the new kitchen. The supplier still replenishes carrots.
 
-V1 uses constrained workstation interactions and procedural models, not freely simulated rigid-body ingredients. There is one kitchen per save. Farming/livestock/fishing production integration, multiple simultaneous users/stations, fuel consumption, oven-door interactions and networking remain future work. Heat and recipe durations are gameplay abstractions, not real food-safety guidance. No Rapier dependency or new full-screen render passes were added.
+## Simulation
 
-## Validation, 2026-11-15
+`src/sim/food-solid.js` clips convex polygon solids by a plane, constructs closed cap faces, and computes volume. Splitting conserves mass and retains temperature/doneness. Very small slivers are rejected; a kitchen is capped at 32 food pieces.
 
-- `npm test`: 53 passed, 0 failed. Cooking coverage includes all recipes, conservation/refunds, invalid actions, chopper requirements, heat/time outcomes, hunger/spoilage and save/load determinism.
-- Existing page smoke also passes: Low/High rendering, time controls, construction UI, save/reload and no page errors. Executed with local browser paths; its redundant screenshot was skipped.
-- `npm run build`: succeeds; self-contained HTML 1,339,138 bytes.
-- `test/cooking.smoke.mjs`: all six recipes completed through browser UI; actual ingredient mesh picking, movement/build input isolation, unattended cooking, meals/hunger, reload and portrait interactions pass without page errors. Screenshots inspected for desktop and portrait layout.
-- `node bench/cooking.mjs`: isolated Node 24 median of five 500,000-tick runs measured idle 0.000018 ms/tick and simmering soup 0.000038 ms/tick. Microbenchmark excludes other simulation systems/rendering.
-- Chromium SwiftShader at 1280×800, same paused close-up scene: kitchen adds 58 draw calls and 1,896 triangles (49 to 107 calls). Cached view update averaged 0.0053 ms over 1,000 calls. These are software-renderer diagnostics, not integrated-GPU FPS measurements. Static kitchen batching and further mobile layout polish are sensible follow-ups.
+`src/sim/physical-kitchen.js` owns JSON state and commands. Rapier 0.21 provides gravity, angular motion, convex ingredient colliders, a compound hollow pan and a moving knife at 60 Hz. Held objects are rate-limited kinematic bodies; free bodies are dynamic. Sleeping kitchens skip physics work. The rendering host submits elapsed interaction time through `kitchen.advance`; a future server must own that clock and validate player reach/ownership. This is not networked yet.
 
-Browser reproduction: set PLAYWRIGHT_MODULE to an available Playwright module and CHROMIUM_PATH to its Chromium executable, then run `node test/cooking.smoke.mjs` after building.
+The separate 9×9 pan grid receives heat at cells whose underside overlaps the burner at contact height. Neighbor diffusion distributes heat; room losses cool the pan. Food samples nearby pan cells when resting against the pan base. Smaller pieces warm faster. Food temperature drives doneness and burning. Stable thermal substeps run from the existing world clock (72 world seconds per physical heating second, matching 1× game time).
+
+The model is intentionally approximate: each food piece has one temperature, not a volumetric temperature field; contact footprints are approximate. There is no liquid/fluid solver, pouring, stirring tool, fuel consumption or connection to the electrical system yet. No pretense of nutritional or food-safety simulation.
+
+Poses, velocities, cut solids, mass, heat, doneness and spoilage age are saved. Rapier caches are disposable and reconstructed from state. A loaded save releases stale mouse grabs. Warm-start contact caches are not saved, so continuation is not promised to be bit-identical at the rigid-body solver level.
+
+## Validation and cost (2026-11-15)
+
+- 99 tests passed; subsequent main integration changed only docs/STATUS.md. Six new physical-kitchen tests cover closed arbitrary cuts and volume conservation, blade-location slicing, containment and pan transport, partial heat overlap/diffusion/lifting, save recovery, inventory and eating validation.
+- Browser smoke uses actual pointer events for knife cutting, piece transfer, pan placement, dial operation and unattended heating; also verifies plating/eating and cut geometry after reload. No cooking buttons are present. Run `node test/cooking.smoke.mjs` (alias of `physical-kitchen.smoke.mjs`) after building; PLAYWRIGHT_MODULE and CHROMIUM_PATH can select local installations.
+- Existing page smoke passed Low/High rendering, time controls, build-mode opening, save/reload and no page errors. Local browser paths were substituted and its redundant screenshot skipped.
+- `node bench/physical-kitchen.mjs`: 32 whole food bodies plus cookware during settling, median 0.057 ms / p95 1.066 ms per 60 Hz physics step. Thermal update with 32 foods: median 0.501 ms / p95 0.960 ms per world tick. JSON kitchen state in that fixture: 73,597 bytes. Node 24 on the development host; not integrated-GPU FPS measurements.
+- Single-file HTML is about 5.75 MB, up roughly 4.4 MB from embedding Rapier's compatibility WASM build. No runtime CDN dependency. A desktop release could ship WASM separately to avoid base64 overhead; that packaging change is outside this prototype.
+
+## Follow-ups
+
+Playtest mouse ergonomics first. Add trackpad/touch controls, clearer hand/knife feedback and sound, safe constrained tilting/pouring, more sliceable ingredient shapes, a physical pot and liquids, and dish recognition from actual contents. Benchmark larger fields and kitchens on target integrated graphics before increasing the active-body cap. The camera still needs occlusion handling inside tight player-built rooms.
+
+### Integration with current main (PR #2)
+
+Preserved thermal, chickens, construction and equipment updates when resolving the system registration conflict. Combined suite: 136/137 passed on the first run; the remaining weather wall-time bound passed in isolation after browser checks finished (2.69 s, versus 2.63 s on unchanged main). Both the general page smoke and physical cooking smoke passed. Cooking smoke now waits, with a bounded timeout, for an edible piece and selects that piece rather than assuming all differently sized pieces finish at a fixed time.
