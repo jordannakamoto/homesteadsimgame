@@ -8145,6 +8145,8 @@
     return (src.bb = { w: Math.max(0, x1 - x0), d: Math.max(0, z1 - z0), h: y1, r: Math.max(0.3, Math.hypot(x1 - x0, z1 - z0) / 2) });
   }
   function structPieces(S) {
+    // pieces say what is built from the plan: bring the plan up to date first, so a piece made by this very edit starts unbuilt
+    syncKnown(S);
     const out = [],
       pend = [],
       H = EAVE * S.hs,
