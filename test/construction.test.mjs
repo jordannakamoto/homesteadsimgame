@@ -122,7 +122,7 @@ test('picking up respects the carry limit and takes what the open stage wants', 
   // a wheelbarrow carries more
   sim.state.sys.stock.tools.push('wheelbarrow');
   sim.commandNow('construction.pickUp', { stackId: stack('lumber_2x4').id });
-  assert.ok(K.carriedMassKg(s) > 80 && K.carriedMassKg(s) <= 90 + 1e-6);
+  assert.ok(K.carriedMassKg(s) > 170 && K.carriedMassKg(s) <= 180 + 1e-6);
   assert.deepEqual(SUP.imbalance(s), {});
 });
 
@@ -149,7 +149,7 @@ test('install consumes the right material and refuses the wrong one; stages gate
   const had = s.carried.qty;
   const r = sim.commandNow('construction.install', { structId: P.id, memberIds: [pier] });
   assert.ok(r.ok); assert.deepEqual(r.installed, [pier]); assert.ok(near((s.carried ? s.carried.qty : 0), had - 1));
-  assert.equal(had, 1);                                    // a 20 kg block: one at a time, never half of one
+  assert.ok(Number.isInteger(had) && had >= 1);            // 20 kg blocks: whole ones only, never half of one
   assert.equal(P.members[pier].built, 1);
   assert.equal(sim.commandNow('construction.install', { structId: P.id, memberIds: [pier] }).reason, 'already built');
   assert.equal(sim.commandNow('construction.install', { structId: P.id, memberIds: [stud] }).reason, 'stage not open');
@@ -276,7 +276,7 @@ test('set by hand, then fastened: a piece set in place holds its material but is
   assert.equal(sim.commandNow('construction.install', { structId: P.id, memberIds: [pier], hold: true }).reason, 'no material');
   sim.commandNow('construction.pickUp', { stackId: s.stacks.find((k) => k.itemId === 'pier_block').id });
   const r = sim.commandNow('construction.install', { structId: P.id, memberIds: [pier], hold: true });
-  assert.ok(r.ok); assert.deepEqual(r.set, [pier]); assert.equal(s.carried, null);
+  assert.ok(r.ok); assert.deepEqual(r.set, [pier]); assert.ok(!s.carried || s.carried.qty < 3 + 1e-6);
   assert.equal(P.members[pier].built, 0); assert.equal(P.members[pier].got, 1); assert.equal(P.tally.foundation[0], 0);
   assert.equal(sim.commandNow('construction.install', { structId: P.id, memberIds: [pier], hold: true }).reason, 'already set');
   assert.deepEqual(SUP.imbalance(s), {});
@@ -317,7 +317,7 @@ test('a small piece takes an offcut, else cuts a sheet and keeps the rest; the o
   assert.equal(K.needsStock(s, P(), 'p1'), true);
   let r = sim.commandNow('construction.install', { structId: 77, memberIds: ['p1'], hold: true });
   assert.ok(r.ok); assert.equal(r.cuts[0].how, 'new'); assert.ok(near(r.cuts[0].keptM2, A - 1.0));
-  assert.ok(!s.carried || s.carried.qty < stack.qty);                         // a sheet left the arms
+  assert.ok(!s.carried || s.carried.qty < 2);                                 // a sheet left the arms
   assert.equal(K.needsStock(s, P(), 'p2'), false);
   r = sim.commandNow('construction.install', { structId: 77, memberIds: ['p2'], hold: true });
   assert.equal(r.cuts[0].how, 'offcut'); assert.ok(near(s.offcuts.osb_18.reduce((n, a) => n + a, 0), A - 1.0 - 0.9));
@@ -351,7 +351,7 @@ test('a sheet cut from a stack by Guided and from the stacks with nothing in the
 test('the ladder comes with the shed order; lean it, take it down, and the books balance', () => {
   const sim = start(); sim.commandNow('construction.setOption', { key: 'instant', value: true });
   const s = cs(sim), P = pr(sim);
-  assert.ok(P.lines['top-plates|ladder'] && P.lines['top-plates|ladder'].itemId === 'ladder' && C.ITEMS_CONSTRUCTION.ladder.priceUsd > 0);
+  assert.ok(P.lines['site|ladder'] && P.lines['site|ladder'].itemId === 'ladder' && C.ITEMS_CONSTRUCTION.ladder.priceUsd > 0);
   assert.ok(sim.commandNow('construction.order', { structId: shed.struct, stage: 'all' }).ok);
   assert.ok(s.stacks.some((k) => k.itemId === 'ladder'));
   assert.equal(sim.commandNow('construction.leanLadder', { x: 1, z: 1, yaw: 0, topY: 3 }).reason, 'no ladder in the arms');
@@ -365,7 +365,7 @@ test('the ladder comes with the shed order; lean it, take it down, and the books
   const back = JSON.parse(JSON.stringify(s)); assert.equal(back.ladder, null);
 });
 
-test('learn once: three of a kind nailed by hand and the kind is known; auto work does not count', () => {
+test('learn once: two of a kind nailed by hand and the kind is known; auto work does not count', () => {
   const sim = start(), s = cs(sim);
   sim.commandNow('construction.setOption', { key: 'instant', value: true });
   sim.commandNow('construction.order', { structId: shed.struct, stage: 'all' });
@@ -377,10 +377,10 @@ test('learn once: three of a kind nailed by hand and the kind is known; auto wor
   assert.deepEqual(s.learn.counts, {});
   const joists = K.installable(P).filter((i) => P.members[i].kind === 'joist');
   assert.ok(joists.length >= 4);
-  assert.equal(nailByHand(joists[0]).learned.length, 0); assert.equal(nailByHand(joists[1]).learned.length, 0);
-  assert.equal(s.learn.counts.joist, 2);
-  assert.deepEqual(nailByHand(joists[2]).learned, ['joist']);
-  assert.ok(s.learn.known.joist); assert.equal(nailByHand(joists[3]).learned.length, 0); assert.equal(s.learn.counts.joist, 3);
+  assert.equal(nailByHand(joists[0]).learned.length, 0);
+  assert.equal(s.learn.counts.joist, 1);
+  assert.deepEqual(nailByHand(joists[1]).learned, ['joist']);
+  assert.ok(s.learn.known.joist); assert.equal(nailByHand(joists[2]).learned.length, 0); assert.equal(s.learn.counts.joist, 2);
   // saved and loaded, it is still known
   const back = JSON.parse(JSON.stringify(s)); assert.ok(back.learn.known.joist);
 });

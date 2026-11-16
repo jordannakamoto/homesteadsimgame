@@ -51,11 +51,11 @@ export const ITEMS_CONSTRUCTION = Object.freeze({
 });
 
 // ---- the ladder: it comes with the shed order (a line of the top-plates stage), is leaned by hand and climbed
-export const LADDER = Object.freeze({ itemId: 'ladder', stage: 'top-plates', lenM: 3.9, footOutM: 0.95, reachUpM: 2.2, climbMps: 1.5, topBelowM: 0.9, why: 'Anything higher than you can reach from the ground is worked from a ladder: the top plates, the roof.' });
+export const LADDER = Object.freeze({ itemId: 'ladder', stage: 'site', lenM: 3.9, footOutM: 0.95, reachUpM: 2.2, climbMps: 1.5, topBelowM: 0.9, why: 'Anything higher than you can reach from the ground is worked from a ladder: the top plates, the roof.' });
 
 // ---- learn once, then sweep: after nailing a few of a kind by hand, that kind is learned and is set and nailed as you sweep along its run
 export const LEARN = Object.freeze({
-  needed: 3,
+  needed: 2,
   group: Object.freeze({ stud: 'stud', plate: 'plate', header: 'header', joist: 'joist', rafter: 'rafter', beam: 'beam', post: 'post', skid: 'skid', sheathing: 'sheet', membrane: 'sheet', roofing: 'sheet', lining: 'sheet', cladding: 'sheet', insulation: 'sheet' }),
   says: Object.freeze({ stud: 'frame a stud wall', plate: 'lay wall plates', header: 'frame an opening', joist: 'frame a floor', rafter: 'set rafters', beam: 'set a beam', post: 'set posts', skid: 'lay skids', sheet: 'lay sheets' }),
 });
@@ -112,7 +112,7 @@ export const DELIVERY = Object.freeze({
 });
 
 // ---- carrying: by hand about what a person lifts comfortably; a tool that carries more raises it
-export const CARRY = Object.freeze({ byHandKg: 30, tools: Object.freeze([{ tool: 'wheelbarrow', kg: 90 }]), slow: 0.85 });
+export const CARRY = Object.freeze({ byHandKg: 90, tools: Object.freeze([{ tool: 'wheelbarrow', kg: 180 }]), slow: 0.85 });
 export function carryLimitKg(tools = []) {
   let kg = CARRY.byHandKg;
   for (const t of CARRY.tools) if (tools.includes(t.tool)) kg = Math.max(kg, t.kg);

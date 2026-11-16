@@ -312,6 +312,24 @@ function takeLadder(ctx) {
   ctx.emit('construction.ladder', { up: false });
   return { ok: true };
 }
+// a build ordered before the ladder came with the order (or one lost): move its old line to the first stage and put a
+// ladder at the stacks, so "bring the ladder" always has a ladder to bring
+function ensureLadder(ctx) {
+  const s = ctx.s, oldKey = 'top-plates|ladder', L = s.ledger.ladder;
+  let any = null;
+  for (const id in s.progress) {
+    const pr = s.progress[id];
+    if (pr.lines[oldKey] && oldKey !== LADDER_KEY) { const o = pr.lines[oldKey]; delete pr.lines[oldKey]; if (!pr.lines[LADDER_KEY]) pr.lines[LADDER_KEY] = { ...o, stage: C.LADDER.stage }; }
+    if (pr.lines[LADDER_KEY] && Object.values(pr.lines).some((l) => l.ordered > 0)) any = pr;
+  }
+  if (!any || (L && L.bought > 0) || s.ladder || (s.carried && s.carried.itemId === C.LADDER.itemId)) return;
+  if (s.stacks.some((k) => k.itemId === C.LADDER.itemId) || s.deliveries.some((d) => d.lines.some((l) => l.itemId === C.LADDER.itemId))) return;
+  const near = s.stacks[0], at = near ? { x: near.x - 1.6, z: near.z } : dropOf(s, any);
+  SUP.addToStacks(s, C.LADDER.itemId, 1, at.x, at.z, C.DELIVERY.layout);
+  s.ledger.ladder = { bought: 1, used: 0, spent: 0 };
+  any.lines[LADDER_KEY].ordered = 1;
+  ctx.emit('construction.ladderGranted', {});
+}
 const dropOf = (s, pr) => s.dropPoint || { x: pr.x + pr.r + 2.5, z: pr.z };
 
 // ---------------------------------------------------------------- commands
@@ -551,7 +569,7 @@ export const constructionSystem = () => ({
   step: (ctx) => {
     const s = ctx.s;
     if (!s.tutorial.card) ensureCard(ctx, s);
-    if (!s.deliveries.length) return;
+    if (!s.deliveries.length) { ensureLadder(ctx); return; }
     for (const d of SUP.dueDeliveries(s, ctx.state.t)) land(ctx, s, d.id);
   },
   commands: {
