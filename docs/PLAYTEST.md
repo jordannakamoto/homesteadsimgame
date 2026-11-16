@@ -241,6 +241,37 @@ Water, electricity and room heat are merged and tested headlessly. They become p
 - Is the Home panel enough to understand what your power and water are doing, or do you want to see it in the world?
 - Is wiring by dragging between ports clear?
 
+## F2: gardening with your hands (branch `iter/f2-garden-hands`)
+
+**What changed**
+
+- The nine-button palette and working the ground from above are gone. Key 5 puts you in gardening stance with a hotbar of things to hold (Hands, Hoe, Can, seed packets, Straw, Compost, Seed box); the mouse aims within arm's reach of the character.
+- No Bed tool and no hold-to-dig: you till by pulling the hoe through the grass. Each stroke turns a strip; a second pass makes fine, furrowed soil. Worked ground that touches becomes one bed.
+- The can is lifted by holding and poured by dragging down to tip it. It is filled at the pump, a tap or tank, or by dipping in a pond.
+- Seed is dropped by clicking or by dragging along the row; root crops are pulled upward, leaves cut with a swipe, fruit clicked. The first of each crop is held up overhead.
+- A name tag by the marker says what a plant is and the one thing it needs. F opens the full card, N the almanac. The first-salad cards are rewritten for the gestures.
+- Old saves: existing beds and plants load as fully worked soil and look as before.
+
+**Try this**
+
+1. Press 5. With the hoe, press ahead of you and drag back; do three strips side by side, each twice. Time it: a small bed should be dug, sown and watered in under a minute.
+2. Seed box, radish, then drag along a row. Can (3): hold, drag down, walk the row.
+3. Empty the can and fill it at the pump by the well.
+4. Run time forward, then pull a radish with Hands (1).
+
+**Questions**
+
+- Does the pull of the hoe feel like work in a good way, and is two strokes the right number?
+- Is tipping by dragging down natural, or would you rather hold the right button?
+- Is the overhead moment charming or in the way?
+
+**Known gaps**
+
+- The hoe is hard to see from the high camera when it points away from you; the character has no two-handed grip.
+- The pump refill is the simplest working version (in `src/garden-view.js`: `fixtureNear`, `drawFrom`, `settleDraw` and the `fill` branch); the handle does not move.
+- Produce goes straight to the stores after the overhead moment: there is no basket to carry.
+- Peas, tomatoes and beans are picked a plant at a time, not fruit by fruit.
+
 ## F1 — farming, first playable (branch `iter/f1-farming`)
 
 **What is new**

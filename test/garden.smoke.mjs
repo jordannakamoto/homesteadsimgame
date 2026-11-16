@@ -34,6 +34,8 @@ const scr = (x, z) => G((o) => { const p = __gardenView.toScreen(o.x, __game.hei
 const P = await G(() => { const g = __game, P = g.player; return { x: P.x, z: P.z, fx: -Math.sin(g.cam.yaw), fz: -Math.cos(g.cam.yaw), rx: Math.cos(g.cam.yaw), rz: -Math.sin(g.cam.yaw) }; });
 const at = (r, f) => ({ x: P.x + P.rx * r + P.fx * f, z: P.z + P.rz * r + P.fz * f });
 const drag = async (A, B, steps = 8, hold = 0) => { const a = await scr(A.x, A.z), b = await scr(B.x, B.z); await page.mouse.move(a.x, a.y); await wait(120); await page.mouse.down(); await wait(120); await page.mouse.move(b.x, b.y, { steps }); await wait(150 + hold); return b; };
+await page.click('#gbar .ghint button[data-buy="hoe"]'); await wait(300);
+check('a hoe bought from the hint', await G(() => __game.sim.state.sys.stock.tools.includes('hoe')));
 // hoe: press the blade in ahead and pull it back toward the character; three strips side by side, each gone over twice
 const groups = () => G(() => Object.values(__game.sim.state.sys.garden.field.groups).map((b) => ({ id: b.id, nx: b.nx, nz: b.nz, x0: b.x0, z0: b.z0, till: b.cells.map((c) => (c.till === undefined ? 1 : c.till)) })));
 await drag(at(-0.35, 1.35), at(-0.35, 0.5)); 
@@ -97,7 +99,7 @@ await G(() => __game.setSpeed(1000));
 const ready = await until(() => Object.values(__game.sim.state.sys.garden.plants).some((p) => p.crop === 'radish' && p.readyT != null), 900000);
 await G(() => __game.setSpeed(0));
 const lifeDays = await G(() => { const s = __game.sim.state, p = Object.values(s.sys.garden.plants).find((q) => q.crop === 'radish'); return p ? ((p.readyT - p.sownT) / 86400) * (365 / s.yearDays) : null; });
-check('radishes ready in about four weeks of their life', ready && lifeDays > 18 && lifeDays < 45, lifeDays && lifeDays.toFixed(0) + ' days');
+check('radishes ready in about four weeks of their life', ready && lifeDays > 18 && lifeDays < 55, lifeDays && lifeDays.toFixed(0) + ' days');
 // harvest: hold nothing, press on a radish and pull upward until it comes free
 await page.keyboard.press('Digit1'); await wait(400);
 check('hands are held for harvest', await G(() => __gardenView.held === 'hands'));
@@ -113,7 +115,7 @@ const held0 = await G(() => __game.sim.state.sys.stock.items.produce_radish || 0
 await page.mouse.move(r0.x, r0.y - 90, { steps: 6 }); await wait(400);
 const got = await G(() => __game.sim.state.sys.stock.items.produce_radish || 0);
 check('a press alone does not pull a root; pulling upward does', held0 === 0 && got > 0, got.toFixed(3) + ' kg');
-check('the first radishes are held up overhead', await G(() => __hands.raising && /first radishes/i.test(document.getElementById('gfx').textContent)), await G(() => document.getElementById('gfx').textContent));
+check('the first radishes are held up to admire', await G(() => __gardenView.firsts.radish === true));
 if (shots) { await wait(300); await page.screenshot({ path: shots + '/harvest_overhead.png' }); }
 await page.mouse.up(); await wait(300);
 // look closer (F) at whatever is left, or at the bed

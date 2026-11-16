@@ -6,6 +6,7 @@
    - gesture measures while the button is held, in one `aim` object the caller reads: the pull of a stroke toward the
      character, the path travelled, the tip (pointer dragged down, or the second button), the lift (dragged up) and
      the sideways sweep;
+   - pick(objects): what the pointer is over among any 3D objects, for targets that are not ground;
    - the held thing shown in the character's hands (carried at rest, shouldered when walking, put to the aimed spot
      in use), and a moment of holding something up overhead.
    The caller supplies slots and handlers through window.__hands.open(). Reaches the game only through window.__game.
@@ -297,8 +298,15 @@
     if (b && barEl.contains(b)) { hold(b.dataset.slot); canvas.focus(); }
   });
 
+  // What the pointer is over among the given objects (any Object3D list): the nearest hit { object, point, distance }
+  // or null. For callers whose targets are things rather than ground: a handle, a spout, a fruit.
+  function pick(objects, recursive = true) {
+    v2.set(ptr.ndcX, ptr.ndcY); ray.setFromCamera(v2, G.camera);
+    const hits = ray.intersectObjects(objects, recursive);
+    return hits.length ? hits[0] : null;
+  }
   window.__hands = {
-    aim, open, close, setSlots, hold, groundAt, toScreen, setMark,
+    aim, open, close, setSlots, hold, groundAt, toScreen, setMark, pick,
     get isOpen() { return !!cfg; }, get held() { return cur ? cur.id : null; }, get slots() { return slots; },
     // hold something up overhead for a beat: obj is any Object3D, shown above the head and then handed back to `done`
     raise(obj, secs, scale, done) {

@@ -494,7 +494,7 @@
   const mesh = (parts) => { const m = new T.Mesh(merge(parts), toolMat); m.castShadow = true; return m; };
   const ITEMSHOW = {};
   // the hoe: its blade at the origin, the handle up along +y
-  ITEMSHOW.hoe = { obj: mesh([part(stick(1.5, 0.032, 6), 0xb98a52, 0, 0.04, 0), part(box(0.34, 0.05, 0.2), 0xaab4bb, 0, 0.03, 0.09, 0.35), part(box(0.1, 0.09, 0.08), 0x7d868c, 0, 0.07, 0)]),
+  ITEMSHOW.hoe = { obj: mesh([part(stick(1.55, 0.05, 6), 0xc9975a, 0, 0.04, 0), part(box(0.44, 0.07, 0.26), 0xc3ccd3, 0, 0.03, 0.11, 0.35), part(box(0.14, 0.12, 0.1), 0x7d868c, 0, 0.08, 0)]),
     use: 'tip', still: [0.44, 0.02, 0.22, 0, 0, 0], stillArm: -0.5, walk: [0.3, 1.74, -0.78, 2.15, 0, 0], walkArm: -1.0 };
   // the watering can: body on the origin, spout and rose ahead (+z), handle behind
   ITEMSHOW.can = { obj: mesh([part(new T.CylinderGeometry(0.17, 0.19, 0.3, 10), 0x4f8fb5, 0, 0.15, 0), part(stick(0.42, 0.035, 6), 0x5c9cc2, 0, 0.1, 0.14, 0.95), part(new T.CylinderGeometry(0.085, 0.05, 0.06, 8), 0xd9e6ee, 0, 0.345, 0.48, 0.95),
@@ -732,11 +732,11 @@
       const k = m === 'up' ? a.lift : m === 'side' ? Math.min(1, a.side / 55) : 1;
       if (m === 'up' && a.lift > 0.25 && Math.random() < 0.25) G.burst(a.ox, a.y + 0.08, a.oz, 1, 0x6b4f35, 0.8, 1.2, 0.04, 0.3);   // the soil gives a little
       if (k >= 1 || far) {
-        act.done = true;
+        act.done = true; act.sweep = m !== 'up';   // a cut or a pick carries on along the row; each root needs its own pull
         if (!takePlant(p, a)) say(read.plantStatus(G.sim.state, p.id).reason + (a.shift ? '' : ' (Hold Shift to pull it out anyway.)'), 4);
         else act.n++;
       }
-    } else if (act.done && act.n) {
+    } else if (act.done && act.n && act.sweep) {
       // the hand keeps working along the row: whatever else is ready comes with a touch
       const p = plantAt(a.x, a.z);
       if (p && p.id !== g && cmdQuiet(p)) { const res = cmd('garden.harvest', { bed: p.bed, cells: [p.cell] }); if (res.ok) { flourish(res); act.n++; } }
@@ -848,7 +848,7 @@
         else if (cell && tillOf(cell) >= 1) { const ci = read.cellInfo(G.sim.state, c.bed.id, c.i); txt = ci.water < 0.35 ? 'Dry soil' : ci.water > 0.8 ? 'Wet enough' : ''; warn = ci.water < 0.35; }
       } else if (id === 'hoe' && cell && tillOf(cell) >= 1 && cell.weed > 0.25) txt = 'Weeds: pull the hoe through them';
     }
-    H.setMark(warn ? 0xf0b080 : 0xfff2c4, id === 'can' || id === 'mulch' || id === 'compost' ? 2.2 : id === 'hoe' ? 1.3 : 1);
+    H.setMark(warn ? 0xf0b080 : 0xfff2c4, id === 'can' || id === 'mulch' || id === 'compost' ? 1.6 : id === 'hoe' ? 1.3 : 1);
     if (txt !== tagSig) { tagSig = txt; tag.textContent = txt; tag.hidden = !txt; tag.classList.toggle('warn', warn); tagX = -1; }
   }
   function moveTag() {
@@ -1092,6 +1092,6 @@
     get on() { return on; }, get held() { return held(); }, hold: (id) => H.hold(id), choose: (c) => { crop = c; H.setSlots(slotList()); return H.hold('seed:' + c); },
     groundAt: (nx, ny) => { const o = {}; return H.groundAt(nx, ny, o) ? o : null; }, toScreen: (x, y, z) => toScreen(x, y, z, {}),
     meshes: () => [...meshes.entries()].map(([k, m]) => [k, m.count]), beds: () => [...bedViews.keys()], almanac: toggleAlmanac,
-    inspect: (x, z) => inspectAt({ x, z }), refresh: () => { dirty = true; refresh(); }, source,
+    inspect: (x, z) => inspectAt({ x, z }), get firsts() { return tipState.got || {}; }, refresh: () => { dirty = true; refresh(); }, source,
   };
 })();
