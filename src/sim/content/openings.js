@@ -82,7 +82,7 @@ export function openingItems() {
   for (const t of OPENING_TYPES) {
     for (const w of t.w) for (const h of t.h) {
       const id = openingItemId(t.id, w, h), ref = t.w[0] * t.h[0], k = Math.sqrt((w * h) / (t.w[0] * t.h[0])) || 1;
-      out[id] = { id, name: `${t.name} ${Math.round(w * 1000)} x ${Math.round(h * 1000)}`, category: 'glass', store: t.store, unit: 'each', massKgPerUnit: Math.round(t.mass * (w * h) / ref * 10) / 10 || t.mass, priceUsd: Math.round(t.price * k), dims: { lengthM: h, widthM: w, thicknessM: t.kind === 'door' ? 0.045 : 0.08 }, blurb: `${t.name}: ${OPERATION[t.op]}` };
+      out[id] = { id, name: `${t.name} ${Math.round(w * 1000)} x ${Math.round(h * 1000)}`, category: t.store, store: t.store, unit: 'each', massKgPerUnit: Math.round(t.mass * (w * h) / ref * 10) / 10 || t.mass, priceUsd: Math.round(t.price * k), dims: { lengthM: h, widthM: w, thicknessM: t.kind === 'door' ? 0.045 : 0.08 }, blurb: `${t.name}: ${OPERATION[t.op]}` };
     }
   }
   return out;

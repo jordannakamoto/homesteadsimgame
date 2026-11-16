@@ -126,3 +126,27 @@ test('free openings save and load as plain data', () => {
   assert.equal(freeToFraming(back, 1).frame, 'pocket');
   assert.ok(Math.abs(freeToFraming(back, 1).width - (0.81 + 0.024)) < 1e-9);
 });
+
+// ---- item 2: the units are in the store, in the plan's orders, and operable in the sim
+import { ITEMS, ITEM_CATEGORIES } from '../src/sim/items.js';
+import { createGameSim } from '../src/sim/index.js';
+
+test('units are Supplier items by category Doors and Windows, and plan orders list them', () => {
+  assert.ok(ITEM_CATEGORIES.some((c) => c.id === 'doors') && ITEM_CATEGORIES.some((c) => c.id === 'windows'));
+  assert.equal(ITEMS.op_door_patio_1830x2030.category, 'doors');
+  assert.equal(ITEMS.op_double_hung_600x1500.category, 'windows');
+  const F = globalThis.__framing, sp = freeSpec({ typeId: 'door_patio', sizeIdx: 0 });
+  const lines = F.materialsList([{ id: 'x1', stage: 'openings', kind: 'door', unit: sp.itemId, unitName: 'Sliding patio door', built: false }]);
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].itemId, 'op_door_patio_1830x2030'); assert.equal(lines[0].qty, 1); assert.equal(lines[0].unit, 'each');
+});
+
+test('the hands open and close a unit and the sim keeps it', () => {
+  const sim = createGameSim(7);
+  assert.equal(sim.commandNow('construction.operate', { id: 'p5' }).open, true);
+  assert.equal(sim.state.sys.construction.open.p5, 1);
+  assert.equal(sim.commandNow('construction.operate', { id: 'p5' }).open, false);
+  sim.commandNow('construction.operate', { id: 'p6', open: true });
+  assert.deepEqual(Object.keys(sim.state.sys.construction.open), ['p6']);
+  assert.equal(sim.commandNow('construction.operate', {}).ok, false);
+});

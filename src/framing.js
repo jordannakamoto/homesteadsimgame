@@ -491,6 +491,7 @@
       return ["floor" + m.material, f ? f[0] : null, f ? f[1] : "m2", f && f[1] === "m" ? m.area / 0.14 : m.area, "Flooring", "The finished floor you walk on.", f ? undefined : "flooring: " + m.material];
     }
     if (k === "lining") return t === "gypsum" ? ["gyp", "gypsum_13", "sheet", m.area, "Wall panels", "Panels on the inside of the walls. They cover the insulation and finish the room."] : ["lin", "board_pine_1x6", "m", m.area / 0.14, "Lining boards", "Boards on the inside of the walls and ceiling. They cover the insulation and finish the room."];
+    if ((k === "door" || k === "window") && m.unit) return ["u" + m.unit, m.unit, "each", 1, m.unitName || (k === "door" ? "Door" : "Window"), "A ready-made " + k + " in its frame. It is carried in, set into its rough opening and nailed through the frame."];
     if (k === "door") return ["door", null, "each", 1, "Doors", "A way in that closes. Without it the room is not enclosed.", "a door"];
     if (k === "window") return ["window", "glass_float_4", "m2", m.area || 0.6, "Window glass", "Lets light in while keeping the weather out."];
     return null;
