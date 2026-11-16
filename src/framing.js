@@ -25,6 +25,29 @@
     BEAM = LUMBER["6x6"][0];
   const hyp = Math.hypot,
     r3 = (v) => Math.round(v * 1000) / 1000;
+  // Lumber comes in stock lengths (8 to 20 ft; the same list as STICK in src/sim/content/construction.js). Nothing is
+  // stretched: a run longer than MAX_RUN is spliced from pieces that butt over a stud, joist, pier or rafter.
+  const STOCK = [2.4, 3.0, 3.6, 4.2, 4.8, 5.4, 6.0],
+    MAX_RUN = 4.8,
+    KERF = 0.003,
+    KEEP = 0.3;
+  // [s0, s1] in pieces no longer than MAX_RUN, each joint on a support (origin + k * step); the first piece no longer than
+  // `first` (a cap plate starts short so its joints fall 1.2 m from those of the plate under it); no stub under 0.6 m
+  function splice(s0, s1, origin, step, first = MAX_RUN) {
+    const out = [];
+    let a = s0,
+      lim = Math.min(first, MAX_RUN);
+    while (s1 - a > lim + 1e-6) {
+      let j = origin + Math.floor((a + lim - origin + 1e-6) / step) * step;
+      if (s1 - j < 0.6 && j - step > a + 0.3) j -= step;
+      if (j <= a + 0.3) j = a + lim;
+      out.push([a, j]);
+      a = j;
+      lim = MAX_RUN;
+    }
+    out.push([a, s1]);
+    return out;
+  }
 
   // one member. a, b: the ends of its centre line [x, y, z]; n: the unit direction its depth d lies along; its
   // breadth b lies along (axis x n). Sheets are members too: thickness for b, width for d.
@@ -104,10 +127,10 @@
       if (skid) M(out, id(fid, "g"), "footing", "gravel-bed", "foundation", fid, "gravel", 0.1, b1 - b0 + 0.6, P(a0 - 0.3, J_BOT - BEAM - 0.05, (b0 + b1) / 2), P(a1 + 0.3, J_BOT - BEAM - 0.05, (b0 + b1) / 2), dirB, { area: r3((a1 - a0 + 0.6) * (b1 - b0 + 0.6)), volume: r3((a1 - a0 + 0.6) * (b1 - b0 + 0.6) * 0.1), col: "gravel" });
       for (const b of lines) {
         const sp = spans(pts, b, !longX)[0] || [a0, a1];
-        M(out, id(fid, skid ? "sk" : "bm"), skid ? "skid" : "beam", skid ? "skid" : "girder", "foundation", fid, "timber", BEAM, BEAM, P(sp[0], J_BOT - BEAM / 2, b), P(sp[1], J_BOT - BEAM / 2, b), UP);
-        if (skid) continue;
-        // a pier at each end of the beam and between, no more than 1.8 m apart
+        // a pier at each end of the beam and between, no more than 1.8 m apart; a beam longer than a stick joins over a pier
         const np = Math.max(2, Math.ceil((sp[1] - sp[0] - 0.3) / 1.8) + 1);
+        for (const [p0, p1] of splice(sp[0], sp[1], sp[0] + 0.15, (sp[1] - sp[0] - 0.3) / (np - 1))) M(out, id(fid, skid ? "sk" : "bm"), skid ? "skid" : "beam", skid ? "skid" : "girder", "foundation", fid, "timber", BEAM, BEAM, P(p0, J_BOT - BEAM / 2, b), P(p1, J_BOT - BEAM / 2, b), UP);
+        if (skid) continue;
         for (let k = 0; k < np; k++) {
           const a = sp[0] + 0.15 + ((sp[1] - sp[0] - 0.3) * k) / (np - 1),
             top = J_BOT - BEAM,
@@ -160,7 +183,7 @@
       const jy = (J_TOP + J_BOT) / 2,
         sp = spec.joists || 0.4;
       // rim joists close the ends of the joists; the joists run between them at 0.4 m centres
-      if (rect) for (const b of [b0 + 0.019, b1 - 0.019]) M(out, id(f.id, "rj"), "joist", "rim", "floor-frame", f.id, "timber", 0.038, JD, P(a0, jy, b), P(a1, jy, b), UP);
+      if (rect) for (const b of [b0 + 0.019, b1 - 0.019]) for (const [p0, p1] of splice(a0, a1, a0, sp, b === b0 + 0.019 ? MAX_RUN : MAX_RUN - 1.2)) M(out, id(f.id, "rj"), "joist", "rim", "floor-frame", f.id, "timber", 0.038, JD, P(p0, jy, b), P(p1, jy, b), UP);
       const at = [a0 + 0.019];
       for (let a = a0 + sp; a < a1 - 0.06; a += sp) at.push(a);
       at.push(a1 - 0.019);
@@ -260,15 +283,17 @@
     const id = (c) => w.id + "." + c + n++,
       stud = (type, s, y0, y1, stage) => y1 - y0 > 0.04 && M(out, id("st"), "stud", type, stage || "wall-frame", w.id, "timber", SB, SD, at(s, y0), at(s, y1), nrm),
       flat = (code, kind, type, stage, s0, s1, y, d) => M(out, id(code), kind, type, stage, w.id, "timber", SB, d || SD, at(s0, y), at(s1, y), nrm);
-    // the bottom plate stops at doorways
-    let s = 0;
-    for (const q of opens.filter((q) => q.door && q.y0 - yb < 0.2).sort((p, q) => p.s0 - q.s0)) (q.s0 - s > 0.05 && flat("bp", "plate", "bottom", "wall-frame", s, q.s0, yb + SB / 2), (s = q.pocket || q.s1));
-    L - s > 0.05 && flat("bp", "plate", "bottom", "wall-frame", s, L, yb + SB / 2);
-    flat("tp", "plate", "top", "wall-frame", 0, L, yt - 1.5 * SB);
-    flat("cp", "plate", "cap", "top-plates", 0, L, yt - 0.5 * SB);
-    // studs: one at each end with a second beside it for the corner, then every 0.4 m measured from the start
+    // the bottom plate stops at doorways; plates longer than a stick are spliced over a stud, the cap plate's joints 1.2 m from the top plate's
     const sp = spec.studs || 0.4,
-      inOpen = (x) => opens.find((q) => x > q.s0 - 0.12 && x < q.s1 + 0.12),
+      plates = (code, type, stage, s0, s1, y, first) => { for (const [p0, p1] of splice(s0, s1, 0, sp, first)) flat(code, "plate", type, stage, p0, p1, y); };
+    let s = 0;
+    for (const q of opens.filter((q) => q.door && q.y0 - yb < 0.2).sort((p, q) => p.s0 - q.s0)) (q.s0 - s > 0.05 && plates("bp", "bottom", "wall-frame", s, q.s0, yb + SB / 2), (s = q.pocket || q.s1));
+    L - s > 0.05 && plates("bp", "bottom", "wall-frame", s, L, yb + SB / 2);
+    plates("tp", "top", "wall-frame", 0, L, yt - 1.5 * SB);
+    { const j = splice(0, L, 0, sp)[0][1];
+      plates("cp", "cap", "top-plates", 0, L, yt - 0.5 * SB, j < L - 1e-6 ? Math.max(0.6, j - 1.2) : MAX_RUN); }
+    // studs: one at each end with a second beside it for the corner, then every 0.4 m measured from the start
+    const inOpen = (x) => opens.find((q) => x > q.s0 - 0.12 && x < q.s1 + 0.12),
       ups = [];
     for (const [x, type] of [[SB / 2, "end"], [1.5 * SB, "corner"], [L - 1.5 * SB, "corner"], [L - SB / 2, "end"]]) inOpen(x) || (stud(type, x, st0, st1), ups.push(x));
     for (let x = sp; x < L - 0.1; x += sp) {
@@ -388,7 +413,13 @@
     let n = 0;
     const id = (p, c) => p + "." + c + n++,
       sp = spec.rafters || 0.6;
-    for (const rd of r.ridges || []) M(out, r.id + ".rb", "beam", "ridge", "roof-frame", r.planes[0].id, "timber", 0.038, LUMBER["2x8"][1], [rd.a[0], rd.y - 0.1, rd.a[1]], [rd.b[0], rd.y - 0.1, rd.b[1]], UP, { roof: r.id });
+    for (const rd of r.ridges || []) {
+      // a long ridge is spliced from boards that join between a pair of rafters
+      const RL = hyp(rd.b[0] - rd.a[0], rd.b[1] - rd.a[1]) || 1,
+        pt = (t) => [rd.a[0] + ((rd.b[0] - rd.a[0]) * t) / RL, rd.y - 0.1, rd.a[1] + ((rd.b[1] - rd.a[1]) * t) / RL],
+        parts = splice(0, RL, 0, sp);
+      parts.forEach(([p0, p1], k) => M(out, r.id + ".rb" + (k ? k : ""), "beam", "ridge", "roof-frame", r.planes[0].id, "timber", 0.038, LUMBER["2x8"][1], pt(p0), pt(p1), UP, { roof: r.id }));
+    }
     for (const pl of r.planes) {
       const pts = pl.pts,
         e0 = pts[0],
@@ -561,6 +592,22 @@
     }
     return sheets;
   }
+  // the metres of whole sticks a set of pieces is sawn from: longest first, each from the shortest offcut that holds it, else a
+  // new stick of the shortest stock length (the same rule as packSticks in src/sim/content/construction.js)
+  function packSticks(lens) {
+    const pool = [];
+    let metres = 0;
+    for (const len of lens.slice().sort((p, q) => q - p)) {
+      let k = -1;
+      for (let i = 0; i < pool.length; i++) if (pool[i] >= len - 1e-9 && (k < 0 || pool[i] < pool[k])) k = i;
+      let from;
+      if (k >= 0) from = pool.splice(k, 1)[0];
+      else ((from = STOCK.find((L) => L >= len - 1e-9) || Math.ceil((len - 1e-9) / 0.6) * 0.6), (metres += from));
+      const rest = from - len < 1e-6 ? 0 : from - len - KERF;
+      rest >= KEEP && pool.push(Math.round(rest * 1e6) / 1e6);
+    }
+    return Math.round(metres * 1e6) / 1e6;
+  }
   // members (or pieces with the same fields) -> lines to buy, in stage order: { stage, itemId, qty, unit, label, why }
   function materialsList(members) {
     const lines = new Map(),
@@ -572,6 +619,7 @@
       let ln = lines.get(key);
       if (!ln) lines.set(key, (ln = { key, stage: m.stage, itemId: q[1], qty: 0, unit: q[2], label: q[4], why: q[5], count: 0, members: [] }));
       ln.members.push([m.id, r3(q[3])]);
+      if (q[2] === "m" && /^lumber_/.test(q[1] || "")) (ln.pieces || (ln.pieces = [])).push(...Array(m.plies || 1).fill(m.length));
       if (q[6]) ln.missing = q[6];
       ln.qty += q[3];
       ln.count++;
@@ -586,6 +634,7 @@
     const out = [...lines.values()];
     for (const ln of out) {
       if (ln.unit === "sheet") ((ln.areaM2 = r3(ln.qty)), (ln.qty = packSheets(ln.members.map((q) => q[1]))), (ln.unit = "each"));
+      else if (ln.pieces) ((ln.lengthM = r3(ln.qty)), (ln.qty = packSticks(ln.pieces)), delete ln.pieces);
       else if (ln.unit === "each") ln.qty = Math.round(ln.qty);
       else if (ln.unit === "kg") ln.qty = ln.itemId === "concrete_mix" ? Math.ceil(ln.qty / 25) * 25 : Math.ceil(ln.qty * 2) / 2;
       else ln.qty = Math.ceil(ln.qty * 10 - 1e-6) / 10;
@@ -593,5 +642,5 @@
     return out.sort((p, q) => STAGES.indexOf(p.stage) - STAGES.indexOf(q.stage) || (p.label < q.label ? -1 : 1));
   }
 
-  globalThis.__framing = { packSheets, STAGES, STAGE_NAME, LUMBER, SHEET, FOUNDATIONS, generate, materialsList, floorMembers, wallMembers, roofMembers, FLOOR_T };
+  globalThis.__framing = { packSheets, packSticks, STOCK, MAX_RUN, splice, STAGES, STAGE_NAME, LUMBER, SHEET, FOUNDATIONS, generate, materialsList, floorMembers, wallMembers, roofMembers, FLOOR_T };
 })();

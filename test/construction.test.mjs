@@ -29,7 +29,7 @@ function workAll(sim, { stopAfter = null, from = 'carried' } = {}) {
     if (!ids.length) break;
     if (stopAfter && !ids.some((id) => C.STAGE_ORDER.indexOf(P.members[id].stage) <= C.STAGE_ORDER.indexOf(stopAfter))) break;
     const id = ids[0], m = P.members[id], ln = m.line ? P.lines[m.line] : null;
-    if (from === 'carried' && ln && (!cs(sim).carried || cs(sim).carried.itemId !== ln.itemId)) {
+    if (from === 'carried' && ln && K.needsStock(cs(sim), P, id) && (!cs(sim).carried || cs(sim).carried.itemId !== ln.itemId || cs(sim).carried.qty + 1e-6 < K.stockNeed(cs(sim), P, id))) {
       if (cs(sim).carried) assert.ok(sim.commandNow('construction.putDown', { x: 44, z: 40 }).ok);
       const st = cs(sim).stacks.find((k) => k.itemId === ln.itemId);
       assert.ok(st, 'a stack of ' + ln.itemId + ' for ' + id);
@@ -76,12 +76,12 @@ test('every line of the shed is priced, and the items the catalog lacked have re
   assert.ok(v.costUsd > 800 && v.costUsd < 3200, 'the shed costs $' + v.costUsd);
   assert.equal(v.total, Object.keys(P.members).length);
   // every member with something to buy has a share, and the shares add up to the line
-  for (const k in P.lines) { const ln = P.lines[k]; if (ln.supply || ln.sheet || ln.itemId === 'ladder') continue; const sum = Object.values(P.members).filter((m) => m.line === k).reduce((n, m) => n + m.need, 0); assert.ok(near(sum, ln.qty, 1e-5), k + ' ' + sum + ' ' + ln.qty); }
+  for (const k in P.lines) { const ln = P.lines[k]; if (ln.supply || ln.sheet || ln.stick || ln.itemId === 'ladder') continue; const sum = Object.values(P.members).filter((m) => m.line === k).reduce((n, m) => n + m.need, 0); assert.ok(near(sum, ln.qty, 1e-5), k + ' ' + sum + ' ' + ln.qty); }
 });
 
 test('ordering the foundation stage debits the right money and delivers the right stacks', () => {
   const sim = start(), before = money(sim);
-  const posts = shed.materialsList.find((l) => l.key === 'foundation|Posts4x4').qty;
+  const posts = 2.4;   // three short posts, sawn from one 8 ft stick
   const expect = 6 * 12 + Math.round(6 * 17.5 * 100) / 100 + Math.round(posts * 5.6 * 100) / 100 + Math.round(0.5 * 6.2 * 100) / 100;
   const r = sim.commandNow('construction.order', { structId: shed.struct, stage: 'foundation' });
   assert.ok(r.ok); assert.ok(near(r.costUsd, expect), r.costUsd + ' vs ' + expect);
@@ -193,7 +193,7 @@ test('a whole shed: conservation, the project card, unlocks; then taking it apar
   const P = pr(sim);
   assert.ok(P.done); assert.equal(K.installable(P).length, 0);
   assert.ok(trips > 30 && trips < 110, trips + ' trips');
-  assert.deepEqual(SUP.imbalance(s), {});
+  assert.deepEqual(SUP.imbalance(s), {}); assert.deepEqual(K.stickImbalance(s), {});
   // everything bought is in the building: the stacks are empty and the hands are free
   assert.equal(s.carried, null); assert.deepEqual(s.stacks.filter((k) => k.itemId !== 'ladder'), []);   // the ladder is still in its yard
   for (const id in bought) if (id !== 'ladder') assert.ok(near(s.ledger[id].used + s.ledger[id].spent, bought[id], 1e-4), id);
@@ -214,11 +214,12 @@ test('a whole shed: conservation, the project card, unlocks; then taking it apar
     const ids = Object.keys(P.members).filter((id) => P.members[id].stage === st && P.members[id].built);
     if (ids.length) assert.ok(sim.commandNow('construction.dismantle', { structId: P.id, memberIds: ids }).ok, st);
   }
-  assert.deepEqual(SUP.imbalance(s), {}); assert.deepEqual(K.sheetImbalance(s), {});
+  assert.deepEqual(SUP.imbalance(s), {}); assert.deepEqual(K.sheetImbalance(s), {}); assert.deepEqual(K.stickImbalance(s), {});
   for (const id in bought) {
     const inStacks = s.stacks.filter((k) => k.itemId === id).reduce((n, k) => n + k.qty, 0);
     if (C.SITE_SUPPLY.includes(id)) assert.ok(near(s.ledger[id].spent, bought[id], 1e-4), id + ' is used up');
     else if (/^(osb|plywood|gypsum)_/.test(id)) assert.ok(near(inStacks, 0, 1e-4), id + ': cut sheets do not come back whole');
+    else if (/^lumber_/.test(id)) assert.ok(near(inStacks, 0, 1e-4) && Object.values(P.lines).some((l) => l.itemId === id && l.cut && l.cut.sticks.some((st) => st.open && st.left > 0)), id + ': sawn lumber comes back as offcuts, not whole sticks');
     else assert.ok(near(inStacks, bought[id], 1e-4), id + ' came back: ' + inStacks + ' of ' + bought[id]);
   }
 });
@@ -444,4 +445,21 @@ test('nails bought in the Supplier go to the inventory and construction draws fr
   assert.ok(r2.ok, r2.reason);
   assert.ok(sim.state.sys.stock.items[lack] < 20);
   assert.equal(JSON.stringify(SUP.imbalance(S)), imb0);          // drawing from the inventory neither conjures nor loses material
+});
+
+test('lumber is sawn from stock lengths: the studs line is whole 10 ft sticks, a doubled header is two pieces, offcuts are reused', () => {
+  const sim = start(), s = cs(sim), P = pr(sim);
+  const studs = P.lines['wall-frame|Studs2x4'];
+  assert.ok(studs.stick && K.cutList(P, 'wall-frame|Studs2x4').every((c) => [2.4, 3, 3.6, 4.2, 4.8].includes(c.lenM)));
+  assert.ok(near((studs.qty / 0.6) % 1, 0, 1e-6) || near((studs.qty / 0.6) % 1, 1, 1e-6), 'whole sticks: ' + studs.qty);
+  const hd = Object.keys(P.members).find((id) => P.members[id].kind === 'header');
+  assert.equal(P.members[hd].pcs, 2);
+  sim.commandNow('construction.setOption', { key: 'instant', value: true });
+  assert.ok(sim.commandNow('construction.order', { structId: shed.struct, stage: 'all' }).ok);
+  workAll(sim, { stopAfter: 'wall-frame', from: 'stacks' });
+  const cripples = Object.keys(P.members).filter((id) => P.members[id].kind === 'stud' && P.members[id].stage === 'wall-frame' && P.members[id].built && P.members[id].len < 1);
+  assert.ok(cripples.length > 0 && cripples.some((id) => P.members[id].cut === 'offcut'), 'short pieces come out of offcuts');
+  assert.deepEqual(K.stickImbalance(s), {}); assert.deepEqual(SUP.imbalance(s), {});
+  // what was bought for the wall frames is exactly what they took
+  for (const key of ['wall-frame|Studs2x4', 'wall-frame|Headers2x6']) assert.ok(near(P.lines[key].used, P.lines[key].qty, 1e-6), key);
 });

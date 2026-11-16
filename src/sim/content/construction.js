@@ -129,15 +129,19 @@ export const restAfter = (L, len, kerf = STICK.kerfM) => (L - len < 1e-6 ? 0 : M
 // stick (whose rest joins the offcuts). held: offcut lengths already on hand. Returns
 // { metres (of new sticks), sticks: [stock length, ...], assign: { [id]: { how: 'offcut' | 'new', stock } }, left: offcuts after, waste }
 export function packSticks(pieces, held = [], { stocks = STICK.stocksM, kerf = STICK.kerfM, minKeep = STICK.minKeepM } = {}) {
+  // own: the stock length of a stick this plan cuts new (its remainders are not on hand yet), or null for an offcut held now
   const pool = held.map((L) => ({ L, own: null })).sort((a, b) => a.L - b.L), assign = {}, sticks = [];
   let metres = 0, waste = 0;
   const order = pieces.map((p, i) => i).sort((i, j) => pieces[j].len - pieces[i].len || i - j);
   for (const i of order) {
-    const p = pieces[i], len = p.len;
-    let k = pool.findIndex((o) => o.L >= len - 1e-9), rest;
-    if (k >= 0) { const o = pool.splice(k, 1)[0]; rest = restAfter(o.L, len, kerf); waste += o.L - len - rest; assign[p.id] = { how: o.own === null ? 'offcut' : 'new', stock: o.own === null ? o.L : o.own, of: o.stick }; }
-    else { const L = stockFor(len, stocks); metres += L; sticks.push(L); rest = restAfter(L, len, kerf); waste += L - len - rest; assign[p.id] = { how: 'new', stock: L, of: sticks.length - 1 }; k = { own: L, stick: sticks.length - 1 }; }
-    if (rest >= minKeep) { pool.push({ L: Math.round(rest * 1e6) / 1e6, own: k && k.own !== undefined ? k.own : null, stick: k && k.stick }); pool.sort((a, b) => a.L - b.L); }
+    const p = pieces[i], len = p.len, k = pool.findIndex((o) => o.L >= len - 1e-9);
+    let src;
+    if (k >= 0) src = pool.splice(k, 1)[0];
+    else { const L = stockFor(len, stocks); metres += L; sticks.push(L); src = { L, own: L }; }
+    assign[p.id] = { how: src.own === null ? 'offcut' : 'new', stock: src.own === null ? src.L : src.own, from: src.L };
+    const rest = restAfter(src.L, len, kerf);
+    waste += src.L - len - rest;
+    if (rest >= minKeep) { pool.push({ L: Math.round(rest * 1e6) / 1e6, own: src.own }); pool.sort((a, b) => a.L - b.L); }
     else waste += rest;
   }
   return { metres: Math.round(metres * 1e6) / 1e6, sticks, assign, left: pool.map((o) => o.L), waste: Math.round(waste * 1e6) / 1e6 };

@@ -10,9 +10,14 @@ test('a 5 m stick-framed wall with a window: plates, studs at 0.4 m, kings, jack
   const out = [];
   F.wallMembers(out, { id: 'w', a: [0, 0], b: [5, 0], y0: 0, h: 2.84, out: 1, mat: 'timber', openings: [{ id: 'o', kind: 'window', offset: 2.1, width: 0.8, sill: 1.11, height: 0.78 }] }, { studs: 0.4, ins: 'fibreglass_batt', lining: 'boards' });
   const of = (k, t) => out.filter((m) => m.kind === k && (!t || m.type === t));
-  assert.equal(of('plate', 'bottom').length, 1); assert.equal(of('plate', 'top').length, 1); assert.equal(of('plate', 'cap').length, 1); assert.equal(of('plate', 'sill').length, 1);
-  assert.ok(of('plate').every((m) => near(m.section.b, 0.038) && near(m.section.d, 0.089)));
-  assert.ok(near(of('plate', 'top')[0].length, 5) && of('plate', 'cap')[0].stage === 'top-plates');
+  // 5 m is longer than the longest 2x4 (4.8 m, 16 ft): each plate is two pieces butted over a stud, and the cap plate's
+  // joint is 1.2 m from the top plate's, so the two lap
+  assert.equal(of('plate', 'bottom').length, 2); assert.equal(of('plate', 'top').length, 2); assert.equal(of('plate', 'cap').length, 2); assert.equal(of('plate', 'sill').length, 1);
+  assert.ok(of('plate').every((m) => near(m.section.b, 0.038) && near(m.section.d, 0.089) && m.length <= 4.8 + 1e-9));
+  assert.ok(near(of('plate', 'top').reduce((n, m) => n + m.length, 0), 5) && of('plate', 'cap')[0].stage === 'top-plates');
+  const joint = (t) => Math.min(...of('plate', t).map((m) => Math.max(m.a[0], m.b[0])));
+  assert.ok(near((joint('top') / 0.4) % 1, 0, 1e-6) || near((joint('top') / 0.4) % 1, 1, 1e-6), 'the top plate joins over a stud at ' + joint('top'));
+  assert.ok(Math.abs(joint('top') - joint('cap')) >= 1.2 - 1e-6, 'joints lap: ' + joint('top') + ' and ' + joint('cap'));
   // common studs every 0.4 m from the start, except where the window is: 0.4 .. 4.8 is 12 places, 2.0, 2.4 and 2.8 fall in the opening
   const xs = of('stud', 'stud').map((m) => m.a[0]).sort((a, b) => a - b);
   assert.deepEqual(xs.map((x) => Math.round(x * 10) / 10), [0.4, 0.8, 1.2, 1.6, 3.2, 3.6, 4.0, 4.4, 4.8]);
@@ -71,7 +76,9 @@ test('a gable roof: a ridge, rafters in pairs at 0.6 m, a deck, underlayment and
   const common = raf.filter((m) => m.parent === 'r.0' && m.type === 'common').map((m) => m.a[0]).sort((a, b) => a - b);
   for (let k = 2; k < common.length - 1; k++) assert.ok(near(common[k] - common[k - 1], 0.6, 1e-9));
   assert.ok(raf.every((m) => near(m.section.b, 0.038) && near(m.section.d, 0.14) && near(m.length, Math.hypot(run, rise + (rise / half) * ov), 1e-3)));
-  assert.equal(out.filter((m) => m.kind === 'beam' && m.type === 'ridge').length, 1);
+  // a 5.9 m ridge is two boards (no board is longer than 4.8 m) that join between rafters
+  const ridge = out.filter((m) => m.kind === 'beam' && m.type === 'ridge');
+  assert.equal(ridge.length, 2); assert.ok(near(ridge.reduce((n, m) => n + m.length, 0), 5.9, 1e-3) && ridge.every((m) => m.length <= 4.8 + 1e-9));
   assert.ok(out.some((m) => m.kind === 'membrane' && m.stage === 'roofing') && out.some((m) => m.kind === 'roofing' && m.material === 'slate'));
   const deck = out.filter((m) => m.type === 'roof-deck').reduce((a, m) => a + m.area, 0), cover = out.filter((m) => m.kind === 'roofing').reduce((a, m) => a + m.area, 0);
   assert.ok(near(deck, cover, 0.01));
@@ -101,4 +108,14 @@ test('the shopping list buys sheets by cutting them to fit, by the same rule as 
   const list = F.materialsList([{ id: 'a', stage: 'subfloor', kind: 'sheathing', type: 'subfloor', material: 'osb', area: 1, length: 1 }, { id: 'b', stage: 'subfloor', kind: 'sheathing', type: 'subfloor', material: 'osb', area: 1, length: 1 }, { id: 'c', stage: 'subfloor', kind: 'sheathing', type: 'subfloor', material: 'osb', area: 0.9, length: 1 }]);
   const ln = list.find((l) => l.itemId === 'osb_18');
   assert.equal(ln.qty, 1);                          // three small pieces cut from one sheet and its offcuts
+});
+
+test('lumber is bought in stock lengths: the shopping list is whole sticks, short pieces come out of offcuts', () => {
+  assert.equal(F.packSticks([2.606]), 3.0);                       // a stud for a 2.84 m wall is sawn from a 10 ft stick
+  assert.equal(F.packSticks([2.4, 2.4]), 4.8);                    // exact lengths: no cut, no waste
+  assert.equal(F.packSticks([1.2, 0.8, 0.3]), 2.4);          // three short pieces from one 8 ft stick
+  assert.equal(F.packSticks([5.0]), 5.4);                         // a long one takes an 18 ft stick
+  const lines = F.materialsList([{ id: 'a', kind: 'stud', type: 'stud', stage: 'wall-frame', section: { b: 0.038, d: 0.089 }, length: 2.606 }, { id: 'b', kind: 'stud', type: 'cripple', stage: 'wall-frame', section: { b: 0.038, d: 0.089 }, length: 0.35 }]);
+  const studs = lines.find((l) => /Studs/.test(l.key));
+  assert.equal(studs.qty, 3.0); assert.ok(near(studs.lengthM, 2.956, 1e-6));   // the cripple comes out of the stud's offcut
 });
