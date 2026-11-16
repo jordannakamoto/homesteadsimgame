@@ -2676,11 +2676,12 @@ function updatePlayer(dt) {
     const ahead = heightAt(P.x + (vx / sp) * 0.6, P.z + (vz / sp) * 0.6) - heightAt(P.x, P.z);
     if (ahead > 0.25) { const k = clamp(1 - (ahead - 0.25) * 1.3, 0.25, 1); vx *= k; vz *= k; sp *= k; }
   }
+  if (P.climbY != null) { vx = vz = 0; P.kvx = P.kvz = 0; }       // on a ladder (set by the construction add-on): it places the player
   P.x += (vx + P.kvx) * dt; P.z += (vz + P.kvz) * dt;
   P.kvx *= Math.exp(-7 * dt); P.kvz *= Math.exp(-7 * dt);
   pushOut(P, 0.28);
   const gh = window.__build ? window.__build.ground(P.x, P.z, P.y, heightAt(P.x, P.z)) : heightAt(P.x, P.z);   // built floors count as ground
-  const ty = Math.max(gh, waveHeight(P.x, P.z) - 0.95);
+  const ty = P.climbY != null ? P.climbY : Math.max(gh, waveHeight(P.x, P.z) - 0.95);
   if (P.air) {
     P.vy -= 21 * dt; P.y += P.vy * dt;
     if (P.y <= ty) { P.y = ty; P.air = false; P.vy = 0; P.jumps = 0; }

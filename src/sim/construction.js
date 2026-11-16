@@ -17,6 +17,7 @@ import * as SUP from './core/supply.js';
 import * as C from './content/construction.js';
 
 const { round6, cents } = SUP;
+const LADDER_KEY = C.LADDER.stage + '|ladder';
 const o_cut = (old, id) => (old && old.members[id] && old.members[id].cut) || null;
 export const CONSTRUCTION_CATALOG = Object.freeze({ ...C.ITEMS_CONSTRUCTION, ...ITEMS });
 const item = (id) => CONSTRUCTION_CATALOG[id];
@@ -28,6 +29,7 @@ export function initConstruction() {
     ...SUP.initSupply(),
     level: 'hands-on',
     progress: {},
+    ladder: null,                     // { x, z, yaw, topY, structId } when one is leaned on a wall
     offcuts: {},                      // { [itemId]: [area m2, ...] } pieces of sheet goods kept from cutting
     waste: {},                        // { [itemId]: area m2 } offcuts too small to keep
     unlocked: [...C.UNLOCKS[0].opens],
@@ -287,6 +289,28 @@ function supplies(s, pr, stage, builtAfter, check) {
   }
   return null;
 }
+function leanLadder(ctx, p) {
+  const s = ctx.s;
+  if (s.ladder) return { ok: false, reason: 'a ladder is already up' };
+  if (!s.carried || s.carried.itemId !== C.LADDER.itemId) return { ok: false, reason: 'no ladder in the arms' };
+  if (![p && p.x, p && p.z, p && p.yaw, p && p.topY].every(Number.isFinite)) return { ok: false, reason: 'bad place' };
+  SUP.useCarried(s, C.LADDER.itemId, 1);
+  s.ladder = { x: round6(p.x), z: round6(p.z), yaw: round6(p.yaw), topY: round6(p.topY), structId: p.structId === undefined ? null : p.structId };
+  ctx.emit('construction.ladder', { up: true });
+  return { ok: true, ladder: s.ladder };
+}
+function takeLadder(ctx) {
+  const s = ctx.s;
+  if (!s.ladder) return { ok: false, reason: 'no ladder up' };
+  if (s.carried) return { ok: false, reason: 'hands full' };
+  const L = s.ladder, it = item(C.LADDER.itemId);
+  SUP.giveBack(s, C.LADDER.itemId, 1, L.x, L.z, C.DELIVERY.layout);
+  const st = s.stacks.find((k) => k.itemId === C.LADDER.itemId);
+  SUP.takeFromStack(s, st.id, { massKgPerUnit: it.massKgPerUnit, limitKg: 1e9, want: 1, minQty: 1 });
+  s.ladder = null;
+  ctx.emit('construction.ladder', { up: false });
+  return { ok: true };
+}
 const dropOf = (s, pr) => s.dropPoint || { x: pr.x + pr.r + 2.5, z: pr.z };
 
 // ---------------------------------------------------------------- commands
@@ -336,6 +360,10 @@ function setPlan(ctx, p) {
   if (old) for (const k in old.raised) pr.raised[k] = true;
   if (!old) for (const st of C.STAGES) if (st.flat) for (const par of flatParents(pr, st.id)) if (frameReady(pr, st.id, par)) pr.raised[par] = true;
   retally(pr);
+  if (!pr.lines[LADDER_KEY] && pr.tally[C.LADDER.stage] && pr.tally['roof-frame'] && item(C.LADDER.itemId)) {   // a roof is worked from a ladder: it comes with the order
+    const o = old && old.lines[LADDER_KEY];
+    pr.lines[LADDER_KEY] = { stage: C.LADDER.stage, itemId: C.LADDER.itemId, qty: 1, unit: 'each', label: 'Ladder', why: C.LADDER.why, count: 1, supply: false, ordered: o ? o.ordered : 0, used: o ? o.used : 0 };
+  }
   for (const key in pr.lines) { const ln = pr.lines[key]; if (ln.supply) { const t = pr.tally[ln.stage]; ln.used = old && old.lines[key] ? Math.min(old.lines[key].used, ln.qty) : 0; if (!old && t && t[1]) ln.used = round6((ln.qty * t[0]) / t[1]); } }
   s.progress[p.structId] = pr;
   if (p.tutorial && s.tutorial.shed === null && !s.tutorial.done) s.tutorial.shed = p.structId;
@@ -525,6 +553,8 @@ export const constructionSystem = () => ({
     'construction.pickUp': pickUp,
     'construction.putDown': putDownCmd,
     'construction.install': install,
+    'construction.leanLadder': leanLadder,
+    'construction.takeLadder': takeLadder,
     'construction.raise': raise,
     'construction.dismantle': dismantle,
     'construction.setLevel': (c, p) => { if (!LEVELS.includes(p.level)) return { ok: false, reason: 'unknown level' }; const pr = c.s.progress[p.structId]; if (pr) pr.level = p.level; else c.s.level = p.level; return { ok: true }; },

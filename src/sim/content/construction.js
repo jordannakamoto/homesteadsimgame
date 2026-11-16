@@ -46,8 +46,12 @@ export const ITEMS_CONSTRUCTION = Object.freeze({
   door_prehung: { id: 'door_prehung', name: 'Exterior door, pre-hung', category: 'glass', unit: 'each', massKgPerUnit: 38, priceUsd: 180, dims: { lengthM: 2.03, widthM: 0.915, thicknessM: 0.045 }, blurb: 'Comes in its frame with hinges on: set it in the opening and fix it' },
   window_shed: { id: 'window_shed', name: 'Shed window 600 x 900', category: 'glass', unit: 'each', massKgPerUnit: 9, priceUsd: 95, dims: { lengthM: 0.9, widthM: 0.6, thicknessM: 0.08 }, blurb: 'A small fixed window in its own frame' },
   framing_nailer: { id: 'framing_nailer', name: 'Framing nail gun', category: 'tools_power', unit: 'each', massKgPerUnit: 3.8, priceUsd: 230, powerW: 1500, blurb: 'Drives a nail a second. Needs power' },
+  ladder: { id: 'ladder', name: 'Extension ladder', category: 'tools_hand', unit: 'each', massKgPerUnit: 11, priceUsd: 140, blurb: 'Lean it on a wall or the eave and climb it: anything higher than you can reach from the ground is worked from the ladder' },
   wheelbarrow: { id: 'wheelbarrow', name: 'Wheelbarrow', category: 'tools_hand', unit: 'each', massKgPerUnit: 18, priceUsd: 120, blurb: 'Carries three armfuls at once' },
 });
+
+// ---- the ladder: it comes with the shed order (a line of the top-plates stage), is leaned by hand and climbed
+export const LADDER = Object.freeze({ itemId: 'ladder', stage: 'top-plates', lenM: 3.9, footOutM: 0.95, reachUpM: 2.2, climbMps: 1.5, topBelowM: 0.9, why: 'Anything higher than you can reach from the ground is worked from a ladder: the top plates, the roof.' });
 
 // ---- how each item sits in a stack and in the arms: the page draws these forms.
 export function itemForm(itemId) {

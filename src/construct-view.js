@@ -239,6 +239,7 @@
   function describe(itemId, qty) {
     const it = CAT[itemId], f = C.itemForm(itemId), d = (it && it.dims) || {};
     const n = (per) => Math.max(1, Math.min(140, Math.ceil(qty / per - 0.02)));
+    if (itemId === 'ladder') return { form: 'lumber', w: 0.42, h: 0.05, l: 3.6, n: 1, color: COLORS.lumber };
     if (f === 'lumber') { const l = itemId === 'lumber_2x4' ? 2.6 : 3; return { form: 'lumber', w: Math.max(d.depthM, d.widthM), h: Math.min(d.depthM, d.widthM), l, n: n(l), color: COLORS.lumber }; }
     if (f === 'boards') return { form: 'lumber', w: 0.14, h: 0.019, l: 3, n: n(3 * 4), color: COLORS.boards, scaleH: 4 };
     if (f === 'sheet') return { form: 'sheet', w: 1.22, l: 2.44, h: Math.max(0.011, d.thicknessM || 0.011), n: n(1), color: /gypsum/.test(itemId) ? 0xd8d6cf : COLORS.osb };
@@ -349,10 +350,65 @@
     }
     dotLayers.set(id, new Set(by.keys()));
   }
+
+  // ---- the ladder: a few boxes, leaned by hand on a wall, climbed with E
+  const LAD = C.LADDER;
+  const ladMat = new T.MeshLambertMaterial({ color: 0xc9a468 }), ladGeo = new T.BoxGeometry(1, 1, 1), ladG = new T.Group(), ladParts = [];
+  for (let i = 0; i < 2 + 7; i++) { const b = new T.Mesh(ladGeo, ladMat); b.castShadow = true; ladG.add(b); ladParts.push(b); }
+  ladG.visible = false; G.scene.add(ladG);
+  const ladD = LAD.footOutM + 0.1;
+  const ladPts = (L) => { const fy = G.heightAt(L.x, L.z), cx = L.x + Math.sin(L.yaw) * ladD, cz = L.z + Math.cos(L.yaw) * ladD; return { fx: L.x, fy, fz: L.z, cx, cy: L.topY, cz, len: Math.hypot(ladD, L.topY - fy) }; };
+  function drawLadder() {
+    const L = S().ladder, sig = L ? [L.x, L.z, L.yaw, L.topY].join() : '';
+    if (sig === V.ladSig) return;
+    V.ladSig = sig; ladG.visible = !!L;
+    if (!L) return;
+    const q = ladPts(L);
+    ladG.position.set(q.fx, q.fy, q.fz); ladG.lookAt(q.cx, q.cy, q.cz);
+    for (let i = 0; i < 2; i++) { ladParts[i].scale.set(0.05, 0.05, q.len); ladParts[i].position.set(i ? 0.2 : -0.2, 0, q.len / 2); }
+    for (let i = 0; i < 7; i++) { ladParts[2 + i].scale.set(0.4, 0.03, 0.04); ladParts[2 + i].position.set(0, 0, ((i + 0.6) / 7.2) * q.len); }
+  }
+  // where a ladder would lean if the pointer says so: the raised wall nearest it, the foot a step out
+  function ladderSpot(pr) {
+    const g = geom(pr.id);
+    if (!g) return null;
+    const inv = g.matrix.clone().invert(), lp = new T.Vector3(reach.x, 0, reach.z).applyMatrix4(inv);
+    let best = null, bd = 3.2;
+    for (const [par, hw] of g.walls) {
+      if (!pr.raised[par]) continue;
+      const t = Math.max(-hw.len / 2, Math.min(hw.len / 2, (lp.x - hw.mid[0]) * hw.u[0] + (lp.z - hw.mid[1]) * hw.u[1])), qx = hw.mid[0] + hw.u[0] * t, qz = hw.mid[1] + hw.u[1] * t, d = Math.hypot(lp.x - qx, lp.z - qz);
+      if (d < bd) { bd = d; best = { hw, qx, qz }; }
+    }
+    if (!best) return null;
+    const { hw, qx, qz } = best, ix = hw.inward[0], iz = hw.inward[1];
+    const foot = new T.Vector3(qx - ix * ladD, 0, qz - iz * ladD).applyMatrix4(g.matrix), top = new T.Vector3(qx - ix * 0.1, hw.top, qz - iz * 0.1).applyMatrix4(g.matrix);
+    return { x: foot.x, z: foot.z, yaw: Math.atan2(top.x - foot.x, top.z - foot.z), topY: top.y, structId: pr.id };
+  }
+  function ladderCtx(strong) {
+    const L = S().ladder, P = G.player;
+    if (!L || V.climb) return null;
+    const hold = !!S().carried, ft = Math.hypot(P.x - L.x, P.z - L.z), rp = Math.hypot(reach.x - L.x, reach.z - L.z);
+    if (strong) return rp < 0.6 && ft < 1.3 ? { kind: 'ladder', act: 'climb' } : rp < 0.9 && ft < 4 && ft >= 1.3 && !hold ? { kind: 'ladder', act: 'take' } : null;
+    return ft < 1.0 ? { kind: 'ladder', act: 'climb' } : null;
+  }
+  function tickLadder(dt) {
+    const cl = V.climb, P = G.player, L = S().ladder;
+    if (!cl) { if (P.climbY != null) P.climbY = null; return; }
+    if (!L) { V.climb = null; P.climbY = null; return; }
+    const q = ladPts(L), top = Math.max(q.fy, q.cy - LAD.topBelowM);
+    if (G.keys.KeyW || G.keys.KeyA || G.keys.KeyS || G.keys.KeyD || G.keys.ArrowUp || G.keys.ArrowDown || G.keys.ArrowLeft || G.keys.ArrowRight || G.keys.Space) cl.dir = -1;
+    cl.t = Math.max(0, Math.min(1, cl.t + (cl.dir * dt * LAD.climbMps) / Math.max(1, q.len)));
+    if (cl.dir > 0 && cl.t >= 1) { cl.dir = 0; V.rev++; }
+    if (cl.t <= 0 && cl.dir < 0) { V.climb = null; P.climbY = null; V.rev++; return; }
+    const reachOut = Math.max(0, ladD - 0.38) * cl.t;
+    P.x = q.fx + Math.sin(L.yaw) * reachOut; P.z = q.fz + Math.cos(L.yaw) * reachOut;
+    P.climbY = q.fy + (top - q.fy) * cl.t;
+    P.faceTarget = L.yaw;
+  }
   // what the hands can do from here: every open piece within reach, and the one the pointer is on
   function aimHands(pr) {
     const pl = plan(pr.id), g = geom(pr.id), P = G.player, c = S().carried, st = V.structs.get(pr.id);
-    let best = null, bs = 1e9, want = null, ws = 1e9;
+    let best = null, bs = 1e9, want = null, ws = 1e9, high = false;
     const q = [];
     for (const mid of pl.inst) {
       const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid);
@@ -363,6 +419,9 @@
         const hw = C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null;
         worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB);
         if (segDist(P.x, P.z, wA, wB) > REACH) continue;
+        const dy = (wA.y + wB.y) / 2 - P.y;
+        if (dy > LAD.reachUpM) { high = true; continue; }        // out of reach from here: it is worked from a ladder
+        if (dy < -3.2) continue;
         if (reach.free) { score = 1e9; for (const t of [0.5, 0.15, 0.85]) { wM.lerpVectors(wA, wB, t).project(G.camera); score = Math.min(score, Math.hypot((wM.x * 0.5 + 0.5) * reach.w - reach.px, (-wM.y * 0.5 + 0.5) * reach.h - reach.py)); } }
         else score = segDist(reach.x, reach.z, wA, wB) * 100;
       }
@@ -373,6 +432,7 @@
     }
     if (best) return { kind: 'hands', id: pr.id, act: best.act, mid: best.mid, q };
     if (want) return { kind: 'hint', text: 'Needs ' + low(plain(lineOf(pr, want).label)), id: pr.id };
+    if (high) return { kind: 'hint', text: 'Too high: bring the ladder', id: pr.id };
     return null;
   }
   function finishInstall(id, mid, layer, kind, r) {
@@ -441,16 +501,23 @@
     const P = G.player, s = S(), c = s.carried;
     if (OFF[P.tool] || V.placing || s.options.sandbox) return null;
     if (V.auto) return { kind: 'stop', id: V.auto.id };
+    if (V.climb) { const pc = nearBuilding(P.x, P.z), h = pc && !pc.done && plan(pc.id) && !plan(pc.id).raise ? aimHands(pc) : null; return h && h.kind === 'hands' ? h : { kind: 'ladder', act: 'down' }; }
+    const strong = ladderCtx(true);
+    if (strong) return strong;
     const pr = nearBuilding(P.x, P.z), stack = carry.nearest(reach.x, reach.z, 1.0, pickable) || (V.wantItem && carry.nearest(P.x, P.z, 2.1, wantedStack)) || carry.nearest(P.x, P.z, 2.1, pickable) || carry.nearest(P.x, P.z, 1.3);
+    if (c && c.itemId === LAD.itemId && !s.ladder) {
+      if (pr) { const spot = ladderSpot(pr); if (spot) return { kind: 'lean', id: pr.id, spot }; return { kind: 'hint', text: 'Point at a wall: the ladder leans there', id: pr.id, drop: true }; }
+    }
     if (pr) {
       const pl = plan(pr.id);
       if (pl) {
         if (pl.raise) return { kind: 'raise', id: pr.id, parent: pl.raise };
         const mine = usable(pr, pl, c);
         if (pr.level === 'guided' || s.options.auto) { if (pl.inst.length && !(stack && !c && pr.level !== 'guided' && !mine.length && false)) return { kind: 'auto', id: pr.id, q: pl.inst, stage: pr.members[pl.inst[0]].stage, guided: pr.level === 'guided' }; }
-        else { const near = carry.nearest(reach.x, reach.z, 0.9, pickable), h = near && !(c && wantsHere(pr, pl, c)) ? null : aimHands(pr); if (h && (h.kind === 'hands' || !stack)) return h; }
+        else { const near = carry.nearest(reach.x, reach.z, 0.9, pickable), h = near && !(c && wantsHere(pr, pl, c)) ? null : aimHands(pr); if (h && (h.kind === 'hands' || !stack)) return h.kind === 'hands' ? h : ladderCtx(false) || h; }
       }
     }
+    { const soft = ladderCtx(false); if (soft) return soft; }
     if (stack) {
       if (C.SITE_SUPPLY.includes(stack.itemId)) return { kind: 'hint', text: plain(CAT[stack.itemId].name) + ': used up as you build' };
       if (!c) return { kind: 'pick', stack };
@@ -485,6 +552,12 @@
     else if (ctx.kind === 'swap') { putDown(); pickUp(ctx.stack); }
     else if (ctx.kind === 'auto') startAuto(ctx.id, ctx.stage, ctx.guided);
     else if (ctx.kind === 'stop') stopAuto();
+    else if (ctx.kind === 'lean') { const r = cmd('leanLadder', ctx.spot); if (r.ok) { sounds.play('thunk'); flash('Ladder up. Stand at its foot and press E to climb'); } else flash(r.reason); }
+    else if (ctx.kind === 'ladder') {
+      if (ctx.act === 'climb') { V.climb = { t: 0, dir: 1 }; V.rev++; }
+      else if (ctx.act === 'down' && V.climb) V.climb.dir = -1;
+      else if (ctx.act === 'take') { const r = cmd('takeLadder'); if (r.ok) sounds.play('thunk'); else flash('Put down what you are carrying first'); }
+    }
   }
   function startAuto(id, stage, guided) {
     const pr = S().progress[id];
@@ -668,6 +741,8 @@
       setPrompt('E', 'Stop · ' + (V.raise ? 'raising the wall' : w ? low(w.text) : A.wait > 0 ? 'fetching more' : low(C.STAGE[A.stage].name)), v ? v.built + ' of ' + v.total : '', V.raise ? Math.min(1, V.raise.p) : W.job ? W.progress() : null);
     } else if (ctx.kind === 'raise') setPrompt('E', 'Hold and push up to raise the wall', '', V.raise ? Math.min(1, V.raise.p) : 0);
     else if (ctx.kind === 'hands') { const w = workLabel(pr, ctx.mid), pm = pr.members[ctx.mid], b = V.blows[ctx.mid], of = b ? b.of : nailCount(geom(ctx.id), pm, ctx.mid); setPrompt('E', ctx.act === 'set' ? 'Set it in place: ' + low(w.text).replace(/s$/, '') + (pm.line && pr.lines[pm.line].sheet && !api.needsStock(S(), pr, ctx.mid) ? ' (from an offcut)' : '') : ctx.act === 'dig' ? 'Dig and level' : pm.kind === 'pier' ? 'Stamp it level' : 'Nail the ' + low(w.text).replace(/s$/, ''), ctx.act === 'set' ? w.count : (b ? b.n : 0) + ' of ' + of, ctx.act === 'set' ? null : (b ? b.n : 0) / of); }
+    else if (ctx.kind === 'lean') setPrompt('E', 'Lean the ladder here', '', null);
+    else if (ctx.kind === 'ladder') setPrompt('E', ctx.act === 'climb' ? 'Climb the ladder' : ctx.act === 'take' ? 'Take the ladder down' : 'Climb down', '', null);
     else if (ctx.kind === 'work') { const w = workLabel(pr, V.working ? V.working.memberId : ctx.q[0]); setPrompt('E', 'Hold to build: ' + low(w.text), w.count, W.job ? W.progress() : 0); }
     else if (ctx.kind === 'piece') setPrompt('', 'Click a glowing piece to set it', ctx.q.length + ' ready', W.job ? W.progress() : null);
     else if (ctx.kind === 'auto') setPrompt('E', (ctx.guided ? 'Build: ' : 'Work until done: ') + low(C.STAGE[ctx.stage].name), '', null);
@@ -707,6 +782,7 @@
     if (!ln) return { ...out, line: 'Stand on the plan and hold <kbd>E</kbd> (or the mouse button) to dig it level.', target: at };
     const looseOne = pl.inst.find((id) => pr.members[id].need > 0 && pr.members[id].got >= pr.members[id].need - 1e-6);
     if (looseOne) return { ...out, line: 'A piece is set but loose. ' + (pr.members[looseOne].kind === 'pier' ? 'Point at it and click to stamp it level.' : 'Click each bright dot to drive a nail, or hold and drag across them.'), target: at };
+    if (['top-plates', 'roof-frame', 'roof-deck', 'roofing'].includes(v.id) && !s.ladder && !V.climb && !s.options.auto && pr.level !== 'guided' && ((s.carried && s.carried.itemId === LAD.itemId) || s.stacks.some((k) => k.itemId === LAD.itemId))) return { ...out, line: 'This is out of reach from the ground. Carry the ladder to a wall and click to lean it, then stand at its foot and press <kbd>E</kbd>.', target: at };
     const c = s.carried;
     if (c && c.itemId === ln.itemId) return { ...out, line: 'Carry the ' + stackName(c.itemId) + ' to the ' + low(pr.name) + '. Point at a glowing place: click sets a piece, then click its bright dots to nail it. Hold to keep going.', target: at };
     const stack = homeStack(ln.itemId) || s.stacks.find((k) => k.itemId === ln.itemId);
@@ -981,6 +1057,7 @@
       }
     }
     if (V.fTap) { V.fTap = false; if (!OFF[G.player.tool]) press(V.ctx); }
+    tickLadder(dt); drawLadder();
     if (!s.options.sandbox) tickWork(dt);
     glow(V.ctx);
     {

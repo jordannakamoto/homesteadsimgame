@@ -67,7 +67,7 @@ test('supply mechanism with a fixture that is not a homestead: orders, stacks, c
 
 test('every line of the shed is priced, and the items the catalog lacked have real figures', () => {
   const sim = start(), P = pr(sim);
-  assert.equal(Object.keys(P.lines).length, shed.materialsList.length);
+  assert.equal(Object.keys(P.lines).length, shed.materialsList.length + 1);   // and the ladder
   for (const k in P.lines) { const it = K.CONSTRUCTION_CATALOG[P.lines[k].itemId]; assert.ok(it && it.priceUsd > 0 && it.massKgPerUnit > 0, k); }
   for (const id of ['pier_block', 'door_prehung', 'window_shed', 'roof_underlayment']) assert.ok(ITEMS_CONSTRUCTION[id] && !ITEMS[id]);
   assert.equal(P.lines['foundation|pierblock'].itemId, 'pier_block');
@@ -76,7 +76,7 @@ test('every line of the shed is priced, and the items the catalog lacked have re
   assert.ok(v.costUsd > 800 && v.costUsd < 3200, 'the shed costs $' + v.costUsd);
   assert.equal(v.total, Object.keys(P.members).length);
   // every member with something to buy has a share, and the shares add up to the line
-  for (const k in P.lines) { const ln = P.lines[k]; if (ln.supply || ln.sheet) continue; const sum = Object.values(P.members).filter((m) => m.line === k).reduce((n, m) => n + m.need, 0); assert.ok(near(sum, ln.qty, 1e-5), k + ' ' + sum + ' ' + ln.qty); }
+  for (const k in P.lines) { const ln = P.lines[k]; if (ln.supply || ln.sheet || ln.itemId === 'ladder') continue; const sum = Object.values(P.members).filter((m) => m.line === k).reduce((n, m) => n + m.need, 0); assert.ok(near(sum, ln.qty, 1e-5), k + ' ' + sum + ' ' + ln.qty); }
 });
 
 test('ordering the foundation stage debits the right money and delivers the right stacks', () => {
@@ -195,8 +195,8 @@ test('a whole shed: conservation, the project card, unlocks; then taking it apar
   assert.ok(trips > 30 && trips < 110, trips + ' trips');
   assert.deepEqual(SUP.imbalance(s), {});
   // everything bought is in the building: the stacks are empty and the hands are free
-  assert.equal(s.carried, null); assert.equal(s.stacks.length, 0, JSON.stringify(s.stacks));
-  for (const id in bought) assert.ok(near(s.ledger[id].used + s.ledger[id].spent, bought[id], 1e-4), id);
+  assert.equal(s.carried, null); assert.deepEqual(s.stacks.filter((k) => k.itemId !== 'ladder'), []);   // the ladder is still in its yard
+  for (const id in bought) if (id !== 'ladder') assert.ok(near(s.ledger[id].used + s.ledger[id].spent, bought[id], 1e-4), id);
   assert.equal(sim.state.sys.stock.projects.find((p) => p.id === 'first-shed').status, 'done');
   assert.ok(s.unlocked.includes('plan:cabin') && s.unlocked.includes('plan:draw')); assert.equal(K.tutorialStep(s), 14);
   // taking apart goes in reverse
@@ -227,7 +227,7 @@ test('guided building takes straight from the stacks and conserves too', () => {
   const sim = start(); sim.commandNow('construction.setOption', { key: 'instant', value: true });
   sim.commandNow('construction.order', { structId: shed.struct, stage: 'all' });
   assert.equal(workAll(sim, { from: 'stacks' }), 0);
-  assert.ok(pr(sim).done); assert.deepEqual(SUP.imbalance(cs(sim)), {}); assert.equal(cs(sim).stacks.length, 0);
+  assert.ok(pr(sim).done); assert.deepEqual(SUP.imbalance(cs(sim)), {}); assert.deepEqual(cs(sim).stacks.filter((k) => k.itemId !== 'ladder'), []);
 });
 
 test('deterministic, and saves and loads mid-build with a load in the arms', () => {
@@ -346,4 +346,21 @@ test('a sheet cut from a stack by Guided and from the stacks with nothing in the
   assert.equal(s.progress[78].lines['subfloor|sub'].qty, 1);
   for (const id of ['p0', 'p1', 'p2', 'p3', 'p4']) assert.ok(sim.commandNow('construction.install', { structId: 78, memberIds: [id], from: 'stacks' }).ok, id);
   assert.ok(s.progress[78].done); assert.deepEqual(K.sheetImbalance(s), {}); assert.equal(s.stacks.length, 0);
+});
+
+test('the ladder comes with the shed order; lean it, take it down, and the books balance', () => {
+  const sim = start(); sim.commandNow('construction.setOption', { key: 'instant', value: true });
+  const s = cs(sim), P = pr(sim);
+  assert.ok(P.lines['top-plates|ladder'] && P.lines['top-plates|ladder'].itemId === 'ladder' && C.ITEMS_CONSTRUCTION.ladder.priceUsd > 0);
+  assert.ok(sim.commandNow('construction.order', { structId: shed.struct, stage: 'all' }).ok);
+  assert.ok(s.stacks.some((k) => k.itemId === 'ladder'));
+  assert.equal(sim.commandNow('construction.leanLadder', { x: 1, z: 1, yaw: 0, topY: 3 }).reason, 'no ladder in the arms');
+  assert.ok(sim.commandNow('construction.pickUp', { stackId: s.stacks.find((k) => k.itemId === 'ladder').id }).ok);
+  assert.ok(s.carried && s.carried.itemId === 'ladder');
+  const r = sim.commandNow('construction.leanLadder', { x: 41, z: 38, yaw: 1.5, topY: 3.4, structId: shed.struct });
+  assert.ok(r.ok); assert.equal(s.carried, null); assert.equal(s.ladder.topY, 3.4); assert.deepEqual(SUP.imbalance(s), {});
+  assert.equal(sim.commandNow('construction.leanLadder', { x: 1, z: 1, yaw: 0, topY: 3 }).ok, false);
+  assert.ok(sim.commandNow('construction.takeLadder', {}).ok);
+  assert.equal(s.ladder, null); assert.equal(s.carried.itemId, 'ladder'); assert.deepEqual(SUP.imbalance(s), {});
+  const back = JSON.parse(JSON.stringify(s)); assert.equal(back.ladder, null);
 });
