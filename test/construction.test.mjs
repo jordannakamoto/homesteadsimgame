@@ -463,3 +463,30 @@ test('lumber is sawn from stock lengths: the studs line is whole 10 ft sticks, a
   // what was bought for the wall frames is exactly what they took
   for (const key of ['wall-frame|Studs2x4', 'wall-frame|Headers2x6']) assert.ok(near(P.lines[key].used, P.lines[key].qty, 1e-6), key);
 });
+
+test('a ladder is always on site for work at height, even when the build is ordered a stage at a time after the site is dug', () => {
+  const sim = start(), s = cs(sim);
+  sim.commandNow('construction.setOption', { key: 'instant', value: true });
+  workAll(sim, { stopAfter: 'site', from: 'stacks' });          // the site is dug before anything is ordered: its ladder line is never bought
+  for (const st of ['foundation', 'floor-frame', 'subfloor', 'wall-frame']) { sim.commandNow('construction.order', { structId: shed.struct, stage: st }); workAll(sim, { stopAfter: st, from: 'stacks' }); }
+  sim.runTicks(2);
+  assert.ok(s.stacks.some((k) => k.itemId === 'ladder') || s.ladder || (s.carried && s.carried.itemId === 'ladder'), 'a ladder for the top plates');
+  assert.deepEqual(SUP.imbalance(s), {});
+  // lost: it comes back
+  s.stacks = s.stacks.filter((k) => k.itemId !== 'ladder'); s.ledger.ladder.spent += 1;
+  sim.runTicks(2);
+  assert.ok(s.stacks.some((k) => k.itemId === 'ladder'));
+});
+
+test('scaffolding is rented by the day, set up along a wall, taken down, and collected when the days run out', () => {
+  const sim = start(), s = cs(sim), m0 = money(sim);
+  const r = sim.commandNow('construction.rentScaffold', { structId: shed.struct, days: 2 });
+  assert.ok(r.ok); assert.ok(near(m0 - money(sim), 2 * C.SCAFFOLD.usdPerDay)); assert.ok(s.scaffold && !s.scaffold.set);
+  assert.equal(sim.commandNow('construction.setScaffold', { x: 1, z: 2, yaw: 0, len: 9, deckY: 2 }).reason, 'bad place');
+  assert.ok(sim.commandNow('construction.setScaffold', { x: 41, z: 38, yaw: 0, len: 2.6, deckY: 2.1, structId: shed.struct }).ok);
+  assert.equal(sim.commandNow('construction.setScaffold', { x: 41, z: 38, yaw: 0, len: 2.6, deckY: 2.1 }).reason, 'already up');
+  assert.ok(sim.commandNow('construction.strikeScaffold', { x: 44, z: 40 }).ok); assert.equal(s.scaffold.set, null);
+  assert.ok(sim.commandNow('construction.rentScaffold', { days: 1 }).ok);       // one more day
+  sim.runTicks(Math.ceil((3 * 86400) / 60) + 2);
+  assert.equal(s.scaffold, null);
+});

@@ -11,6 +11,8 @@ Write anything here, as roughly as you like. It is read before each wave starts.
 
 ## Answered
 
+- **16 Nov, owner, on hands-on construction.** Planned walls looked yellow, not like blueprints; ladders were sometimes not delivered; you could be trapped inside walls with no door; scaffolding wanted; a saw for cuts; real stock lengths instead of stretched studs; framing is the focus. Done on branch `construction-fixes`: see `docs/PLAYTEST.md`, "Construction fixes".
+
 - **15 Nov, owner.** Plumbing and electrical "aren't quite there yet" for Nintendo-level intuition plus real-world gestures; construction still feels like the Sims build mode when the aim is laying things by hand so the player learns how to build in real life. Done: "The hands rule" added to `docs/V1_PLAN.md`; the construction agent redirected to setting and nailing pieces by hand; hook-ups redesigned to be done by hand in `docs/CONSTRUCTION.md`.
 - **15 Nov, owner.** The starting plot needs water for the watering can: a spigot or a well. Done: every new world now has a dug well, a hand pump and a spigot near the arrival point.
 

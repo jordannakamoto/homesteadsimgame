@@ -367,3 +367,35 @@ Water, electricity and room heat are merged and tested headlessly. They become p
 - The cabin has not been played through; drawn plans become buildings in progress but walls that are not stick-framed are not handled.
 - The nail gun and the wheelbarrow are in the content but not yet in the store.
 - After the roof is on, the view from above hides the walls being sheathed.
+
+## Construction fixes: blueprints, ladders, never trapped, stock lumber, the saw, scaffolding (branch `construction-fixes`)
+
+**What the owner reported, and what changed**
+
+- **"Walls aren't blueprints, they're like yellow."** The shell of an unstarted plan was the finished building's own colours (tan timber) at 30 % opacity, and the pieces within reach glowed amber. Now a plan is a blueprint: cyan-blue fill, a grid line every 0.4 m across (the stud spacing) and 0.6 m up, and a bright rim. Planned members are a stronger blue; the pieces within reach glow pale cyan.
+- **"Sometimes we don't get ladders."** The ladder was a line of the Site stage and only existed for plans with a roof. Ordering a stage at a time after digging the site (the site needs no material) never bought it, and a walls-only plan never had one. Now any order for walls, top plates or roof brings the ladder if it has not come, and a building with work up high and no ladder anywhere (leaned, carried, stacked or on its way) gets one at its stacks.
+- **"Stuck inside if there is no door."** Bare stud framing (frame up, no sheathing yet) is no wall to the player: you step through between the studs, as framers do. In a room with no doorway at all, pushing into a wall for about two-thirds of a second climbs you out over it. A room with a door is never climbed out of.
+- **Scaffolding.** "Rent scaffolding, $35 a day" in the Build panel once a building has work up high. The bundle lands by the stacks: point at it and press E to take it, point at a raised wall and press again to set a bay up along it. Walk into the ladder at its end to climb (no key), walk the plank, walk back off the ladder end to come down. From the plank the top plates, rafter tails and roof edge are in reach. Point at its foot from a step away to take it down. Collected when the days run out ("One more day" and "Send it back" in the panel).
+- **The saw** (owner: "I asked for a saw for cuts"). It had never been built. Now every piece of lumber is sawn to length as it goes in: the stick is laid across the sawhorses, the saw strokes through with sawdust, the offcut drops (kept ones pile up beside the horses, short ends are scrap) and the piece arcs to its place before it swings in. The sawhorses are set up at the edge of the work when the lumber arrives; within 4.5 m of them cuts are quick, anywhere else you kneel and cut on the deck, slower. Point at them and press E to carry them somewhere else. A circular saw with power cuts in one pass.
+- **Stock lengths** (owner: "we need longer studs for long sections instead of auto-expanding them"). Lumber is bought as whole sticks of 8, 10, 12, 14, 16, 18 or 20 ft. A run longer than 16 ft is two pieces butted over a stud (plates), a joist (rim joists), a pier (beams) or between rafters (ridge); the cap plate's joints fall 1.2 m from the top plate's so they lap. Each line keeps a cut list: each piece from the shortest offcut that holds it, else a new stick; cripples and short pieces come out of offcuts. The Build panel shows lumber as sticks ("26 x 10 ft"). Studs for these 2.84 m walls are 2.61 m, sawn from 10 ft sticks.
+
+**Framing technique added**
+
+- **Layout marks.** Once a wall's plates are down on the deck, every stud, king and jack position is marked on their up-facing edge: a pencil line each side and a cross. The studs go in on the marks.
+- Already in and kept: walls framed flat on the deck and tilted up, a temporary diagonal brace on each raised wall until the sheathing is on.
+
+**Try this**
+
+1. Place the tool shed: the plan is a blue blueprint, not tan.
+2. Order the foundation only, then each stage as it comes: the ladder still turns up for the top plates.
+3. Frame a wall: plates first, then watch the layout marks appear and each stud get sawn at the horses and arc onto its mark.
+4. With four bare walls up, walk out through one. Draw a doorless room in Plan mode, build it, stand inside and push into a wall.
+5. Rent scaffolding, set it along a wall, walk into its ladder, and put the top plates on from the plank.
+
+**Known gaps**
+
+- The Supplier (U) still sells lumber by the metre; the Build panel's order is in sticks.
+- The cut always happens near you: at the horses when they are close, else on the deck. The character does not walk to the horses.
+- Scaffold bays are one bay long (2.6 m); a long wall takes moving it. The frames are not solid to walk into.
+- A save from before this branch keeps any lumber line it had started by the metre; new lines are bought in sticks.
+- `test/shed.e2e.mjs` was already failing on `main` before this branch (the wheelbarrow's prompt takes the pointer near the stacks); `test/construction-tools.smoke.mjs` covers the new tools in the page.
