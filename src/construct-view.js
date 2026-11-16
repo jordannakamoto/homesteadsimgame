@@ -131,11 +131,19 @@
       cmd('setPlan', api.planFromPieces(st.id, pieces, B.materialsList(st.id), extra));
       if (pend) V.pendingPlan = null;
       V.planVer.set(st.id, st.ver);
+      settleStrays(st.id);
       reconcile(st.id);
     }
     for (const id of Object.keys(s.progress)) if (!V.structs.has(+id)) { cmd('forget', { structId: +id }); asm.remove(+id); V.fresh.delete(+id); }
   }
   // the simulation says what is built; build mode draws it (all but a frame still lying on the deck, and pieces just put in)
+  // an unbuilt place with no geometry to aim at can never be set by hand: finish it with its stage
+  function settleStrays(id) {
+    const pr = S().progress[id], g = geom(id);
+    if (!pr || !g) return;
+    const lost = Object.keys(pr.members).filter((k) => { const m = pr.members[k]; return !m.built && m.kind !== 'site' && !g.byId.has(k); });
+    if (lost.length) cmd('settle', { structId: id, memberIds: lost });
+  }
   function reconcile(id) {
     const pr = S().progress[id], mw = B.membersOf(id);
     if (!pr || !mw) return;
@@ -667,8 +675,10 @@
     if (n) redraw(id);
   }
   // Beacons: with 5 or fewer places left in a stage, each gets a tall thin pulsing marker, and the hint line says where.
-  const beaconMat = new T.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.55, depthWrite: false, fog: false }),
-    beaconMesh = new T.InstancedMesh(new T.BoxGeometry(1, 1, 1), beaconMat, 6);
+  // one small calm arrow, bobbing 0.5 m above each open place of the current stage (at most five), gone the moment the place is built
+  const beaconMat = new T.MeshBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0.85, depthWrite: false, fog: false }),
+    beaconMesh = new T.InstancedMesh(new T.ConeGeometry(0.11, 0.26, 10).rotateX(Math.PI), beaconMat, 6),
+    bm4 = new T.Matrix4(), bq = new T.Quaternion(), bs = new T.Vector3(1, 1, 1), bp = new T.Vector3();
   beaconMesh.frustumCulled = false; beaconMesh.visible = false; beaconMesh.renderOrder = 6; beaconMesh.count = 0;
   G.scene.add(beaconMesh);
   V.aimed = new Set(); V.beacons = []; V.beaconT = 0;
@@ -706,12 +716,18 @@
       const L = pr && !pr.done && !S().options.sandbox && !OFF[P.tool] && !V.placing ? leftInStage(pr) : null;
       V.beacons = L ? L.list.map((b) => ({ ...b, id: pr.id })) : [];
       V.left = L;
-      beaconMesh.count = V.beacons.length;
-      V.beacons.forEach((b, i) => { const top = b.top + 4, y0 = Math.max(G.heightAt(b.x, b.z), b.y - 0.3); beaconMesh.setMatrixAt(i, new T.Matrix4().makeScale(0.07, top - y0, 0.07).setPosition(b.x, (top + y0) / 2, b.z)); });
-      beaconMesh.instanceMatrix.needsUpdate = true;
     }
-    beaconMesh.visible = V.beacons.length > 0;
-    if (beaconMesh.visible) beaconMat.opacity = 0.4 + 0.25 * Math.sin(performance.now() / 260);
+    // a place that is done loses its arrow at once, not at the next refresh
+    let n = 0;
+    const t = performance.now() / 1000;
+    for (const b of V.beacons) {
+      const pm = S().progress[b.id] && S().progress[b.id].members[b.mid];
+      if (!pm || pm.built) continue;
+      bp.set(b.x, b.y + 0.5 + 0.07 * Math.sin(t * 3 + n), b.z);
+      beaconMesh.setMatrixAt(n++, bm4.compose(bp, bq, bs));
+    }
+    beaconMesh.count = n; beaconMesh.visible = n > 0;
+    if (n) beaconMesh.instanceMatrix.needsUpdate = true;
   }
   // clicking a beacon finishes a place that never had a valid aim: a stage never waits on what cannot be reached or seen
   function beaconAt(cx, cy) {
@@ -719,7 +735,7 @@
     let best = null, bd = 30;
     for (const b of V.beacons) {
       if (V.aimed.has(b.mid)) continue;
-      const a = wA.set(b.x, b.y, b.z).project(G.camera), t = wB.set(b.x, b.top + 4, b.z).project(G.camera);
+      const a = wA.set(b.x, b.y, b.z).project(G.camera), t = wB.set(b.x, b.y + 0.5, b.z).project(G.camera);
       if (a.z > 1 || t.z > 1) continue;
       const ax = (a.x * 0.5 + 0.5) * r.width + r.left, ay = (-a.y * 0.5 + 0.5) * r.height + r.top, tx = (t.x * 0.5 + 0.5) * r.width + r.left, ty = (-t.y * 0.5 + 0.5) * r.height + r.top;
       const dx = tx - ax, dy = ty - ay, L2 = dx * dx + dy * dy, k = L2 > 1 ? Math.max(0, Math.min(1, ((cx - ax) * dx + (cy - ay) * dy) / L2)) : 0, d = Math.hypot(cx - ax - dx * k, cy - ay - dy * k);

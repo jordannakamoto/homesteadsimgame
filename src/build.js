@@ -7029,15 +7029,23 @@
     }
     return out;
   }
-  // What of a structure is finished (drawn as it always was), what is still only a plan (drawn as a ghost of the
-  // finished thing) and what is part way (its members are drawn one by one).
-  function memberState(S) {
-    const mem = membersOf(S),
-      ids = plannable(S),
+  // every id the structure now has: new ones start as plans while construction is on, gone ones leave the plan.
+  // Also run when the add-on asks which structures there are, so a structure drawn this frame is never missed.
+  function syncKnown(S) {
+    if (S.knownVer === S.ver && S.knownMode === B.cmode && S.known) return;
+    const ids = plannable(S),
       all = new Set(ids);
     if (S.known && B.cmode) for (const id of ids) S.known.has(id) || S.plan.add(id);
     S.known = all;
     for (const id of [...S.plan]) all.has(id) || S.plan.delete(id);
+    S.knownVer = S.ver;
+    S.knownMode = B.cmode;
+  }
+  // What of a structure is finished (drawn as it always was), what is still only a plan (drawn as a ghost of the
+  // finished thing) and what is part way (its members are drawn one by one).
+  function memberState(S) {
+    const mem = membersOf(S);
+    syncKnown(S);
     S.sitePlanned = mem.list.some((m) => m.kind === "site" && S.plan.has(m.id));
     const st = { all: !S.plan.size, mem, finRun: null, finFloor: null, finRoof: null, cur: null, built: null, shell: null };
     S.ghostW = null;
@@ -8402,7 +8410,7 @@
     plans: planList,
     placePlan,
     // for the construction add-on: where each building stands and how much of it is still only planned
-    structs: () => B.structs.map((S) => ({ id: S.id, ver: S.ver, x: S.cx, z: S.cz, r: S.rad, y0: S.y0, yaw: S.yaw || 0, level: S.level, planned: S.plan.size, sitePlanned: !!S.sitePlanned, found: S.found })),
+    structs: () => B.structs.map((S) => (syncKnown(S), { id: S.id, ver: S.ver, x: S.cx, z: S.cz, r: S.rad, y0: S.y0, yaw: S.yaw || 0, level: S.level, planned: S.plan.size, sitePlanned: !!S.sitePlanned, found: S.found })),
     // every member of one building in its own metres, with the matrix that puts them in the world
     membersOf(structId) {
       const S = B.structs.find((O) => O.id === structId);

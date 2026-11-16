@@ -238,7 +238,7 @@ export const carriedMassKg = (s) => (s.carried ? s.carried.qty * item(s.carried.
 // Build mode's pieces and shopping lines for one building, as the payload of construction.setPlan.
 export function planFromPieces(structId, pieces, lines, extra = {}) {
   const members = [];
-  for (const p of pieces) if (p.struct === structId && p.stage && p.parent && C.STAGE[p.stage]) members.push({ id: p.id, stage: p.stage, kind: p.kind, parent: p.parent, built: p.built !== false });
+  for (const p of pieces) if (p.struct === structId && p.stage && p.parent && C.STAGE[p.stage]) members.push({ id: p.id, stage: p.stage, kind: p.kind, parent: p.parent, built: p.built !== false || p.area === 0 || (p.length === 0 && p.area === undefined && !p.volume) });
   return { structId, members, lines: lines.map((l) => ({ key: l.key, stage: l.stage, itemId: l.itemId, qty: l.qty, unit: l.unit, label: l.label, why: l.why, count: l.count, members: l.members })), ...extra };
 }
 
@@ -591,6 +591,15 @@ export const constructionSystem = () => ({
     'construction.leanLadder': leanLadder,
     'construction.takeLadder': takeLadder,
     'construction.raise': raise,
+    // places that can never be reached or seen (no geometry, no size) are finished with their stage, never left as stray markers
+    'construction.settle': (c, p) => {
+      const pr = c.s.progress[p && p.structId];
+      if (!pr) return { ok: false, reason: 'unknown building' };
+      const done = [];
+      for (const id of p.memberIds || []) { const m = pr.members[id]; if (!m || m.built || m.kind === 'site') continue; m.got = m.need; m.built = 1; pr.tally[m.stage][0]++; done.push(id); }
+      if (done.length) refresh(c, c.s, pr);
+      return { ok: done.length > 0, settled: done };
+    },
     'construction.dismantle': dismantle,
     'construction.setLevel': (c, p) => { if (!LEVELS.includes(p.level)) return { ok: false, reason: 'unknown level' }; const pr = c.s.progress[p.structId]; if (pr) pr.level = p.level; else c.s.level = p.level; return { ok: true }; },
     'construction.setOption': (c, p) => { if (!p || !(p.key in c.s.options)) return { ok: false, reason: 'unknown option' }; c.s.options[p.key] = !!p.value; if (p.key === 'sandbox') c.emit('construction.sandbox', { on: !!p.value }); return { ok: true }; },
