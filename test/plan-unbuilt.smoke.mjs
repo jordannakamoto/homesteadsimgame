@@ -5,7 +5,7 @@
 // Software rendering manages about a frame a second here, so drawing is switched off and frames are stepped
 // by hand; a real frame is drawn at the end of each part.
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
-const file = 'file://' + 'process.cwd() + '/dist/index.html';
+const file = 'file://' + process.cwd() + '/dist/index.html';
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] });
 const errors = [], fails = [];
 const check = (name, ok, info = '') => { console.log((ok ? 'ok   ' : 'FAIL ') + name + (info ? '  ' + info : '')); if (!ok) fails.push(name); };
