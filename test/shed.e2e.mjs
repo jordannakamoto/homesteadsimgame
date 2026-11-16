@@ -39,8 +39,9 @@ async function open(fresh = true) {
   const shot = async (name) => { if (!SHOTS) return; await G(() => { window.__step(1, 1 / 60); window.__draw(__game.scene, __game.camera); }); await page.waitForTimeout(400); await page.screenshot({ path: SHOTS + '/' + name + '.png', timeout: 120000 }); };
   const state0 = () => G(() => {
     const c = __construct, s = __game.sim.state.sys.construction, pr = c.current() || Object.values(s.progress)[0] || null, a = c.nextAction(), x = c.context(), st = pr && __build.structs().find((q) => q.id === pr.id);
+    const np0 = c.nextPiece(); if (np0 && np0.sx !== undefined) { np0.sx = Math.min(1240, Math.max(290, np0.sx)); np0.sy = Math.min(560, Math.max(128, np0.sy)); }   // keep the pointer on the view, clear of the panels
     return { stage: pr && pr.stage, done: !!(pr && pr.done), built: pr ? Object.values(pr.members).filter((m) => m.built).length : 0, total: pr ? Object.keys(pr.members).length : 0,
-      raised: pr ? Object.keys(pr.raised).length : 0, raise: pr ? c.plan(pr.id).raise : null, np: c.nextPiece(), px: __game.player.x, pz: __game.player.z, target: a && a.target, line: a && a.line, ctx: x && x.kind, carried: s.carried,
+      raised: pr ? Object.keys(pr.raised).length : 0, raise: pr ? c.plan(pr.id).raise : null, np: np0, px: __game.player.x, pz: __game.player.z, target: a && a.target, line: a && a.line, ctx: x && x.kind, carried: s.carried,
       shed: st && { x: st.x, z: st.z, r: c.geom(pr.id).reach + 0.7 }, money: __game.sim.state.sys.stock.money, stacks: s.stacks.length, deliveries: s.deliveries.length, auto: !!c.V.auto,
       prompt: document.getElementById('cvprompt').hidden ? '' : document.getElementById('cvprompt').innerText.replace(/\s+/g, ' '),
       banner: document.getElementById('cvbanner').hidden ? '' : document.getElementById('cvbanner').innerText.replace(/\s+/g, ' '), played: window.__played };
@@ -121,6 +122,18 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
   // carry and work, stage by stage
   const taken = {};
   let trips = 0, reloaded = false, lastStage = '';
+  // a standing wall is in the way: go round the building, one way and then the other, as a player would
+  const around = async (t, range) => {
+    const c = await G(() => { const b = __build.structs()[0], P = __game.player; return { x: b.x, z: b.z, px: P.x, pz: P.z }; });
+    // from indoors the way out is the door opening, in the front wall
+    if (Math.abs(c.px - c.x) < 1.5 && Math.abs(c.pz - c.z) < 1.8) { await walkTo({ x: c.x + 0.7, z: c.z + 0.5 }, 0.3); await walkTo({ x: c.x + 0.7, z: c.z + 3.6 }, 0.5); if (await walkTo(t, range)) return true; c.px = c.x + 0.7; c.pz = c.z + 3.6; }
+    for (const sign of [1, -1]) {
+      const dx = t.x - c.px, dz = t.z - c.pz, L = Math.hypot(dx, dz) || 1, R = 4.6;
+      await walkTo({ x: c.x - sign * (dz / L) * R, z: c.z + sign * (dx / L) * R }, 0.7);
+      if (await walkTo(t, range)) return true;
+    }
+    return false;
+  };
   const byHand = async (until) => {
     for (let guard = 0; guard < 600; guard++) {
       s = await state();
@@ -142,13 +155,7 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
       if (s.np) {
         // by hand: walk to the piece, point at it, hold the mouse button: it is set in place, then nailed blow by blow
         const pointAt = async (np) => { await page.mouse.move(np.sx, np.sy); await tick(1); return (await state()).ctx === 'hands'; };
-        if (!(await walkTo(s.np, 1.2)) && !(await pointAt((await state()).np || s.np))) {
-          // a standing wall is in the way: go round the building and come at the piece from its own side
-          const c = await G(() => { const b = __build.structs()[0]; return { x: b.x, z: b.z }; }), dx = s.np.x - c.x, dz = s.np.z - c.z, L = Math.hypot(dx, dz) || 1, R = 4.2;
-          await walkTo({ x: c.x - (dz / L) * R, z: c.z + (dx / L) * R }, 0.6);
-          await walkTo({ x: c.x + (dx / L) * R, z: c.z + (dz / L) * R }, 0.6);
-          await walkTo(s.np, 1.2);
-        }
+        if (!(await walkTo(s.np, 1.2)) && !(await pointAt((await state()).np || s.np))) await around(s.np, 1.2);
         if (s.carried && s.carried.itemId === 'lumber_2x4' && !taken.carry) { taken.carry = 1; check('the load is on the shoulder and walking is a little slower', await G(() => __construct.carry.loadForm === 'lumber' && __game.player.carryK > 0.7 && __game.player.carryK < 1)); await shot('05-carrying-studs'); }
         for (let k = 0; k < 40; k++) {
           const q = await state(); note(q);
@@ -180,7 +187,7 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
         continue;
       }
       if (!s.target) { await tick(20); continue; }
-      await walkTo(s.target, 1.0);
+      if (!(await walkTo(s.target, 1.0))) await around(s.target, 1.0);
       const sp = await G((t) => { const v = new __game.THREE.Vector3(t.x, __game.heightAt(t.x, t.z) + 0.2, t.z).project(__game.camera); return { x: (v.x * 0.5 + 0.5) * __construct.reach.w, y: (-v.y * 0.5 + 0.5) * __construct.reach.h }; }, s.target);
       await page.mouse.move(sp.x, sp.y); await tick(2);
       const c = await state();

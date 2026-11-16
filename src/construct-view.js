@@ -634,7 +634,7 @@
     const looseOne = pl.inst.find((id) => pr.members[id].need > 0 && pr.members[id].got >= pr.members[id].need - 1e-6);
     if (looseOne) return { ...out, line: 'A piece is set but loose. Point at it and press <kbd>F</kbd> or click to ' + (pr.members[looseOne].kind === 'pier' ? 'stamp it level' : 'nail it') + '.', target: at };
     const c = s.carried;
-    if (c && c.itemId === ln.itemId) return { ...out, line: 'Carry the ' + stackName(c.itemId) + ' to the ' + low(pr.name) + '. Point at a glowing place and click (or <kbd>F</kbd>) to set a piece, then again to nail it. Holding keeps going.', target: at };
+    if (c && c.itemId === ln.itemId) return { ...out, line: 'Carry the ' + stackName(c.itemId) + ' to the ' + low(pr.name) + '. Point at a glowing place: click sets a piece, click again nails it. Hold to keep going.', target: at };
     const stack = homeStack(ln.itemId) || s.stacks.find((k) => k.itemId === ln.itemId);
     return { ...out, line: (s.options.auto ? 'Press <kbd>F</kbd> by the ' + low(pr.name) + ' to work until done, or pick' : 'Pick') + ' up ' + stackName(ln.itemId) + ' at the stacks: point at them and click, or <kbd>F</kbd>.', target: s.options.auto ? at : stack ? { x: stack.x, z: stack.z, y: 1.9 } : null, item: ln.itemId };
   }
