@@ -67,7 +67,7 @@ Later: fruit trees and berries (years to bear), herbs, onions, cabbage, cover cr
 
 ## The loop, day by day
 
-1. **Make a bed.** Draw it on the ground. Turning sod is the first work: by spade, or a rented tiller. Raised beds are a build-mode piece filled with bought or home-made soil.
+1. **Make a bed.** Till it: pull the hoe through the grass, stroke by stroke. The bed is whatever you have worked. Raised beds are a build-mode piece filled with bought or home-made soil.
 2. **Read the soil.** Squeeze test for texture and a simple test kit for pH and nutrients. The bed shows its state as colour and words, not a table.
 3. **Sow.** Pick a seed packet; the ghost shows spacing; drag to sow a row or fill a block. The packet says when to sow in plain words for your climate ("after the last frost, usually mid May here").
 4. **Tend.** Water when the soil looks dry (it visibly darkens when wet and pales as it dries). Hoe weeds. Stake tomatoes, hill potatoes. A morning walk round the garden takes a few minutes.
@@ -95,24 +95,22 @@ Later: fruit trees and berries (years to bear), herbs, onions, cabbage, cover cr
 - Frost is forecast the evening before by the almanac ("clear and still tonight: frost likely"), and a row cover is one action.
 - The first radishes are nearly impossible to fail.
 
-## Controls: revised after the first playtest (15 Nov)
+## Controls (as built: gardening with your hands)
 
-The owner's verdict on the first playable garden: "not really intuitive on a game level like Stardew Valley, and not realistic feeling with the controls and interactions." The first version was a palette of verbs and dragging over the ground from above, which is a design tool, not gardening. The owner's choices for the rebuild:
+Press **5** to take up the garden tools. The camera comes in close, you walk as usual (WASD, a little slower), and a small hotbar shows what you can hold: Hands, Hoe, Can, each seed packet you own, Straw and Compost when you have them, and the Seed box (where packets, straw and compost are bought). Number keys, the wheel or a click change what is held, and it is shown in the character's hands. The mouse aims a marker on the ground, clamped to arm's reach (1.5 m, the faint circle); the character turns to face it. Right-drag turns the view. Esc or 5 puts the tools away.
 
-- **In the body, mouse-aimed.** You hold a hoe, a can, a seed packet or nothing, chosen from a hotbar. The mouse picks a spot within arm's reach of the character. No acting on the ground from the sky.
-- **Hands-on gestures with Nintendo simplicity.** "A combination of hands-on gestures and simplified Nintendo style, like how in Zelda you hold items over your head." You make the motion yourself, but each motion is one clear, forgiving gesture with big readable feedback, chunky held items and friendly poses. Pulling a vegetable free ends with it held overhead for a beat. Things are carried visibly: the hoe over the shoulder, a squash overhead.
-- **You actually till.** "Rather than holding on an area to prepare it, we should actually have to till it." There is no marking out a bed and holding to dig. You pull the hoe through the ground stroke by stroke, and the bed is whatever ground you have tilled.
+One gesture per job, each forgiving about direction and length:
 
-| Job | Gesture |
-|---|---|
-| Till and weed | Press where the blade bites, pull back toward you, release. The strip turns over. |
-| Water | Lift the can over the spot and tip it; tip further to pour faster; sweep along the row. Refill at water. |
-| Sow | Click to drop a seed where you aim; drag along the row to drop them at the packet's spacing. |
-| Harvest roots | Press on the plant and pull up; it resists, then comes free and is held overhead. |
-| Harvest leaves and fruit | A short cut for leaves; click each ripe fruit. |
-| Mulch and compost | Hold and sweep over the bed. |
+- **Hoe: till and weed.** Press the blade into the ground and drag it toward you; every 30 cm square the blade passes is worked once per stroke. Grass becomes rough, clod-strewn sod on the first stroke and fine, furrowed, darker soil on the second (three with only the shovel). There is no bed tool: a bed is the ground you have worked. Under the hood `garden.till` grows the touching bed or starts one, and joins beds that come to touch. On worked soil the same pull cuts weeds.
+- **Can: tip to pour.** Hold the button to lift the can over the marker, drag the mouse down (or hold the right button) to tip it; the further it tips the faster it pours. Walk or sweep along the row while it pours. Fill it at a water fixture (hold the can at a tap or tank; at a hand pump, each drag down and release is a stroke of the handle and draws real water with `water.draw`), or dip it in a pond. A labelled temporary "Fill it here" button appears only when the can is empty and the world has neither.
+- **Seed: drop along the row.** Faint dots show the packet's spacing on the worked soil around the marker. Click to drop a pinch into a square; hold and drag to sow square after square as your hand passes. Seed takes only in fully worked soil, and the name tag says why otherwise.
+- **Hands: harvest and tend.** Root crops: press on the plant and pull upward. Leaf and grain crops: a sideways swipe, which carries on along the row while held. Fruiting crops: click to pick, the plant stays. The first harvest of each crop, and any haul over 1.5 kg, is held up overhead for a beat with its name; later ones get a quick lift. Shift with the same motion pulls out an unripe plant; spent or dead plants come out without it.
+- **Straw and compost:** hold and sweep the bucket over the bed.
+- **Look.** Pointing at a plant shows a name tag with one plain line. **F** opens the full card for the plant or bed under the marker; **N** opens the almanac.
 
-The same hands (hotbar, reach, gestures, carrying) are meant to serve construction and other work later.
+Touch: one finger aims and drags the same gestures near the character; two fingers turn the view; the hotbar is tapped.
+
+The generic part is `src/engine/hands.js` (`window.__hands`): the hotbar, reach-limited aiming, the gesture measures (pull, travel, tip, lift, sideways), posing the held object, holding something overhead, and `pick(objects)` for targets that are not ground. It knows nothing of gardening; `src/garden-view.js` supplies the slots and handlers through `__hands.open()`.
 
 ## The first garden: a guided project
 

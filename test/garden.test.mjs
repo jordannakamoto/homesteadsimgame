@@ -402,3 +402,34 @@ test('determinism, save round trip, and old saves without a garden', () => {
 
 
 
+
+// ---------------------------------------------------------------- tilling: a bed is the ground you have worked
+test('tilling with the hoe makes and grows beds, joins them, and only worked soil takes seed', () => {
+  const sim = createGameSim({ seed: 7 });
+  const g = () => sim.state.sys.garden;
+  sim.state.sys.stock.money = 500;
+  cmd(sim, 'stock.buy', { id: 'hoe', qty: 1 }); cmd(sim, 'stock.buy', { id: 'seed_radish', qty: 1 });
+  const strip = (z) => [[0, z], [1, z], [2, z], [3, z]];
+  let r = cmd(sim, 'garden.till', { cells: strip(0) });
+  assert.equal(r.ok, true); assert.equal(r.broke, 4);
+  let beds = Object.values(g().field.groups);
+  assert.equal(beds.length, 1, 'one stroke is one bed'); assert.equal(beds[0].nx * beds[0].nz, 4);
+  assert.equal(cmd(sim, 'garden.sow', { crop: 'radish', bed: beds[0].id, cells: [0] }).ok, false, 'half-worked sod takes no seed');
+  r = cmd(sim, 'garden.till', { cells: strip(0) });
+  assert.equal(r.worked, 4, 'a second stroke of the hoe finishes it');
+  assert.equal(cmd(sim, 'garden.sow', { crop: 'radish', bed: beds[0].id, cells: [0] }).ok, true);
+  // a strip beside it grows the same bed, and the plant keeps its place
+  cmd(sim, 'garden.till', { cells: strip(-1) }); cmd(sim, 'garden.till', { cells: strip(-1) });
+  beds = Object.values(g().field.groups);
+  assert.equal(beds.length, 1); assert.equal(beds[0].nz, 2);
+  const p = Object.values(g().plants)[0];
+  assert.equal(beds[0].cells[p.cell].pl, p.id); assert.equal(p.cell, beds[0].nx);
+  // a patch apart is its own bed until the gap is worked, then they are one
+  cmd(sim, 'garden.till', { cells: [[6, 0], [6, -1]] });
+  assert.equal(Object.values(g().field.groups).length, 2);
+  cmd(sim, 'garden.till', { cells: [[4, 0], [5, 0]] });
+  beds = Object.values(g().field.groups);
+  assert.equal(beds.length, 1, 'beds that touch are joined'); assert.equal(beds[0].nx, 7);
+  assert.equal(beds[0].cells[Object.values(g().plants)[0].cell].pl, p.id);
+  sim.runDays(2);   // and the soil and growth steps run over the grown bed
+});

@@ -476,9 +476,9 @@ function sow(ctx, p = {}) {
   const spots = [];
   const taken = new Set();
   for (const { group: g, index: i } of list) {
-    if (span === 1) { if (!g.cells[i].pl) spots.push([g, i, [i]]); continue; }
+    if (span === 1) { if (!g.cells[i].pl && tilled(g.cells[i])) spots.push([g, i, [i]]); continue; }
     const ix = i % g.nx, iz = Math.floor(i / g.nx), cells = block(g, ix, iz, span);
-    if (!cells || cells.some((j) => g.cells[j].pl || taken.has(g.id + ':' + j))) continue;
+    if (!cells || cells.some((j) => g.cells[j].pl || !tilled(g.cells[j]) || taken.has(g.id + ':' + j))) continue;
     for (const j of cells) taken.add(g.id + ':' + j);
     spots.push([g, i, cells]);
   }
@@ -529,8 +529,9 @@ function water(ctx, p = {}) {
 function refill(ctx, p = {}) {
   const s = ensure(ctx);
   if (stockOf(ctx) && !hasTool(ctx, 'watering_can')) return fail('You need a watering can.');
-  s.can.litres = CAN_L;
-  return { ok: true, litres: CAN_L };
+  // with p.litres: water actually drawn from a source goes into the can (up to the brim); without: a free fill
+  s.can.litres = p.litres != null ? r3(Math.min(CAN_L, s.can.litres + Math.max(0, +p.litres || 0))) : CAN_L;
+  return { ok: true, litres: s.can.litres };
 }
 function hoe(ctx, p = {}) {
   const s = ensure(ctx);
@@ -540,6 +541,103 @@ function hoe(ctx, p = {}) {
   for (const { group, index } of list) { const c = group.cells[index]; cleared += c.weed; c.on += c.wN; c.wN = 0; c.weed = 0; }
   ctx.emit('garden.hoe', { cells: list.length, cleared });
   return { ok: true, cells: list.length, clearedM2: r3(cleared * CELL_AREA) };
+}
+// Work the ground with a hoe, stroke by stroke. p.cells = [[gx, gz]...] names 30 cm squares of the world grid
+// (square gx covers x from gx * 0.3 m). Ground outside every bed becomes bed: the nearest touching bed grows to
+// take it in (beds that come to touch are joined), or a new bed starts. A square is sod until it has been worked
+// enough (cell.till climbs to 1; beds made before tilling existed have no `till` and count as worked). Weeds on
+// worked squares are cut, as garden.hoe does.
+const tilled = (c) => c.till === undefined || c.till >= 1;
+function regroup(s, g, x0g, z0g, nx, nz) {
+  const ox = Math.round(g.x0 / CELL_M) - x0g, oz = Math.round(g.z0 / CELL_M) - z0g, soil = SOILS[g.soil] || SOILS[DEFAULT_SOIL];
+  const map = (i) => (Math.floor(i / g.nx) + oz) * nx + (i % g.nx) + ox;
+  const cells = new Array(nx * nz);
+  for (let i = 0; i < g.cells.length; i++) cells[map(i)] = g.cells[i];
+  for (let i = 0; i < cells.length; i++) if (!cells[i]) { const c = newCell(soil); c.till = 0; cells[i] = c; s.totals.nInit += cellN(c) * CELL_AREA; }
+  for (const pl of Object.values(s.plants)) if (pl.bed === g.id) { pl.cell = map(pl.cell); if (pl.cells) pl.cells = pl.cells.map(map); }
+  for (const q of s.pending) for (const pr of q.cells) if (pr[0] === g.id) pr[1] = map(pr[1]);
+  g.x0 = Math.round(x0g * CELL_M * 1e6) / 1e6; g.z0 = Math.round(z0g * CELL_M * 1e6) / 1e6; g.nx = nx; g.nz = nz; g.cells = cells;
+  plantsChanged(s);
+}
+const gridRect = (g) => { const x = Math.round(g.x0 / CELL_M), z = Math.round(g.z0 / CELL_M); return [x, z, x + g.nx, z + g.nz]; };
+const MAX_BED_CELLS = 2500;
+// can bed g take the grid rectangle [x0, z0, x1, z1) without running into another bed (other than `except`)?
+function roomFor(s, g, r, except) {
+  if ((r[2] - r[0]) * (r[3] - r[1]) > MAX_BED_CELLS) return false;
+  for (const o of Object.values(s.field.groups)) {
+    if (o === g || o === except) continue;
+    const q = gridRect(o);
+    if (r[0] < q[2] && q[0] < r[2] && r[1] < q[3] && q[1] < r[3]) return false;
+  }
+  return true;
+}
+function till(ctx, p = {}) {
+  const s = ensure(ctx);
+  const hoeing = hasTool(ctx, 'hoe');
+  if (stockOf(ctx) && !hoeing && !hasTool(ctx, 'spade') && !hasTool(ctx, 'shovel')) return fail('You need a hoe to work the ground.');
+  const list = Array.isArray(p.cells) ? p.cells : [];
+  const step = clamp(+p.amount || (hoeing ? 0.5 : 0.34), 0.05, 1);
+  let broke = 0, worked = 0, cleared = 0, fresh = 0;
+  for (const pt of list) {
+    const gx = Math.round(pt[0]), gz = Math.round(pt[1]);
+    if (!Number.isFinite(gx) || !Number.isFinite(gz)) continue;
+    const x = (gx + 0.5) * CELL_M, z = (gz + 0.5) * CELL_M;
+    let at = cellAt(s.field, x, z);
+    if (!at) {
+      // a bed this square touches (edge to edge) grows to take it in
+      for (const g of Object.values(s.field.groups)) {
+        const r = gridRect(g);
+        if (gx < r[0] - 1 || gx > r[2] || gz < r[1] - 1 || gz > r[3]) continue;
+        if ((gx < r[0] || gx >= r[2]) && (gz < r[1] || gz >= r[3])) continue;   // only a corner touches
+        const n = [Math.min(r[0], gx), Math.min(r[1], gz), Math.max(r[2], gx + 1), Math.max(r[3], gz + 1)];
+        if (!roomFor(s, g, n)) continue;
+        regroup(s, g, n[0], n[1], n[2] - n[0], n[3] - n[1]);
+        break;
+      }
+      at = cellAt(s.field, x, z);
+      if (!at) {
+        const g = addGroup(s.field, { x0: gx * CELL_M, z0: gz * CELL_M, nx: 1, nz: 1 }, () => { const c = newCell(SOILS[DEFAULT_SOIL]); c.till = 0; return c; }, { maxCells: MAX_BED_CELLS });
+        if (g.error) continue;
+        g.x0 = Math.round(gx * CELL_M * 1e6) / 1e6; g.z0 = Math.round(gz * CELL_M * 1e6) / 1e6;
+        g.soil = DEFAULT_SOIL; g.shade = 0; g.cover = false; g.madeT = ctx.t;
+        s.totals.nInit += cellN(g.cells[0]) * CELL_AREA; fresh++;
+        plantsChanged(s);
+        at = cellAt(s.field, x, z);
+        if (!at) continue;
+      }
+    }
+    const c = at.group.cells[at.index];
+    if (!tilled(c)) {
+      if (!c.till) broke++;
+      c.till = Math.min(1, r3((c.till || 0) + step));
+      if (c.till >= 1) { delete c.till; worked++; c.on += c.wN; c.wN = 0; c.weed = 0.01; }
+    } else if (!c.pl || p.amongPlants !== false) { cleared += c.weed; c.on += c.wN; c.wN = 0; c.weed = 0; }
+  }
+  // beds of the same soil that now touch along an edge become one, when the joined rectangle is free
+  for (let again = true, guard = 0; again && guard < 8; guard++) {
+    again = false;
+    const beds = Object.values(s.field.groups);
+    join: for (const a of beds) for (const b of beds) {
+      if (a === b || a.soil !== b.soil || a.cover !== b.cover) continue;
+      const ra = gridRect(a), rb = gridRect(b);
+      const ox = Math.min(ra[2], rb[2]) - Math.max(ra[0], rb[0]), oz = Math.min(ra[3], rb[3]) - Math.max(ra[1], rb[1]);
+      if (!((ox === 0 && oz > 0) || (oz === 0 && ox > 0))) continue;
+      const n = [Math.min(ra[0], rb[0]), Math.min(ra[1], rb[1]), Math.max(ra[2], rb[2]), Math.max(ra[3], rb[3])];
+      if (!roomFor(s, a, n, b)) continue;
+      regroup(s, a, n[0], n[1], n[2] - n[0], n[3] - n[1]);
+      // b's squares replace the fresh sod laid under them
+      const dx = rb[0] - n[0], dz = rb[1] - n[1], map = (i) => (Math.floor(i / b.nx) + dz) * a.nx + (i % b.nx) + dx;
+      for (let i = 0; i < b.cells.length; i++) { s.totals.nInit -= cellN(a.cells[map(i)]) * CELL_AREA; a.cells[map(i)] = b.cells[i]; }
+      for (const pl of Object.values(s.plants)) if (pl.bed === b.id) { pl.bed = a.id; pl.cell = map(pl.cell); if (pl.cells) pl.cells = pl.cells.map(map); }
+      for (const q of s.pending) for (const pr of q.cells) if (pr[0] === b.id) { pr[0] = a.id; pr[1] = map(pr[1]); }
+      a.shade = Math.max(a.shade || 0, b.shade || 0);
+      removeGroup(s.field, b.id); plantsChanged(s);
+      again = true; break join;
+    }
+  }
+  if (fresh || broke) ctx.emit('garden.bed', { made: true });
+  ctx.emit('garden.hoe', { cells: list.length, cleared });
+  return { ok: true, cells: list.length, broke, worked, clearedM2: r3(cleared * CELL_AREA) };
 }
 function useStock(ctx, id, qty) {
   if (!stockOf(ctx)) return qty;
@@ -680,7 +778,7 @@ export const garden = {
   },
   commands: {
     'garden.makeBed': makeBed, 'garden.removeBed': removeBed, 'garden.sow': sow, 'garden.water': water, 'garden.refill': refill,
-    'garden.hoe': hoe, 'garden.mulch': mulch, 'garden.amend': amend, 'garden.harvest': harvest, 'garden.pull': pull,
+    'garden.hoe': hoe, 'garden.till': till, 'garden.mulch': mulch, 'garden.amend': amend, 'garden.harvest': harvest, 'garden.pull': pull,
     'garden.cover': cover, 'garden.setShade': setShade,
   },
 };
@@ -714,7 +812,7 @@ export function cellInfo(state, bedId, index) {
   const g = state.sys ? state.sys.garden : state, bed = g.field.groups[bedId];
   if (!bed) return null;
   const c = bed.cells[index], soil = soilOf(bed), b = bucket(soil);
-  return { water: topFraction(c, b), seed: seedFraction(c, b), deep: clamp((c.d - b.wp2) / (b.fc2 - b.wp2), 0, 1.2), n: c.n, p: c.p, k: c.k, ph: c.ph, om: omPct(c, soil), weed: c.weed, mulch: Math.min(1, c.mulch / MULCH.fullCoverLPerM2), plant: c.pl, hist: c.hist };
+  return { water: topFraction(c, b), seed: seedFraction(c, b), deep: clamp((c.d - b.wp2) / (b.fc2 - b.wp2), 0, 1.2), n: c.n, p: c.p, k: c.k, ph: c.ph, om: omPct(c, soil), weed: c.weed, till: c.till === undefined ? 1 : c.till, mulch: Math.min(1, c.mulch / MULCH.fullCoverLPerM2), plant: c.pl, hist: c.hist };
 }
 // A bed in a few words.
 export function bedSummary(state, bedId) {

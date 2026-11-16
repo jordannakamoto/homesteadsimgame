@@ -1426,7 +1426,7 @@ const pm = {};
       if (arm === pm.armR) {
         const haft = mk(0.04, 0.04, 0.46, 0x7a5230); haft.position.set(0, -0.5, 0.16);
         const head = mk(0.035, 0.17, 0.11, 0x9aa2a8); head.position.set(0, -0.545, 0.34);
-        arm.add(haft, head);
+        arm.add(haft, head); pm.hatchet = [haft, head];
       }
       continue;
     }
@@ -2655,6 +2655,7 @@ function updatePlayer(dt) {
       if (P.atk) sp *= 0.4;
       if (P.parry) sp *= 0.5;
       vx = mx * sp; vz = mz * sp;
+      if (P.pace) { vx *= P.pace; vz *= P.pace; sp *= P.pace; }   // an add-on working with the hands slows the walk
       if (!P.atk && !P.aiming && !P.charging && !P.parry) P.faceTarget = Math.atan2(mx, mz);
     }
     P.mvx = vx; P.mvz = vz;
@@ -2762,6 +2763,7 @@ function updatePlayer(dt) {
   }
   if (P.parry) { P.parry.t += dt; if (P.parry.t >= 0.45) P.parry = null; }
   mouse.click = Math.max(0, mouse.click - dt);
+  if (P.faceHold != null) P.faceTarget = P.faceHold;     // the hands add-on turns the character to what it is reaching for
   let df = P.faceTarget - P.face;
   df = Math.atan2(Math.sin(df), Math.cos(df));
   P.face += df * (1 - Math.exp(-(P.aiming || (P.atk && P.atk.kind === 'swing') ? 30 : 16) * dt));
@@ -2797,6 +2799,7 @@ function updatePlayer(dt) {
   pm.armR.position.z = -0.22 * pullR;
   pm.body.rotation.set(lean, twist, 0);
   pm.bow.visible = P.aiming;
+  if (window.__game.handPose) window.__game.handPose(pm, P, dt);   // src/engine/hands.js poses the arms and what they hold
   if (trails.cur) {
     trails.t -= dt;
     trails.cur.material.opacity = clamp(trails.t / 0.14, 0, 1) * trails.peak;
@@ -2967,6 +2970,7 @@ window.__game = {
   camera, scene, setTool, fade: addWind, fadeR: U.fadeR, burst, editGet: getDelta, editSet: setDelta, baseHeight, chunkSize: CS, treeKinds: TREE, refreshLock: lockUi, forestAt,
   light: SKY, noise: fbm, palette: PAL, quality: () => quality.level, composer: () => composer, treeGeo, pineLite: pineLiteGeo, markStockDirty: () => { hudDirty = true; },
   garden: gardenRead,
+  handPose: null, sea: SEA,
 };
 window.__game.cooking = createCookingView(window.__game);
 requestAnimationFrame(frame);
