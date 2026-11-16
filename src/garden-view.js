@@ -660,9 +660,9 @@
     act.n += batch.length;
     const y = G.heightAt(x1, z1);
     G.burst(x1, y + 0.12, z1, 5 + batch.length * 2, 0x5a4230, 1.5, 2.6, 0.075, 0.6);       // clods
-    if (res.broke) G.burst(x1, y + 0.12, z1, 4, 0x5e8a3a, 1.4, 2.2, 0.06, 0.6);             // torn sod
+    if (res.broke) { G.burst(x1, y + 0.12, z1, 6, 0x5e8a3a, 1.6, 2.6, 0.07, 0.7); G.cam.shake = Math.min(G.cam.shake + 0.05, 0.3); }             // torn sod
     if (res.clearedM2 > 0.004) G.burst(x1, y + 0.1, z1, 5, 0x6f9a3a, 1.2, 1.8, 0.05, 0.5);  // cut weeds
-    if (res.worked) tipEvent('bed');
+    if (res.worked) { G.burst(x1, y + 0.1, z1, 6, 0x3a2c22, 1.0, 1.6, 0.06, 0.5); tipEvent('bed'); }   // fine dark crumbs when the soil comes right
   }
   const HOE_W = 0.2;
 
@@ -752,7 +752,7 @@
     if (id === 'hoe') {
       if (!canDig()) { act.kind = ''; return say('You need a hoe first.'); }
       strokeCells.clear();
-      G.cam.shake = Math.max(G.cam.shake, 0.12);
+      G.cam.shake = Math.min(G.cam.shake + 0.12, 0.4); G.juice.hitStop = 0.045;   // the blade bites, like the axe landing
       hoeAlong(a.x, a.z, a.x, a.z);
     } else if (id === 'can') {
       if (!owns('watering_can')) { act.kind = ''; return say('You need a watering can first.'); }
