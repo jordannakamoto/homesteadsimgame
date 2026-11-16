@@ -48,7 +48,7 @@
     const mw = B.membersOf(id);
     if (!mw) return null;
     g = { ver: st.ver, byId: new Map(), matrix: mw.matrix.clone(), rank: new Map(), walls: new Map(), cx: 0, cz: 0 };
-    for (const m of mw.list) g.byId.set(m.id, m);
+    for (const m of mw.list) { g.byId.set(m.id, m); if (m.kind === 'membrane' && m.type === 'housewrap') (V.sheetMids || (V.sheetMids = new Set())).add(m.id); }
     // doors and windows are pieces of their own: stand a box in for each so that it can glow and be set
     const inv = g.matrix.clone().invert(), v = new T.Vector3();
     for (const p of B.pieces()) {
@@ -294,7 +294,7 @@
     const m = geom(id) && geom(id).byId.get(mid);
     if (m && m.kind === 'cladding' && m.out) asm.lift(id, layer, mid, h * 0.5, m.out); else asm.lift(id, layer, mid, h);
   }
-  const proud = (mid) => { const sw = V.swingIn; if (sw && sw.mid === mid) return 0.045 + 0.55 * (1 - Math.min(1, sw.t / 0.2)) ** 2; const b = V.blows[mid]; return 0.045 * (1 - (b ? b.n / b.of : 0)); };
+  const proud = (mid) => { if (V.sheetMids && V.sheetMids.has(mid)) return 0; const sw = V.swingIn; if (sw && sw.mid === mid) return 0.045 + 0.55 * (1 - Math.min(1, sw.t / 0.2)) ** 2; const b = V.blows[mid]; return 0.045 * (1 - (b ? b.n / b.of : 0)); };
   const qTmp = new T.Quaternion(), aTmp = new T.Vector3(), wA = new T.Vector3(), wB = new T.Vector3(), wM = new T.Vector3();
   // a point of a member in the world, wherever its frame lies just now
   function worldPt(g, hw, p, out) {
@@ -475,9 +475,9 @@
     if (!m0 || !ln0 || m0.type === 'ridge' || pm0.kind === 'door' || pm0.kind === 'window' || pm0.kind === 'site') return [];
     if (pm0.kind === 'rafter' && !Object.values(pr.members).some((q) => q.kind === 'rafter' && q.built)) return [];
     const mx = (m0.a[0] + m0.b[0]) / 2, mz = (m0.a[2] + m0.b[2]) / 2, out = [];
-    if (pm0.kind === 'cladding') {       // one gesture lays the whole course (the rest of it, past an opening), and as many courses above as the multiplier says
+    if (pm0.kind === 'cladding' || V.sheetMids && V.sheetMids.has(ctx.mid)) {       // one gesture lays the whole course (the rest of it, past an opening), and as many courses above as the multiplier says
       const rows = [];
-      for (const mid of ctx.q || []) { const pm = pr.members[mid], m = g.byId.get(mid); if (mid !== ctx.mid && pm && m && pm.kind === 'cladding' && pm.parent === pm0.parent && pm.type === pm0.type && pm.need - pm.got > 1e-6 && m.row >= m0.row && m.row <= m0.row + n) rows.push({ mid, k: m.row * 100 + Math.abs((m.a[0] + m.b[0]) / 2 - mx) + Math.abs((m.a[2] + m.b[2]) / 2 - mz) }); }
+      for (const mid of ctx.q || []) { const pm = pr.members[mid], m = g.byId.get(mid); if (mid !== ctx.mid && pm && m && pm.kind === pm0.kind && pm.parent === pm0.parent && pm.type === pm0.type && pm.need - pm.got > 1e-6 && m.row >= m0.row && m.row <= m0.row + n) rows.push({ mid, k: m.row * 100 + Math.abs((m.a[0] + m.b[0]) / 2 - mx) + Math.abs((m.a[2] + m.b[2]) / 2 - mz) }); }
       return rows.sort((a, b) => a.k - b.k).map((o) => o.mid);
     }
     for (const mid of ctx.q || []) {
@@ -488,15 +488,16 @@
     }
     return out.sort((a, b) => a.d - b.d).slice(0, n).map((o) => o.mid);
   }
+  const courseOf = (pm, m) => pm.kind === 'cladding' && m.type === 'boards' || pm.kind === 'membrane' && m.type === 'housewrap';
   // what the hands can do from here: every open piece within reach, and the one the pointer is on
   function aimHands(pr) {
     const pl = plan(pr.id), g = geom(pr.id), P = G.player, c = S().carried, st = V.structs.get(pr.id);
     let best = null, bs = 1e9, want = null, ws = 1e9, high = false;
     const q = [], low0 = new Map();     // siding goes on from the bottom course up: the lowest course not yet set, per wall
-    for (const mid of pl.inst) { const pm = pr.members[mid], m = g.byId.get(mid); if (m && pm.kind === 'cladding' && m.type === 'boards' && pm.need - pm.got > 1e-6) low0.set(pm.parent, Math.min(low0.has(pm.parent) ? low0.get(pm.parent) : 1e9, m.row)); }
+    for (const mid of pl.inst) { const pm = pr.members[mid], m = g.byId.get(mid); if (m && courseOf(pm, m) && pm.need - pm.got > 1e-6) low0.set(pm.parent + pm.kind, Math.min(low0.has(pm.parent + pm.kind) ? low0.get(pm.parent + pm.kind) : 1e9, m.row)); }
     for (const mid of pl.inst) {
       const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid);
-      if (m && pm.kind === 'cladding' && m.type === 'boards' && pm.need - pm.got > 1e-6 && m.row > low0.get(pm.parent)) continue;
+      if (m && courseOf(pm, m) && pm.need - pm.got > 1e-6 && m.row > low0.get(pm.parent + pm.kind)) continue;
       const set = !ln || pm.need - pm.got < 1e-6, act = pm.kind === 'site' ? 'dig' : set ? 'nail' : (c && c.itemId === ln.itemId) || !api.needsStock(S(), pr, mid) || stackWithin(ln.itemId, takeM()) ? 'set' : 'want';
       let score;
       if (!m) { if (Math.hypot(P.x - st.x, P.z - st.z) > g.reach + 0.5) continue; score = 0; }
@@ -551,12 +552,42 @@
     for (const w of V.slides) if (w.t >= SLIDE_S) { const pm = S().progress[w.id] && S().progress[w.id].members[w.mid]; liftTo(w.id, w.layer, w.mid, pm && !pm.built ? proud(w.mid) : 0); }
     V.slides = V.slides.filter((w) => w.t < SLIDE_S);
   }
+  // house wrap: a white roll runs along the course (an axis stood on end), the sheet unfurling behind it and settling flat
+  const ROLL_R = 0.075, rollMat = new T.MeshLambertMaterial({ color: 0xf6f8f7 }), rollPool = [], rv = new T.Vector3();
+  const rollGeo = new T.CylinderGeometry(ROLL_R, ROLL_R, 1, 14);
+  function wrapRoll(id, layer, mid) {
+    const m = geom(id).byId.get(mid);
+    if (!m) return;
+    let mesh = rollPool.find((q) => !q.visible);
+    if (!mesh) { mesh = new T.Mesh(rollGeo, rollMat); mesh.castShadow = true; mesh.frustumCulled = false; G.scene.add(mesh); rollPool.push(mesh); }
+    mesh.visible = true;
+    (V.rolls || (V.rolls = [])).push({ id, layer, mid, t: 0, dur: 0.16 + 0.45 * Math.min(1, m.section.d / 2.7), mesh, last: -1 });
+    asm.unfurl(id, layer, mid, 0.001, 0.03, m.out);
+  }
+  const smooth = (x) => x * x * (3 - 2 * x);
+  function tickRolls(dt) {
+    if (!V.rolls || !V.rolls.length) return;
+    for (const w of V.rolls) {
+      const g = geom(w.id), m = g && g.byId.get(w.mid);
+      w.t += dt;
+      const p = Math.min(1, w.t / w.dur), f = smooth(Math.min(1, p / 0.85)), settle = p < 0.85 ? 1 : 1 - smooth((p - 0.85) / 0.15);
+      if (!m) { w.t = 1e9; continue; }
+      asm.unfurl(w.id, w.layer, w.mid, Math.max(0.001, f), 0.03 * settle, m.out);
+      const d = m.section.d, hgt = Math.abs(m.b[1] - m.a[1]);
+      rv.set((m.a[0] + m.b[0]) / 2 + m.n[0] * (-d / 2 + f * d) + m.out[0] * (ROLL_R + 0.004), (m.a[1] + m.b[1]) / 2, (m.a[2] + m.b[2]) / 2 + m.n[2] * (-d / 2 + f * d) + m.out[2] * (ROLL_R + 0.004)).applyMatrix4(g.matrix);
+      w.mesh.position.copy(rv); w.mesh.scale.set(1, hgt, 1); w.mesh.rotation.y += dt * 9 * (1 - p);
+      const step = Math.floor(f * d / 0.4);
+      if (p < 0.9 && step !== w.last) { w.last = step; G.burst(rv.x, rv.y - hgt * 0.5 + 0.9 * Math.min(1, hgt), rv.z, 1, 0xf0f0f0, 0.15, 0.1, 0.02, 0.15); }
+    }
+    for (const w of V.rolls) if (w.t >= w.dur) { w.mesh.visible = false; const pm = S().progress[w.id] && S().progress[w.id].members[w.mid]; liftTo(w.id, w.layer, w.mid, pm && !pm.built ? proud(w.mid) : 0); }
+    V.rolls = V.rolls.filter((w) => w.t < w.dur);
+  }
   // set one piece in place with its small moment; returns the install result, or null when it did not work
   function setPiece(id, mid, pm, layer, m, at, swp, quiet) {
     const pr = S().progress[id], r = cmd('install', { structId: id, memberIds: [mid], hold: true });
     if (!r.ok) { if (!quiet) flash(reason(r, pm.kind)); return null; }
     if (r.cuts && r.cuts.length && !quiet) flash(r.cuts[0].how === 'offcut' ? 'Cut from an offcut' : 'Cut to fit; offcut kept');
-    if (r.set.length) { if (swp) V.stick = { id, mid }; if (pm.kind === 'cladding') slideIn(id, layer, mid); else if (!quiet) V.swingIn = { mid, id, layer, t: 0 }; sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
+    if (r.set.length) { if (swp) V.stick = { id, mid }; if (pm.kind === 'cladding') slideIn(id, layer, mid); else if (V.sheetMids && V.sheetMids.has(mid)) wrapRoll(id, layer, mid); else if (!quiet) V.swingIn = { mid, id, layer, t: 0 }; sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
     else if (!quiet) { const q = r.partial[0]; sounds.play('rustle'); flash(plain(lineOf(pr, mid).label) + ': ' + Math.round((100 * q.got) / q.need) + '% there. Fetch more.'); }
     return r;
   }
@@ -656,7 +687,7 @@
       if (!r.ok && (r.reason === 'no material' || r.reason === 'wrong material')) r = cmd('install', { structId: id, memberIds: [sid], hold: true, from: 'stacks' });
       if (!r.ok) continue;
       const r2 = cmd('install', { structId: id, memberIds: [sid] });
-      if (r2.ok && r2.installed.length) { n++; finishInstall(id, sid, lay, pm.kind, r2); if (pm.kind === 'cladding') slideIn(id, lay, sid); }
+      if (r2.ok && r2.installed.length) { n++; finishInstall(id, sid, lay, pm.kind, r2); if (pm.kind === 'cladding') slideIn(id, lay, sid); else if (V.sheetMids && V.sheetMids.has(sid)) wrapRoll(id, lay, sid); }
     }
     if (n) redraw(id);
   }
@@ -944,7 +975,7 @@
     const ctx = V.ctx, held = !!G.keys.KeyE || V.mDown, s = S();
     V.cool -= dt * (C.workSpeed(G.sim.state.sys.stock.tools, G.powerAvailable && G.powerAvailable()));
     if (V.jolt) { const j = V.jolt; j.t += dt; liftTo(j.id, j.layer, j.mid, Math.max(-0.02, (j.built ? 0 : proud(j.mid)) - 0.03 * Math.exp(-j.t * 16) * Math.cos(j.t * 46))); if (j.t > 0.28) { asm.lift(j.id, j.layer, j.mid, j.built ? 0 : proud(j.mid)); V.jolt = null; } }
-    tickSlides(dt);
+    tickSlides(dt); tickRolls(dt);
     if (V.swingIn) { V.swingIn.t += dt; const w = V.swingIn; asm.lift(w.id, w.layer, w.mid, proud(w.mid)); if (w.t > 0.2) V.swingIn = null; }
     const speed = C.workSpeed(G.sim.state.sys.stock.tools, G.powerAvailable && G.powerAvailable());
     if (V.auto) {

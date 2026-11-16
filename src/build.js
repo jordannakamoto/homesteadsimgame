@@ -7664,6 +7664,7 @@
     tex.colorSpace = T.SRGBColorSpace;
     return new T.MeshLambertMaterial({ map: tex, color: 0xffffff });
   })();
+  const tapeMat = new T.MeshLambertMaterial({ color: 0x8e9692 });
   const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), siding: col(0xc7b79b), sidingDark: col(0x6f5a47), concrete: CONCRETE, gravel: col(0x8f8b82) };
   const _m4 = new T.Matrix4(),
     _c = new T.Color();
@@ -7771,6 +7772,32 @@
         add(mesh, k === 1, true);
       }
     });
+    // seam tape: a thin darker strip round every opening, on the wrap edges that meet it
+    {
+      const mats = [],
+        W = 0.05;
+      for (const list of sets)
+        for (const m of list) {
+          if (!m.tape) continue;
+          const U = new T.Vector3(m.b[0] - m.a[0], m.b[1] - m.a[1], m.b[2] - m.a[2]),
+            Uh = U.clone().normalize(),
+            N = new T.Vector3(m.n[0], m.n[1], m.n[2]),
+            O = new T.Vector3(m.out[0], m.out[1], m.out[2]).normalize().multiplyScalar(m.section.b + 0.0012),
+            mid = new T.Vector3((m.a[0] + m.b[0]) / 2, (m.a[1] + m.b[1]) / 2, (m.a[2] + m.b[2]) / 2),
+            d = m.section.d;
+          for (const e of m.tape) {
+            const side = e === "l" || e === "r",
+              c = e === "l" ? mid.clone().addScaledVector(N, -(d / 2 - W / 2)) : e === "r" ? mid.clone().addScaledVector(N, d / 2 - W / 2) : e === "b" ? new T.Vector3(m.a[0], m.a[1], m.a[2]).addScaledVector(Uh, W / 2) : new T.Vector3(m.b[0], m.b[1], m.b[2]).addScaledVector(Uh, -W / 2);
+            mats.push(new T.Matrix4().makeBasis(side ? U : N.clone().multiplyScalar(d), side ? N.clone().multiplyScalar(W) : Uh.clone().multiplyScalar(W), O).setPosition(c));
+          }
+        }
+      if (mats.length) {
+        const mesh = new T.InstancedMesh(boxGeo, tapeMat, mats.length);
+        mats.forEach((mm, n) => mesh.setMatrixAt(n, mm));
+        mesh.instanceMatrix.needsUpdate = true;
+        add(mesh, false, true);
+      }
+    }
     for (const key in ghosts) {
       const [level, top, poly] = key.split("|"),
         list = ghosts[key];
