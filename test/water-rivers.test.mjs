@@ -67,3 +67,14 @@ test('rivers: a spring near spawn starts a brook that runs to the sea without cr
   assert.ok(m && m.mouth);
   assert.equal(createRivers({ seed: 11, height }).spring.x, s.x);
 });
+
+test('rivers: steep reaches fall in steps framed by rocks, with a pool below each fall', () => {
+  const steep = (x, z) => 40 - Math.hypot(x, z - 250) * 0.16 + 3 * Math.sin(x * 0.021) * Math.cos(z * 0.013);
+  const r = createRivers({ seed: 4, height: steep, spawnClear: 0, springNear: false });
+  const falls = r.fallsIn(-300, -60, 300, 560), rocks = r.rocksIn(-300, -60, 300, 560);
+  assert.ok(falls.length > 0, 'some falls');
+  for (const f of falls) { assert.ok(f.drop > 0.5 && f.top > f.bottom); assert.ok(Math.abs(Math.hypot(f.dx, f.dz) - 1) < 1e-6); }
+  assert.ok(rocks.length > falls.length * 2);
+  for (const k of rocks) assert.ok(k.r > 0.1 && k.r < 2 && Number.isFinite(k.x) && Number.isFinite(k.z));
+  assert.equal(JSON.stringify(createRivers({ seed: 4, height: steep, spawnClear: 0, springNear: false }).rocksIn(-300, -60, 300, 560)), JSON.stringify(rocks));
+});

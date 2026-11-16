@@ -113,7 +113,6 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
         if (r > 0.0 && d > 0.005) {
           float k = 1.0 - smoothstep(0.0, r, distance(w, push[i].xy));
           v = mix(v, pushV[i], k * min(1.0, dt * 30.0 * push[i].w));
-          d = max(0.0, d - k * dt * 0.08 * push[i].w * length(pushV[i]));
           foam += k * dt * 3.0 * push[i].w * min(1.0, length(pushV[i]));
         }
         // water poured in (m3/s over a disc)
@@ -152,8 +151,14 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
   // ---- bed and feed, sampled on the CPU
   function sampleCell(i, j) {
     const x = win.ox + (i + 0.5) * CELL, z = win.oz + (j + 0.5) * CELL, k = j * SIZE + i;
-    bedA[k] = heightAt(x, z);
     const ch = chunkAt(x, z), D = ch && ch.riverData;
+    let b0 = heightAt(x, z);
+    // rocks in the stream stand up out of the bed, so the water piles against them and runs round
+    if (ch && ch.riverRocks) for (const r of ch.riverRocks) {
+      const dd = Math.hypot(x - r.x, z - r.z) / (r.r * 0.9);
+      if (dd < 1) b0 = Math.max(b0, r.y + r.hy * Math.sqrt(1 - dd * dd));
+    }
+    bedA[k] = b0;
     if (!D) { feedA[k * 4] = NOFEED; return; }
     const lx = x - D.ox, lz = z - D.oz, N = CS + 1;
     const i0 = Math.min(CS - 1, Math.floor(lx)), j0 = Math.min(CS - 1, Math.floor(lz)), fx = lx - i0, fz = lz - j0;

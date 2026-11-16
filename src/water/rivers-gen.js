@@ -127,32 +127,45 @@ export function createRivers({ seed = 0, height, SEA = 0, spawnClear = 28, sprin
     let L = 0; const acc = [0];
     for (let s = 1; s < pts.length; s++) { L += Math.hypot(pts[s][0] - pts[s - 1][0], pts[s][1] - pts[s - 1][1]); acc.push(L); }
     const a0 = area(n), a1 = d.mouth ? a0 : area(d), z0 = bedAtNode(n), z1 = Math.min(z0, bedAtNode(d)), dz = z0 - z1;
-    const k = Math.max(1, Math.min(Math.round(dz / STEP), Math.floor(L / MIN_STEP_LEN)));
     const s0 = channelSize(a0), s1 = channelSize(a1), wmax = Math.max(s0.w, s1.w) * (d.mouth ? 2 : 1);
+    // steep reaches gather their fall into fewer, bigger steps a few channel widths apart (step-pool streams: a
+    // boulder or rock step, a plunge pool, the next step), so they cascade and fall; gentle ones riffle in small steps
+    const slope = dz / L, spacing = slope > 0.07 ? Math.max(7, 3.5 * s0.w) : MIN_STEP_LEN;
+    const k = Math.max(1, Math.min(Math.round(dz / STEP), Math.floor(L / spacing)));
+    // signed curvature at each sample (1/m; + turns left), smoothed over a few samples: the outside of a bend is
+    // cut steep and deep, the inside builds a gravel bar
+    const curv = pts.map((_, s) => {
+      const a = pts[Math.max(0, s - 2)], b = pts[s], c = pts[Math.min(pts.length - 1, s + 2)];
+      const ux = b[0] - a[0], uz = b[1] - a[1], vx = c[0] - b[0], vz = c[1] - b[1], la = Math.hypot(ux, uz), lb = Math.hypot(vx, vz);
+      if (la < 1e-6 || lb < 1e-6) return 0;
+      return (ux * vz - uz * vx) / (la * lb) / ((la + lb) / 2);
+    });
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     for (const p of pts) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
     const reach = wmax * 2.5 + 2;
-    n.seg = { n, d, pts, acc, L, z0, z1, dz, k, fall: dz / k > 1.0, s0, s1, mouth: !!d.mouth, box: [x0 - reach, y0 - reach, x1 + reach, y1 + reach], reach };
+    n.seg = { n, d, pts, acc, curv, L, z0, z1, dz, k, drop: dz / k, fall: dz / k > 0.7, s0, s1, mouth: !!d.mouth, box: [x0 - reach, y0 - reach, x1 + reach, y1 + reach], reach };
     return n.seg;
   }
   // bed height a fraction t along a segment: steps of pools and riffles, pools scoured just below each crest
+  // a fall drops over a short, near vertical face at the end of its step, into a plunge pool scoured below
   function bedAt(sg, t, noScour) {
     const u = t * sg.k, f = u - Math.floor(u);
-    let z = sg.z0 - sg.dz * (Math.floor(u) + smooth(0.78, 1, f)) / sg.k;
-    if (!noScour && (sg.k > 1 || sg.dz > 0.05)) z -= 0.12 * (1 - smooth(0, 0.3, f)) * (u >= 1 ? 1 : 0);
+    let z = sg.z0 - sg.dz * (Math.floor(u) + (sg.fall ? smooth(0.9, 0.96, f) : smooth(0.78, 1, f))) / sg.k;
+    if (!noScour && (sg.k > 1 || sg.dz > 0.05)) z -= (sg.fall ? 0.2 + 0.25 * sg.drop : 0.12) * (1 - smooth(0, sg.fall ? 0.4 : 0.3, f)) * (u >= 1 ? 1 : 0);
     if (sg.mouth) z = Math.min(z, sg.z0 + (SEA - 0.6 - sg.z0) * smooth(0.5, 1, t));
     return z;
   }
   function closest(sg, x, z) {
-    let best = Infinity, bt = 0;
+    let best = Infinity, bt = 0, side = 0, cv = 0;
     const P = sg.pts;
     for (let s = 1; s < P.length; s++) {
       const ax = P[s - 1][0], az = P[s - 1][1], bx = P[s][0] - ax, bz = P[s][1] - az, l2 = bx * bx + bz * bz;
       const q = l2 > 0 ? clamp(((x - ax) * bx + (z - az) * bz) / l2, 0, 1) : 0;
       const ex = x - ax - bx * q, ez = z - az - bz * q, d2 = ex * ex + ez * ez;
-      if (d2 < best) { best = d2; bt = (sg.acc[s - 1] + q * (sg.acc[s] - sg.acc[s - 1])) / sg.L; }
+      if (d2 < best) { best = d2; bt = (sg.acc[s - 1] + q * (sg.acc[s] - sg.acc[s - 1])) / sg.L; side = bx * ez - bz * ex; cv = sg.curv[s - 1] + (sg.curv[s] - sg.curv[s - 1]) * q; }
     }
-    return { dist: Math.sqrt(best), t: bt };
+    // bend: +1 on the outside of a tight bend (radius 10 m or less), -1 on the inside, 0 on a straight
+    return { dist: Math.sqrt(best), t: bt, bend: -Math.sign(side) * Math.sign(cv) * clamp(Math.abs(cv) * 10, 0, 1) };
   }
   // channels that can reach into node cell (i, j)
   const cellCache = new Map();
@@ -183,11 +196,15 @@ export function createRivers({ seed = 0, height, SEA = 0, spawnClear = 28, sprin
     let out = h;
     for (const sg of list) {
       if (x < sg.box[0] || x > sg.box[2] || z < sg.box[1] || z > sg.box[3]) continue;
-      const { dist, t } = closest(sg, x, z);
+      const { dist, t, bend } = closest(sg, x, z);
       const { w, D } = sizeAt(sg, t);
       if (dist > w * 2.5 + 2) continue;
-      const bed = bedAt(sg, t);
-      const bank = bed + Math.max(0, dist - w / 2) / 1.5;          // a 1:1.5 bank, on up to the ground
+      // the bed deepens toward the outside of a bend (the thalweg) and shelves up onto the bar inside it
+      const across = Math.min(1, dist / (w / 2));
+      const bed = bedAt(sg, t) - 0.35 * D * bend * across;
+      // banks: 1:1.5 on a straight, cut to 1:0.6 on the outside of a bend, a 1:3 gravel bar on the inside
+      const run = bend > 0 ? 1.5 - 0.9 * bend : 1.5 - 1.5 * bend;
+      const bank = bed + Math.max(0, dist - w / 2) / run;
       const cut = Math.min(out, bank);
       const levee = Math.min(bank, bed + D);                       // where the ground sits low, banks up to bankfull
       const fillW = 1 - smooth(w / 2 + 1.5 * D, w * 2.5, dist);
@@ -207,10 +224,66 @@ export function createRivers({ seed = 0, height, SEA = 0, spawnClear = 28, sprin
       const u = c.t * sg.k, f = u - Math.floor(u);
       // phase: where in its step this is (pool below 0.78, riffle above); bedLip: the bed without pool scour,
       // which is where the water surface rides
-      best = { dist: c.dist, t: c.t, w: s.w, D: s.D, Q: s.Q, dir: [dx / dl, dz / dl], bedZ: bedAt(sg, c.t), bedLip: bedAt(sg, c.t, true), phase: f, riffle: f > 0.78, fall: sg.fall && f > 0.78, mouth: sg.mouth, area: sg.n.area };
+      best = { dist: c.dist, t: c.t, w: s.w, D: s.D, Q: s.Q, dir: [dx / dl, dz / dl], bedZ: bedAt(sg, c.t), bedLip: bedAt(sg, c.t, true), phase: f, riffle: f > 0.78, fall: sg.fall && f > 0.78, face: sg.fall && f > 0.88 && f < 0.98, drop: sg.drop, bend: c.bend, mouth: sg.mouth, area: sg.n.area, seg: sg };
     }
     return best;
   }
+  // a point a fraction t along a segment, and the direction there
+  function pointAt(sg, t) {
+    const P = sg.pts, A = sg.acc, want = clamp(t, 0, 1) * sg.L;
+    let s = 1;
+    while (s < P.length - 1 && A[s] < want) s++;
+    const q = A[s] > A[s - 1] ? clamp((want - A[s - 1]) / (A[s] - A[s - 1]), 0, 1) : 0;
+    const dx = P[s][0] - P[s - 1][0], dz = P[s][1] - P[s - 1][1], l = Math.hypot(dx, dz) || 1;
+    return [P[s - 1][0] + dx * q, P[s - 1][1] + dz * q, dx / l, dz / l];
+  }
+  const curvAt = (sg, t) => { const f = clamp(t, 0, 1) * (sg.curv.length - 1), i = Math.floor(f); return sg.curv[i] + ((sg.curv[i + 1] ?? sg.curv[i]) - sg.curv[i]) * (f - i); };
+  // Rocks of a channel: { x, z, r (m), sink (how much of it is buried, of r), squash (height over width) }. Where
+  // real streams have them: the step of each fall framed by boulders at its ends, more round its plunge pool; cobbles
+  // and boulders on riffles, a few breaking the surface (more on steep reaches); boulders fallen from the cut bank on
+  // the outside of bends. The engine sets them on the ground and the live water flows round them.
+  function rocksOf(sg) {
+    if (sg.rocks) return sg.rocks;
+    const out = [], H = (a, b) => hash(sg.n.i * 7 + a, sg.n.j * 13 + b, 11);
+    const add = (t, u, r, sink, squash) => { const [x, z, dx, dz] = pointAt(sg, t); out.push({ x: x - dz * u, z: z + dx * u, r, sink, squash }); };
+    for (let i = 0; i < sg.k; i++) {
+      const tl = (i + 0.9) / sg.k, { w } = sizeAt(sg, tl);
+      if (sg.fall) {
+        for (const sd of [-1, 1]) add(tl - 0.4 / sg.L, sd * (w / 2 + 0.15 - 0.35 * H(i, sd + 2)), (0.5 + 0.45 * H(i, sd + 5)) * Math.min(1.4, 0.6 + sg.drop * 0.3), 0.35, 0.8 + 0.4 * H(i, sd + 7));
+        const nb = 2 + Math.floor(H(i, 21) * 3.5), tb = (i + 1) / sg.k;
+        for (let q = 0; q < nb; q++) {
+          const side = H(i, 30 + q) < 0.5 ? -1 : 1;
+          add(Math.min(1, tb + (0.6 + 2.2 * H(i, 40 + q)) / sg.L), side * (w / 2 - 0.2 + 0.9 * H(i, 50 + q)), 0.3 + 0.45 * H(i, 60 + q), 0.4, 0.7 + 0.4 * H(i, 70 + q));
+        }
+      } else {
+        const n = Math.floor(H(i, 80) * (sg.drop > 0.3 ? 3.6 : 2.3));
+        for (let q = 0; q < n; q++) add((i + 0.74 + 0.24 * H(i, 90 + q)) / sg.k, (2 * H(i, 100 + q) - 1) * w * 0.42, (0.13 + 0.32 * H(i, 110 + q)) * Math.min(1.2, 0.5 + w / 6), 0.45, 0.6 + 0.4 * H(i, 120 + q));
+      }
+    }
+    // fallen from the cut bank on the outside of bends
+    for (let t = 0.04, q = 0; t < 0.97; t += 5 / sg.L, q++) {
+      const cv = curvAt(sg, t);
+      if (Math.abs(cv) < 0.06 || H(q, 140) < 0.55) continue;
+      const { w } = sizeAt(sg, t);
+      add(t, -Math.sign(cv) * (w / 2 + 0.1 + 0.9 * H(q, 150)), 0.3 + 0.5 * H(q, 160), 0.3, 0.75 + 0.35 * H(q, 170));
+    }
+    return (sg.rocks = out);
+  }
+  // Falls: { x, z (middle of the lip), dx, dz (downstream), w, top (water surface over the lip), bottom (the pool's
+  // surface below), drop }
+  function fallsOf(sg) {
+    if (sg.falls) return sg.falls;
+    const out = [];
+    if (sg.fall) for (let i = 0; i < sg.k; i++) {
+      const tl = (i + 0.9) / sg.k, [x, z, dx, dz] = pointAt(sg, tl), { w, D } = sizeAt(sg, tl);
+      const lip = bedAt(sg, tl, true), below = bedAt(sg, Math.min(1, (i + 0.99) / sg.k), true);
+      if (lip - below > 0.5 && below > SEA) out.push({ x, z, dx, dz, w, D, top: lip + D * 0.3, bottom: below + D * 0.62, drop: lip - below });
+    }
+    return (sg.falls = out);
+  }
+  const inRect = (o, x0, z0, x1, z1) => o.x >= x0 && o.x < x1 && o.z >= z0 && o.z < z1;
+  function rocksIn(x0, z0, x1, z1) { const out = []; for (const sg of segmentsIn(x0, z0, x1, z1)) for (const r of rocksOf(sg)) if (inRect(r, x0, z0, x1, z1)) out.push(r); return out; }
+  function fallsIn(x0, z0, x1, z1) { const out = []; for (const sg of segmentsIn(x0, z0, x1, z1)) for (const f of fallsOf(sg)) if (inRect(f, x0, z0, x1, z1)) out.push(f); return out; }
   // every channel whose box touches the rectangle (for drawing maps and debugging)
   function segmentsIn(x0, z0, x1, z1) {
     const out = new Set();
@@ -239,5 +312,5 @@ export function createRivers({ seed = 0, height, SEA = 0, spawnClear = 28, sprin
     }
     if (spring) spring.spring = 2 * MIN_AREA;
   }
-  return { spring, node, down, area, segment, bedAt, carve, riverInfo, segmentsIn, CELL, MIN_AREA, stats: () => ({ nodes: nodes.size, cells: cellCache.size }) };
+  return { spring, node, down, area, segment, bedAt, carve, riverInfo, segmentsIn, rocksIn, fallsIn, CELL, MIN_AREA, stats: () => ({ nodes: nodes.size, cells: cellCache.size }) };
 }

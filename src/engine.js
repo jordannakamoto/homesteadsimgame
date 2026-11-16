@@ -5,6 +5,7 @@ import { createSea } from './water/sea.js';
 import { createRivers } from './water/rivers-gen.js';
 import { createRiverWater } from './water/rivers-render.js';
 import { createRiverLive } from './water/rivers-live.js';
+import { createFalls } from './water/falls-render.js';
 import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -187,7 +188,7 @@ let RIVERS_ON = true;
 try { RIVERS_ON = localStorage.getItem('rivers') !== '0'; } catch (e) { /* no storage */ }
 let rivers = null;
 const makeRivers = () => (RIVERS_ON ? createRivers({ seed: SEED, height: (x, z) => rawHeight(x, z, true), SEA }) : null);
-const RIVER_PAL = { gravel: new THREE.Color(0x7d7461), silt: new THREE.Color(0x4f4a3a) };
+const RIVER_PAL = { gravel: new THREE.Color(0x7d7461), silt: new THREE.Color(0x4f4a3a), earth: new THREE.Color(0x5b4430) };
 // whether x, z lies in a stream or river channel, widened by `margin` m each side
 function inChannel(x, z, margin) {
   if (!rivers) return false;
@@ -1988,12 +1989,20 @@ class Chunk {
       }
       const dd = clamp(Math.abs(delta) * 1.6, 0, 1) * 0.85;
       if (dd > 0) _c.lerp(PAL.dirt, dd);
-      // stream beds: wet gravel in the channel, darker silt just under the banks
+      // streams: wet gravel on riffles and silt in pools; a gravel bar up the inside of a bend and bare earth on the
+      // cut bank outside it; rock where a fall drops; and the ground at the water's edge dark with wet
       if (rivers) {
         const ri = rivers.riverInfo(this.ox + i, this.oz + j);
-        if (ri && ri.dist < ri.w / 2 + 1.2) {
-          const bed = 1 - smoothstep(ri.w / 2 - 0.4, ri.w / 2 + 1.0, ri.dist);
-          _c.lerp(ri.riffle ? RIVER_PAL.gravel : RIVER_PAL.silt, bed * 0.85);
+        if (ri && ri.dist < ri.w / 2 + 1.5 * ri.D + 2.5) {
+          const half = ri.w / 2, bed = 1 - smoothstep(half - 0.4, half + 1.0, ri.dist);
+          const bar = ri.bend < 0 ? -ri.bend * (1 - smoothstep(half + 0.2, half + 0.6 - ri.bend * 1.6, ri.dist)) : 0;
+          _c.lerp(ri.riffle || bar > bed ? RIVER_PAL.gravel : RIVER_PAL.silt, Math.max(bed * 0.85, bar * 0.8));
+          const cut = ri.bend > 0 ? ri.bend * smoothstep(0.22, 0.42, slope) * (1 - smoothstep(half + 0.4, half + 1.5 * ri.D + 2.2, ri.dist)) : 0;
+          _c.lerp(RIVER_PAL.earth, cut * 0.9);
+          const along = ri.seg ? ri.t * ri.seg.k % 1 : 0;
+          const rock = ri.seg && ri.seg.fall ? smoothstep(0.82, 0.9, along) * (1 - smoothstep(0.97, 1, along)) * (1 - smoothstep(half + 0.6, half + 2.5, ri.dist)) : 0;
+          _c.lerp(slope > 0.3 ? PAL.rockDark : PAL.rock, Math.max(rock, smoothstep(0.35, 0.6, slope) * (1 - smoothstep(half, half + 2, ri.dist)) * 0.7 * (1 - cut)));
+          _c.multiplyScalar(1 - 0.28 * (1 - smoothstep(half - 0.1, half + 0.9, ri.dist)) * (1 - bed * 0.5));
         }
       }
       const v = 0.96 + 0.08 * ((hash2(this.ox + i, this.oz + j, SEED) & 255) / 255);
@@ -2040,7 +2049,7 @@ class Chunk {
     geo.attributes.normal.needsUpdate = true;
     geo.attributes.color.needsUpdate = true;
     geo.computeBoundingSphere();
-    if (rivers) { riverWater.refresh(this, rivers); riverLive.chunkChanged(this); }
+    if (rivers) { riverWater.refresh(this, rivers); refreshRiverRocks(this); riverFalls.refresh(this, rivers); riverLive.chunkChanged(this); }
     for (const tr of this.trees) this.treeMeshes[tr.type].setMatrixAt(tr.slot, this.treeMatrix(tr, _m));
     for (const mesh of this.treeMeshes) if (mesh) { mesh.instanceMatrix.needsUpdate = true; mesh.computeBoundingSphere(); }
     if (this.rockMesh) {
@@ -2067,7 +2076,8 @@ class Chunk {
   }
   dispose() {
     clearShade(this);
-    riverWater.dispose(this);
+    riverWater.dispose(this); riverFalls.dispose(this);
+    if (this.riverRockMesh) { this.riverRockMesh.dispose(); this.riverRockMesh = null; }
     scene.remove(this.group);
     clearEnemies((e) => e.chunkKey === this.key);
     this.terrain.geometry.dispose();
@@ -2595,6 +2605,7 @@ const riverWater = createRiverWater({ U, sea, CS, P, SEA });
 // the live tier (src/water/rivers-live.js): a shallow-water simulation on the GPU in a window round the player
 const riverLive = createRiverLive({ renderer, river: riverWater, scene, CS, heightAt, chunkAt: (x, z) => world.chunks.get(ckey(Math.floor(x / CS), Math.floor(z / CS))) });
 riverLive.setMode(LOOK.riverWater === 'baked' ? 'off' : LOOK.riverWater);
+const riverFalls = createFalls({ river: riverWater, CS });
 riverWater.uniforms.uTPM.value = LOOK.waterTexel === 'ground' ? 6.4 : 12.8;
 // The stream water at a point: the live simulation's where it runs, else the baked water of the day.
 // { depth (m), vx, vz (m/s), foam } or null where there is no stream.
@@ -2609,6 +2620,32 @@ function streamWaterAt(x, z) {
   const u = riverWater.uniforms, sfc = D.bed[k] + (D.surf[k] - D.bed[k]) * u.uWetDepth.value, depth = sfc - heightAt(x, z);
   return depth > 0 ? { depth, vx: D.vel[k * 2] * u.uWetSpeed.value, vz: D.vel[k * 2 + 1] * u.uWetSpeed.value, foam: D.foam[k] } : null;
 }
+// Rocks of the streams (rivers-gen.js rocksIn): set on the carved ground, wet and dark in the water, mossy above it.
+// Kept on the chunk as { x, z, r, y, hy } (centre height, top above it) for the live water to flow round.
+const _rc = new THREE.Color();
+function refreshRiverRocks(ch) {
+  const list = rivers ? rivers.rocksIn(ch.ox, ch.oz, ch.ox + CS, ch.oz + CS) : [];
+  let mesh = ch.riverRockMesh;
+  if (mesh && mesh.instanceMatrix.count < list.length) { ch.group.remove(mesh); mesh.dispose(); mesh = ch.riverRockMesh = null; }
+  if (!list.length) { if (mesh) mesh.count = 0; ch.riverRocks = null; return; }
+  if (!mesh) {
+    mesh = ch.riverRockMesh = new THREE.InstancedMesh(rockGeo, solidMat, list.length);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    ch.group.add(mesh);
+  }
+  mesh.count = list.length;
+  ch.riverRocks = list.map((r, i) => {
+    const g = ch.heightLocal(r.x - ch.ox, r.z - ch.oz), y = g - r.r * r.sink, hy = 0.8 * r.r * r.squash;
+    const hsh = hash2(Math.round(r.x * 10), Math.round(r.z * 10), SEED);
+    _p.set(r.x, y, r.z); _q.setFromAxisAngle(UP, (hsh & 1023) / 1023 * Math.PI * 2); _s.set(r.r, r.r * r.squash, r.r);
+    mesh.setMatrixAt(i, _m.compose(_p, _q, _s));
+    const ri = rivers.riverInfo(r.x, r.z), wet = ri && ri.dist < ri.w / 2 + 0.2 ? 1 : 0, v = 0.85 + 0.3 * (((hsh >> 10) & 255) / 255);
+    mesh.setColorAt(i, wet ? _rc.setRGB(0.62 * v, 0.6 * v, 0.55 * v) : _rc.setRGB(0.78 * v, 0.86 * v, 0.62 * v));
+    return { x: r.x, z: r.z, r: r.r, y, hy };
+  });
+  mesh.instanceMatrix.needsUpdate = true; if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  mesh.computeBoundingSphere();
+}
 // the streams follow the weather (src/sim/streams.js): depth and speed with the day's flow, mud with the storm flow;
 // eased, so a change shows over a few seconds rather than in a jump
 let irrigT = 0;
@@ -2621,6 +2658,7 @@ function updateStreams(dt) {
     u.uWetSpeed.value += (lk.speed - u.uWetSpeed.value) * k;
     u.uTurbid.value += (sw.turbidity - u.uTurbid.value) * k;
   }
+  riverFalls.update(dt, player.x, player.z, { burst, live: riverLive.on ? riverLive : null, wet: u.uWetSpeed.value });
   riverLive.update(dt, player.x, player.z, simCtl.speed > 0);
   // irrigation: garden cells under stream water (a trench dug from a brook, a flooded bed) soak it up
   irrigT += dt;
