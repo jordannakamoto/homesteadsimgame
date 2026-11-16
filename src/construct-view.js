@@ -407,7 +407,7 @@
     V.ladCool = Math.max(0, (V.ladCool || 0) - dt);
     if (!cl) {
       if (P.climbY != null) P.climbY = null;
-      if (L && !V.ladCool && !OFF[P.tool] && !V.placing && !V.raise && dt > 0) {
+      if (L && !V.ladCool && !V.placing && !V.raise && dt > 0) {
         const dx = P.x - px, dz = P.z - pz, sp = Math.hypot(dx, dz), ux = Math.sin(L.yaw), uz = Math.cos(L.yaw), rx = P.x - L.x, rz = P.z - L.z;
         if (sp > 0.004 && Math.hypot(rx, rz) < 0.5 && (dx * ux + dz * uz) / sp > 0.87 && rx * ux + rz * uz < 0.3) { V.climb = { t: 0, dir: 0, age: 0 }; V.rev++; sounds.play('thunk'); flash('On the ladder: forward climbs, back comes down'); }
       }
