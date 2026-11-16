@@ -10,12 +10,12 @@
 (() => {
   const G = window.__game, RCH = window.__reach, PV = window.__parts;
   if (!G || !RCH || !PV || !G.sim || !G.sim.handlers.has('water.pumpStroke') || !G.sim.handlers.has('parts.fit')) return;
-  const T = G.THREE, sim = G.sim, R0 = RCH.R;
+  const T = G.THREE, R0 = RCH.R;                 // never keep G.sim: a new world replaces it
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
-  const W = () => sim.state.sys.water, PL = () => sim.state.sys.plumbing, PT = () => sim.state.sys.parts, GD = () => sim.state.sys.garden;
-  const cmd = (n, p) => sim.commandNow(n, p);
+  const W = () => G.sim.state.sys.water, PL = () => G.sim.state.sys.plumbing, PT = () => G.sim.state.sys.parts, GD = () => G.sim.state.sys.garden;
+  const cmd = (n, p) => { try { return G.sim.commandNow(n, p) || { ok: true }; } catch (e) { console.warn('water-hands: ' + n + ' failed: ' + e.message); return { ok: false, reason: e.message, text: 'That did not work: ' + e.message }; } };
   const CAN_L = 9, STEP = 0.25;
-  const hasCan = () => sim.state.sys.stock.tools.includes('watering_can');
+  const hasCan = () => G.sim.state.sys.stock.tools.includes('watering_can');
   const mat = new T.MeshLambertMaterial({ vertexColors: true });
   const M4 = () => new T.Matrix4();
   const at = (x, y, z) => M4().makeTranslation(x, y, z);
@@ -313,6 +313,7 @@
     },
     release(hit) { if (hit.kind === 'pump') pumping.on = false; },
     frame(dt, R) {
+      watchSim();
       if (!Y) { slow += dt; if (slow > 0.5) { slow = 0; const B = window.__build; if (B && B.version !== yardV) { yardV = B.version; buildYard(); } } return; }
       // the handle
       if (pumping.on) {
@@ -343,7 +344,7 @@
       }
       if (tapAsk && performance.now() > tapAsk) { tapAsk = 0; if (open && !flowing) R.say(whyDry(), 5); }
       // each simulated minute that passed: what ran out of the tap goes into the can or onto the ground
-      const tick = sim.state.tick;
+      const tick = G.sim.state.tick;
       if (tick !== lastTick) {
         const n = lastTick < 0 ? 0 : Math.min(5, tick - lastTick); lastTick = tick;
         if (flowing && n > 0) {
@@ -395,7 +396,9 @@
     for (const k of Object.values(PL().kits || {})) if (!dyn.kits[k.id]) { yardV = -1; }
   }
   RCH.use(user);
-  sim.listen((type) => { if (type === 'loaded') { yardV = -1; Y = null; lastTick = -1; } });
+  let simSeen = null;
+  const forget = () => { yardV = -1; Y = null; lastTick = -1; canPref = null; pumping.on = false; sputter = 0; tapAsk = 0; for (const [k, p] of patches) { G.scene.remove(p.m); patches.delete(k); } for (const o of [...yardG.children]) yardG.remove(o); };
+  const watchSim = () => { if (G.sim === simSeen) return; simSeen = G.sim; forget(); G.sim.listen((type) => { if (type === 'loaded') forget(); }); };
 
   // debug and test hooks
   const _p = new T.Vector3();
