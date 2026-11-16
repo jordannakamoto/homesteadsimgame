@@ -384,3 +384,14 @@ test('learn once: two of a kind nailed by hand and the kind is known; auto work 
   // saved and loaded, it is still known
   const back = JSON.parse(JSON.stringify(s)); assert.ok(back.learn.known.joist);
 });
+
+test('support order: beams wait for the pier blocks, posts for piers', () => {
+  const P = { members: {
+    p: { stage: 'foundation', kind: 'pier', built: false }, b: { stage: 'foundation', kind: 'beam', built: false },
+    s: { stage: 'site', kind: 'site', built: true } }, tally: { site: [1, 1], foundation: [0, 2] }, raised: {} };
+  assert.equal(K.blocked(P, 'b'), 'support missing');
+  assert.equal(K.supportMissing(P, 'b'), 'pier');
+  assert.equal(K.blocked(P, 'p'), null);
+  P.members.p.built = true; P.tally.foundation[0] = 1;
+  assert.equal(K.blocked(P, 'b'), null);
+});

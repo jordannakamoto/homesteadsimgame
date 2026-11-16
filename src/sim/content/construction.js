@@ -27,6 +27,14 @@ export const STAGES = Object.freeze([
 export const STAGE = Object.freeze(Object.fromEntries(STAGES.map((s) => [s.id, s])));
 export const STAGE_ORDER = Object.freeze(STAGES.map((s) => s.id));
 
+// ---- support order inside a stage: a piece of the kind on the left waits until every piece of the kinds on the right,
+// in the same stage, is built. (Across stages, `needs` above does it.) `says`: the hint when it waits.
+export const SUPPORT = Object.freeze({
+  pier: ['footing'], post: ['pier'], skid: ['footing'], slab: ['footing'], stemwall: ['footing'],
+  beam: ['pier', 'post', 'footing', 'stemwall'], rafter: ['beam'],
+});
+export const SUPPORT_SAYS = Object.freeze({ footing: 'Lay the footings', pier: 'Set the pier blocks', post: 'Set the posts', stemwall: 'Pour the stem wall', beam: 'Set the ridge beam' });
+
 // ---- what a shopping line is bought as, where the plan's own item is missing or not what a builder buys.
 // Keyed by the line's name (the part of its key after the stage). `each`: one whole unit per member.
 export const LINE_ITEM = Object.freeze({

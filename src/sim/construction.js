@@ -117,6 +117,13 @@ export function frameReady(pr, stage, parent) {
   for (const id in pr.members) { const m = pr.members[id]; if (m.stage === stage && m.parent === parent) { if (!m.built) return false; n++; } }
   return n > 0;
 }
+// the kind of piece this one bears on that is not built yet (same stage), or null
+export function supportMissing(pr, id) {
+  const m = pr.members[id], need = m && C.SUPPORT[m.kind];
+  if (!need) return null;
+  for (const o in pr.members) { const q = pr.members[o]; if (!q.built && q.stage === m.stage && q.kind !== m.kind && need.includes(q.kind)) return q.kind; }
+  return null;
+}
 // why a member cannot go in yet, or null if it can
 export function blocked(pr, id) {
   const m = pr.members[id];
@@ -127,7 +134,7 @@ export function blocked(pr, id) {
   if (!stageOpen(pr, m.stage)) return 'stage not open';
   if (def.parentFirst) for (const o in pr.members) { const q = pr.members[o]; if (!q.built && q.parent === m.parent && def.parentFirst.includes(q.stage)) return 'frame not finished'; }
   if (def.flat && flatCurrent(pr, m.stage) !== m.parent) return 'one frame at a time';
-  return null;
+  return supportMissing(pr, id) ? 'support missing' : null;
 }
 export const installable = (pr) => Object.keys(pr.members).filter((id) => !pr.members[id].built && !blocked(pr, id));
 // the stages that can be worked on now (open, not complete), in order
@@ -445,7 +452,7 @@ function install(ctx, p) {
   for (const id of p.memberIds || []) {
     const m = pr.members[id];
     const why = blocked(pr, id);
-    if (why) { out.refused.push({ id, reason: why }); break; }
+    if (why) { out.refused.push({ id, reason: why, missing: why === 'support missing' ? supportMissing(pr, id) : undefined }); break; }
     const ln = m.line ? pr.lines[m.line] : null;
     let need = round6(m.need - m.got), give = 0, cut = null;
     if (ln && ln.sheet && need > 1e-6) {       // a sheet piece: from an offcut if one will do, else a whole sheet is cut
@@ -504,7 +511,7 @@ function install(ctx, p) {
   }
   out.ok = out.installed.length > 0 || out.partial.length > 0 || out.set.length > 0;
   requote(s, pr);
-  if (!out.ok) { out.reason = out.refused[0] ? out.refused[0].reason : 'nothing to do'; if (out.refused[0] && out.refused[0].itemId) out.itemId = out.refused[0].itemId; return out; }
+  if (!out.ok) { out.reason = out.refused[0] ? out.refused[0].reason : 'nothing to do'; if (out.refused[0] && out.refused[0].itemId) out.itemId = out.refused[0].itemId; if (out.refused[0] && out.refused[0].missing) out.missing = out.refused[0].missing; return out; }
   refresh(ctx, s, pr);
   out.stagesDone = C.STAGE_ORDER.filter((st) => !before.has(st) && stageComplete(pr, st));
   out.done = pr.done; out.stage = pr.stage; out.carried = s.carried;
