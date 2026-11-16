@@ -17,6 +17,7 @@ import * as SUP from './core/supply.js';
 import * as C from './content/construction.js';
 
 const { round6, cents } = SUP;
+const o_cut = (old, id) => (old && old.members[id] && old.members[id].cut) || null;
 export const CONSTRUCTION_CATALOG = Object.freeze({ ...C.ITEMS_CONSTRUCTION, ...ITEMS });
 const item = (id) => CONSTRUCTION_CATALOG[id];
 const LEVELS = ['guided', 'hands-on', 'piece'];
@@ -27,12 +28,52 @@ export function initConstruction() {
     ...SUP.initSupply(),
     level: 'hands-on',
     progress: {},
+    offcuts: {},                      // { [itemId]: [area m2, ...] } pieces of sheet goods kept from cutting
+    waste: {},                        // { [itemId]: area m2 } offcuts too small to keep
     unlocked: [...C.UNLOCKS[0].opens],
     tutorial: { card: false, shed: null, seen: {}, done: false },
     options: { sandbox: false, instant: false, cards: true, auto: false, mute: true },   // sound is off until it has been tuned
     finished: 0,
   };
 }
+
+// ---------------------------------------------------------------- sheet goods: cut to fit, offcuts reused
+const isSheetItem = (itemId) => { const it = item(itemId); return !!it && it.category === 'sheet' && it.unit === 'each'; };
+const sheetAreaOf = (itemId) => { const d = (item(itemId) || {}).dims; return d && d.widthM && d.lengthM ? d.widthM * d.lengthM : C.SHEET.areaM2; };
+const placed = (m) => m.built || (m.need > 0 && m.got >= m.need - 1e-6);
+// where a piece of a sheet line would be cut from: { how: 'offcut', idx } of the smallest offcut that will do, or { how: 'new' }
+export function sheetSource(s, ln, area) {
+  const pool = (s.offcuts && s.offcuts[ln.itemId]) || [];
+  let idx = -1;
+  for (let i = 0; i < pool.length; i++) if (pool[i] >= area - 1e-9 && (idx < 0 || pool[i] < pool[idx])) idx = i;
+  return idx >= 0 ? { how: 'offcut', idx } : { how: 'new' };
+}
+// does putting this piece in want a sheet from the stacks or the arms?
+export function needsStock(s, pr, id) {
+  const m = pr.members[id], ln = m && m.line ? pr.lines[m.line] : null;
+  if (!ln || !ln.sheet || placed(m)) return true;
+  return sheetSource(s, ln, m.area).how === 'new';
+}
+// the whole sheets a sheet line still takes for the pieces not yet cut (all of them, or only those of open stages)
+function sheetsLeft(s, pr, key, onlyOpen) {
+  const ln = pr.lines[key], ids = Object.keys(pr.members).filter((id) => pr.members[id].line === key && !placed(pr.members[id]) && (!onlyOpen || stageOpen(pr, pr.members[id].stage)));
+  return C.packSheets(ids.map((id) => pr.members[id].area), (s.offcuts && s.offcuts[ln.itemId]) || [], sheetAreaOf(ln.itemId)).sheets;
+}
+// a sheet line's quantity is what has been cut plus what the pieces still to cut will take, given the offcuts held
+function requote(s, pr) {
+  for (const key in pr.lines) { const ln = pr.lines[key]; if (ln.sheet) ln.qty = round6(ln.used + sheetsLeft(s, pr, key, false)); }
+}
+// area conservation for sheet goods: sheets cut (whole) = area placed + offcuts held + waste. Returns the differences by item.
+export function sheetImbalance(s) {
+  const out = {};
+  for (const sid in s.progress) for (const key in s.progress[sid].lines) { const ln = s.progress[sid].lines[key]; if (ln.sheet) out[ln.itemId] = (out[ln.itemId] || 0) + ln.used * sheetAreaOf(ln.itemId); }
+  for (const sid in s.progress) for (const id in s.progress[sid].members) { const m = s.progress[sid].members[id]; if (m.area && m.line && s.progress[sid].lines[m.line].sheet && m.got > 0) out[s.progress[sid].lines[m.line].itemId] -= m.area; }
+  for (const k in s.offcuts || {}) for (const a of s.offcuts[k]) out[k] = (out[k] || 0) - a;
+  for (const k in s.waste || {}) out[k] = (out[k] || 0) - s.waste[k];
+  for (const k of Object.keys(out)) if (Math.abs(out[k]) < 1e-4) delete out[k];
+  return out;
+}
+const keepOrWaste = (s, itemId, area) => { if (area >= C.SHEET.minKeepM2) (s.offcuts[itemId] || (s.offcuts[itemId] = [])).push(round6(area)); else if (area > 1e-9) s.waste[itemId] = round6((s.waste[itemId] || 0) + area); };
 
 // ---------------------------------------------------------------- reading a building's progress (pure)
 const membersOfStage = (pr, stage) => Object.keys(pr.members).filter((id) => pr.members[id].stage === stage);
@@ -114,10 +155,11 @@ export function wanted(s, itemId) {
     const pr = s.progress[sid], open = {};
     for (const id in pr.members) {
       const m = pr.members[id];
-      if (m.built || !m.line || pr.lines[m.line].itemId !== itemId) continue;
+      if (m.built || !m.line || pr.lines[m.line].itemId !== itemId || pr.lines[m.line].sheet) continue;
       if (open[m.stage] === undefined) open[m.stage] = stageOpen(pr, m.stage);
       if (open[m.stage]) n += m.need - m.got;
     }
+    for (const key in pr.lines) if (pr.lines[key].sheet && pr.lines[key].itemId === itemId) n += sheetsLeft(s, pr, key, true);
   }
   return round6(n);
 }
@@ -126,14 +168,17 @@ export function wanted(s, itemId) {
 export function armful(s, itemId, cap) {
   let sum = 0, any = false;
   for (const sid in s.progress) {
-    const pr = s.progress[sid], open = {};
+    const pr = s.progress[sid], open = {}, rs = [];
     for (const id in pr.members) {
       const m = pr.members[id];
-      if (m.built || !m.line || pr.lines[m.line].itemId !== itemId) continue;
+      if (m.built || !m.line || pr.lines[m.line].itemId !== itemId || pr.lines[m.line].sheet) continue;
       if (open[m.stage] === undefined) open[m.stage] = stageOpen(pr, m.stage);
       if (!open[m.stage]) continue;
       const r = m.need - m.got;
-      if (r <= 1e-6) continue;
+      if (r > 1e-6) rs.push(r);
+    }
+    for (const key in pr.lines) if (pr.lines[key].sheet && pr.lines[key].itemId === itemId) for (let i = sheetsLeft(s, pr, key, true); i > 0; i--) rs.push(1);
+    for (const r of rs) {
       any = true;
       if (sum + r <= cap + 1e-6) sum += r;
       else return sum > 0 ? round6(sum) : cap;
@@ -265,7 +310,14 @@ function setPlan(ctx, p) {
     const qty = each ? own.length : round6(ln.qty);
     const L = { stage: ln.stage, itemId, qty, unit: each ? 'each' : ln.unit, label: (map && map.label) || ln.label, why: ln.why || '', count: ln.count || own.length, supply: isSupply(itemId), ordered: o ? o.ordered : 0, used: 0 };
     if (!item(itemId) || !(qty > 0)) continue;
+    if (!each && isSheetItem(itemId) && own.length && own.every((q) => q[1] > 0)) L.sheet = true;
     pr.lines[ln.key] = L;
+    if (L.sheet) {                         // cut to fit: each piece's share is its own area, and the line is the sheets that cutting them takes
+      const A = sheetAreaOf(itemId);
+      for (const q of own) { const m = pr.members[q[0]]; m.line = ln.key; m.area = round6(Math.min(q[1], A)); m.need = round6(m.area / A); if (m.built) m.got = m.need; else if (m.got > m.need) m.got = m.need; m.cut = o_cut(old, q[0]); }
+      L.used = o ? o.used : round6(C.packSheets(own.filter((q) => pr.members[q[0]].built).map((q) => pr.members[q[0]].area), [], A).sheets);
+      continue;
+    }
     // each member's share of the line, so that the shares add up to exactly what was bought
     let wsum = 0, cum = 0, prev = 0;
     for (const q of own) wsum += each ? 1 : q[1] || 0;
@@ -278,6 +330,9 @@ function setPlan(ctx, p) {
       L.used = round6(L.used + m.got);
     }
   }
+  if (!s.offcuts) s.offcuts = {};
+  if (!s.waste) s.waste = {};
+  requote(s, pr);
   if (old) for (const k in old.raised) pr.raised[k] = true;
   if (!old) for (const st of C.STAGES) if (st.flat) for (const par of flatParents(pr, st.id)) if (frameReady(pr, st.id, par)) pr.raised[par] = true;
   retally(pr);
@@ -336,15 +391,24 @@ function install(ctx, p) {
   const s = ctx.s, pr = s.progress[p && p.structId];
   if (!pr) return { ok: false, reason: 'unknown building' };
   const fromStacks = p.from === 'stacks';
-  const out = { ok: false, installed: [], set: [], partial: [], refused: [], stagesDone: [], done: false };
+  const out = { ok: false, installed: [], set: [], partial: [], refused: [], cuts: [], stagesDone: [], done: false };
+  if (!s.offcuts) s.offcuts = {};
+  if (!s.waste) s.waste = {};
   const before = new Set(C.STAGE_ORDER.filter((st) => stageComplete(pr, st)));
   for (const id of p.memberIds || []) {
     const m = pr.members[id];
     const why = blocked(pr, id);
     if (why) { out.refused.push({ id, reason: why }); break; }
-    const ln = m.line ? pr.lines[m.line] : null, need = round6(m.need - m.got);
-    let give = 0;
-    if (ln && need > 1e-6) {
+    const ln = m.line ? pr.lines[m.line] : null;
+    let need = round6(m.need - m.got), give = 0, cut = null;
+    if (ln && ln.sheet && need > 1e-6) {       // a sheet piece: from an offcut if one will do, else a whole sheet is cut
+      cut = sheetSource(s, ln, m.area);
+      if (cut.how === 'new') {
+        const have = fromStacks ? SUP.stackQty(s, ln.itemId) : s.carried && s.carried.itemId === ln.itemId ? s.carried.qty : 0;
+        if (have + 1e-6 < 1) { out.refused.push({ id, reason: !fromStacks && s.carried && s.carried.itemId !== ln.itemId ? 'wrong material' : 'no material', itemId: ln.itemId }); break; }
+      }
+      need = 0;
+    } else if (ln && need > 1e-6) {
       if (fromStacks) { if (SUP.stackQty(s, ln.itemId) + 1e-6 < need) { out.refused.push({ id, reason: 'no material', itemId: ln.itemId }); break; } give = need; }
       else {
         if (!s.carried || s.carried.itemId !== ln.itemId) { out.refused.push({ id, reason: s.carried ? 'wrong material' : 'no material', itemId: ln.itemId }); break; }
@@ -352,7 +416,18 @@ function install(ctx, p) {
       }
     }
     const completes = !ln || give + 1e-6 >= need;
+    const doCut = () => {
+      if (!cut) return;
+      const A = sheetAreaOf(ln.itemId);
+      let rest;
+      if (cut.how === 'new') { fromStacks ? SUP.useFromStacks(s, ln.itemId, 1, pr.x, pr.z) : SUP.useCarried(s, ln.itemId, 1); ln.used = round6(ln.used + 1); rest = A - m.area; }
+      else { rest = s.offcuts[ln.itemId].splice(cut.idx, 1)[0] - m.area; }
+      keepOrWaste(s, ln.itemId, rest);
+      m.got = m.need; m.cut = cut.how;
+      out.cuts.push({ id, how: cut.how, keptM2: rest >= C.SHEET.minKeepM2 ? round6(rest) : 0 });
+    };
     if (p.hold) {                          // set in place by hand: the material goes in, the piece stays loose until it is fastened
+      if (cut) { doCut(); out.set.push(id); continue; }
       if (!ln || need <= 1e-6) { out.refused.push({ id, reason: 'already set' }); break; }
       const used = fromStacks ? SUP.useFromStacks(s, ln.itemId, give, pr.x, pr.z) : SUP.useCarried(s, ln.itemId, give);
       m.got = round6(m.got + used); ln.used = round6(ln.used + used);
@@ -360,6 +435,7 @@ function install(ctx, p) {
       continue;
     }
     if (completes) { const lack = supplies(s, pr, m.stage, pr.tally[m.stage][0] + 1, true); if (lack) { out.refused.push({ id, reason: 'no fasteners', itemId: lack }); break; } }
+    doCut();
     if (give > 0) {
       const used = fromStacks ? SUP.useFromStacks(s, ln.itemId, give, pr.x, pr.z) : SUP.useCarried(s, ln.itemId, give);
       m.got = round6(m.got + used); ln.used = round6(ln.used + used);
@@ -371,6 +447,7 @@ function install(ctx, p) {
     } else { out.partial.push({ id, got: m.got, need: m.need }); break; }
   }
   out.ok = out.installed.length > 0 || out.partial.length > 0 || out.set.length > 0;
+  requote(s, pr);
   if (!out.ok) { out.reason = out.refused[0] ? out.refused[0].reason : 'nothing to do'; if (out.refused[0] && out.refused[0].itemId) out.itemId = out.refused[0].itemId; return out; }
   refresh(ctx, s, pr);
   out.stagesDone = C.STAGE_ORDER.filter((st) => !before.has(st) && stageComplete(pr, st));
@@ -407,7 +484,11 @@ function dismantle(ctx, p) {
     if (!m || !(m.built || m.got > 0)) { out.refused.push({ id, reason: 'not built' }); continue; }
     if (standsOn(m.stage).some((q) => anyBuilt(q))) { out.refused.push({ id, reason: 'something stands on it' }); continue; }
     const ln = m.line ? pr.lines[m.line] : null;
-    if (ln && m.got > 0) {
+    if (ln && ln.sheet && m.got > 0) {       // a cut piece comes off as an offcut of its own size: the sheet it was cut from stays used
+      if (!s.offcuts) s.offcuts = {};
+      (s.offcuts[ln.itemId] || (s.offcuts[ln.itemId] = [])).push(m.area);
+      m.cut = null;
+    } else if (ln && m.got > 0) {
       SUP.giveBack(s, ln.itemId, m.got, at.x, at.z, C.DELIVERY.layout);
       ln.used = round6(ln.used - m.got);
       out.returned[ln.itemId] = round6((out.returned[ln.itemId] || 0) + m.got);
@@ -419,6 +500,7 @@ function dismantle(ctx, p) {
   }
   out.ok = out.removed.length > 0;
   if (!out.ok) { out.reason = out.refused[0] ? out.refused[0].reason : 'nothing to take apart'; return out; }
+  requote(s, pr);
   refresh(ctx, s, pr);
   ctx.emit('construction.dismantled', { structId: pr.id, ids: out.removed });
   return out;
@@ -449,5 +531,5 @@ export const constructionSystem = () => ({
     'construction.setOption': (c, p) => { if (!p || !(p.key in c.s.options)) return { ok: false, reason: 'unknown option' }; c.s.options[p.key] = !!p.value; if (p.key === 'sandbox') c.emit('construction.sandbox', { on: !!p.value }); return { ok: true }; },
     'construction.seeCard': (c, p) => { c.s.tutorial.seen[p.stage] = true; return { ok: true }; },
   },
-  api: { content: C, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance },
+  api: { content: C, sheetSource, needsStock, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance },
 });

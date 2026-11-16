@@ -76,7 +76,7 @@ test('every line of the shed is priced, and the items the catalog lacked have re
   assert.ok(v.costUsd > 800 && v.costUsd < 3200, 'the shed costs $' + v.costUsd);
   assert.equal(v.total, Object.keys(P.members).length);
   // every member with something to buy has a share, and the shares add up to the line
-  for (const k in P.lines) { const ln = P.lines[k]; if (ln.supply) continue; const sum = Object.values(P.members).filter((m) => m.line === k).reduce((n, m) => n + m.need, 0); assert.ok(near(sum, ln.qty, 1e-5), k + ' ' + sum + ' ' + ln.qty); }
+  for (const k in P.lines) { const ln = P.lines[k]; if (ln.supply || ln.sheet) continue; const sum = Object.values(P.members).filter((m) => m.line === k).reduce((n, m) => n + m.need, 0); assert.ok(near(sum, ln.qty, 1e-5), k + ' ' + sum + ' ' + ln.qty); }
 });
 
 test('ordering the foundation stage debits the right money and delivers the right stacks', () => {
@@ -208,16 +208,17 @@ test('a whole shed: conservation, the project card, unlocks; then taking it apar
   assert.ok(r.ok); assert.equal(r.removed.length, clad.length + lining.length);
   assert.ok(near(r.returned.board_pine_1x6, bought.board_pine_1x6, 1e-4));
   assert.ok(near(s.stacks.find((k) => k.itemId === 'board_pine_1x6').qty, bought.board_pine_1x6, 1e-4));
-  assert.ok(!P.done); assert.deepEqual(SUP.imbalance(s), {});
+  assert.ok(!P.done); assert.deepEqual(SUP.imbalance(s), {}); assert.deepEqual(K.sheetImbalance(s), {});
   // all of it, stage by stage from the top
   for (const st of [...C.STAGE_ORDER].reverse()) {
     const ids = Object.keys(P.members).filter((id) => P.members[id].stage === st && P.members[id].built);
     if (ids.length) assert.ok(sim.commandNow('construction.dismantle', { structId: P.id, memberIds: ids }).ok, st);
   }
-  assert.deepEqual(SUP.imbalance(s), {});
+  assert.deepEqual(SUP.imbalance(s), {}); assert.deepEqual(K.sheetImbalance(s), {});
   for (const id in bought) {
     const inStacks = s.stacks.filter((k) => k.itemId === id).reduce((n, k) => n + k.qty, 0);
     if (C.SITE_SUPPLY.includes(id)) assert.ok(near(s.ledger[id].spent, bought[id], 1e-4), id + ' is used up');
+    else if (/^(osb|plywood|gypsum)_/.test(id)) assert.ok(near(inStacks, 0, 1e-4), id + ': cut sheets do not come back whole');
     else assert.ok(near(inStacks, bought[id], 1e-4), id + ' came back: ' + inStacks + ' of ' + bought[id]);
   }
 });
@@ -282,4 +283,67 @@ test('set by hand, then fastened: a piece set in place holds its material but is
   const n = sim.commandNow('construction.install', { structId: P.id, memberIds: [pier] });      // the nailing: needs nothing in the hands
   assert.ok(n.ok); assert.deepEqual(n.installed, [pier]); assert.equal(P.members[pier].built, 1);
   assert.deepEqual(SUP.imbalance(s), {});
+});
+
+// ---- sheet goods are cut to fit and offcuts are reused
+const sheetPlan = (areas, structId = 77) => ({
+  structId, name: 'Sheet test', x: 10, z: 10, r: 2,
+  members: areas.map((a, i) => ({ id: 'p' + i, stage: 'subfloor', kind: 'sheathing', parent: 'f', built: false })),
+  lines: [{ key: 'subfloor|sub', stage: 'subfloor', itemId: 'osb_18', qty: 99, unit: 'each', label: 'Subfloor sheets', why: '', count: areas.length, members: areas.map((a, i) => ['p' + i, a]) }],
+});
+test('packSheets: pieces are cut biggest first from the smallest offcut that will do', () => {
+  const A = C.SHEET.areaM2;
+  assert.equal(C.packSheets([]).sheets, 0);
+  assert.equal(C.packSheets([A, A, 1, 0.9, 0.5]).sheets, 3);                 // the three small pieces share one sheet
+  assert.equal(C.packSheets([1, 1, 0.9]).sheets, 1);                         // old rule: ceil(2.9 / 2.98) = 1 too, but with pieces of 1.5 and 1.5 it is 2 and cutting makes it 2 as well
+  assert.equal(C.packSheets([1.5, 1.5, 1.4]).sheets, 2);                     // a 1.4 needs the 1.47 left of a sheet: it fits
+  const r = C.packSheets([2, 1.5], [1.6]);                                   // the 1.6 offcut takes the 1.5; the 2 needs a new sheet
+  assert.equal(r.sheets, 1); assert.deepEqual(r.from, ['new', 'offcut']);
+  assert.equal(C.packSheets([A * 0.5], [A * 0.4]).sheets, 1);                // an offcut too small is not used
+  for (const rest of C.packSheets([2.9]).left) assert.ok(rest >= C.SHEET.minKeepM2);   // slivers are waste, not kept
+  assert.equal(C.packSheets([2.95]).left.length, 0);
+});
+test('a small piece takes an offcut, else cuts a sheet and keeps the rest; the order and the books agree', () => {
+  const A = C.SHEET.areaM2, areas = [A, 1.0, 0.9, 0.5];
+  const sim = createGameSim(5); sim.state.sys.stock.money = 5000;
+  assert.ok(sim.commandNow('construction.setPlan', sheetPlan(areas)).ok);
+  const P = () => cs(sim).progress[77], s = cs(sim);
+  assert.equal(P().lines['subfloor|sub'].qty, 2); assert.equal(P().lines['subfloor|sub'].qty, C.packSheets(areas).sheets);
+  assert.ok(near(P().members.p1.need, 1.0 / A));
+  assert.ok(sim.commandNow('construction.setOption', { key: 'instant', value: true }).ok);
+  assert.ok(sim.commandNow('construction.order', { structId: 77, stage: 'all' }).ok);
+  const stack = s.stacks.find((k) => k.itemId === 'osb_18');
+  assert.ok(sim.commandNow('construction.pickUp', { stackId: stack.id }).ok);
+  assert.equal(K.needsStock(s, P(), 'p1'), true);
+  let r = sim.commandNow('construction.install', { structId: 77, memberIds: ['p1'], hold: true });
+  assert.ok(r.ok); assert.equal(r.cuts[0].how, 'new'); assert.ok(near(r.cuts[0].keptM2, A - 1.0));
+  assert.ok(!s.carried || s.carried.qty < stack.qty);                         // a sheet left the arms
+  assert.equal(K.needsStock(s, P(), 'p2'), false);
+  r = sim.commandNow('construction.install', { structId: 77, memberIds: ['p2'], hold: true });
+  assert.equal(r.cuts[0].how, 'offcut'); assert.ok(near(s.offcuts.osb_18.reduce((n, a) => n + a, 0), A - 1.0 - 0.9));
+  r = sim.commandNow('construction.install', { structId: 77, memberIds: ['p3'], hold: true });
+  assert.equal(r.cuts[0].how, 'offcut');
+  assert.deepEqual(K.sheetImbalance(s), {});
+  assert.equal(P().lines['subfloor|sub'].qty, 2);                           // still two: one more sheet for the whole one
+  if (!s.carried) assert.ok(sim.commandNow('construction.pickUp', { stackId: s.stacks.find((k) => k.itemId === 'osb_18').id }).ok);
+  r = sim.commandNow('construction.install', { structId: 77, memberIds: ['p0'], hold: true });
+  assert.equal(r.cuts[0].how, 'new'); assert.equal(P().lines['subfloor|sub'].used, 2);
+  assert.deepEqual(K.sheetImbalance(s), {}); assert.deepEqual(SUP.imbalance(s), {});
+  for (const id of ['p0', 'p1', 'p2', 'p3']) assert.ok(sim.commandNow('construction.install', { structId: 77, memberIds: [id] }).ok);
+  assert.ok(P().done);
+  assert.ok(s.stacks.every((k) => k.itemId !== 'osb_18' || k.qty < 1e-6) && !s.carried);
+  // taking a piece off leaves an offcut of its size, and the books still balance
+  assert.ok(sim.commandNow('construction.dismantle', { structId: 77, memberIds: ['p3'] }).ok);
+  assert.deepEqual(K.sheetImbalance(s), {});
+  assert.equal(K.needsStock(s, P(), 'p3'), false);
+});
+test('a sheet cut from a stack by Guided and from the stacks with nothing in the arms', () => {
+  const sim = createGameSim(5); sim.state.sys.stock.money = 5000;
+  sim.commandNow('construction.setPlan', sheetPlan([1.2, 0.7, 0.5, 0.3, 0.2], 78));
+  sim.commandNow('construction.setOption', { key: 'instant', value: true });
+  sim.commandNow('construction.order', { structId: 78, stage: 'all' });
+  const s = cs(sim);
+  assert.equal(s.progress[78].lines['subfloor|sub'].qty, 1);
+  for (const id of ['p0', 'p1', 'p2', 'p3', 'p4']) assert.ok(sim.commandNow('construction.install', { structId: 78, memberIds: [id], from: 'stacks' }).ok, id);
+  assert.ok(s.progress[78].done); assert.deepEqual(K.sheetImbalance(s), {}); assert.equal(s.stacks.length, 0);
 });

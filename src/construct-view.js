@@ -103,7 +103,7 @@
     return list.length ? list[list.length - 1] : null;
   }
   const lineOf = (pr, memberId) => { const m = pr.members[memberId]; return m && m.line ? pr.lines[m.line] : null; };
-  const usable = (pr, pl, c) => pl.inst.filter((id) => { const ln = lineOf(pr, id); return !ln || pr.members[id].need - pr.members[id].got < 1e-6 || (c && c.itemId === ln.itemId); });
+  const usable = (pr, pl, c) => pl.inst.filter((id) => { const ln = lineOf(pr, id); return !ln || pr.members[id].need - pr.members[id].got < 1e-6 || (c && c.itemId === ln.itemId) || !api.needsStock(S(), pr, id); });
 
   // ------------------------------------------------------------------ keeping build mode and the simulation in step
   function attach() {
@@ -356,7 +356,7 @@
     const q = [];
     for (const mid of pl.inst) {
       const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid);
-      const set = !ln || pm.need - pm.got < 1e-6, act = pm.kind === 'site' ? 'dig' : set ? 'nail' : c && c.itemId === ln.itemId ? 'set' : 'want';
+      const set = !ln || pm.need - pm.got < 1e-6, act = pm.kind === 'site' ? 'dig' : set ? 'nail' : (c && c.itemId === ln.itemId) || !api.needsStock(S(), pr, mid) ? 'set' : 'want';
       let score;
       if (!m) { if (Math.hypot(P.x - st.x, P.z - st.z) > g.reach + 0.5) continue; score = 0; }
       else {
@@ -394,6 +394,7 @@
     if (ctx.act === 'set') {
       const r = cmd('install', { structId: ctx.id, memberIds: [ctx.mid], hold: true });
       if (!r.ok) { flash(reason(r)); return; }
+      if (r.cuts && r.cuts.length) flash(r.cuts[0].how === 'offcut' ? 'Cut from an offcut' : 'Cut to fit; offcut kept');
       if (r.set.length) { V.swingIn = { mid: ctx.mid, id: ctx.id, layer, t: 0 }; sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); V.poseT = 0.25; V.poseKind = 'lift'; G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(wM.x, wM.y, wM.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
       else { const q = r.partial[0]; sounds.play('rustle'); flash(plain(lineOf(pr, ctx.mid).label) + ': ' + Math.round((100 * q.got) / q.need) + '% there. Fetch more.'); }
       redraw(ctx.id);
@@ -526,7 +527,7 @@
   function beginMember(id, memberId, from) {
     const pr = S().progress[id], g = geom(id), m = g.byId.get(memberId) || { id: memberId, kind: 'site', a: [g.cx, 0, g.cz], b: [g.cx, 0, g.cz], n: [0, 1, 0], section: { b: 0, d: 0 }, draw: 0 }, pm = pr.members[memberId], ln = lineOf(pr, memberId);
     const need = pm.need - pm.got, c = S().carried;
-    const partial = from !== 'stacks' && ln && need > 1e-6 && (!c || c.qty + 1e-6 < need);
+    const partial = from !== 'stacks' && ln && need > 1e-6 && !(ln.sheet && !api.needsStock(S(), pr, memberId)) && (!c || c.qty + 1e-6 < (ln.sheet ? 1 : need));
     const layer = C.STAGE[pm.stage].flat && g.walls.has(pm.parent) ? pm.parent : 'main';
     V.working = { id, memberId, layer, m, partial };
     W.begin({ id, memberId, layer, m, from, kind: pm.kind, beats: partial ? 2 : C.memberBeats(pm.kind) });
@@ -592,7 +593,7 @@
         if (!q.length) { const was = A.stage; stopAuto(); if (!api.stageComplete(pr, was)) flash('Stopped: ' + C.STAGE[was].name + ' is waiting on something else'); return; }
         const ln = lineOf(pr, q[0]), pm = pr.members[q[0]], c = s.carried;
         if (A.guided || !ln || pm.need - pm.got < 1e-6) beginMember(A.id, q[0], A.guided ? 'stacks' : 'carried');
-        else if (c && c.itemId === ln.itemId) beginMember(A.id, q[0], 'carried');
+        else if ((c && c.itemId === ln.itemId) || !api.needsStock(s, pr, q[0])) beginMember(A.id, q[0], 'carried');
         else {                                        // fetch the next armful: a short pause for the walk
           A.wait += dt;
           if (A.wait > 0.8) {
@@ -666,7 +667,7 @@
       const A = V.auto, w = V.working && workLabel(pr, V.working.memberId), v = plan(A.id).view.stages.find((q) => q.id === A.stage);
       setPrompt('E', 'Stop · ' + (V.raise ? 'raising the wall' : w ? low(w.text) : A.wait > 0 ? 'fetching more' : low(C.STAGE[A.stage].name)), v ? v.built + ' of ' + v.total : '', V.raise ? Math.min(1, V.raise.p) : W.job ? W.progress() : null);
     } else if (ctx.kind === 'raise') setPrompt('E', 'Hold and push up to raise the wall', '', V.raise ? Math.min(1, V.raise.p) : 0);
-    else if (ctx.kind === 'hands') { const w = workLabel(pr, ctx.mid), pm = pr.members[ctx.mid], b = V.blows[ctx.mid], of = b ? b.of : nailCount(geom(ctx.id), pm, ctx.mid); setPrompt('E', ctx.act === 'set' ? 'Set it in place: ' + low(w.text).replace(/s$/, '') : ctx.act === 'dig' ? 'Dig and level' : pm.kind === 'pier' ? 'Stamp it level' : 'Nail the ' + low(w.text).replace(/s$/, ''), ctx.act === 'set' ? w.count : (b ? b.n : 0) + ' of ' + of, ctx.act === 'set' ? null : (b ? b.n : 0) / of); }
+    else if (ctx.kind === 'hands') { const w = workLabel(pr, ctx.mid), pm = pr.members[ctx.mid], b = V.blows[ctx.mid], of = b ? b.of : nailCount(geom(ctx.id), pm, ctx.mid); setPrompt('E', ctx.act === 'set' ? 'Set it in place: ' + low(w.text).replace(/s$/, '') + (pm.line && pr.lines[pm.line].sheet && !api.needsStock(S(), pr, ctx.mid) ? ' (from an offcut)' : '') : ctx.act === 'dig' ? 'Dig and level' : pm.kind === 'pier' ? 'Stamp it level' : 'Nail the ' + low(w.text).replace(/s$/, ''), ctx.act === 'set' ? w.count : (b ? b.n : 0) + ' of ' + of, ctx.act === 'set' ? null : (b ? b.n : 0) / of); }
     else if (ctx.kind === 'work') { const w = workLabel(pr, V.working ? V.working.memberId : ctx.q[0]); setPrompt('E', 'Hold to build: ' + low(w.text), w.count, W.job ? W.progress() : 0); }
     else if (ctx.kind === 'piece') setPrompt('', 'Click a glowing piece to set it', ctx.q.length + ' ready', W.job ? W.progress() : null);
     else if (ctx.kind === 'auto') setPrompt('E', (ctx.guided ? 'Build: ' : 'Work until done: ') + low(C.STAGE[ctx.stage].name), '', null);

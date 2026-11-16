@@ -66,6 +66,32 @@ export function itemForm(itemId) {
   return 'box';
 }
 
+// ---- sheet goods are cut to fit. A piece that needs less than a whole sheet takes a matching offcut if one is held,
+// else cuts a whole sheet and keeps the rest as an offcut. Offcuts below minKeepM2 are waste.
+export const SHEET = Object.freeze({ areaM2: 1.22 * 2.44, minKeepM2: 0.06 });
+// How many whole sheets do these pieces take (areas in m2), given the offcuts already held? Pieces are cut biggest first,
+// each from the smallest offcut that will do. { sheets, from: ['offcut' | 'new' per piece, in the order given], left: offcuts afterwards }
+export function packSheets(areas, held = [], sheetA = SHEET.areaM2, minKeep = SHEET.minKeepM2) {
+  const pool = [...held].sort((a, b) => a - b), from = new Array(areas.length);
+  let sheets = 0;
+  const order = areas.map((a, i) => i).sort((i, j) => areas[j] - areas[i] || i - j);
+  for (const i of order) {
+    const a = Math.min(areas[i], sheetA);
+    let k = pool.findIndex((o) => o >= a - 1e-9);
+    if (k >= 0) {
+      const rest = pool.splice(k, 1)[0] - a;
+      if (rest >= minKeep) { pool.push(Math.round(rest * 1e6) / 1e6); pool.sort((x, y) => x - y); }
+      from[i] = 'offcut';
+    } else {
+      sheets++;
+      const rest = sheetA - a;
+      if (rest >= minKeep) { pool.push(Math.round(rest * 1e6) / 1e6); pool.sort((x, y) => x - y); }
+      from[i] = 'new';
+    }
+  }
+  return { sheets, from, left: pool };
+}
+
 // ---- deliveries
 export const DELIVERY = Object.freeze({
   delayS: 3600,                       // an hour of world time: under a minute at normal speed

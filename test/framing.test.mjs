@@ -86,3 +86,13 @@ test('the shopping list: buyable units, real item ids, a plain reason on every l
   assert.equal(list.find((l) => l.label === 'Pier blocks').qty, 6);
   assert.deepEqual(list.map((l) => F.STAGES.indexOf(l.stage)), list.map((l) => F.STAGES.indexOf(l.stage)).sort((a, b) => a - b));
 });
+
+test('the shopping list buys sheets by cutting them to fit, by the same rule as the sim', async () => {
+  const C = await import('../src/sim/content/construction.js');
+  const A = F.SHEET.w * F.SHEET.l;
+  assert.ok(near(A, C.SHEET.areaM2));
+  for (const areas of [[1, 1, 0.9], [A, 0.4, 0.4, 0.4, 2.1, 1.5], [0.3, 0.3], [1.5, 1.5, 1.4], []]) assert.equal(F.packSheets(areas), C.packSheets(areas).sheets, areas.join());
+  const list = F.materialsList([{ id: 'a', stage: 'subfloor', kind: 'sheathing', type: 'subfloor', material: 'osb', area: 1, length: 1 }, { id: 'b', stage: 'subfloor', kind: 'sheathing', type: 'subfloor', material: 'osb', area: 1, length: 1 }, { id: 'c', stage: 'subfloor', kind: 'sheathing', type: 'subfloor', material: 'osb', area: 0.9, length: 1 }]);
+  const ln = list.find((l) => l.itemId === 'osb_18');
+  assert.equal(ln.qty, 1);                          // three small pieces cut from one sheet and its offcuts
+});
