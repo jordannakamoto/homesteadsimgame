@@ -351,7 +351,7 @@
     dotLayers.set(id, new Set(by.keys()));
   }
 
-  // ---- the ladder: a few boxes, leaned by hand on a wall, climbed with E
+  // ---- the ladder: a few boxes, leaned by hand on a wall, climbed by walking onto it
   const LAD = C.LADDER;
   const ladMat = new T.MeshLambertMaterial({ color: 0xc9a468 }), ladGeo = new T.BoxGeometry(1, 1, 1), ladG = new T.Group(), ladParts = [];
   for (let i = 0; i < 2 + 7; i++) { const b = new T.Mesh(ladGeo, ladMat); b.castShadow = true; ladG.add(b); ladParts.push(b); }
@@ -388,8 +388,8 @@
     const L = S().ladder, P = G.player;
     if (!L || V.climb) return null;
     const hold = !!S().carried, ft = Math.hypot(P.x - L.x, P.z - L.z), rp = Math.hypot(reach.x - L.x, reach.z - L.z);
-    if (strong) return rp < 0.6 && ft < 1.3 ? { kind: 'ladder', act: 'climb' } : rp < 0.9 && ft < 4 && ft >= 1.3 && !hold ? { kind: 'ladder', act: 'take' } : null;
-    return ft < 1.0 ? { kind: 'ladder', act: 'climb' } : null;
+    if (strong) return rp < 0.9 && ft < 4 && ft >= 1.3 && !hold ? { kind: 'ladder', act: 'take' } : null;
+    return null;
   }
   // a pulsing marker over the ladder in the yard while something is too high to reach and no ladder is up
   const ladMark = new T.Mesh(new T.SphereGeometry(0.32, 12, 8), new T.MeshBasicMaterial({ color: 0xffd34a, transparent: true, opacity: 0.8, depthTest: false }));
@@ -402,16 +402,32 @@
   }
   function tickLadder(dt) {
     const cl = V.climb, P = G.player, L = S().ladder;
-    if (!cl) { if (P.climbY != null) P.climbY = null; return; }
+    // walking into the foot of a leaned ladder, heading for the wall, mounts it; walking past does not
+    const px = V.lpx === undefined ? P.x : V.lpx, pz = V.lpz === undefined ? P.z : V.lpz; V.lpx = P.x; V.lpz = P.z;
+    V.ladCool = Math.max(0, (V.ladCool || 0) - dt);
+    if (!cl) {
+      if (P.climbY != null) P.climbY = null;
+      if (L && !V.ladCool && !OFF[P.tool] && !V.placing && !V.raise && dt > 0) {
+        const dx = P.x - px, dz = P.z - pz, sp = Math.hypot(dx, dz), ux = Math.sin(L.yaw), uz = Math.cos(L.yaw), rx = P.x - L.x, rz = P.z - L.z;
+        if (sp > 0.004 && Math.hypot(rx, rz) < 0.5 && (dx * ux + dz * uz) / sp > 0.87 && rx * ux + rz * uz < 0.3) { V.climb = { t: 0, dir: 0, age: 0 }; V.rev++; sounds.play('thunk'); flash('On the ladder: forward climbs, back comes down'); }
+      }
+      if (!V.climb) return;
+    }
+    const cl2 = V.climb;
     if (!L) { V.climb = null; P.climbY = null; return; }
     const q = ladPts(L), top = Math.max(q.fy, q.cy - LAD.topBelowM);
-    if (G.keys.KeyW || G.keys.KeyA || G.keys.KeyS || G.keys.KeyD || G.keys.ArrowUp || G.keys.ArrowDown || G.keys.ArrowLeft || G.keys.ArrowRight || G.keys.Space) cl.dir = -1;
-    cl.t = Math.max(0, Math.min(1, cl.t + (cl.dir * dt * LAD.climbMps) / Math.max(1, q.len)));
-    if (cl.dir > 0 && cl.t >= 1) { cl.dir = 0; V.rev++; }
-    if (cl.t <= 0 && cl.dir < 0) { V.climb = null; P.climbY = null; V.rev++; return; }
-    const reachOut = Math.max(0, ladD - 0.38) * cl.t;
+    {
+      const K = G.keys, fwd = K.KeyW || K.ArrowUp, back = K.KeyS || K.ArrowDown, side = K.KeyA || K.KeyD || K.ArrowLeft || K.ArrowRight || K.Space;
+      cl2.age = (cl2.age || 0) + dt;
+      cl2.dir = fwd ? 1 : back || cl2.e ? -1 : 0;
+      if (side && !fwd && cl2.t < 0.2 && cl2.age > 0.4) { cl2.dir = -1; cl2.t = 0; }       // stepping off the bottom
+    }
+    cl2.t = Math.max(0, Math.min(1, cl2.t + (cl2.dir * dt * LAD.climbMps) / Math.max(1, q.len)));
+    if (cl2.t >= 1 && !cl2.top) { cl2.top = true; V.rev++; } else if (cl2.t < 1) cl2.top = false;
+    if (cl2.t <= 0 && cl2.dir < 0 && cl2.age > 0.4) { V.climb = null; P.climbY = null; V.ladCool = 0.9; V.rev++; return; }
+    const reachOut = Math.max(0, ladD - 0.38) * cl2.t;
     P.x = q.fx + Math.sin(L.yaw) * reachOut; P.z = q.fz + Math.cos(L.yaw) * reachOut;
-    P.climbY = q.fy + (top - q.fy) * cl.t;
+    P.climbY = q.fy + (top - q.fy) * cl2.t;
     P.faceTarget = L.yaw;
   }
   // a kind that is learned is set and nailed as you sweep along its run; the big moments stay manual (the ridge, the first rafter)
@@ -474,7 +490,7 @@
     if (sk && sk.id === pr.id) { const pm = pr.members[sk.mid]; if (pm && !pm.built && pm.need > 0 && pm.got >= pm.need - 1e-6 && q.includes(sk.mid)) best = { mid: sk.mid, act: 'nail' }; else V.stick = null; }
     if (best) return { kind: 'hands', id: pr.id, act: best.act, mid: best.mid, q };
     if (want) return { kind: 'hint', text: 'Needs ' + low(plain(lineOf(pr, want).label)), id: pr.id };
-    if (high) { V.needLadder = 0.5; return { kind: 'hint', text: S().ladder || (S().carried && S().carried.itemId === LAD.itemId) ? 'Too high: lean the ladder on a wall and climb' : S().stacks.some((k) => k.itemId === LAD.itemId) ? 'Too high: the ladder is in the yard by the stacks (glowing marker)' : 'Too high: bring the ladder', id: pr.id }; }
+    if (high) { V.needLadder = 0.5; return { kind: 'hint', text: S().ladder || (S().carried && S().carried.itemId === LAD.itemId) ? 'Too high: lean the ladder on a wall, then walk onto it' : S().stacks.some((k) => k.itemId === LAD.itemId) ? 'Too high: the ladder is in the yard by the stacks (glowing marker)' : 'Too high: bring the ladder', id: pr.id }; }
     return null;
   }
   function finishInstall(id, mid, layer, kind, r) {
@@ -626,10 +642,9 @@
     else if (ctx.kind === 'swap') { putDown(); pickUp(ctx.stack); }
     else if (ctx.kind === 'auto') startAuto(ctx.id, ctx.stage, ctx.guided);
     else if (ctx.kind === 'stop') stopAuto();
-    else if (ctx.kind === 'lean') { const r = cmd('leanLadder', ctx.spot); if (r.ok) { sounds.play('thunk'); flash('Ladder up. Stand at its foot and press E to climb'); } else flash(r.reason); }
+    else if (ctx.kind === 'lean') { const r = cmd('leanLadder', ctx.spot); if (r.ok) { sounds.play('thunk'); flash('Ladder up. Walk onto its foot to climb'); } else flash(r.reason); }
     else if (ctx.kind === 'ladder') {
-      if (ctx.act === 'climb') { V.climb = { t: 0, dir: 1 }; V.rev++; }
-      else if (ctx.act === 'down' && V.climb) V.climb.dir = -1;
+      if (ctx.act === 'down' && V.climb) V.climb.e = true;
       else if (ctx.act === 'take') { const r = cmd('takeLadder'); if (r.ok) sounds.play('thunk'); else flash('Put down what you are carrying first'); }
     }
   }
@@ -856,7 +871,7 @@
     if (!ln) return { ...out, line: 'Stand on the plan and hold <kbd>E</kbd> (or the mouse button) to dig it level.', target: at };
     const looseOne = pl.inst.find((id) => pr.members[id].need > 0 && pr.members[id].got >= pr.members[id].need - 1e-6);
     if (looseOne) return { ...out, line: 'A piece is set but loose. ' + (pr.members[looseOne].kind === 'pier' ? 'Point at it and click to stamp it level.' : 'Strike it once to drive all its nails, or hold and drag across the pieces.'), target: at };
-    if (['top-plates', 'roof-frame', 'roof-deck', 'roofing'].includes(v.id) && !s.ladder && !V.climb && !s.options.auto && pr.level !== 'guided' && ((s.carried && s.carried.itemId === LAD.itemId) || s.stacks.some((k) => k.itemId === LAD.itemId))) return { ...out, line: 'This is out of reach from the ground. Carry the ladder to a wall and click to lean it, then stand at its foot and press <kbd>E</kbd>.', target: at };
+    if (['top-plates', 'roof-frame', 'roof-deck', 'roofing'].includes(v.id) && !s.ladder && !V.climb && !s.options.auto && pr.level !== 'guided' && ((s.carried && s.carried.itemId === LAD.itemId) || s.stacks.some((k) => k.itemId === LAD.itemId))) return { ...out, line: 'This is out of reach from the ground. Carry the ladder to a wall and click to lean it. Walk onto the ladder to climb.', target: at };
     const c = s.carried;
     if (c && c.itemId === ln.itemId && first && api.knows(s, pr.members[first].kind)) return { ...out, line: 'You know this work: hold the button and drag along the glowing places. Each piece is set and nailed as you pass.', target: at };
     if (c && c.itemId === ln.itemId) return { ...out, line: 'Carry the ' + stackName(c.itemId) + ' to the ' + low(pr.name) + '. Point at a glowing place: one click sets three pieces, then one strike nails a piece. Hold to keep going.', target: at };
