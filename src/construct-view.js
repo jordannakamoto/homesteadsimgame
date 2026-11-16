@@ -2,7 +2,7 @@
 // The truth is the simulation's construction system (src/sim/construction.js); the wording and rates are its
 // content (src/sim/content/construction.js); stacks and the load in the arms are drawn by src/engine/carry.js,
 // the pieces going in by src/engine/assembly.js. Build mode owns the building's shape and draws what is finished.
-// Keys: L the Build panel, F pick up / put down / hold to work. Build mode keeps its own keys while it is open.
+// Keys: L the Build panel, click or E: pick up, set a piece, nail it. Build mode keeps its own keys while it is open.
 (() => {
   const G = window.__game, B = window.__build;
   if (!G || !B || !B.structs || !window.__carry || !window.__assembly || !G.stepHooks) return;
@@ -27,6 +27,7 @@
   const carry = window.__carry.create(G);
   const reach = window.__carry.createReach(G, { reach: C.WORK.reachM });
   const REACH = C.WORK.reachM;
+  const OFF = { build: 1, garden: 1, hands: 1 };       // other tools own the pointer while they are out
   const V = {
     sim: null, rev: 1, bv: -1, sel: null, structs: new Map(), geom: new Map(), plans: new Map(), planVer: new Map(), fresh: new Map(), flushing: [],
     working: null, auto: null, raise: null, ctx: null, fWas: false, idleT: 0, placing: null, pendingPlan: null, book: false, expand: null, quotes: {},
@@ -365,7 +366,7 @@
   const pickable = (d) => !C.SITE_SUPPLY.includes(d.itemId);
   function context() {
     const P = G.player, s = S(), c = s.carried;
-    if (P.tool === 'build' || P.tool === 'garden' || V.placing || s.options.sandbox) return null;
+    if (OFF[P.tool] || V.placing || s.options.sandbox) return null;
     if (V.auto) return { kind: 'stop', id: V.auto.id };
     const pr = nearBuilding(P.x, P.z), stack = carry.nearest(reach.x, reach.z, 1.0, pickable) || (V.wantItem && carry.nearest(P.x, P.z, 2.1, wantedStack)) || carry.nearest(P.x, P.z, 2.1, pickable) || carry.nearest(P.x, P.z, 1.3);
     if (pr) {
@@ -504,7 +505,7 @@
     } else if (!hold && R.p <= 0) { V.raise = null; redraw(R.id); }
   }
   function tickWork(dt) {
-    const ctx = V.ctx, held = !!G.keys.KeyF || V.mDown, s = S();
+    const ctx = V.ctx, held = !!G.keys.KeyE || V.mDown, s = S();
     V.cool -= dt * (C.workSpeed(G.sim.state.sys.stock.tools, G.powerAvailable && G.powerAvailable()));
     if (V.jolt) { const j = V.jolt; j.t += dt; asm.lift(j.id, j.layer, j.mid, Math.max(-0.02, (j.built ? 0 : proud(j.mid)) - 0.03 * Math.exp(-j.t * 16) * Math.cos(j.t * 46))); if (j.t > 0.28) { asm.lift(j.id, j.layer, j.mid, j.built ? 0 : proud(j.mid)); V.jolt = null; } }
     if (V.swingIn) { V.swingIn.t += dt; const w = V.swingIn; asm.lift(w.id, w.layer, w.mid, proud(w.mid)); if (w.t > 0.2) V.swingIn = null; }
@@ -591,17 +592,17 @@
     if (ctx.kind === 'stop' && !V.auto) { setPrompt('', '', '', null); return; }
     if (ctx.kind === 'stop') {
       const A = V.auto, w = V.working && workLabel(pr, V.working.memberId), v = plan(A.id).view.stages.find((q) => q.id === A.stage);
-      setPrompt('F', 'Stop · ' + (V.raise ? 'raising the wall' : w ? low(w.text) : A.wait > 0 ? 'fetching more' : low(C.STAGE[A.stage].name)), v ? v.built + ' of ' + v.total : '', V.raise ? Math.min(1, V.raise.p) : W.job ? W.progress() : null);
-    } else if (ctx.kind === 'raise') setPrompt('F', 'Hold and push up to raise the wall', '', V.raise ? Math.min(1, V.raise.p) : 0);
-    else if (ctx.kind === 'hands') { const w = workLabel(pr, ctx.mid), b = V.blows[ctx.mid], pm = pr.members[ctx.mid], of = C.memberNails(pm.kind); setPrompt('F', ctx.act === 'set' ? 'Set it in place: ' + low(w.text).replace(/s$/, '') : ctx.act === 'dig' ? 'Dig and level' : pm.kind === 'pier' ? 'Stamp it level' : 'Nail it: ' + low(w.text).replace(/s$/, ''), ctx.act === 'set' ? w.count : (b ? b.n : 0) + ' of ' + of, ctx.act === 'set' ? null : (b ? b.n : 0) / of); }
-    else if (ctx.kind === 'work') { const w = workLabel(pr, V.working ? V.working.memberId : ctx.q[0]); setPrompt('F', 'Hold to build: ' + low(w.text), w.count, W.job ? W.progress() : 0); }
+      setPrompt('E', 'Stop · ' + (V.raise ? 'raising the wall' : w ? low(w.text) : A.wait > 0 ? 'fetching more' : low(C.STAGE[A.stage].name)), v ? v.built + ' of ' + v.total : '', V.raise ? Math.min(1, V.raise.p) : W.job ? W.progress() : null);
+    } else if (ctx.kind === 'raise') setPrompt('E', 'Hold and push up to raise the wall', '', V.raise ? Math.min(1, V.raise.p) : 0);
+    else if (ctx.kind === 'hands') { const w = workLabel(pr, ctx.mid), b = V.blows[ctx.mid], pm = pr.members[ctx.mid], of = C.memberNails(pm.kind); setPrompt('E', ctx.act === 'set' ? 'Set it in place: ' + low(w.text).replace(/s$/, '') : ctx.act === 'dig' ? 'Dig and level' : pm.kind === 'pier' ? 'Stamp it level' : 'Nail it: ' + low(w.text).replace(/s$/, ''), ctx.act === 'set' ? w.count : (b ? b.n : 0) + ' of ' + of, ctx.act === 'set' ? null : (b ? b.n : 0) / of); }
+    else if (ctx.kind === 'work') { const w = workLabel(pr, V.working ? V.working.memberId : ctx.q[0]); setPrompt('E', 'Hold to build: ' + low(w.text), w.count, W.job ? W.progress() : 0); }
     else if (ctx.kind === 'piece') setPrompt('', 'Click a glowing piece to set it', ctx.q.length + ' ready', W.job ? W.progress() : null);
-    else if (ctx.kind === 'auto') setPrompt('F', (ctx.guided ? 'Build: ' : 'Work until done: ') + low(C.STAGE[ctx.stage].name), '', null);
-    else if (ctx.kind === 'pick') setPrompt('F', (ctx.more ? 'Take more ' : 'Pick up ') + stackName(ctx.stack.itemId), '', null);
-    else if (ctx.kind === 'back') setPrompt('F', 'Put back the ' + stackName(ctx.stack.itemId), '', null);
-    else if (ctx.kind === 'swap') setPrompt('F', 'Swap for ' + stackName(ctx.stack.itemId), '', null);
-    else if (ctx.kind === 'drop') setPrompt('F', 'Put down the ' + stackName(s.carried.itemId), '', null);
-    else if (ctx.kind === 'hint') setPrompt(ctx.drop ? 'F' : '', ctx.text + (ctx.drop ? ' · put down' : ''), '', null);
+    else if (ctx.kind === 'auto') setPrompt('E', (ctx.guided ? 'Build: ' : 'Work until done: ') + low(C.STAGE[ctx.stage].name), '', null);
+    else if (ctx.kind === 'pick') setPrompt('E', (ctx.more ? 'Take more ' : 'Pick up ') + stackName(ctx.stack.itemId), '', null);
+    else if (ctx.kind === 'back') setPrompt('E', 'Put back the ' + stackName(ctx.stack.itemId), '', null);
+    else if (ctx.kind === 'swap') setPrompt('E', 'Swap for ' + stackName(ctx.stack.itemId), '', null);
+    else if (ctx.kind === 'drop') setPrompt('E', 'Put down the ' + stackName(s.carried.itemId), '', null);
+    else if (ctx.kind === 'hint') setPrompt(ctx.drop ? 'E' : '', ctx.text + (ctx.drop ? ' · put down' : ''), '', null);
   }
 
   // what to do next, for the note on the left and the arrow in the world
@@ -620,23 +621,23 @@
     if (!v) return pr.done ? null : { k: pr.name, title: 'Waiting', line: 'Nothing can go in just now.' };
     const out = { k: pr.name + ' · ' + C.STAGE_ORDER.filter((q) => pl.view.stages.some((w) => w.id === q)).indexOf(v.id) + ' of ' + pl.view.stages.length + ' stages done', title: v.name, stage: v.id, what: v.what, why: v.why };
     out.k = pr.name + ' · stage ' + (pl.view.stages.indexOf(v) + 1) + ' of ' + pl.view.stages.length;
-    if (Object.values(pr.lines).every((l) => l.ordered <= 1e-9) && pl.view.toOrderUsd > 0) return { ...out, line: 'Order the materials. While they are on their way, level the ground: stand on the plan and hold <kbd>F</kbd>.', btn: ['order:all', 'Order everything, ' + money(pl.view.toOrderUsd)], target: at };
-    if (V.auto && V.auto.id === pr.id) return { ...out, line: (V.auto.guided ? 'Building. ' : 'Working until it is done. ') + '<kbd>F</kbd> stops.', target: at };
-    if (pl.raise) return { ...out, line: 'The frame is ready. Stand by it and hold <kbd>F</kbd> to raise the wall.', target: at };
+    if (Object.values(pr.lines).every((l) => l.ordered <= 1e-9) && pl.view.toOrderUsd > 0) return { ...out, line: 'Order the materials. While they are on their way, level the ground: stand on the plan and hold <kbd>E</kbd>.', btn: ['order:all', 'Order everything, ' + money(pl.view.toOrderUsd)], target: at };
+    if (V.auto && V.auto.id === pr.id) return { ...out, line: (V.auto.guided ? 'Building. ' : 'Working until it is done. ') + '<kbd>E</kbd> stops.', target: at };
+    if (pl.raise) return { ...out, line: 'The frame is ready. Stand by it and hold <kbd>E</kbd> to raise the wall.', target: at };
     const first = pl.inst.find((id) => pr.members[id].stage === v.id) || pl.inst[0], ln = first ? lineOf(pr, first) : null;
     const have = (itemId) => s.stacks.some((k) => k.itemId === itemId) || (s.carried && s.carried.itemId === itemId);
     if (ln && !have(ln.itemId)) {
       if (v.pending || s.deliveries.some((d) => d.lines.some((l) => l.itemId === ln.itemId))) { const d = s.deliveries[0], mins = Math.max(1, Math.ceil((d.dueT - G.sim.state.t) / 60)); return { ...out, line: 'Your delivery arrives in about ' + mins + ' min of game time.' + (G.speed === 0 ? ' Time is paused.' : ''), wait: true }; }
       return { ...out, line: 'Order the materials for this stage.', btn: ['order:' + v.id, 'Order this stage, ' + money(v.toOrderUsd || v.costUsd)], btn2: pl.view.toOrderUsd > (v.toOrderUsd || 0) + 1 ? ['order:all', 'Order everything, ' + money(pl.view.toOrderUsd)] : null };
     }
-    if (pr.level === 'guided') return { ...out, line: 'Stand by the ' + low(pr.name) + ' and press <kbd>F</kbd>, or use the button.', btn: ['auto:' + v.id, v.verb], target: at };
-    if (!ln) return { ...out, line: 'Stand on the plan and hold <kbd>F</kbd> (or the mouse button) to dig it level.', target: at };
+    if (pr.level === 'guided') return { ...out, line: 'Stand by the ' + low(pr.name) + ' and press <kbd>E</kbd>, or use the button.', btn: ['auto:' + v.id, v.verb], target: at };
+    if (!ln) return { ...out, line: 'Stand on the plan and hold <kbd>E</kbd> (or the mouse button) to dig it level.', target: at };
     const looseOne = pl.inst.find((id) => pr.members[id].need > 0 && pr.members[id].got >= pr.members[id].need - 1e-6);
-    if (looseOne) return { ...out, line: 'A piece is set but loose. Point at it and press <kbd>F</kbd> or click to ' + (pr.members[looseOne].kind === 'pier' ? 'stamp it level' : 'nail it') + '.', target: at };
+    if (looseOne) return { ...out, line: 'A piece is set but loose. Point at it and press <kbd>E</kbd> or click to ' + (pr.members[looseOne].kind === 'pier' ? 'stamp it level' : 'nail it') + '.', target: at };
     const c = s.carried;
     if (c && c.itemId === ln.itemId) return { ...out, line: 'Carry the ' + stackName(c.itemId) + ' to the ' + low(pr.name) + '. Point at a glowing place: click sets a piece, click again nails it. Hold to keep going.', target: at };
     const stack = homeStack(ln.itemId) || s.stacks.find((k) => k.itemId === ln.itemId);
-    return { ...out, line: (s.options.auto ? 'Press <kbd>F</kbd> by the ' + low(pr.name) + ' to work until done, or pick' : 'Pick') + ' up ' + stackName(ln.itemId) + ' at the stacks: point at them and click, or <kbd>F</kbd>.', target: s.options.auto ? at : stack ? { x: stack.x, z: stack.z, y: 1.9 } : null, item: ln.itemId };
+    return { ...out, line: (s.options.auto ? 'Press <kbd>E</kbd> by the ' + low(pr.name) + ' to work until done, or pick' : 'Pick') + ' up ' + stackName(ln.itemId) + ' at the stacks: point at them and click, or <kbd>E</kbd>.', target: s.options.auto ? at : stack ? { x: stack.x, z: stack.z, y: 1.9 } : null, item: ln.itemId };
   }
   function drawNext() {
     const a = nextAction(), s = S();
@@ -899,14 +900,14 @@
     if (V.placing) tickPlacing();
     {
       // what F would do is worked out again only when something changed or you have moved
-      reach.update(G.player.tool !== 'build' && G.player.tool !== 'garden' && !V.placing && !s.options.sandbox && (!!s.carried || (!!V.ctx && V.ctx.kind !== 'stop')));
+      reach.update(!OFF[G.player.tool] && !V.placing && !s.options.sandbox && (!!s.carried || (!!V.ctx && V.ctx.kind !== 'stop')));
       const P = G.player, c = s.carried, sig = V.rev * 4 + (c ? 1 : 0) + (V.auto ? 2 : 0);
       if (sig !== V.ctxSig || Math.abs(reach.px - V.ctxPx) + Math.abs(reach.py - V.ctxPy) > 2 || Math.abs(reach.x - V.ctxRx) + Math.abs(reach.z - V.ctxRz) > 0.08 || Math.abs(P.x - V.ctxX) + Math.abs(P.z - V.ctxZ) > 0.12 || P.tool !== V.ctxTool || !!V.placing !== V.ctxPl) {
         V.ctxSig = sig; V.ctxPx = reach.px; V.ctxPy = reach.py; V.ctxRx = reach.x; V.ctxRz = reach.z; V.ctxX = P.x; V.ctxZ = P.z; V.ctxTool = P.tool; V.ctxPl = !!V.placing;
         V.ctx = context();
       }
     }
-    if (V.fTap) { V.fTap = false; if (G.player.tool !== 'build') press(V.ctx); }
+    if (V.fTap) { V.fTap = false; if (!OFF[G.player.tool]) press(V.ctx); }
     if (!s.options.sandbox) tickWork(dt);
     glow(V.ctx);
     {
@@ -957,14 +958,14 @@
     if (e.code === 'Escape') { if (V.placing) { endPlacing(); e.stopImmediatePropagation(); } else if (!panel.hidden) closePanel(); return; }
     if (G.player.tool === 'build') return;
     if (e.code === 'KeyL') panel.hidden ? openPanel() : closePanel();
-    else if (e.code === 'KeyF') V.fTap = true;
+    else if (e.code === 'KeyE') V.fTap = true;
   }, true);
   canvas.addEventListener('pointermove', (e) => { ptr.x = e.clientX; ptr.y = e.clientY; ptr.has = true; }, true);
   canvas.addEventListener('pointerdown', (e) => {
     ptr.x = e.clientX; ptr.y = e.clientY; ptr.has = true; sounds.wake();
     if (V.placing) { e.stopImmediatePropagation(); e.preventDefault(); if (e.button === 2) endPlacing(); else { tickPlacing(); commitPlacing(); } return; }
     // the left button is the hands: whatever F would do here
-    if (e.button === 0 && G.player.tool !== 'build' && G.player.tool !== 'garden' && V.ctx && V.ctx.kind !== 'hint' && V.ctx.kind !== 'drop') { e.stopImmediatePropagation(); V.mDown = true; V.fTap = true; return; }
+    if (e.button === 0 && !OFF[G.player.tool] && V.ctx && V.ctx.kind !== 'hint' && V.ctx.kind !== 'drop') { e.stopImmediatePropagation(); V.mDown = true; V.fTap = true; return; }
     const ctx = V.ctx;
     if (ctx && ctx.kind === 'piece' && !W.job && e.button === 0) {
       const r = canvas.getBoundingClientRect(), g = geom(ctx.id), pr = S().progress[ctx.id];
@@ -986,7 +987,7 @@
   canvas.addEventListener('pointermove', (e) => { if (V.raise && V.mDown && !V.raise.landed) V.raise.push = (V.raise.push || 0) + Math.max(0, -e.movementY) / 300; }, true);
   canvas.addEventListener('wheel', (e) => { if (!V.placing) return; e.stopImmediatePropagation(); e.preventDefault(); V.placing.yaw += (e.deltaY > 0 ? 1 : -1) * Math.PI / 12; }, { capture: true, passive: false });
   canvas.addEventListener('contextmenu', (e) => { if (V.placing) e.preventDefault(); }, true);
-  { const b = $('cvact'); const down = (e) => { e.preventDefault(); G.keys.KeyF = true; V.fTap = true; sounds.wake(); }, up = () => { G.keys.KeyF = false; };
+  { const b = $('cvact'); const down = (e) => { e.preventDefault(); G.keys.KeyE = true; V.fTap = true; sounds.wake(); }, up = () => { G.keys.KeyE = false; };
     b.addEventListener('pointerdown', down); b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('pointerleave', up); }
 
   // for tests and the console

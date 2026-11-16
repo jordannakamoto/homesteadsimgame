@@ -2014,7 +2014,7 @@
   }
   // closed shapes made with at least one angled wall: found as faces of the wall graph
   function findPolys(S) {
-    if (!S.segs.length) return [];
+    if (!S || !S.segs.length) return [];
     const raw = S.segs.map((sg) => [sg[0], sg[1], sg[2], sg[3], 1]);
     for (const k of S.walls.keys()) {
       const [i, j, d] = parse(k);
@@ -3604,6 +3604,7 @@
   // ground-level sample points of everything in a structure (local)
   function localSamples(S) {
     const out = [];
+    if (!S) return out;
     for (const k of S.floors) {
       const [i, j] = parse(k);
       out.push([i, j], [i + 1, j], [i, j + 1], [i + 1, j + 1], [i + 0.5, j + 0.5]);
@@ -5465,8 +5466,8 @@
     const A = { floors: new Set(op.addFloors.map(([i, j]) => ck(i, j))), walls: new Map(), wmat: new Map(), fmat: new Map(), roofs: op.addRoofs, segs: op.addSegs.slice(), rings: op.addRings.slice(), stairs: op.addStairs, pillars: op.addPillars.slice(), hs: F.hs || B.hs, paths: op.addPaths, frame: F, lift: F.lift || 0, decor: op.addDecor, base: Sx };
     A.polys = op.addPolyRoofs.length && Sx ? [{ ...Sx.polys[polyAt(Sx, op.addPolyRoofs[0][0], op.addPolyRoofs[0][1])], roofed: true }] : [];
     const sideSeg = (ri, k, ty) => [...ringVert(Sx.rings[ri], k), ...ringVert(Sx.rings[ri], k + 1), ty];
-    for (const [idx, ty] of op.setSegs) A.segs.push([...Sx.segs[idx].slice(0, 4), ty]);
-    for (const [idx] of op.setSegMats) A.segs.push(Sx.segs[idx].slice(0, 5));
+    if (Sx) for (const [idx, ty] of op.setSegs) A.segs.push([...Sx.segs[idx].slice(0, 4), ty]);
+    if (Sx) for (const [idx] of op.setSegMats) A.segs.push(Sx.segs[idx].slice(0, 5));
     for (const [ri, k, ty] of op.setSides) ty && A.segs.push(sideSeg(ri, k, ty));
     for (const [ri, on] of op.ringRoofs) on && A.rings.push({ ...Sx.rings[ri], sides: [], roof: on, floor: false });
     for (const [i, j, dd, ty] of op.addWalls) A.walls.set(ek(i, j, dd), ty || op.style || "wall");
@@ -5485,14 +5486,14 @@
     ghostAdd.material.userData.hatch.value = bad ? 1 : 0;
     const S = Sx;
     const Dl = { floors: new Set(op.delFloors.map(([i, j]) => ck(i, j))), walls: new Map(), roofs: S && !op.replacing ? op.delRoofs.map((i) => S.roofs[i]) : [] };
-    if (!op.move) for (const [i, j, dd] of op.delWalls.concat(op.revert)) Dl.walls.set(ek(i, j, dd), S.walls.get(ek(i, j, dd)) || "wall");
+    if (!op.move) for (const [i, j, dd] of op.delWalls.concat(op.revert)) Dl.walls.set(ek(i, j, dd), (S && S.walls.get(ek(i, j, dd))) || "wall");
     else Dl.floors = new Set(op.delFloors.map(([i, j]) => ck(i, j)));
-    Dl.segs = op.delSegs.map((idx) => S.segs[idx]);
-    Dl.rings = op.delRings.map((idx) => S.rings[idx]);
-    Dl.stairs = op.delStairs.map((idx) => S.stairs[idx]);
-    Dl.pillars = op.delPillars.map((idx) => S.pillars[idx]);
-    Dl.paths = op.delPaths.map((idx) => S.paths[idx]);
-    Dl.decor = op.delDecor.map((idx) => S.decor[idx]);
+    Dl.segs = S ? op.delSegs.map((idx) => S.segs[idx]) : [];
+    Dl.rings = S ? op.delRings.map((idx) => S.rings[idx]) : [];
+    Dl.stairs = S ? op.delStairs.map((idx) => S.stairs[idx]) : [];
+    Dl.pillars = S ? op.delPillars.map((idx) => S.pillars[idx]) : [];
+    Dl.paths = S ? op.delPaths.map((idx) => S.paths[idx]) : [];
+    Dl.decor = S ? op.delDecor.map((idx) => S.decor[idx]) : [];
     Dl.base = S;
     Dl.frame = F;
     Dl.hs = S ? S.hs : 1;
@@ -7470,12 +7471,15 @@
     return { pts, len: Math.round(L * 1000) / 1000 };
   }
   function fxDraw() {
-    if (FX.drawn === FX.v) return;
+    // the port dots belong to the Equip tool: leaving the tool or build mode redraws, so none linger
+    const eq = B.on && B.tool === "equip";
+    if (FX.drawn === FX.v && FX.eq === eq) return;
     FX.drawn = FX.v;
+    FX.eq = eq;
     for (const m of [...FX.group.children]) (FX.group.remove(m), m.geometry.dispose());
     for (const f of FX.list) {
       const d = fxDef(f.fixture);
-      if (!d) continue;
+      if (!d || f.settings.viewOwned) continue;   // viewOwned: an add-on draws this one itself (a pump with a working handle)
       const m = new T.Mesh(fxGeo(d, fxTilt(f)).build(), fxMat);
       m.position.set(f.x, f.y, f.z);
       m.rotation.order = "YXZ";
@@ -7500,8 +7504,9 @@
     if (g.p.length) FX.group.add(new T.Mesh(g.build(), wireMat));
     // the dots the interface draws on ports and in the middle of each run
     const pv = [];
-    if (B.on && B.tool === "equip") {
-      for (const f of FX.list) for (const p of (fxDef(f.fixture) || { ports: [] }).ports) pv.push({ p: portPos(f, p.id), type: p.type, fid: f.id, pid: p.id, from: !!FX.from && FX.from.piece === f.id && FX.from.port === p.id });
+    if (eq) {
+      // water ports get no dots: pipes are fitted by hand, part by part (docs/FIRST_WATER.md). Wires and flues stay here for now.
+      for (const f of FX.list) for (const p of (fxDef(f.fixture) || { ports: [] }).ports) if (p.type !== "water") pv.push({ p: portPos(f, p.id), type: p.type, fid: f.id, pid: p.id, from: !!FX.from && FX.from.piece === f.id && FX.from.port === p.id });
       for (const ln of FX.links) {
         const r = linkRoute(ln);
         r && pv.push({ p: [(r.pts[1][0] + r.pts[3][0]) / 2, r.pts[1][1], (r.pts[1][2] + r.pts[3][2]) / 2], type: "link", lid: ln.id, text: fmtM(r.len), sel: ln.id === FX.sel });

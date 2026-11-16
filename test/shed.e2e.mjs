@@ -100,9 +100,9 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
   s = await state();
   check('standing on the plan, the prompt offers to level the ground', s.ctx === 'hands' && /dig and level/i.test(s.prompt), s.prompt);
   check('a ghost wall does not block the way: the player stands inside the plan', await G(() => { const st = __build.structs().find((q) => q.planned); return Math.hypot(st.x - __game.player.x, st.z - __game.player.z) < 2.6; }));
-  await page.keyboard.down('KeyF'); await tick(20);
-  check('letting go of F part way through a piece loses only that piece', await (async () => { await page.keyboard.up('KeyF'); await tick(3); const q = await state(); return q.built === 0 && q.stage === 'site'; })());
-  await page.keyboard.down('KeyF'); for (let i = 0; i < 60 && (await state()).stage === 'site'; i++) await tick(6); await page.keyboard.up('KeyF'); await tick(4);
+  await page.keyboard.down('KeyE'); await tick(20);
+  check('letting go of F part way through a piece loses only that piece', await (async () => { await page.keyboard.up('KeyE'); await tick(3); const q = await state(); return q.built === 0 && q.stage === 'site'; })());
+  await page.keyboard.down('KeyE'); for (let i = 0; i < 60 && (await state()).stage === 'site'; i++) await tick(6); await page.keyboard.up('KeyE'); await tick(4);
   s = await state();
   check('the site is staked and levelled; the foundation is next, waiting for its delivery', s.stage === 'foundation' && /arrives/.test(s.line || ''), s.line);
   check('a card says what the next stage is and why, and stays away once dismissed', await (async () => {
@@ -144,10 +144,10 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
       if (s.raise) {
         await walkTo(s.shed, s.shed.r);
         if (!taken.flat) { taken.flat = 1; check('a wall frame lies flat on the deck, waiting to be raised', await G(() => { const pr = __construct.current(), par = __construct.plan(pr.id).raise, mw = __build.membersOf(pr.id); return !!par && Object.keys(pr.members).filter((id) => pr.members[id].parent === par && pr.members[id].stage === 'wall-frame').every((id) => pr.members[id].built && mw.planned.has(id)); })); await shot('06-wall-flat'); }
-        await page.keyboard.down('KeyF'); await tick(30);
+        await page.keyboard.down('KeyE'); await tick(30);
         if (!taken.half) { taken.half = 1; check('holding F swings it up about its bottom plate', await G(() => { const R = __construct.V.raise; return !!R && R.p > 0.1 && R.p < 0.95 && Math.abs(R.angle) > 0.2 && Math.abs(R.angle) < 1.5; })); await shot('07-wall-half-raised'); }
         for (let i = 0; i < 40 && (await state()).raise; i++) await tick(5);
-        await page.keyboard.up('KeyF'); await tick(30);
+        await page.keyboard.up('KeyE'); await tick(30);
         if (!taken.up) { taken.up = 1; await shot('08-wall-up'); }
         continue;
       }
@@ -212,7 +212,7 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
     s = await state();
     if (s.done) break;
     if (s.banner) banners.add(s.banner.split(' ').slice(0, 2).join(' '));
-    if (!s.auto) { await walkTo(s.shed, s.shed.r); if ((await state()).ctx === 'auto') await page.keyboard.press('KeyF'); await tick(4); }
+    if (!s.auto) { await walkTo(s.shed, s.shed.r); if ((await state()).ctx === 'auto') await page.keyboard.press('KeyE'); await tick(4); }
     for (let i = 0; i < 400; i++) { await tick(10); const q = await state(); if (q.banner) banners.add(q.banner.split(' ').slice(0, 2).join(' ')); if (!q.auto) break; }
   }
   await tick(40);
@@ -252,7 +252,7 @@ let guidedAll = 0;
   for (let guard = 0; guard < 40; guard++) {
     s = await state();
     if (s.done) break;
-    if (!s.auto && s.ctx === 'auto') { await page.keyboard.press('KeyF'); presses++; await tick(3); }
+    if (!s.auto && s.ctx === 'auto') { await page.keyboard.press('KeyE'); presses++; await tick(3); }
     for (let i = 0; i < 300; i++) { await tick(10); const q = await state(); if (!q.auto) break; }
     if (guard === 4) await shot('13-guided');
   }

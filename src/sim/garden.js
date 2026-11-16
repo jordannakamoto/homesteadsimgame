@@ -533,6 +533,14 @@ function refill(ctx, p = {}) {
   s.can.litres = p.litres != null ? r3(Math.min(CAN_L, s.can.litres + Math.max(0, +p.litres || 0))) : CAN_L;
   return { ok: true, litres: s.can.litres };
 }
+// Water caught in the can from a spout or a tap: takes what fits and says how much that was.
+function fill(ctx, p = {}) {
+  const s = ensure(ctx);
+  if (stockOf(ctx) && !hasTool(ctx, 'watering_can')) return fail('You need a watering can.');
+  const taken = Math.max(0, Math.min(+p.litres || 0, CAN_L - s.can.litres));
+  s.can.litres = r3(s.can.litres + taken);
+  return { ok: true, taken, canL: s.can.litres, full: s.can.litres >= CAN_L - 1e-9 };
+}
 function hoe(ctx, p = {}) {
   const s = ensure(ctx);
   if (stockOf(ctx) && !hasTool(ctx, 'hoe')) return fail('You need a hoe.');
@@ -777,7 +785,7 @@ export const garden = {
     growthStep(ctx, s);   // a third of the garden each hour
   },
   commands: {
-    'garden.makeBed': makeBed, 'garden.removeBed': removeBed, 'garden.sow': sow, 'garden.water': water, 'garden.refill': refill,
+    'garden.makeBed': makeBed, 'garden.removeBed': removeBed, 'garden.sow': sow, 'garden.water': water, 'garden.refill': refill, 'garden.fill': fill,
     'garden.hoe': hoe, 'garden.till': till, 'garden.mulch': mulch, 'garden.amend': amend, 'garden.harvest': harvest, 'garden.pull': pull,
     'garden.cover': cover, 'garden.setShade': setShade,
   },

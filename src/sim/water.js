@@ -118,11 +118,27 @@ const resolvePipe = (p) => {
   return FIXTURES_WATER.pipe_pex_20;
 };
 
+// Hand-fitted runs arrive from another system (state `plumbing`: { version, pieces }) as extra connection
+// pieces: "pipe" runs between fixture ports (with `shut` when a closed valve is on the way and `equivM` for
+// the fittings), and "leak" pieces for open ends. They are joined to the site's pieces here.
+const merged = new WeakMap();
+function piecesFor(ctx) {
+  const site = ctx.get('site'), extra = ctx.get('plumbing');
+  if (!site) return null;
+  if (!extra || !extra.pieces || !extra.pieces.length) return site.pieces;
+  let m = merged.get(site.pieces);
+  if (!m || m.extra !== extra.pieces) { m = { extra: extra.pieces, all: site.pieces.concat(extra.pieces) }; merged.set(site.pieces, m); }
+  return m.all;
+}
+const versionOf = (ctx) => { const site = ctx.get('site'), extra = ctx.get('plumbing'); return extra && extra.version ? site.version + ':' + extra.version : site.version; };
+// An open pipe end is an orifice the size of the bore: all the head left becomes velocity (v = sqrt(2 g h)).
+const openEndSpec = (dM) => ({ ratedLmin: Math.PI * (dM / 2) ** 2 * Math.sqrt(2 * G) * 60000, ratedKPa: KPA_PER_M });
+
 function netFor(pieces) {
   let net = nets.get(pieces);
   if (net) return net;
   net = { fx: new Map(), pipes: [], pipeById: new Map(), ports: new Map(), roofs: new Map(), paths: new Map(),
-    gutters: [], tanks: [], grey: [], pumps: [], ptanks: [], wells: [], outlets: [], heaters: [], ffs: [], drains: [], routes: {} };
+    gutters: [], tanks: [], grey: [], pumps: [], ptanks: [], wells: [], outlets: [], heaters: [], ffs: [], drains: [], leaks: [], routes: {} };
   for (const p of pieces) {
     if (p.kind === 'roof') net.roofs.set(p.id, p);
     if (p.kind !== 'fixture') continue;
@@ -134,11 +150,16 @@ function netFor(pieces) {
     if (list) list.push(p.id);
   }
   for (const p of pieces) {
+    if (p.kind === 'leak' && p.from && net.fx.has(p.from.piece)) {
+      const spec = resolvePipe(p), d = spec.innerMm / 1000, L = Math.max(0.01, +p.lengthM || 0.01) + (+p.equivM || 0);
+      net.leaks.push({ id: p.id, from: p.from, y: +p.y || 0, x: p.a ? p.a.x : 0, z: p.a ? p.a.z : 0, d, K: HW(spec.hazenC || 140, d) * L, out: openEndSpec(d) });
+      continue;
+    }
     if (p.kind !== 'pipe' || !p.from || !p.to || !net.fx.has(p.from.piece) || !net.fx.has(p.to.piece)) continue;
     const spec = resolvePipe(p), d = spec.innerMm / 1000, od = spec.outerMm / 1000, L = Math.max(0.01, +p.lengthM || 1);
     const s = p.settings || {};
     const insulMm = +(p.insulationMm ?? s.insulationMm ?? 0), buriedDepthM = +(p.buriedDepthM ?? s.buriedDepthM ?? 0);
-    const pipe = { id: p.id, from: p.from, to: p.to, L, d, od, C: spec.hazenC || 140, K: HW(spec.hazenC || 140, d) * L,
+    const pipe = { id: p.id, from: p.from, to: p.to, L, d, od, C: spec.hazenC || 140, K: HW(spec.hazenC || 140, d) * (L + (+p.equivM || 0)), shut: !!p.shut,
       volL: Math.PI * (d / 2) ** 2 * L * 1000, buriedDepthM, insulMm, indoor: !!(p.indoor ?? s.indoor), spec: spec.id };
     // heat path from the water to the air per unit film coefficient: bare wall resistance is negligible for plastic this thin
     const r1 = od / 2, r2 = r1 + insulMm / 1000;
@@ -182,6 +203,7 @@ function upstream(net, pid, port) {
       for (const ln of net.ports.get(cur.pid + ':' + cur.port) || []) {
         const o = ln.other, f = net.fx.get(o.piece);
         if (!f || seen.has(o.piece) || o.port !== 'out') continue;
+        if (ln.pipe.shut && (net.ports.get(cur.pid + ':' + cur.port) || []).some((x) => !x.pipe.shut && x.other.port === 'out')) continue;   // an open run beats a shut one
         const pipes = [...cur.pipes, ln.pipe], cat = f.spec.category;
         if (cat === 'storage' || cat === 'source') { found = compilePath(net, o.piece, cat === 'source' ? 'well' : 'tank', pipes, cur.devs); break; }
         if (cat === 'pump' || cat === 'pressure' || cat === 'heater') { seen.add(o.piece); next.push({ pid: o.piece, port: 'in', pipes, devs: [...cur.devs, { id: o.piece, at: pipes.length }] }); }
@@ -205,11 +227,11 @@ function compilePath(net, source, kind, pipes, devs) {
 }
 
 // ---------------------------------------------------------------------------------------- state
-const zeroLedger = () => ({ collectedL: 0, wellL: 0, importedL: 0, usedL: 0, overflowL: 0, firstFlushL: 0, greyL: 0,
+const zeroLedger = () => ({ collectedL: 0, wellL: 0, importedL: 0, usedL: 0, overflowL: 0, firstFlushL: 0, greyL: 0, leakedL: 0,
   heaterKWh: 0, propaneKg: 0, solarKWh: 0, pumpWh: 0 });
 function fresh() {
   return { v: STATE_V, version: -1, empty: true,
-    tanks: {}, catchments: {}, pumps: {}, taps: {}, wells: {}, heaters: {}, pressureTanks: {}, firstFlush: {}, pipes: {},
+    tanks: {}, catchments: {}, pumps: {}, taps: {}, wells: {}, heaters: {}, pressureTanks: {}, firstFlush: {}, pipes: {}, leaks: {},
     greywater: { storedL: 0, toGroundL: 0, toSewerL: 0, tanks: {} }, diverters: {},
     ground: {}, draws: [], results: {}, issues: [], loadsSent: {}, frost: { indexCs: 0, depthM: 0 },
     today: { day: -1, collectedL: 0, usedL: 0, overflowL: 0 }, totals: zeroLedger(), nextDraw: 1, issuesDirty: false };
@@ -217,8 +239,10 @@ function fresh() {
 const tankHeight = (f) => f.spec.heightM;
 
 function sync(s, site, ctx) {
-  const net = netFor(site.pieces);
-  s.version = site.version;
+  const net = netFor(piecesFor(ctx));
+  s.version = versionOf(ctx);
+  if (!s.leaks) s.leaks = {};
+  if (s.totals.leakedL === undefined) s.totals.leakedL = 0;
   s.empty = net.empty;
   const keep = (obj, ids, make) => {
     const out = {};
@@ -241,6 +265,8 @@ function sync(s, site, ctx) {
   }
   s.firstFlush = keep(s.firstFlush, net.ffs, (id) => ({ capacityL: F(id).spec.chamberL, heldL: 0 }));
   s.pumps = keep(s.pumps, net.pumps, (id) => ({ on: false, ratedW: F(id).spec.ratedW, headM: 0, flowLmin: 0, wanted: false }));
+  s.leaks = keep(s.leaks, net.leaks.map((l) => l.id), () => ({ flowLmin: 0, lostL: 0 }));
+  for (const l of net.leaks) Object.assign(s.leaks[l.id], { x: l.x, y: l.y, z: l.z });
   s.pressureTanks = keep(s.pressureTanks, net.ptanks, (id) => ({ storedL: 0, drawdownL: F(id).spec.drawdownL, pressureKPa: 0, refill: false }));
   s.wells = keep(s.wells, net.wells, (id) => {
     const sp = F(id).spec, st = F(id).p.settings || {};
@@ -272,9 +298,9 @@ function step(ctx) {
   if (!s || s.v !== STATE_V) ctx.s = s = fresh();
   const site = ctx.get('site');
   if (!site) return;
-  if (site.version !== s.version) sync(s, site, ctx);
+  if (versionOf(ctx) !== s.version) sync(s, site, ctx);
   if (s.empty) return;                                     // nothing installed: costs nothing
-  const net = netFor(site.pieces), w = ctx.get('weather') || NO_WEATHER, dt = ctx.dt, minutes = dt / 60;
+  const net = netFor(piecesFor(ctx)), w = ctx.get('weather') || NO_WEATHER, dt = ctx.dt, minutes = dt / 60;
   const el = ctx.get('electrical'), hasEl = ctx.sim.handlers.has('electrical.setLoad');
   const T = s.totals, today = s.today, day = Math.floor(ctx.t / DAY);
   if (today.day !== day) { s.today = { day, collectedL: 0, usedL: 0, overflowL: 0, firstFlushL: 0, wellL: 0 }; }
@@ -289,7 +315,10 @@ function step(ctx) {
   // which pumps can run this minute
   for (const id of net.pumps) {
     const pm = s.pumps[id], spec = net.fx.get(id).spec;
-    if (!spec.ratedW) pm.on = true;                        // a hand pump runs whenever someone pumps it
+    if (!spec.ratedW) {                                    // a hand pump runs whenever someone pumps it; one marked
+      pm.on = !(net.fx.get(id).p.settings || {}).manual;   // manual moves water only stroke by stroke (water.pumpStroke)
+      if (pm.prime > 0) pm.prime = Math.max(0, pm.prime - minutes / PRIME_HOLD_MIN);   // left alone, the column drains back
+    }
     else { const ld = hasEl && el && el.loads && el.loads[id]; pm.on = !!(ld && ld.on && ld.served); if (pm.on) T.pumpWh += (spec.ratedW * dt) / 3600; }
     pm.wanted = false; pm.flowLmin = 0; pm.headM = 0;
   }
@@ -308,6 +337,7 @@ function step(ctx) {
   // consumers: outlets, then tanks filled by pump or gravity, pressure tanks, heaters
   serveDraws(R);
   for (const id of net.outlets) outletStep(R, id);
+  for (const lk of net.leaks) leakStep(R, lk);
   for (const id of net.tanks) tankFillStep(R, id);
   for (const id of net.ptanks) ptankStep(R, id);
   for (const id of net.heaters) heaterStep(R, id);
@@ -434,6 +464,7 @@ function flowThrough(R, pipes, L, tC) {
 // Why a path cannot flow right now, or null. Also checks suction lift for a surface pump.
 function blocked(R, path, pipes, usePumps) {
   const { s, net } = R;
+  for (const p of pipes) if (p.shut) return 'valve';
   for (const p of pipes) if (s.pipes[p.id].frozen) return 'frozen';
   if (usePumps) {
     for (const id of path.pumps) if (!s.pumps[id].on) return net.fx.get(id).spec.ratedW ? 'unpowered' : 'pump';
@@ -511,7 +542,7 @@ const REASON = {
   unpowered: 'The pump that feeds this outlet has no power.', pump: 'The pump that feeds this outlet is not running.',
   frozen: 'A pipe feeding this outlet is frozen.', empty: 'The tank feeding this outlet is empty.', iced: 'The tank feeding this outlet is frozen over.',
   dry: 'The well is pumped dry for now.', suction: 'The pump sits too far above the water to lift it by suction.', head: 'The pump cannot push water that high.',
-  dry_toilet: 'A composting toilet needs no water.',
+  dry_toilet: 'A composting toilet needs no water.', valve: 'A shutoff valve on the way to this outlet is closed.',
 };
 
 function outletStep(R, id) {
@@ -581,6 +612,75 @@ function outletStep(R, id) {
   if (why !== o.why) { o.why = why; s.issuesDirty = true; }
   o.tempC = o.tempC ?? null;
   o.outTempC = usedL > 0 ? tc + hotFrac * (th - tc) : null;
+}
+
+// ------------------------------------------------------------------ open ends
+// A run left open drains its tank onto the ground for as long as the water stands above the open end.
+function leakStep(R, lk) {
+  const { s, net, minutes } = R, o = s.leaks[lk.id], f = net.fx.get(lk.from.piece);
+  o.flowLmin = 0;
+  if (!f || f.spec.category !== 'storage' || lk.from.port !== 'out') return;
+  const t = s.tanks[lk.from.piece], avail = Math.max(0, t.storedL - t.iceL);
+  if (avail <= 1e-6) return;
+  const zs = t.elevationM + (t.storedL / t.capacityL) * f.spec.heightM;
+  const q = solveLmin(zs, lk.y, [], net, lk.K, lk.out);
+  // it cannot take the surface below the open end within the minute
+  const aboveL = lk.y > t.elevationM ? Math.max(0, ((zs - lk.y) / f.spec.heightM) * t.capacityL) : avail;
+  const L = Math.min(q * minutes, avail, aboveL);
+  if (L <= 0) return;
+  removeLiquid(t, t.storedL, L); t.storedL = Math.max(0, t.storedL - L);
+  o.flowLmin = L / minutes; o.lostL += L;
+  ledger(R, 'leakedL', L);
+  const g = s.ground[lk.id] || (s.ground[lk.id] = { x: lk.x, z: lk.z, cleanL: 0, greyL: 0, blackL: 0 });
+  g.cleanL += L;
+}
+
+// ------------------------------------------------------------------ pumping by hand
+// One stroke of a manual hand pump: lifts up to its stroke volume from whatever its inlet is piped to and
+// sends it out of the spout or up to the tank its outlet is piped to (the diverter). The first strokes only
+// prime it. Applied at once, so the handle and the water agree.
+const PRIME_STROKES = 3, PRIME_HOLD_MIN = 720;      // it holds its prime for half a day (ten minutes of play at 1x)
+function pumpStroke(ctx, p = {}) {
+  const s = ensure(ctx), pieces = piecesFor(ctx), net = pieces && netFor(pieces), f = net && net.fx.get(p.id), pm = f && s.pumps[p.id];
+  const out = (o) => ({ ok: false, litres: 0, to: null, ...o });
+  if (!pm || f.spec.ratedW) return out({ reason: 'none', text: 'There is no hand pump here.' });
+  const up = upstream(net, p.id, 'in');
+  if (!up) return out({ reason: 'none', text: 'The pump is not piped to any water.' });
+  const A = up.kind === 'well' ? wellLperM(net, up.source) : 0;
+  const surface = up.kind === 'well' ? (net.fx.get(up.source).p.y0 || 0) - s.wells[up.source].levelM : s.tanks[up.source].surfaceM;
+  if (!f.spec.submersible && (f.p.y0 || 0) - surface > f.spec.maxSuctionM) return out({ reason: 'suction', text: REASON.suction });
+  const avail = up.kind === 'well' ? Math.max(0, (s.wells[up.source].pumpDepthM - s.wells[up.source].levelM) * A) : Math.max(0, s.tanks[up.source].storedL - s.tanks[up.source].iceL);
+  if (avail <= 1e-6) return out({ reason: 'dry', text: REASON.dry });
+  if ((pm.prime || 0) < 1) {
+    pm.prime = Math.min(1, (pm.prime || 0) + 1 / PRIME_STROKES + 1e-9);
+    if (pm.prime < 1) return { ok: true, litres: 0, to: null, priming: true, prime: pm.prime };
+  }
+  pm.prime = 1;
+  const L = Math.min(Math.max(0, +p.litres || f.spec.strokeL || 0.5), f.spec.strokeL || 0.5, avail);
+  if (up.kind === 'well') { const wl = s.wells[up.source]; wl.levelM += L / A; s.totals.wellL += L; if (s.today.wellL !== undefined) s.today.wellL += L; }
+  else { const t = s.tanks[up.source]; removeLiquid(t, t.storedL, L); t.storedL -= L; }
+  pm.strokes = (pm.strokes || 0) + 1; pm.liftedL = (pm.liftedL || 0) + L;
+  const R = { s, net, minutes: 1 }, tC = up.kind === 'well' ? 10 : liquidTemp(s.tanks[up.source]);
+  if (pm.divert === 'tank') {
+    const ln = (net.ports.get(p.id + ':out') || []).find((x) => !x.pipe.shut && x.other.port === 'in' && net.fx.get(x.other.piece).spec.category === 'storage');
+    if (ln) {
+      const before = s.tanks[ln.other.piece].storedL;
+      addToTank(R, ln.other.piece, L, tC, 0);
+      const t = s.tanks[ln.other.piece], tf = net.fx.get(ln.other.piece);
+      t.levelM = (t.storedL / t.capacityL) * tankHeight(tf); t.surfaceM = t.elevationM + t.levelM;
+      return { ok: true, litres: L, to: 'tank', tank: ln.other.piece, storedL: t.storedL, overflowL: L - (t.storedL - before) };
+    }
+    ledger(R, 'usedL', L);
+    return { ok: true, litres: L, to: 'ground', text: 'Nothing is piped to the top of the pump, so the water spills.' };
+  }
+  ledger(R, 'usedL', L);                                  // out of the spout: into whatever stands under it
+  return { ok: true, litres: L, to: 'spout' };
+}
+function setPumpDivert(ctx, p = {}) {
+  const pm = ensure(ctx).pumps[p.id];
+  if (!pm) throw new Error('no pump ' + p.id);
+  pm.divert = p.to === 'tank' ? 'tank' : 'spout';
+  return pm.divert;
 }
 
 // ------------------------------------------------------------------ heaters
@@ -778,7 +878,7 @@ function findIssues(R, ctx) {
     const o = s.taps[id];
     if (o.why && o.why !== 'dry_toilet') add(id, o.why === 'none' || o.why === 'above' || o.why === 'unpowered' ? 'problem' : 'warning', REASON[o.why] || REASON.none,
       { none: 'Pipe it to a tank or a pump.', above: 'Raise the tank above the outlet, or add a pump.', unpowered: R.hasEl ? 'Wire the pump to a battery, panel or generator.' : 'Nothing supplies electricity yet: use a hand pump or a gravity tank.',
-        pump: 'Check the pump.', frozen: 'Wait for a thaw, then bury or insulate the pipe.', empty: 'Wait for rain or fill the tank.', iced: 'Wait for a thaw; insulate the tank.',
+        pump: 'Check the pump.', valve: 'Open the valve.', frozen: 'Wait for a thaw, then bury or insulate the pipe.', empty: 'Wait for rain or fill the tank.', iced: 'Wait for a thaw; insulate the tank.',
         dry: 'Draw less at a time; the well refills at its yield.', suction: 'Use a submersible pump, or set the pump closer to the water.', head: 'Use a stronger pump or lower the outlet.' }[o.why] || 'Check the connections.');
   }
   for (const id of net.pumps) {
@@ -802,7 +902,7 @@ function findIssues(R, ctx) {
 function ensure(ctx) {
   if (!ctx.s || ctx.s.v !== STATE_V) ctx.s = fresh();
   const site = ctx.get('site');
-  if (site && site.version !== ctx.s.version) sync(ctx.s, site, ctx);
+  if (site && versionOf(ctx) !== ctx.s.version) sync(ctx.s, site, ctx);
   return ctx.s;
 }
 function draw(ctx, p = {}) {
@@ -848,7 +948,8 @@ export const water = {
   every: 1,
   init: () => fresh(),
   step,
-  commands: { 'water.draw': draw, 'water.setTap': setTap, 'water.setDiverter': setDiverter, 'water.fillTank': fillTank, 'water.emptyGrey': emptyGrey },
+  commands: { 'water.draw': draw, 'water.setTap': setTap, 'water.setDiverter': setDiverter, 'water.fillTank': fillTank, 'water.emptyGrey': emptyGrey,
+    'water.pumpStroke': pumpStroke, 'water.setPumpDivert': setPumpDivert },
 };
 
 // ---------------------------------------------------------------------------------------- read-outs

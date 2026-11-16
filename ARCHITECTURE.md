@@ -256,6 +256,33 @@ Mechanism and content are separate, as the engine-and-game rules ask.
 - **Build mode additions** for this: `structs()`, `membersOf(structId)`, `memberLook()`, `setShell(structId, on)`, `removeStruct(structId)`; shopping lines carry `key` and `members: [[id, measure]]`; a planned wall or deck no longer blocks or carries the player.
 - **Engine additions:** `__game.stepHooks` (functions called with `dt` at the end of every step, so that add-ons that hold game feel move with stepped frames) and `player.carryK` (a speed factor while carrying).
 
+## Hands-on systems: parts that click together (First Water)
+
+The first hands-on slice (`docs/FIRST_WATER.md`) is built as two generic modules plus plumbing content. Wiring, flue, gutters, irrigation and fencing reuse the generic modules unchanged by supplying their own kinds and shapes. Neither generic file mentions water.
+
+| Generic | Content (plumbing) |
+|---|---|
+| `src/sim/core/parts.js`: parts on a 3D lattice, ends that mate, derived joins and graph, placements, cut, save | `src/sim/content/plumbing-parts.js`: the six kit kinds, which ends mate, the starter kit, `starterYard()` |
+| `src/engine/parts.js` (`window.__parts`): instanced drawing, pick, carry, ghost and turns, fit, pull off, cut by dragging, tumble | `src/water-hands.js`: shapes of the kit, pump handle, diverter, tap, can, streams, leaks, wet ground |
+| `src/engine/reach.js` (`window.__reach`): stand-in for `src/engine/hands.js` (Hands mode, pointer and reach, hint line, poses, the overhead beat) | `src/sim/plumbing.js`: compiles the fitted graph into connection pieces for `water.js` |
+
+**`src/sim/core/parts.js`** exports `createPartsSystem({ name, stepM, kinds, mates })`, a simulation system.
+
+- Kind: `{ id, ends: [{ id, type, at, dir }] (local, lattice units), stretch?: { min, max, end } (comes in lengths along +x, can be cut), set?: { defaults }, anchor?, thin? }`. `mates`: `{ endType: [types it joins] }`.
+- State: `{ v, version, next, origin: { x, y, z, yaw }, parts: { [id]: { id, kind, len?, at: [i, j, k] | null, rot: 0..23, pose: { x, y, z, yaw } | null, fixed?, ref?, set? } } }`. `at` set means fitted (fixed geometry on the lattice, one of 24 square orientations); otherwise the part lies loose at `pose`.
+- A fitting sits on one lattice point; a stretch part spans `len` steps. Two ends are joined when they share a point, face each other and their types mate. Joins are derived (`graph()`), never stored.
+- Commands (each returns `{ ok, ... }` or `{ ok: false, reason }`, bumps `version`, emits `<name>.changed`): `setOrigin`, `spawn { kind, len?, pose }`, `anchor { id, kind, at, rot, ref }` (fixed, placed by the game), `fit { id, at, rot }` (must join something), `unfit { id, pose }`, `move { id, pose }`, `cut { id, len }` (the offcut is a new loose part; nothing is created or lost), `set { id, key, value }`, `remove { id }`.
+- Pure read-outs on `sim.systems.find((s) => s.name === name).api`: `graph(state)` -> `{ joins, open, adj }`, `placements(state, kind, len, openEnd)` -> every way a kind can sit on an open end (a length too long for the gap is offered cut to fit), `canFit`, `partEnds`, `toWorld`, `toLattice`, `lengthOf`, `rotationTo`, `ROTATIONS`.
+- Tested with a model-railway kit (`test/parts.test.mjs`), not plumbing.
+
+**`src/engine/parts.js`** exposes `window.__parts.attach({ system, shapes, material?, canPlace?, surfaceAt?, onTap?, tapHint?, onChange? })` -> `{ held(), give(id), spill(ids, from, spots), endWorld(p), refresh(), stats() }`, and `__parts.mergeGeo`. A shape is `{ geo(T, variant), variantOf?(part), rest?, lift?, pick, name(part) }`. One instanced mesh per kind and variant; matrices are rewritten only when the parts version changes; things in flight are scripted, never physics.
+
+**`src/engine/reach.js`** exposes `window.__reach.use(user)` where `user = { id, near, hover(R) -> hit, press, move, release, secondary, key, hint, frame }` and `R = { ray, ptr, player, reach, ground, held, within, rayDist, hand, say, pose, beat, hold, drop }`. It is deliberately small: swap it for `window.__hands` when `src/engine/hands.js` merges, keeping these names. It poses the character through `player.handPose = { l, r, lean }`, the one name it needed added to the engine.
+
+**Plumbing and water.** `plumbing` (after `parts`, before `water` in `GAME_SYSTEMS`) recompiles only when the parts version changes: for each anchor whose `ref` is `{ piece, port }` it walks the joins and emits `{ kind: "pipe", from, to, lengthM, equivM, shut, valves, via }` per pair of connections (a tee gives one per branch; `shut` when a closed valve stands on every way) and `{ kind: "leak", from, y, a, lengthM, part, end, d }` for each open end water can reach. `water.js` merges `plumbing.pieces` with the site's pieces and stays the judge: a shut run blocks with reason `valve`; a leak drains its tank through an orifice the size of the bore while the surface is above the open end (`totals.leakedL`, `state.leaks[id].flowLmin`); `water.pumpStroke { id }` moves up to `strokeL` from the pump's source to the spout or, with `water.setPumpDivert { id, to: "tank" }`, into the tank its outlet is piped to (a hand pump with `settings.manual` moves nothing otherwise; the first three strokes prime it). `garden.fill { litres }` puts caught water in the can. Conservation: collected + well + imported = stored + used + overflow + first flush + leaked (`test/plumbing.test.mjs`).
+
+Build mode: a fixture with `settings.viewOwned` is not drawn by build mode (an add-on draws it); water ports have no dots in the Equip tool, and the dots are redrawn when the tool or build mode is left.
+
 ## Global hooks
 
 Add-ons and tests reach the game only through these. Add a name here rather than reaching into internals.
@@ -263,6 +290,7 @@ Add-ons and tests reach the game only through these. Add a name here rather than
 - `window.__game`: engine. New in wave A: `sim` (the live simulation), `saveGame()`, `saveData()`, `setSpeed(n)`, `speed`.
 - `window.__build`: build mode. New in the second half of 2a: `STAGES`, `FOUNDATIONS`, `setConstructionMode`, `setBuilt`, `setStageBuilt`, `setAllBuilt`, `showStage`, `materialsList`, `plans`, `placePlan`, `setFoundation`, `setFixtureCatalog`, `addFixtures`, `setFixtureSetting`, `connect`, `removeFixture`. New in wave A: `pieces()`, `version`. New in 2a: `piece(id)`, `quantities()`, `onChange(fn)`, `serialize()`, `restore(data)`, `setLayers()`, and for its own interface (`src/buildui.js`) `view()` and `choose(id, value)`.
 - `window.__nature`: ground cover and wildlife.
+- `window.__reach`, `window.__parts`, `window.__waterHands` (First Water): see "Hands-on systems" above. `__waterHands.spawnKit()` puts another starter kit on the bench until deliveries exist. Smoke test: `node test/water.smoke.mjs`.
 - `window.__game.garden` (F1): the garden's pure read-outs from `src/sim/garden.js` (`gardenRead`: `cellInfo`, `plantInfo`, `plantStatus`, `bedSummary`, `almanac`, `frostTonight`, `sowAdvice`, `stageOf`, `dateOf`). `window.__gardenView`: the garden add-on's test hooks. The garden system (`garden`, after water in `GAME_SYSTEMS`) is built on three generic mechanisms in `src/sim/core/` (`cellfield.js`, `soilwater.js`, `growth.js`) with content in `src/sim/content/` (`crops.js`, `soils.js`, `garden-items.js`); garden items join `ITEMS` through `src/sim/items.js`.
 - `window.__game.calendar` (iteration 1): the pure calendar and sun functions of `src/sim/calendar.js`, for add-ons. `window.__weatherView`: the weather add-on's test hooks (`info`, `bench`, `settle`, `open`).
 

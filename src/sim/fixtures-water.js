@@ -57,7 +57,7 @@ export const FIXTURES_WATER = frozen({
   //        "quadratic" H = H0 (1 - (Q / Qmax)^2) (centrifugal); "human" hydraulic power P: H = P / (rho g Q).
   // maxSuctionM: how far above the water a surface pump can lift by suction (atmosphere gives 10.3 m at best).
   hand_pump: { name: 'Hand pump, cast-iron pitcher (suction)', category: 'pump', ports: [P.in, P.out], priceUsd: 95, massKg: 9,
-    dims: { w: 0.2, d: 0.35, h: 0.45 }, curve: 'human', humanW: 40, maxLmin: 20, ratedW: 0, maxSuctionM: 7.6,
+    dims: { w: 0.2, d: 0.35, h: 0.45 }, curve: 'human', humanW: 40, maxLmin: 20, ratedW: 0, maxSuctionM: 7.6, strokeL: 1,
     note: 'A person pumping steadily puts about 40 W into the water; practical suction lift 25 ft (7.6 m).' },
   // 12 V diaphragm pump, Shurflo/Seaflo 3.0 gpm family: 11.4 L/min open flow, 2.8 bar (40 psi) pressure
   // switch, 7 A at 12 V (84 W), self-priming to about 1.8 m.

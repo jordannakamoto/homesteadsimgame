@@ -298,6 +298,33 @@ Water, electricity and room heat are merged and tested headlessly. They become p
 - In a short year (the 20-day default) the weather model is far cloudier than in a real year, so crops yield about half; this is the weather system's, reported for a fix.
 - The supplier also lists the garden's produce for sale.
 
+## First Water — water by hand (branch `iter/w1-first-water`)
+
+**What is new**
+
+- Every new plot starts with a yard: a dug well with a hand pump on its cover, a 200 L barrel on a stand with the pump already piped into its top, a tap on a post, a workbench, and a starter kit box on the bench. You also start with a watering can. Start a new world to see it (old worlds keep their old well).
+- **Hands** (press **F**, or the Hands button). The mouse is freed and aims at things within arm's reach. One line above the tool bar always says what the thing under the pointer does. Right-drag turns the view, the wheel zooms, F or Esc puts the hands away.
+- **Pump:** hold the left button on the handle. Just holding keeps stroking; moving the mouse down and up strokes it yourself. Three dry strokes prime it, then every stroke is a real litre from the well. The can stands under the spout and fills.
+- **Red lever on the pump:** click it. It points where the water goes: the spout, or up the riser into the barrel. The white sight tube on the barrel shows the level.
+- **Kit:** click the box. Parts tumble out: four 1.5 m pipes, four elbows, a tee, a valve, two couplings, a cap.
+- **Parts:** click one to pick it up. Carry it near a glowing end: a ghost shows it already turned to fit. **R** steps through the other ways it can sit. Click to fit. Click the ground to set it down, right-click to toss it. Hold and drag on a fitted part to pull it off. Drag the free end of a fitted pipe back toward its joint to cut it shorter; the offcut is a real pipe in your hands. A pipe too long for a gap is offered already cut to fit.
+- **Valve:** click it (handle along the pipe is open, across is shut; it comes shut). **Tap:** click the red handle.
+- The water simulation decides everything: no path, valve shut, barrel empty, tap above the water level each give that reason in words. An open end leaks, sprays, and drains the barrel until you shut the valve or fit the next part.
+
+**Try this**
+
+1. F, hold the pump handle until the can is full.
+2. Click the red lever, pump twenty strokes, watch the sight tube.
+3. Open the kit. Run: valve on the brass outlet at the foot of the barrel, a short pipe, elbow down, pipe to the ground, elbow, along the ground and around the well (two legs, one more elbow), elbow up, short pipe into the tap. The kit has half a metre of pipe to spare.
+4. Open the tap before the valve and read the hint. Open the valve. Pull a pipe off while it runs.
+5. Reload: the run, the barrel level and the can are as you left them.
+
+**Known gaps**
+
+- No sound yet. No delivery: the kit is simply on the bench (`__waterHands.spawnKit()` in the console gives another).
+- The tap and leaks run on world time (a minute of flow every 0.8 s at 1×), so the barrel empties fast; a pump stroke is one litre.
+- No touch controls for Hands. The garden's Water tool still refills the can for free.
+
 ## Wave D1 — Construction: the first shed, raised by hand (iteration 2c)
 
 **What is new**

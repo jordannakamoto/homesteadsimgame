@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createCookingView } from './cooking/view.js';
 import { createChunkStream } from './world/chunk-stream.js';
-import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead } from './sim/index.js';
+import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -2054,13 +2054,19 @@ function placeStartingWell(build) {
     if (h > SEA + 0.4 && (!best || slope < best.slope)) best = { x, z, slope };
   }
   if (!best) return;
-  const [well, pump, tap] = build.addFixtures([
-    { fixture: 'well_dug', x: best.x, z: best.z },
-    { fixture: 'hand_pump', x: best.x + 0.9, z: best.z, y: heightAt(best.x + 0.9, best.z) + 0.6 },
-    { fixture: 'tap_hose_bib', x: best.x + 1.6, z: best.z, y: heightAt(best.x + 1.6, best.z) + 0.5 },
-  ]);
-  if (well && pump) build.connect(well, 'out', pump, 'in');
-  if (pump && tap) build.connect(pump, 'out', tap, 'in');
+  // The yard is content (starterYard): the engine only levels the spot and places what it lists. Everything sits on
+  // the parts lattice, so the pipes the player fits by hand meet the pump, the barrel and the tap exactly.
+  const ox = Math.round(best.x * 4) / 4, oz = Math.round(best.z * 4) / 4, oy0 = heightAt(ox, oz);
+  const yard = starterYard(ox, oy0, oz);
+  for (let n = 0; n < 3; n++) for (let dz = -4; dz <= 4; dz += 2) for (let dx = -4; dx <= 4; dx += 2) applyBrush(ox + dx, oz + dz, 'level', 1, oy0);
+  const dy = heightAt(ox, oz) - oy0;                       // whatever the levelling left
+  const ids = build.addFixtures(yard.fixtures.map((f) => ({ fixture: f.fixture, x: f.x, z: f.z, y: f.y + dy, settings: f.settings })));
+  const id = Object.fromEntries(yard.fixtures.map((f, i) => [f.key, ids[i]]));
+  sim.commandNow('parts.setOrigin', { ...yard.origin, y: oy0 + dy });
+  for (const a of yard.anchors) sim.commandNow('parts.anchor', { id: a.id, kind: a.kind, len: a.len, at: a.at, rot: rotationTo(a.x, a.y), ref: a.ref ? { piece: id[a.ref[0]], port: a.ref[1] } : null });
+  sim.commandNow('plumbing.setYard', { bench: { ...yard.bench, y: yard.bench.y + dy } });
+  sim.commandNow('plumbing.addKit', { x: yard.bench.x, y: yard.bench.y + dy + yard.bench.h, z: yard.bench.z, yaw: 0.3 });
+  if (!stockState().tools.includes('watering_can')) runStockCommand(sim, 'stock.add', { id: 'watering_can', qty: 1 });
 }
 function syncSite() {
   // hand build mode the real equipment catalog once it has loaded
@@ -2800,6 +2806,7 @@ function updatePlayer(dt) {
     else if (P.work.kind === 'lift') { armL = armR = -2.5; lean = -0.12; }
     else if (P.work.kind === 'carry') armR = -2.0 + armR * 0.2;
   }
+  if (P.handPose) { armL = P.handPose.l; armR = P.handPose.r; lean += P.handPose.lean || 0; }   // hands-on work poses the arms (set by add-ons)
   pm.legL.rotation.x = legL; pm.legR.rotation.x = legR;
   pm.armL.rotation.x = armL; pm.armR.rotation.x = armR;
   pm.armR.position.z = -0.22 * pullR;
