@@ -128,6 +128,8 @@ export const stockSystem = () => ({
     'stock.add': (c, p) => { const r = stockAdd(c.s, p.id, p.qty); c.emit('stock.add', r); return r; },
     'stock.remove': (c, p) => { const r = stockRemove(c.s, p.id, p.qty); c.emit('stock.remove', r); return r; },
     'stock.buy': (c, p) => { const r = stockBuy(c.s, p.id, p.qty); c.emit('stock.buy', r); return r; },
+    // testing aid: hand the player money (the Supplier's "+ $100,000" button)
+    'stock.grant': (c, p) => { const usd = Math.max(0, Math.min(1e7, +(p && p.usd) || 0)); c.s.money = cents(c.s.money + usd); return { ok: true, money: c.s.money }; },
     'projects.add': (c, p) => {
       if (!p || typeof p.id !== 'string' || !p.id || typeof p.title !== 'string' || findProject(c.s, p.id)) return { ok: false, reason: 'invalid or duplicate project' };
       c.s.projects.push({ id: p.id, title: p.title, blurb: typeof p.blurb === 'string' ? p.blurb : '', status: 'open' });

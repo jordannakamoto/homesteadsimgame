@@ -132,6 +132,7 @@
   }
   const signature = () => { const st = S.state; return tab + '|' + st.money + '|' + JSON.stringify(st.items) + st.tools.length + '|' + st.projects.map((p) => p.status).join(); };
   function say(text, cls) { note.textContent = text; note.className = 'svnote ' + (cls || ''); }
+  { const g = $('svgrant'); if (g) g.addEventListener('click', () => { S.do('stock.grant', { usd: 100000 }); render(true); }); }
   function pop() { const m = $('svmoney'); m.classList.add('pop'); setTimeout(() => m.classList.remove('pop'), 250); }
 
   // ------------------------------------------------------------------ open / close
