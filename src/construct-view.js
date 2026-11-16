@@ -729,12 +729,12 @@
   // ------------------------------------------------------------------ the wheelbarrow: a few boxes and a cylinder wheel
   const barrow = new T.Group(), bWood = new T.MeshLambertMaterial({ color: 0x9a7448 }), bTray = new T.MeshLambertMaterial({ color: 0x4d7f68 }), bIron = new T.MeshLambertMaterial({ color: 0x45484d }),
     bPart = (geo, mat, x, y, z, rx = 0) => { const m = new T.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.x = rx; m.castShadow = true; barrow.add(m); return m; },
-    bLoad = new T.Mesh(new T.BoxGeometry(0.5, 1, 0.7), new T.MeshLambertMaterial({ color: 0xdcbc8c }));
+    bBox = new T.BoxGeometry(1, 1, 1), bBits = [];
   bPart(new T.BoxGeometry(0.66, 0.06, 0.9), bTray, 0, 0.5, 0.1); bPart(new T.BoxGeometry(0.06, 0.26, 0.9), bTray, -0.33, 0.62, 0.1); bPart(new T.BoxGeometry(0.06, 0.26, 0.9), bTray, 0.33, 0.62, 0.1);
   bPart(new T.BoxGeometry(0.66, 0.26, 0.06), bTray, 0, 0.62, 0.55); bPart(new T.BoxGeometry(0.66, 0.2, 0.06), bTray, 0, 0.6, -0.35);
   bPart(new T.CylinderGeometry(0.22, 0.22, 0.09, 18).rotateZ(Math.PI / 2), bIron, 0, 0.22, 0.62);
   for (const x of [-0.3, 0.3]) { bPart(new T.BoxGeometry(0.05, 0.05, 1.5), bWood, x, 0.45, -0.55); bPart(new T.BoxGeometry(0.05, 0.4, 0.05), bWood, x, 0.2, -0.95); }
-  bLoad.position.set(0, 0.55, 0.1); bLoad.visible = false; barrow.add(bLoad);
+  for (let i = 0; i < 8; i++) { const m = new T.Mesh(bBox, new T.MeshLambertMaterial({ color: 0xdcbc8c })); m.castShadow = true; m.visible = false; barrow.add(m); bBits.push(m); }
   barrow.visible = false; G.scene.add(barrow);
   V.bYaw = 0; V.bSend = 0;
   function drawBarrow(dt) {
@@ -750,9 +750,20 @@
       P.carryK = Math.max(P.carryK || 0, 0.7);
     }
     barrow.position.set(b.x, G.heightAt(b.x, b.z), b.z); barrow.rotation.y = b.yaw;
-    const k = s.stacks.find((q) => q.barrow);
-    bLoad.visible = !!k;
-    if (k) { const f = Math.min(1, k.qty * CAT[k.itemId].massKgPerUnit / (C.BARROW.capKg * feel().armful)); bLoad.scale.y = 0.06 + 0.24 * f; bLoad.position.y = 0.53 + bLoad.scale.y / 2; bLoad.material.color.setHex(describe(k.itemId, k.qty).color); }
+    const k = s.stacks.find((q) => q.barrow), sig = k ? k.itemId + ':' + Math.round(k.qty * 20) + ':' + feel().armful : '';
+    if (sig === V.bLoadSig) return;
+    V.bLoadSig = sig;
+    for (const m of bBits) m.visible = false;
+    if (!k) return;
+    // the load, drawn as a few sticks, sheets or boxes lying in the tray: more of them the fuller it is
+    const d = describe(k.itemId, k.qty), f = Math.min(1, k.qty * CAT[k.itemId].massKgPerUnit / (C.BARROW.capKg * feel().armful)), cnt = Math.max(1, Math.min(8, d.n, Math.ceil(f * 8)));
+    const sh = d.form === 'lumber' ? { s: [0.09, 0.06, 0.85], cols: 4, rows: 1, dx: 0.13, dz: 0 } : d.form === 'sheet' || d.form === 'lean' ? { s: [0.55, 0.035, 0.85], cols: 1, rows: 1, dx: 0, dz: 0 } : { s: [0.22, 0.17, 0.26], cols: 2, rows: 3, dx: 0.26, dz: 0.3 };
+    for (let i = 0; i < cnt; i++) {
+      const m = bBits[i], col = i % sh.cols, rest = Math.floor(i / sh.cols), row = rest % sh.rows, layer = Math.floor(rest / sh.rows);
+      m.visible = true; m.scale.set(sh.s[0], sh.s[1], sh.s[2]);
+      m.position.set((col - (sh.cols - 1) / 2) * sh.dx, 0.53 + sh.s[1] / 2 + layer * sh.s[1], 0.1 + (row - (sh.rows - 1) / 2) * sh.dz);
+      m.material.color.setHex(d.color);
+    }
   }
   function drawBeacons(dt) {
     const pr = current(), P = G.player;
@@ -822,7 +833,7 @@
     {
       const b = s.barrow;
       if (b && b.held) { const st = carry.nearest(reach.x, reach.z, 1.2, pickable) || carry.nearest(P.x, P.z, 2.0, pickable); return st ? { kind: 'bload', stack: st } : { kind: 'bdown' }; }
-      if (b && !c && Math.hypot(b.x - P.x, b.z - P.z) < C.BARROW.reachM && Math.hypot(b.x - reach.x, b.z - reach.z) < 2.2) return { kind: 'bgrab' };
+      const lk = s.stacks.find((q) => q.barrow && q.qty > 1e-6); if (b && (!c || (lk && lk.itemId === c.itemId)) && Math.hypot(b.x - P.x, b.z - P.z) < C.BARROW.reachM && Math.hypot(b.x - reach.x, b.z - reach.z) < 2.2) return lk ? { kind: 'bgrab', load: lk.id } : { kind: 'bgrab' };
     }
     const pr = nearBuilding(P.x, P.z), stack = carry.nearest(reach.x, reach.z, 1.0, pickable) || (V.wantItem && carry.nearest(P.x, P.z, 2.1, wantedStack)) || carry.nearest(P.x, P.z, 2.1, pickable) || carry.nearest(P.x, P.z, 1.3);
     if (c && c.itemId === LAD.itemId && !s.ladder) {
@@ -863,11 +874,29 @@
   function nameIt(itemId) {
     for (const pr of inProgress()) for (const k in pr.lines) { const ln = pr.lines[k]; if (ln.itemId === itemId && api.stageOpen(pr, ln.stage) && !api.stageComplete(pr, ln.stage)) { if (V.named[k]) return; V.named[k] = 1; note(plain(ln.label).replace(/s$/, ''), ln.why); return; } }
   }
+  function grabHandles() {
+    const r = cmd('barrowGrab', { px: G.player.x, pz: G.player.z });
+    if (r.ok) { V.bYaw = G.player.face; sounds.play('lift'); flash('Wheelbarrow: click a stack to load it, click again to set it down'); } else flash(r.reason === 'hands full' ? 'Put down what you are carrying first' : 'Too far from the wheelbarrow');
+  }
+  function tickBHold(dt) {
+    const h = V.bHold;
+    if (!h) return;
+    const c = V.ctx;
+    if (!c || c.kind !== 'bgrab' || !c.load) { V.bHold = null; return; }
+    if (V.mDown) { h.t += dt; if (h.t >= 0.4) { V.bHold = null; V.mDown = false; grabHandles(); } return; }
+    V.bHold = null;
+    const lk = S().stacks.find((q) => q.id === c.load);
+    if (lk) pickUp(lk);
+  }
   function press(ctx) {
     if (!ctx) return;
     sounds.wake();
     if (ctx.kind === 'hands') { if (!(V.cool > 0.08)) handAct(ctx); }
-    else if (ctx.kind === 'bgrab') { const r = cmd('barrowGrab', { px: G.player.x, pz: G.player.z }); if (r.ok) { V.bYaw = G.player.face; sounds.play('lift'); flash('Wheelbarrow: click a stack to load it, click again to set it down'); } else flash(r.reason === 'hands full' ? 'Put down what you are carrying first' : 'Too far from the wheelbarrow'); }
+    else if (ctx.kind === 'bgrab') {
+      const lk = ctx.load && S().stacks.find((q) => q.id === ctx.load);
+      if (lk && V.fSrc === 'click') { V.bHold = { t: 0 }; return; }       // a click takes an armful once the button is up; held, it takes the handles
+      grabHandles();
+    }
     else if (ctx.kind === 'bload') { const r = cmd('barrowLoad', { stackId: ctx.stack.id }); if (r.ok) { sounds.play('thunk'); nameIt(r.itemId); flash('Loaded ' + stackName(r.itemId)); } else flash(r.reason === 'full' ? 'The wheelbarrow is full' : r.reason === 'holds something else' ? 'It already holds something else' : 'Cannot load that'); }
     else if (ctx.kind === 'bdown') { const b = S().barrow; cmd('barrowSet', { x: b.x, z: b.z, yaw: b.yaw }); sounds.play('thunk'); }
     else if (ctx.kind === 'pick') pickUp(ctx.stack);
@@ -1069,7 +1098,7 @@
     else if (ctx.kind === 'work') { const w = workLabel(pr, V.working ? V.working.memberId : ctx.q[0]); setPrompt('E', 'Hold to build: ' + low(w.text), w.count, W.job ? W.progress() : 0); }
     else if (ctx.kind === 'piece') setPrompt('', 'Click a glowing piece to set it', ctx.q.length + ' ready', W.job ? W.progress() : null);
     else if (ctx.kind === 'auto') setPrompt('E', (ctx.guided ? 'Build: ' : 'Work until done: ') + low(C.STAGE[ctx.stage].name), '', null);
-    else if (ctx.kind === 'bgrab') { const k = s.stacks.find((q) => q.barrow); setPrompt('E', 'Take the wheelbarrow handles', k ? 'holds ' + stackName(k.itemId) + ' (' + describe(k.itemId, k.qty).n + ' left)' : 'empty', null); }
+    else if (ctx.kind === 'bgrab') { const k = ctx.load && s.stacks.find((q) => q.id === ctx.load); if (k) setPrompt('', 'Click: take ' + low(stackName(k.itemId)) + ', ' + describe(k.itemId, k.qty).n + ' left · Hold: take the handles', 'E also takes the handles', V.bHold ? Math.min(1, V.bHold.t / 0.4) : null); else setPrompt('E', 'Take the wheelbarrow handles', 'empty', null); }
     else if (ctx.kind === 'bload') setPrompt('E', 'Load the wheelbarrow with ' + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'bdown') setPrompt('E', 'Set the wheelbarrow down', '', null);
     else if (ctx.kind === 'pick') setPrompt('E', (ctx.more ? 'Take more ' : 'Pick up ') + stackName(ctx.stack.itemId), '', null);
@@ -1393,7 +1422,7 @@
       }
     }
     if (V.fTap) { V.fTap = false; if (!OFF[G.player.tool]) { press(V.ctx); V.ctx = context(); V.ctxSig = -1; } }   // what the press changed is read at once: a stale 'put down' with empty arms threw
-    tickLadder(dt); drawLadder(); tickMark(dt); drawBeacons(dt); drawBarrow(dt);
+    tickBHold(dt); tickLadder(dt); drawLadder(); tickMark(dt); drawBeacons(dt); drawBarrow(dt);
     if (!s.options.sandbox) tickWork(dt);
     glow(V.ctx);
     {
@@ -1446,7 +1475,7 @@
     if (e.code === 'Escape') { if (V.placing) { endPlacing(); e.stopImmediatePropagation(); } else if (!panel.hidden) closePanel(); return; }
     if (G.player.tool === 'build') return;
     if (e.code === 'KeyL') panel.hidden ? openPanel() : closePanel();
-    else if (e.code === 'KeyE') V.fTap = true;
+    else if (e.code === 'KeyE') { V.fTap = true; V.fSrc = 'key'; }
   }, true);
   canvas.addEventListener('pointermove', (e) => { ptr.x = e.clientX; ptr.y = e.clientY; ptr.has = true; }, true);
   canvas.addEventListener('pointerdown', (e) => {
@@ -1454,7 +1483,7 @@
     if (V.placing) { e.stopImmediatePropagation(); e.preventDefault(); if (e.button === 2) endPlacing(); else { tickPlacing(); commitPlacing(); } return; }
     if (e.button === 0 && V.beacons.length && !OFF[G.player.tool] && !V.auto) { const rc = canvas.getBoundingClientRect(), lk = !!document.pointerLockElement, hit = beaconAt(lk ? rc.left + rc.width / 2 : e.clientX, lk ? rc.top + rc.height / 2 : e.clientY); if (hit) { e.stopImmediatePropagation(); finishPlace(hit); return; } }
     // the left button is the hands: whatever F would do here
-    if (e.button === 0 && !OFF[G.player.tool] && V.ctx && V.ctx.kind !== 'hint' && V.ctx.kind !== 'drop') { e.stopImmediatePropagation(); V.mDown = true; V.fTap = true; return; }
+    if (e.button === 0 && !OFF[G.player.tool] && V.ctx && V.ctx.kind !== 'hint' && V.ctx.kind !== 'drop') { e.stopImmediatePropagation(); V.mDown = true; V.fTap = true; V.fSrc = 'click'; return; }
     const ctx = V.ctx;
     if (ctx && ctx.kind === 'piece' && !W.job && e.button === 0) {
       const r = canvas.getBoundingClientRect(), g = geom(ctx.id), pr = S().progress[ctx.id];
@@ -1476,7 +1505,7 @@
   canvas.addEventListener('pointermove', (e) => { if (V.raise && V.mDown && !V.raise.landed) V.raise.push = (V.raise.push || 0) + Math.max(0, -e.movementY) / 300; }, true);
   canvas.addEventListener('wheel', (e) => { if (!V.placing) return; e.stopImmediatePropagation(); e.preventDefault(); V.placing.yaw += (e.deltaY > 0 ? 1 : -1) * Math.PI / 12; }, { capture: true, passive: false });
   canvas.addEventListener('contextmenu', (e) => { if (V.placing) e.preventDefault(); }, true);
-  { const b = $('cvact'); const down = (e) => { e.preventDefault(); G.keys.KeyE = true; V.fTap = true; sounds.wake(); }, up = () => { G.keys.KeyE = false; };
+  { const b = $('cvact'); const down = (e) => { e.preventDefault(); G.keys.KeyE = true; V.fTap = true; V.fSrc = 'key'; sounds.wake(); }, up = () => { G.keys.KeyE = false; };
     b.addEventListener('pointerdown', down); b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('pointerleave', up); }
 
   // for tests and the console
