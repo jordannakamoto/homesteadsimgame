@@ -6,7 +6,7 @@
 
    INTERFACE (the part add-ons use; keep these names when swapping to __hands)
      __reach.use(user)        register: { id, near(px, pz) -> bool, hover(R) -> hit | null, press(hit, R), move(hit, R),
-                              release(hit, R), secondary(R) -> bool, key(code, R) -> bool, hint(R) -> string | null, frame(dt, R) }
+                              release(hit, R), secondary(R) -> bool, key(code, R) -> bool, wheel(dy, R) -> bool, hint(R) -> string | null, frame(dt, R) }
                               hit = { score (smaller wins), hint, x, y, z (where, to face it), ... the user's own fields }
      R (passed to every call) { ray (THREE.Ray through the pointer), ptr { x, y, dx, dy since press, down }, player, reach (m),
                               ground { x, y, z } | null, held (whatever a user put in the hands, or null), on,
@@ -169,7 +169,9 @@
   window.addEventListener('pointerup', up, true);
   window.addEventListener('pointercancel', up, true);
   canvas.addEventListener('contextmenu', (e) => { if (on) e.preventDefault(); });
-  window.addEventListener('wheel', (e) => { if (!on || e.target !== canvas) return; e.stopImmediatePropagation(); e.preventDefault(); wantDist = clamp(wantDist * Math.exp(e.deltaY * 0.0012), 3.5, 14); }, { capture: true, passive: false });
+  window.addEventListener('wheel', (e) => { if (!on || e.target !== canvas) return; e.stopImmediatePropagation(); e.preventDefault();
+    for (const u of users) if (safe(u, 'wheel', e.deltaY, R)) { hover(); return; }          // a user may take the wheel (optional hook)
+    wantDist = clamp(wantDist * Math.exp(e.deltaY * 0.0012), 3.5, 14); }, { capture: true, passive: false });
   window.addEventListener('keydown', (e) => {
     if (e.target && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
     if (P.tool === 'build' || (G.cooking && G.cooking.active)) return;

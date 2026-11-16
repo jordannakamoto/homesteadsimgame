@@ -2014,7 +2014,7 @@
   }
   // closed shapes made with at least one angled wall: found as faces of the wall graph
   function findPolys(S) {
-    if (!S.segs.length) return [];
+    if (!S || !S.segs.length) return [];
     const raw = S.segs.map((sg) => [sg[0], sg[1], sg[2], sg[3], 1]);
     for (const k of S.walls.keys()) {
       const [i, j, d] = parse(k);
@@ -3604,6 +3604,7 @@
   // ground-level sample points of everything in a structure (local)
   function localSamples(S) {
     const out = [];
+    if (!S) return out;
     for (const k of S.floors) {
       const [i, j] = parse(k);
       out.push([i, j], [i + 1, j], [i, j + 1], [i + 1, j + 1], [i + 0.5, j + 0.5]);
@@ -5465,8 +5466,8 @@
     const A = { floors: new Set(op.addFloors.map(([i, j]) => ck(i, j))), walls: new Map(), wmat: new Map(), fmat: new Map(), roofs: op.addRoofs, segs: op.addSegs.slice(), rings: op.addRings.slice(), stairs: op.addStairs, pillars: op.addPillars.slice(), hs: F.hs || B.hs, paths: op.addPaths, frame: F, lift: F.lift || 0, decor: op.addDecor, base: Sx };
     A.polys = op.addPolyRoofs.length && Sx ? [{ ...Sx.polys[polyAt(Sx, op.addPolyRoofs[0][0], op.addPolyRoofs[0][1])], roofed: true }] : [];
     const sideSeg = (ri, k, ty) => [...ringVert(Sx.rings[ri], k), ...ringVert(Sx.rings[ri], k + 1), ty];
-    for (const [idx, ty] of op.setSegs) A.segs.push([...Sx.segs[idx].slice(0, 4), ty]);
-    for (const [idx] of op.setSegMats) A.segs.push(Sx.segs[idx].slice(0, 5));
+    if (Sx) for (const [idx, ty] of op.setSegs) A.segs.push([...Sx.segs[idx].slice(0, 4), ty]);
+    if (Sx) for (const [idx] of op.setSegMats) A.segs.push(Sx.segs[idx].slice(0, 5));
     for (const [ri, k, ty] of op.setSides) ty && A.segs.push(sideSeg(ri, k, ty));
     for (const [ri, on] of op.ringRoofs) on && A.rings.push({ ...Sx.rings[ri], sides: [], roof: on, floor: false });
     for (const [i, j, dd, ty] of op.addWalls) A.walls.set(ek(i, j, dd), ty || op.style || "wall");
@@ -5485,14 +5486,14 @@
     ghostAdd.material.userData.hatch.value = bad ? 1 : 0;
     const S = Sx;
     const Dl = { floors: new Set(op.delFloors.map(([i, j]) => ck(i, j))), walls: new Map(), roofs: S && !op.replacing ? op.delRoofs.map((i) => S.roofs[i]) : [] };
-    if (!op.move) for (const [i, j, dd] of op.delWalls.concat(op.revert)) Dl.walls.set(ek(i, j, dd), S.walls.get(ek(i, j, dd)) || "wall");
+    if (!op.move) for (const [i, j, dd] of op.delWalls.concat(op.revert)) Dl.walls.set(ek(i, j, dd), (S && S.walls.get(ek(i, j, dd))) || "wall");
     else Dl.floors = new Set(op.delFloors.map(([i, j]) => ck(i, j)));
-    Dl.segs = op.delSegs.map((idx) => S.segs[idx]);
-    Dl.rings = op.delRings.map((idx) => S.rings[idx]);
-    Dl.stairs = op.delStairs.map((idx) => S.stairs[idx]);
-    Dl.pillars = op.delPillars.map((idx) => S.pillars[idx]);
-    Dl.paths = op.delPaths.map((idx) => S.paths[idx]);
-    Dl.decor = op.delDecor.map((idx) => S.decor[idx]);
+    Dl.segs = S ? op.delSegs.map((idx) => S.segs[idx]) : [];
+    Dl.rings = S ? op.delRings.map((idx) => S.rings[idx]) : [];
+    Dl.stairs = S ? op.delStairs.map((idx) => S.stairs[idx]) : [];
+    Dl.pillars = S ? op.delPillars.map((idx) => S.pillars[idx]) : [];
+    Dl.paths = S ? op.delPaths.map((idx) => S.paths[idx]) : [];
+    Dl.decor = S ? op.delDecor.map((idx) => S.decor[idx]) : [];
     Dl.base = S;
     Dl.frame = F;
     Dl.hs = S ? S.hs : 1;

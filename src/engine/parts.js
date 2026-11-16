@@ -75,6 +75,8 @@
     };
     const single = (material) => { const m = new T.Mesh(new T.BufferGeometry(), material); m.matrixAutoUpdate = false; m.visible = false; m.frustumCulled = false; G.scene.add(m); return m; };
     const ghost = single(ghostMat), hi = single(hiMat), hand = single(mat);
+    const band = new T.Mesh(new T.CylinderGeometry(0.1, 0.1, 0.05, 20), new T.MeshBasicMaterial({ color: 0xffe27a, depthTest: false, transparent: true, opacity: 0.95 }));
+    band.rotation.z = Math.PI / 2; band.matrixAutoUpdate = false; band.visible = false; band.renderOrder = 22; band.frustumCulled = false; G.scene.add(band);
     ghost.renderOrder = 20; hi.renderOrder = 21; hand.castShadow = true;
     const glows = new T.InstancedMesh(new T.SphereGeometry(0.055, 10, 8), glowMat, 48); glows.count = 0; glows.frustumCulled = false; glows.renderOrder = 22; G.scene.add(glows);
 
@@ -111,7 +113,7 @@
     }
 
     // ---------------------------------------------------------------- drawing
-    let drawnV = -1, held = null, turn = 0, wig = null, lenDrag = null, flashT = 0, hoverId = null, ghostWay = null;
+    let drawnV = -1, held = null, turn = 0, trim = 0, turnT = 0, turnQ = new T.Quaternion(), ghostQ = new T.Quaternion(), ghostOn = false, wig = null, lenDrag = null, flashT = 0, hoverId = null, ghostWay = null;
     const hidden = new Set(), flyers = [];
     function redraw() {
       const s = S();
@@ -188,12 +190,12 @@
     // ---------------------------------------------------------------- handling
     function give(id, fromMatrix) {
       const part = S().parts[id]; if (!part) return;
-      held = id; turn = 0; RCH.R.hold({ by: N, id });
+      held = id; turn = 0; trim = 0; turnT = 0; RCH.R.hold({ by: N, id });
       handFrom.copy(fromMatrix || partMatrix(_m, part)); handK = 0;
       drawnV = -1;
     }
     const handFrom = new T.Matrix4(); let handK = 1;
-    function letGo() { held = null; RCH.R.drop(); hand.visible = ghost.visible = false; ghostWay = null; drawnV = -1; }
+    function letGo() { held = null; trim = 0; band.visible = false; turnT = 0; RCH.R.drop(); hand.visible = ghost.visible = false; ghostWay = null; drawnV = -1; }
     function tossTo(R, x, z, far) {
       const part = S().parts[held], id = held; if (!part) return;
       const from = handMatrix(new T.Matrix4(), part, R), pose = restPose(x, z, Math.random() * 6.28);
@@ -201,6 +203,23 @@
       const to = looseMatrix(new T.Matrix4(), part, pose);
       letGo();
       fly(id, from, to, { dur: far ? 0.55 : 0.3, arc: far ? 0.45 : 0.12, spin: far ? 1.5 : 0.25, bounce: far ? 0.1 : 0.04, done: () => { G.burst(pose.x, pose.y + 0.05, pose.z, far ? 5 : 3, 0xb9a783, 1, 0.8, 0.05, 0.3); } });
+    }
+    // cutting a held or loose length: C, [ ], wheel. Stock is conserved by the sim's cut; the offcut lies at the player's feet
+    const minLen = (part) => A.kinds[part.kind].stretch.min;
+    function cutHeld(R, len, say) {
+      const part = S().parts[held]; if (!part || !isStretch(part.kind) || !(len < A.lengthOf(part)) || len < minLen(part)) return false;
+      const f = R.player.face, id = held, w = new T.Vector3().setFromMatrixPosition(handMatrix(_m, part, R));
+      const c = cmd('cut', { id, len, pose: restPose(R.player.x + Math.sin(f) * 1.1, R.player.z + Math.cos(f) * 1.1, f + Math.PI / 2) });
+      if (!c.ok) { R.say('It will not cut: ' + c.reason + '.'); return false; }
+      trim = 0; band.visible = false; drawnV = -1;
+      G.burst(w.x, w.y, w.z, 8, 0xdfe6ea, 1.4, 1.2, 0.04, 0.35); G.cam.shake = Math.min(G.cam.shake + 0.04, 0.5); G.juice.hitStop = 0.02;
+      R.say(say || 'Cut to ' + (len * STEP).toFixed(2) + ' m. The offcut lies at your feet.', 2.2);
+      return true;
+    }
+    function trimBy(d) {
+      const part = held && S().parts[held]; if (!part || !isStretch(part.kind)) return false;
+      const full = A.lengthOf(part), min = minLen(part);
+      trim = clamp((trim || full) + d, min, full); if (trim >= full) trim = 0; return true;
     }
     function fit(R, hit) {
       const part = S().parts[held], id = held, way = hit.way;
@@ -216,6 +235,7 @@
       if (offcut) { give(offcut, to); R.say('Cut to fit. The offcut is in your hands.', 2.5); }
     }
     // the open end the pointer is nearest, and the ways the held part can go on it
+    const holdKeys = (part) => (isStretch(part.kind) ? '.  <b>C</b> cuts it, then <b>[ ]</b> or wheel set the length' : '');
     function offer(R) {
       const part = S().parts[held]; if (!part) return null;
       const mine = A.kinds[part.kind].ends.map((e) => e.type);
@@ -244,12 +264,13 @@
           if (o) {
             const way = o.ways[turn % o.ways.length]; ghostWay = way;
             showSingle(ghost, part, fittedMatrix(_m, part.kind, way.at, way.rot, way.len ?? 1));
-            const cutNote = way.len && way.len < A.lengthOf(part) ? ', cut to ' + (way.len * STEP).toFixed(2) + ' m' : '';
+            const tooLong = way.len && way.len < A.lengthOf(part), cutNote = tooLong ? ', cut to ' + (way.len * STEP).toFixed(2) + ' m' : '';
             return { score: o.d * 0.4, kind: 'fit', way, end: o.e, x: o.w.x, y: o.w.y, z: o.w.z,
-              hint: '<b>Click</b> to fit the ' + nameOf(part) + cutNote + (o.ways.length > 1 ? '   <b>R</b> turns it (' + ((turn % o.ways.length) + 1) + ' of ' + o.ways.length + ')' : '') };
+              hint: '<b>Click</b> to fit the ' + nameOf(part) + cutNote + (tooLong ? '   <b>C</b> cuts it to fit' : '') + (o.ways.length > 1 ? '   <b>R</b> turns it (' + ((turn % o.ways.length) + 1) + ' of ' + o.ways.length + ')' : '') };
           }
           ghost.visible = false; ghostWay = null;
-          if (R.ground && R.within(R.ground.x, R.ground.z, 0.4)) return { score: 9, kind: 'put', x: R.ground.x, z: R.ground.z, hint: 'Holding the ' + nameOf(part) + '.  Bring it to a glowing end to fit it.  <b>Click</b> sets it down, <b>right-click</b> tosses it' };
+          if (trim) return { score: 9, kind: 'trim', x: R.player.x, z: R.player.z, hint: 'Cutting to <b>' + (trim * STEP).toFixed(2) + ' m</b>.  <b>[ ]</b> or wheel change it, <b>C</b> or click cuts' };
+          if (R.ground && R.within(R.ground.x, R.ground.z, 0.4)) return { score: 9, kind: 'put', x: R.ground.x, z: R.ground.z, hint: 'Holding the ' + nameOf(part) + '.  Bring it to a glowing end to fit it.  <b>Click</b> sets it down, <b>right-click</b> tosses it' + holdKeys(part) };
           return null;
         }
         let best = null;
@@ -282,6 +303,7 @@
       press(hit, R) {
         hi.visible = false;
         if (hit.kind === 'fit') return fit(R, hit);
+        if (hit.kind === 'trim') return cutHeld(R, trim);
         if (hit.kind === 'put') return tossTo(R, hit.x, hit.z, false);
         const part = S().parts[hit.id]; if (!part) return;
         if (!part.at) { give(hit.id); R.pose(-0.9, -0.9, 0.35, 0.15); return; }
@@ -339,8 +361,23 @@
         tossTo(R, R.player.x + Math.sin(f) * 1.5 + (Math.random() - 0.5) * 0.3, R.player.z + Math.cos(f) * 1.5 + (Math.random() - 0.5) * 0.3, true);
         return true;
       },
-      key(code) { if (code === 'KeyR' && held) { turn++; return true; } return false; },
-      hint() { return held && S().parts[held] ? 'Holding the ' + nameOf(S().parts[held]) + '.  Bring it to a glowing end to fit it' : null; },
+      key(code, R) {
+        if (!held) return false;
+        if (code === 'KeyR') { if (ghost.visible) { turnQ.copy(ghostQ); turnT = 0.15; } turn++; return true; }
+        const part = S().parts[held];
+        if (!part || !isStretch(part.kind)) return false;
+        if (code === 'KeyC') {
+          if (trim) return cutHeld(R, trim) || true;
+          if (ghost.visible && ghostWay && ghostWay.len && ghostWay.len < A.lengthOf(part)) return cutHeld(R, ghostWay.len, 'Cut to fit. The offcut lies at your feet.') || true;
+          if (A.lengthOf(part) <= minLen(part)) { R.say('That is already as short as it cuts.', 1.8); return true; }
+          trim = A.lengthOf(part) - 1; return true;                                   // first press starts trimming one step in
+        }
+        if (code === 'BracketLeft' || code === 'Minus') return trimBy(-1);
+        if (code === 'BracketRight' || code === 'Equal') return trimBy(1);
+        return false;
+      },
+      wheel(dy) { return !!held && trim > 0 && trimBy(dy > 0 ? -1 : 1); },
+      hint() { const p = held && S().parts[held]; return p ? (trim ? 'Cutting to <b>' + (trim * STEP).toFixed(2) + ' m</b>.  <b>[ ]</b> or wheel change it, <b>C</b> or click cuts' : 'Holding the ' + nameOf(p) + '.  Bring it to a glowing end to fit it' + holdKeys(p)) : null; },
       leave(R) { hi.visible = ghost.visible = false; if (held) tossTo(R, R.player.x + 0.4, R.player.z + 0.4, false); wig = lenDrag = null; drawnV = -1; },
       frame(dt, R) {
         watchSim();
@@ -361,6 +398,16 @@
             glowMat.opacity = 0.55 + 0.4 * Math.sin(performance.now() * 0.008);
           }
         } else if (hand.visible) hand.visible = false;
+        if (held && trim && S().parts[held]) {                      // the cutting mark sits where the blade will go
+          const part = S().parts[held], full = A.lengthOf(part);
+          handMatrix(_m, part, R); _v.set(trim / full, 0, 0).applyMatrix4(_m);
+          const h = R.beating ? R.overhead() : R.hand(); _q.setFromEuler(_e.set(0, h.yaw + Math.PI / 2, 0));
+          band.matrix.compose(_v, _q, _s.set(1, 1, 1)).multiply(_o.makeRotationZ(Math.PI / 2)); band.visible = true;
+        } else if (band.visible) band.visible = false;
+        if (ghost.visible) {                                         // a quick swing to a new orientation (visual only)
+          ghost.matrix.decompose(_v, _q, _s); ghostQ.copy(_q);
+          if (turnT > 0) { turnT = Math.max(0, turnT - dt); const k = 1 - turnT / 0.15; _q.slerpQuaternions(turnQ, ghostQ, 1 - (1 - k) * (1 - k)); ghost.matrix.compose(_v, _q, _s); }
+        }
         if (!R.on && hi.visible) hi.visible = false;
         if (glows.count && !held && performance.now() > flashT) drawnV = -1;
         if (S().version !== drawnV) redraw();
