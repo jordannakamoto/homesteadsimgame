@@ -209,7 +209,7 @@
         if (sb - sa < 0.1) continue;
         const ym = (ya + yb) / 2;
         // a thin lapped board: it overlaps the course below by 25 mm and only its bottom edge stands off the wall, so the shadow line carries the look
-        const lap = row ? LAP : 0;
+        const lap = row && c.spans(ya - LAP, ya, row - 1).some(([x0, x1]) => x0 <= sa + 1e-6 && x1 >= sb - 1e-6) ? LAP : 0;
         M(out, id("cl"), "cladding", "boards", "cladding", c.parent, c.mat || "timber", 0.007, yb - ya + lap, c.at(sa, ym - lap / 2, c.off), c.at(sb, ym - lap / 2, c.off), upV, { ...common, area: r3((sb - sa) * (yb - ya)), row });
       }
     }
