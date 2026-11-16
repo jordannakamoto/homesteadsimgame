@@ -359,7 +359,7 @@
     const by = new Map();
     for (const mid in pr.members) {
       const pm = pr.members[mid];
-      if (!pm.built && !(pm.need > 0 && pm.got >= pm.need - 1e-6)) continue;
+      if ((!pm.built && !(pm.need > 0 && pm.got >= pm.need - 1e-6)) || V.sawing.has(mid)) continue;
       const pts = nailLocal(g, mid);
       if (!pts) continue;
       const cv = COVER[pm.stage];
