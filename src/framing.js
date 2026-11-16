@@ -277,7 +277,7 @@
       else if (x > q.s0 + 0.05 && x < q.s1 - 0.05) {
         // short studs carry on the spacing above the header and under a window
         stud(q.pocket ? "pocket" : "cripple", x, q.y1 + q.hd, st1);
-        q.door || stud("cripple", x, st0, q.y0 - SB);
+        q.door || q.y0 - SB - st0 < 0.06 || stud("cripple", x, st0, q.y0 - SB);   // a floor-length window has no room for them
       }
     }
     for (const q of opens) {

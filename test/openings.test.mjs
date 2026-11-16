@@ -9,7 +9,7 @@ test('the catalog has every window and door type, with sizes, operation and pric
   for (const t of OPENING_TYPES) {
     assert.ok(t.w.length >= 1 && t.w.length <= 4 && t.h.length >= 1 && t.h.length <= 4, t.id);
     assert.ok(OPERATION[t.op] && t.price > 0 && t.mass > 0 && t.store, t.id);
-    assert.ok(t.kind === 'door' ? t.sill === 0 : t.sill > 0.3, t.id);
+    assert.ok(t.kind === 'door' ? t.sill === 0 : t.sill > (t.look.slim ? 0.1 : 0.3), t.id);   // floor-length modern glass sits just off the floor
   }
   assert.equal(OPENING_BY_ID.door_pocket.frame, 'pocket');
   assert.equal(OPENING_BY_ID.door_garage.frame, 'beam');
@@ -149,4 +149,21 @@ test('the hands open and close a unit and the sim keeps it', () => {
   sim.commandNow('construction.operate', { id: 'p6', open: true });
   assert.deepEqual(Object.keys(sim.state.sys.construction.open), ['p6']);
   assert.equal(sim.commandNow('construction.operate', {}).ok, false);
+});
+
+test('window designer: made-to-order sizes, looks, and items made from their ids', async () => {
+  const { freeSpec, fitSize, LOOKS, FINISHES, GRILLES, openingItemFromId } = await import('../src/sim/content/openings.js');
+  const { ITEMS } = await import('../src/sim/items.js');
+  const sp = freeSpec({ typeId: 'window_wall', w: 4.234, h: 9, sill: 0.15, finish: 'bronze', look: { lites: [4, 2] } });
+  assert.equal(sp.w, 4.23); assert.equal(sp.h, 2.45); assert.equal(sp.finish, 'bronze'); assert.deepEqual(sp.look.lites, [4, 2]);
+  assert.ok(sp.header.engineered);
+  assert.deepEqual(fitSize('slot', 0.05, 1.7), { w: 0.2, h: 1.7 });
+  for (const k in LOOKS) assert.ok(GRILLES[LOOKS[k].grille] && FINISHES[LOOKS[k].finish], k);
+  const it = ITEMS[sp.itemId];
+  assert.ok(it && it.madeToOrder && it.priceUsd > 0 && it.massKgPerUnit > 0);
+  assert.equal(ITEMS[sp.itemId], it);
+  assert.ok(sp.itemId in ITEMS);
+  assert.equal(openingItemFromId('op_nope_100x100'), null);
+  assert.equal(ITEMS.op_nope_100x100, undefined);
+  assert.equal(freeSpec({ typeId: 'double_hung', sizeIdx: 1 }).look.grille, 'colonial');
 });

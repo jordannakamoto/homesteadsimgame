@@ -13,7 +13,7 @@
 import { MATERIALS } from './materials.js';
 import { INGREDIENTS, foodId } from './food-catalog.js';
 import { ITEMS_GARDEN, GARDEN_CATEGORIES } from './content/garden-items.js';
-import { openingItems } from './content/openings.js';
+import { openingItems, openingItemFromId } from './content/openings.js';
 
 export const ITEM_UNITS = Object.freeze(['each', 'm', 'm2', 'm3', 'kg', 'L']);
 
@@ -162,6 +162,21 @@ for (const { dims, massKgPerUnit, ...o } of Object.values(openingItems())) add({
 // ---- the garden: seeds, garden tools, amendments and produce (src/sim/content/garden-items.js)
 for (const g of ITEMS_GARDEN) add(g);
 
-export const ITEMS = Object.freeze(Object.fromEntries(list.map((i) => [i.id, i])));
+// Read-only. A made-to-order door or window (any size off the store's list) is not listed but is made from its id the
+// first time it is asked for, the same every time, so saves and orders that name one keep working.
+const BASE = Object.fromEntries(list.map((i) => [i.id, i])), MADE = Object.create(null);
+const madeItem = (id) => {
+  if (typeof id !== 'string' || !id.startsWith('op_')) return undefined;
+  if (MADE[id]) return MADE[id];
+  const o = openingItemFromId(id);
+  if (!o) return undefined;
+  const { dims, massKgPerUnit, ...rest } = o;
+  return (MADE[id] = Object.freeze({ ...rest, massKgPerUnit }));
+};
+export const ITEMS = new Proxy(BASE, {
+  get: (t, k) => (k in t ? t[k] : madeItem(k)),
+  has: (t, k) => k in t || !!madeItem(k),
+  set: () => false, defineProperty: () => false, deleteProperty: () => false,
+});
 export const item = (id) => ITEMS[id];
 for (const i of list) if (!ITEM_CATEGORIES.some((c) => c.id === i.category)) throw new Error('item ' + i.id + ' has unknown category');
