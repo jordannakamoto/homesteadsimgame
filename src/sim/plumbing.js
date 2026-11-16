@@ -17,7 +17,7 @@
 import { graph, partEnds, toWorld } from './core/parts.js';
 
 const STATE_V = 1;
-const fresh = () => ({ v: STATE_V, partsV: -1, version: 0, pieces: [], runs: {}, yard: null, kits: {}, nextKit: 1, notes: {} });
+const fresh = () => ({ v: STATE_V, partsV: -1, version: 0, pieces: [], sig: '[]', runs: {}, yard: null, kits: {}, nextKit: 1, notes: {} });
 
 // Pure: (parts state, kinds, mates, options) -> { pieces, runs }
 export function compilePlumbing(parts, { kinds, mates, stepM, material, innerM = 0.0204 }) {

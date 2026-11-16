@@ -102,8 +102,12 @@ export function graph(sys, state) {
     }
   }
   for (const list of at.values()) {
+    // a fitting sitting on this point stands between whatever else ends here: the others join it, not each other
+    let hub = null;
+    for (const e of list) { const p = state.parts[e.part], k = kinds[p.kind]; if (!k.stretch && !k.thin && same(p.at, e.p)) { hub = e.part; break; } }
     for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
       const a = list[i], b = list[j];
+      if (hub && (a.part === hub) === (b.part === hub)) continue;
       if (a.joined || b.joined || a.part === b.part || !same(a.d, neg(b.d)) || !(mates[a.type] || []).includes(b.type)) continue;
       a.joined = b.joined = true;
       joins.push({ a: { part: a.part, end: a.end }, b: { part: b.part, end: b.end }, p: a.p });

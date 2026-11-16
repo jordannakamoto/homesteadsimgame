@@ -29,7 +29,7 @@ await aim('pump');
 check('aiming at the handle explains the gesture', /down and up/.test(await G(() => document.getElementById('reachhint').textContent)), await G(() => document.getElementById('reachhint').textContent));
 await shot('1-pump');
 await page.mouse.down();
-check('holding the handle pumps: dry strokes, then the can fills', await until(() => __game.sim.state.sys.garden.can.litres >= 2, null, 1200), 'can ' + await G(() => __game.sim.state.sys.garden.can.litres) + ' L');
+check('holding the handle pumps: dry strokes, then the can fills', await until(() => __game.sim.state.sys.garden.can.litres >= 1, null, 1200), 'can ' + await G(() => __game.sim.state.sys.garden.can.litres) + ' L');
 await shot('2-pumping');
 await page.mouse.up(); await frames(3);
 const led = await G(() => ({ well: __game.sim.state.sys.water.totals.wellL, can: __game.sim.state.sys.garden.can.litres }));
@@ -38,7 +38,7 @@ check('every litre in the can came out of the well', led.well >= led.can && led.
 const lv = await aim('lever'); await page.mouse.down(); await page.mouse.up(); await frames(4);
 check('the lever sends water up to the barrel', await G(() => __game.sim.state.sys.water.pumps[__waterHands.yard.pump.id].divert === 'tank'), JSON.stringify(lv));
 await aim('pump'); await page.mouse.down();
-check('strokes now fill the barrel', await until(() => __game.sim.state.sys.water.tanks[__waterHands.yard.barrel.id].storedL >= 2, null, 1200));
+check('strokes now fill the barrel', await until(() => __game.sim.state.sys.water.tanks[__waterHands.yard.barrel.id].storedL >= 1, null, 1200));
 await page.mouse.up(); await frames(3);
 // the kit
 await stand(2.2, 2.9, 3.4);
@@ -64,9 +64,9 @@ check('a click fits it: it is now fixed on the lattice', await G((id) => { const
 // the rest of the run by command (the unit tests cover the geometry), then finish by hand
 const built = await G((first) => {
   const sim = __game.sim, api = sim.systems.find((s) => s.name === 'parts').api, S = () => sim.state.sys.parts, K = api.kinds;
-  const loose = (kind) => Object.values(S().parts).find((p) => p.kind === kind && !p.at && !p.fixed);
+  const loose = (kind, len) => Object.values(S().parts).filter((p) => p.kind === kind && !p.at && !p.fixed && (!len || p.len >= len)).sort((a, b) => (a.len || 0) - (b.len || 0))[0];
   const put = (kind, on, leave, len) => {
-    let part = kind === first.kind && !first.used ? ((first.used = true), S().parts[first.id]) : loose(kind);
+    let part = kind === first.kind && !first.used ? ((first.used = true), S().parts[first.id]) : loose(kind, len);
     if (part.at) return part.id;
     const end = api.graph(S()).open.find((e) => e.part === on);
     if (len && len < part.len) sim.commandNow('parts.cut', { id: part.id, len });

@@ -106,6 +106,21 @@ test('a tap above the water level gives nothing, and says why', () => {
   assert.equal(W(sim).taps.tap.why, 'above');
 });
 
+test('a valve between the barrel and a pipe is in the way whatever order the parts were made in', () => {
+  const sim = make(); yard(sim);
+  const pipe = sim.commandNow('parts.spawn', { kind: 'pipe', len: 2, pose: {} }).id;      // the pipe exists first
+  const v = put(sim, 'valve', 'a:out');
+  const w = placements(sys, P(sim), 'pipe', 2, graph(sys, P(sim)).open.find((e) => e.part === v))[0];
+  assert.equal(sim.commandNow('parts.fit', { id: pipe, at: w.at, rot: w.rot }).ok, true);
+  const g = graph(sys, P(sim));
+  assert.deepEqual(g.adj.get('a:out').map((l) => l.other), [v], 'the barrel joins the valve, not the pipe behind it');
+  assert.deepEqual(g.adj.get(pipe).map((l) => l.other), [v]);
+  sim.commandNow('water.fillTank', { id: 'barrel', litres: 50 }); sim.runTicks(3);
+  assert.equal(W(sim).totals.leakedL, 0, 'shut valve: the open pipe end stays dry');
+  sim.commandNow('parts.set', { id: v, key: 'open', value: true }); sim.runTicks(2);
+  assert.ok(W(sim).totals.leakedL > 0, 'open valve: it pours out of the open end');
+});
+
 test('a tee feeds two taps', () => {
   const sim = make(); yard(sim);
   const v = put(sim, 'valve', 'a:out');

@@ -217,6 +217,7 @@
   /* ================= the tap, the valve, and saying why ================= */
   function whyDry() {
     const tap = W().taps[Y.tap.id], pl = PL(), run = pl.runs && pl.runs['y:tap'];
+    if (G.speed === 0) return 'Time is paused, and water only runs while time does. Press 1× at the top.';
     if (!run || !run.reaches.includes('y:bout')) return 'No pipe reaches the tap yet. Fit a run from the brass outlet at the foot of the barrel.';
     if (tap.why === 'valve') return 'The shutoff valve is closed. Click it to open it.';
     if (tap.why === 'empty') return 'The barrel is empty. Flip the red lever on the pump and pump some water up into it.';
@@ -371,12 +372,25 @@
       if (slow > 0.25) { slow = 0; refreshSlow(); }
     },
   };
+  // the yard is trodden ground: no tall grass over the pipes (checked only when a chunk rebuilds its grass)
+  const grassSeen = new WeakMap(), ZERO = new T.Matrix4().makeScale(0, 0, 0);
+  function clearGrass() {
+    const chunks = G.world && G.world.chunks; if (!chunks || !Y) return;
+    const cx = Y.well.x + 0.4, cz = Y.well.z + 1.0, b = Y.bench;
+    for (const c of chunks.values()) for (const [m, list] of [[c.grassMesh, c.grass], [c.flowerMesh, c.flowers]]) {
+      if (!m || !list || grassSeen.get(m) === m.instanceMatrix.version) continue;
+      let n = 0;
+      list.forEach((g, i) => { const x = c.ox + g.lx, z = c.oz + g.lz; if (Math.hypot(x - cx, z - cz) < 3.3 || (b && Math.abs(x - b.x) < b.w / 2 + 0.9 && Math.abs(z - b.z) < b.d / 2 + 1.3)) { m.setMatrixAt(i, ZERO); n++; } });
+      if (n) m.instanceMatrix.needsUpdate = true;
+      grassSeen.set(m, m.instanceMatrix.version + (n ? 1 : 0));
+    }
+  }
   let slow = 0;
   function refreshSlow() {
     const B = window.__build;
     if (B && B.version !== yardV) { yardV = B.version; buildYard(); return; }
     if (!Y) return;
-    refreshCan(); refreshSight();
+    refreshCan(); refreshSight(); clearGrass();
     const pm = W().pumps[Y.pump.id]; if (pm && !pumping.on) lever.to = pm.divert === 'tank' ? 1 : 0;
     for (const k of Object.values(PL().kits || {})) if (!dyn.kits[k.id]) { yardV = -1; }
   }

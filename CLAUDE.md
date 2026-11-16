@@ -22,6 +22,7 @@ A browser homestead builder (Stardew-style direction) on a Valheim-style voxel w
 - `src/sim/`: the simulation. All world truth that changes over time lives here: deterministic, fixed ticks, seeded randomness, no DOM or three.js. One system per file, registered in `src/sim/index.js`.
 - `src/engine.js`: world, terrain, trees, grass, water, player, tools, day and night. Ordinary source with real names; edit it directly.
 - `src/build.js`: build mode, furniture and the piece interface. `src/buildui.js`: build mode's bar, options strip and inspector. `src/touch.js`: touch controls. `src/nature.js`: ground cover, shrubs, insects, animals, soft foliage lighting.
+- Hands-on water (docs/FIRST_WATER.md): generic `src/sim/core/parts.js`, `src/engine/parts.js`, `src/engine/reach.js` (no water words in these); content `src/sim/content/plumbing-parts.js`, `src/sim/plumbing.js`, `src/water-hands.js`. After touching them run `node test/water.smoke.mjs`.
 - `src/fxpost.js`: the one post pass (occlusion, depth of field, sun shafts, haze, grade). `src/fxhost.js` + `src/fx.js`: fires, smoke, tree variety, characters.
 - Add-ons reach the engine only through `window.__game`, `window.__build` and `window.__nature`. Add a name there rather than reaching into engine internals.
 
