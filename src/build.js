@@ -183,6 +183,7 @@
     whitestone: { name: "White stone", plank: col(0xd8d6cf), beam: col(0xa9a69c), stone: col(0xb9b6ad), courses: true },
     mossy: { name: "Mossy stone", plank: col(0x6f7a66), beam: col(0x545c4d), stone: col(0x5d6656), courses: true },
     log: { name: "Log", plank: col(0x7a5a3a), beam: col(0x4b3724), stone: C.stone, courses: true },
+    batten: { name: "Board and batten", plank: col(0xc7b79b), beam: col(0x6f5a47), stone: C.stone },
   };
   const PATHS = { cobble: { name: "Cobbles", c: col(0x8e8a80) }, dirt: { name: "Packed earth", c: col(0x8a6b47) }, gravel: { name: "Gravel", c: col(0xb5ad9c) }, boards: { name: "Boardwalk", c: col(0x9b7b4f) } };
   const FLOORS = { planks: { name: "Planks", c: C.floor }, flags: { name: "Flagstone", c: col(0x9a968c) }, dark: { name: "Dark boards", c: col(0x6b5238) }, tile: { name: "Clay tiles", c: col(0xb4654a), c2: col(0xc98a62) }, marble: { name: "Marble", c: col(0xd9d6cf), c2: col(0x4c4f55) }, cobble: { name: "Cobbles", c: col(0x86837b), c2: col(0x77746c) }, carpet: { name: "Red carpet", c: col(0x8c2f2c) }, moss: { name: "Lawn", c: col(0x5f8a3c) } };
@@ -199,7 +200,7 @@
   const solid = (m, t) => Object.freeze([LY(m, t, "structure")]);
   const MASONRY = { stone: "fieldstone", mossy: "fieldstone", sandstone: "sandstone", whitestone: "limestone", brick: "brick" };
   const ASSEMBLIES = {
-    wall: { timber: FRAME_WALL, dark: FRAME_WALL, plaster: DAUB_WALL, halftimber: DAUB_WALL, stone: solid("fieldstone", 0.2), mossy: solid("fieldstone", 0.2), sandstone: solid("sandstone", 0.2), whitestone: solid("limestone", 0.2), brick: solid("brick", 0.215), log: solid("softwood-log", 0.2) },
+    wall: { timber: FRAME_WALL, dark: FRAME_WALL, batten: FRAME_WALL, plaster: DAUB_WALL, halftimber: DAUB_WALL, stone: solid("fieldstone", 0.2), mossy: solid("fieldstone", 0.2), sandstone: solid("sandstone", 0.2), whitestone: solid("limestone", 0.2), brick: solid("brick", 0.215), log: solid("softwood-log", 0.2) },
     floor: {
       planks: Object.freeze([LY("air", 0.095, "joist-bay"), LY("softwood-boards", 0.025, "deck")]),
       dark: Object.freeze([LY("air", 0.095, "joist-bay"), LY("softwood-boards", 0.025, "deck")]),
@@ -7382,7 +7383,7 @@
     return p;
   }
   const dropOf = (S) => (S.level || S.po ? 0.05 : FOUNDATIONS[S.found].drop);
-  const stickWall = (cls, mat) => cls === "wall" && (mat === "timber" || mat === "dark");
+  const stickWall = (cls, mat) => cls === "wall" && (mat === "timber" || mat === "dark" || mat === "batten");
   // every member of a structure, in its own metres above its base; kept until the structure changes
   function membersOf(S) {
     if (S.mem && S.mem.ver === S.ver) return S.mem;

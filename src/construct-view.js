@@ -65,7 +65,7 @@
     // the order pieces go in: by stage, then by kind, then along the building
     for (const m of g.byId.values()) {
       const mx = (m.a[0] + m.b[0]) / 2, mz = (m.a[2] + m.b[2]) / 2, my = (m.a[1] + m.b[1]) / 2;
-      g.rank.set(m.id, C.STAGE_ORDER.indexOf(m.stage) * 1e6 + ((KR[m.kind] || 0) + (TR[m.type] || 0) + 2) * 1e4 + (m.kind === 'sheathing' || m.kind === 'cladding' || m.kind === 'stud' && m.type === 'cripple' ? my * 300 : 0) + (mx - g.cx) + 0.37 * (mz - g.cz) + 50);
+      g.rank.set(m.id, C.STAGE_ORDER.indexOf(m.stage) * 1e6 + ((KR[m.kind] || 0) + (TR[m.type] || 0) + 2) * 1e4 + (m.kind === 'sheathing' || m.kind === 'cladding' && m.type !== 'vboards' && m.type !== 'batten' || m.kind === 'stud' && m.type === 'cripple' ? my * 300 : 0) + (mx - g.cx) + 0.37 * (mz - g.cz) + 50);
     }
     // each framed wall: the line it swings up about (the inner edge of its bottom plate)
     for (const m of g.byId.values()) {
@@ -540,7 +540,8 @@
     const m = geom(id).byId.get(mid);
     if (!m) return;
     const L = Math.hypot(m.b[0] - m.a[0], m.b[2] - m.a[2]) || 1;
-    (V.slides || (V.slides = [])).push({ id, layer, mid, t: 0, u: [(m.b[0] - m.a[0]) / L, 0, (m.b[2] - m.a[2]) / L], len: Math.min(1.2, L) });
+    const up = Math.hypot(m.b[0] - m.a[0], m.b[2] - m.a[2]) < 0.05;      // a board stood on end slides in from the left along the wall
+    (V.slides || (V.slides = [])).push({ id, layer, mid, t: 0, u: up ? [m.n[0], 0, m.n[2]] : [(m.b[0] - m.a[0]) / L, 0, (m.b[2] - m.a[2]) / L], len: up ? 0.5 : Math.min(1.2, L) });
   }
   function tickSlides(dt) {
     if (!V.slides || !V.slides.length) return;
