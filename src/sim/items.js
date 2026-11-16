@@ -34,7 +34,7 @@ export const ITEM_CATEGORIES = Object.freeze([
 export const isToolCategory = (c) => c === 'tools_hand' || c === 'tools_power';
 
 // Actual (not nominal) dimensions of North American dimensional lumber, in metres.
-const ACTUAL = { '2x4': [0.038, 0.089], '2x6': [0.038, 0.14], '2x8': [0.038, 0.184], '2x10': [0.038, 0.235], '4x4': [0.089, 0.089], '6x6': [0.14, 0.14] };
+const ACTUAL = { '2x4': [0.038, 0.089], '2x6': [0.038, 0.14], '2x8': [0.038, 0.184], '2x10': [0.038, 0.235], '2x12': [0.038, 0.286], '4x4': [0.089, 0.089], '6x6': [0.14, 0.14] };
 
 export function unitVolumeM3(item) {
   const d = item.dims;
@@ -62,7 +62,7 @@ const add = (spec) => {
 };
 
 // ---- dimensional lumber, spruce-pine-fir, kiln dried, sold by the metre
-const lumberPrice = { '2x4': 1.95, '2x6': 3.3, '2x8': 4.9, '2x10': 7.1, '4x4': 5.6, '6x6': 17.5 };
+const lumberPrice = { '2x4': 1.95, '2x6': 3.3, '2x8': 4.9, '2x10': 7.1, '2x12': 9.6, '4x4': 5.6, '6x6': 17.5 };
 for (const [size, [w, dpt]] of Object.entries(ACTUAL)) {
   add({ id: 'lumber_' + size, name: size.replace('x', ' x ') + ' framing lumber', category: 'lumber', unit: 'm', material: 'spf_seasoned',
     dims: { widthM: w, depthM: dpt }, priceUsd: lumberPrice[size] });

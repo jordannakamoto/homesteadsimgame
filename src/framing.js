@@ -7,7 +7,7 @@
   const STAGES = ["site", "foundation", "floor-frame", "subfloor", "wall-frame", "top-plates", "roof-frame", "roof-deck", "roofing", "sheathing", "wrap", "openings", "cladding", "insulation", "lining", "services"];
   const STAGE_NAME = { site: "Site", foundation: "Foundation", "floor-frame": "Floor frame", subfloor: "Subfloor", "wall-frame": "Wall frames", "top-plates": "Top plates", "roof-frame": "Roof frame", "roof-deck": "Roof deck", roofing: "Roofing", sheathing: "Sheathing", wrap: "Wrap", openings: "Windows and doors", cladding: "Cladding", insulation: "Insulation", lining: "Lining", services: "Services" };
   // actual (not nominal) sizes of North American lumber, metres: [breadth, depth]
-  const LUMBER = { "2x4": [0.038, 0.089], "2x6": [0.038, 0.14], "2x8": [0.038, 0.184], "2x10": [0.038, 0.235], "4x4": [0.089, 0.089], "6x6": [0.14, 0.14] };
+  const LUMBER = { "2x4": [0.038, 0.089], "2x6": [0.038, 0.14], "2x8": [0.038, 0.184], "2x10": [0.038, 0.235], "2x12": [0.038, 0.286], glulam: [0.09, 0.225], "4x4": [0.089, 0.089], "6x6": [0.14, 0.14] };
   const SHEET = { w: 1.22, l: 2.44 };
   const T = { osb: 0.011, sub: 0.018, clad: 0.019, lining: 0.019, gyp: 0.0127, wrap: 0.0002 };
   const FOUNDATIONS = {
@@ -180,7 +180,13 @@
   }
 
   /* ---------- walls ---------- */
-  const headerFor = (w) => (w <= 1.25 ? "2x6" : w <= 1.85 ? "2x8" : "2x10");
+  // Header by span (the same table as HEADER_TABLE in src/sim/content/openings.js, which a test keeps in step): two boards
+  // on edge up to 3 m; beyond that an engineered beam with doubled jack studs. A garage door always gets the beam.
+  const HEADER_TABLE = [[1.2, "2x6"], [1.8, "2x8"], [2.4, "2x10"], [3.0, "2x12"]];
+  const headerFor = (w, beam) => {
+    if (!beam) for (const [u, z] of HEADER_TABLE) if (w <= u + 1e-9) return z;
+    return "glulam";
+  };
   // Siding: lap boards in even courses CH tall, each course one board along the wall, broken only at openings; a trim
   // board at each end. The boards lean a few degrees (bottom out) so each course throws a shadow line on the one below.
   const CH = 0.18,
@@ -220,14 +226,17 @@
       at = (s, y, off) => [w.a[0] + ux * s + nrm[0] * (off || 0), y, w.a[1] + uz * s + nrm[2] * (off || 0)],
       st0 = yb + SB,
       st1 = yt - 2 * SB,
-      opens = (w.openings || []).map((q) => ({ id: q.id, s0: Math.max(0.1, q.offset), s1: Math.min(L - 0.1, q.offset + q.width), y0: w.y0 + q.sill, y1: Math.min(w.y0 + q.sill + q.height, st1 - 0.15), door: q.kind !== "window" })).filter((q) => q.s1 - q.s0 > 0.2);
+      opens = (w.openings || []).map((q) => ({ id: q.id, s0: Math.max(0.1, q.offset), s1: Math.min(L - 0.1, q.offset + q.width), y0: w.y0 + q.sill, y1: Math.min(w.y0 + q.sill + q.height, st1 - 0.15), door: q.kind !== "window", frame: q.frame || null })).filter((q) => q.s1 - q.s0 > 0.2);
+    // a pocket door's wall section: the opening carries on past the door for the leaf to slide into, framed as one span
+    for (const q of opens) if (q.frame === "pocket") ((q.pocket = q.s1), (q.s1 = Math.min(L - 0.1, q.s1 + (q.s1 - q.s0) + 0.04)));
+    for (const q of opens) ((q.beam = q.frame === "beam" || headerFor(q.s1 - q.s0) === "glulam"), (q.hs = headerFor(q.s1 - q.s0, q.frame === "beam")), (q.hd = LUMBER[q.hs][1]), (q.y1 = Math.min(q.y1, st1 - q.hd - 0.01)), (q.jn = q.beam ? 2 : 1));
     let n = 0;
     const id = (c) => w.id + "." + c + n++,
       stud = (type, s, y0, y1, stage) => y1 - y0 > 0.04 && M(out, id("st"), "stud", type, stage || "wall-frame", w.id, "timber", SB, SD, at(s, y0), at(s, y1), nrm),
       flat = (code, kind, type, stage, s0, s1, y, d) => M(out, id(code), kind, type, stage, w.id, "timber", SB, d || SD, at(s0, y), at(s1, y), nrm);
     // the bottom plate stops at doorways
     let s = 0;
-    for (const q of opens.filter((q) => q.door && q.y0 - yb < 0.2).sort((p, q) => p.s0 - q.s0)) (q.s0 - s > 0.05 && flat("bp", "plate", "bottom", "wall-frame", s, q.s0, yb + SB / 2), (s = q.s1));
+    for (const q of opens.filter((q) => q.door && q.y0 - yb < 0.2).sort((p, q) => p.s0 - q.s0)) (q.s0 - s > 0.05 && flat("bp", "plate", "bottom", "wall-frame", s, q.s0, yb + SB / 2), (s = q.pocket || q.s1));
     L - s > 0.05 && flat("bp", "plate", "bottom", "wall-frame", s, L, yb + SB / 2);
     flat("tp", "plate", "top", "wall-frame", 0, L, yt - 1.5 * SB);
     flat("cp", "plate", "cap", "top-plates", 0, L, yt - 0.5 * SB);
@@ -241,20 +250,24 @@
       if (!q) (stud("stud", x, st0, st1), ups.push(x));
       else if (x > q.s0 + 0.05 && x < q.s1 - 0.05) {
         // short studs carry on the spacing above the header and under a window
-        const hd = LUMBER[headerFor(q.s1 - q.s0)][1];
-        stud("cripple", x, q.y1 + hd, st1);
+        stud(q.pocket ? "pocket" : "cripple", x, q.y1 + q.hd, st1);
         q.door || stud("cripple", x, st0, q.y0 - SB);
       }
     }
     for (const q of opens) {
-      const hs = headerFor(q.s1 - q.s0),
-        hd = LUMBER[hs][1];
-      for (const [x, k] of [[q.s0 - 1.5 * SB, -1], [q.s1 + 1.5 * SB, 1]]) {
+      const hs = q.hs,
+        hd = q.hd,
+        [hb, hdep] = LUMBER[hs],
+        plies = hs === "glulam" ? 1 : 2;
+      // king studs each side, then the jack (trimmer) studs that carry the header; an engineered beam gets two jacks a side
+      for (const k of [-1, 1]) {
+        const e = k < 0 ? q.s0 : q.s1,
+          x = e + k * (q.jn + 0.5) * SB;
         x > 0.02 && x < L - 0.02 && (stud("king", x, st0, st1), ups.push(x));
-        stud("jack", x - k * SB, st0, q.y1);
+        for (let j = 0; j < q.jn; j++) stud("jack", e + k * (j + 0.5) * SB, st0, q.y1);
       }
-      // the header: two boards on edge, carrying what is above across the opening
-      M(out, id("hd"), "header", "header", "wall-frame", w.id, "timber", 2 * SB, hd, at(q.s0 - SB, q.y1 + hd / 2), at(q.s1 + SB, q.y1 + hd / 2), UP, { size: hs, plies: 2, opening: q.id || null });
+      // the header: boards on edge (or one engineered beam), carrying what is above across the opening
+      M(out, id("hd"), "header", "header", "wall-frame", w.id, "timber", plies * hb, hdep, at(q.s0 - q.jn * SB, q.y1 + hd / 2), at(q.s1 + q.jn * SB, q.y1 + hd / 2), UP, { size: hs, plies, opening: q.id || null, span: r3(q.s1 - q.s0) });
       q.door || flat("sl", "plate", "sill", "wall-frame", q.s0, q.s1, q.y0 - SB / 2);
     }
     const cut = (s0, s1, y0, y1) => {
@@ -448,6 +461,7 @@
     if (k === "site") return null;
     if (k === "stud") return lum(t === "gable" ? "Gable studs" : "Studs", t === "gable" ? "Short uprights that fill the triangle under the roof at each end." : "The uprights inside your walls. They carry the roof down to the floor.");
     if (k === "plate") return t === "sill" && m.stage === "floor-frame" ? lum("Sill plates", "Boards bolted flat on top of the foundation wall. The floor frame sits on them.") : lum("Wall plates", "The boards along the bottom and top of each wall. The studs are nailed between them.");
+    if (k === "header" && m.size === "glulam") return ["Beams" + sz, "glulam_90x225", "m", m.length, "Engineered beam (90 x 225)", "A glued-laminated beam over a wide opening. Plain boards would sag across it."];
     if (k === "header") return lum("Headers", "The beam over a door or window. It carries the load above around the opening.", 2);
     if (k === "joist") return t === "ceiling" ? lum("Ceiling joists", "Ties across the top of the walls. They stop the rafters pushing the walls apart.") : t === "rim" ? lum("Rim joists", "The boards that close the ends of the floor joists and hold them upright.") : lum("Floor joists", "The beams of the floor, 40 cm apart. Closer joists make a stiffer floor.");
     if (k === "rafter") return lum("Rafters", "The sloping beams of the roof. They carry rain and snow out to the walls.");
