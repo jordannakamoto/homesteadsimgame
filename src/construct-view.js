@@ -108,6 +108,7 @@
   // ------------------------------------------------------------------ keeping build mode and the simulation in step
   function attach() {
     B.setSupportKinds && B.setSupportKinds(C.SUPPORT);
+    B.setOnClimbOut && B.setOnClimbOut((e) => { flash('No door in this room: you climb out over the wall'); sounds.play('thunk'); G.burst(e.x, G.heightAt(e.x, e.z) + 0.2, e.z, 6, 0xb9a88a, 1.2, 1.4, 0.08, 0.5); });
     V.sim = G.sim; V.rev++; V.bv = -1; V.sel = null;
     for (const k of asm.keys()) asm.remove(k);
     V.structs.clear(); V.geom.clear(); V.plans.clear(); V.planVer.clear(); V.fresh.clear(); V.flushing = []; V.working = null; V.auto = null; V.raise = null; V.placing && endPlacing();

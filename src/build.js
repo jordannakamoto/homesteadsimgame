@@ -6943,6 +6943,43 @@
   }
 
   /* ---------- hooks called by the engine ---------- */
+  // A room with no door is a trap. Inside a building with no doorway at all, pushing into a wall for a moment climbs you
+  // out over it (through the framing, or over the top with a hand up): never stuck, and never a way through a wall that
+  // has a door to use instead.
+  function hasWayOut(S) {
+    if (S.wayVer === S.ver) return S.way;
+    let way = S.fopen.some((o) => o.sp.type.kind === "door") || S.segs.some((sg) => isDoor(sg[4])) || S.rings.length > 0;
+    if (!way) for (const t of S.walls.values()) if (isDoor(t)) ((way = true), 0);
+    S.wayVer = S.ver;
+    return (S.way = way);
+  }
+  function climbOut(e, S, px, pz) {
+    const mv = Math.hypot(e.mvx || 0, e.mvz || 0),
+      pushed = Math.hypot(px, pz);
+    if (mv < 0.5 || pushed < 1e-4 || (px * e.mvx + pz * e.mvz) / (mv * pushed) > -0.3 || e.climbY != null) {
+      e.__stuck = 0;
+      return;
+    }
+    const now = performance.now();
+    if (!e.__stuck || now - e.__stuckLast > 200) e.__stuck = now;
+    e.__stuckLast = now;
+    if (now - e.__stuck < 650) return;
+    const [lx, lz] = toLocal(S, e.x, e.z);
+    if (!onFloorAt(S, lx, lz) || hasWayOut(S)) return;
+    // step out the way you are pushing until clear of the floor, then a little more
+    const ux = e.mvx / mv,
+      uz = e.mvz / mv;
+    let k = 0.3;
+    for (; k < 12; k += 0.15) {
+      const [qx, qz] = toLocal(S, e.x + ux * k, e.z + uz * k);
+      if (!onFloorAt(S, qx, qz)) break;
+    }
+    e.x += ux * (k + 0.55);
+    e.z += uz * (k + 0.55);
+    e.__bp = null;
+    e.__stuck = 0;
+    B.onClimbOut && B.onClimbOut(e);
+  }
   function collideOnce(e, r, isPlayer, S) {
     let [lx, lz] = toLocal(S, e.x, e.z);
     const prev = e.__bp && e.__bp.id === S.id ? e.__bp : null;
@@ -6961,7 +6998,7 @@
         for (let d = 0; d < 2; d++) {
           const wk = ek(i, j, d),
             ty = S.walls.get(wk);
-          if (ty && ((S.hid.size && S.hid.has(wk)) || (isThick(ty) && ey > wallTop) || (S.ghostW && S.ghostW.has(wk)))) continue;
+          if (ty && ((S.hid.size && S.hid.has(wk)) || (isThick(ty) && ey > wallTop) || (S.ghostW && S.ghostW.has(wk)) || (isPlayer && S.studW && S.studW.has(wk)))) continue;
           let block = blocks(ty, isPlayer, low);
           const R = isThick(ty) ? r + 0.52 : R0;
           if (!block && !ty && low && !S.deckGhost) {
@@ -7014,6 +7051,7 @@
     for (const sg of S.colSegs) {
       const ty = sg[4];
       if (!blocks(ty, isPlayer, low) || (isThick(ty) && ey > wallTop)) continue;
+      if (isPlayer && S.studSegs && S.studSegs.size && S.studSegs.has(sg[0] + "," + sg[1] + "," + sg[2] + "," + sg[3])) continue;
       const R = isThick(ty) ? r + 0.52 : R0;
       const ax = sg[0],
         az = sg[1],
@@ -7567,6 +7605,8 @@
     S.sitePlanned = mem.list.some((m) => m.kind === "site" && S.plan.has(m.id));
     const st = { all: !S.plan.size, mem, finRun: null, finFloor: null, finRoof: null, cur: null, built: null, shell: null };
     S.ghostW = null;
+    S.studW = null;
+    S.studSegs = null;
     S.deckGhost = false;
     if (st.all) return st;
     const P = (id) => S.plan.has(id),
@@ -7585,6 +7625,13 @@
       S.ghostW = new Set();
       for (const g of S.runs) if (!stands(g.id)) for (const e of g.m) S.ghostW.add(e.k);
       for (const g of S.fruns) if (!stands(g.id)) for (const n of g.m) gone.add(S.segs[n].slice(0, 4).join(","));
+      // bare framing, studs with no sheathing on them yet, is no wall to a person: you step through between the studs, the
+      // way framers do. Only the player passes; a wall is solid once its first sheet is on (and a raised wall never traps you)
+      const bareFrame = (id) => kids(id) && kids(id).some((m) => m.kind === "sheathing") && kids(id).every((m) => m.kind !== "sheathing" || P(m.id));
+      S.studW = new Set();
+      S.studSegs = new Set();
+      for (const g of S.runs) if (stands(g.id) && bareFrame(g.id)) for (const e of g.m) S.studW.add(e.k);
+      for (const g of S.fruns) if (stands(g.id) && bareFrame(g.id)) for (const n of g.m) S.studSegs.add(S.segs[n].slice(0, 4).join(","));
       if (gone.size) S.colSegs = S.colSegs.filter((sg) => !gone.has(sg.slice(0, 4).join(",")));
       S.deckGhost = mem.list.some((m) => (m.stage === "site" || m.stage === "foundation" || m.stage === "floor-frame" || m.stage === "subfloor") && P(m.id));
     }
@@ -9105,6 +9152,10 @@
       return { matrix: S.group.matrixWorld, y0: S.y0, list: membersOf(S).list, planned: S.plan };
     },
     memberLook: () => ({ geo: boxGeo, mat: memMat, colors: MCOL }),
+    // called when the player climbs out of a room that has no door (see climbOut)
+    setOnClimbOut(fn) {
+      B.onClimbOut = fn;
+    },
     // the pale shell of everything still unbuilt: shown for a plan nobody has started, hidden once work is under way
     setShell(structId, on) {
       const S = B.structs.find((O) => O.id === structId);
@@ -9155,8 +9206,11 @@
         const ey = e.y === undefined ? S.y0 : e.y;
         S.rings.length && ringHold(e, r, S);
         if (S.level ? ey < S.y0 + FLOOR_T - 0.65 || ey > S.y0 + EAVE * S.hs : ey > S.y0 + EAVE * S.hs - 0.3 || ey < S.y0 - 1.2) continue;
+        const x0 = e.x,
+          z0 = e.z;
         collideOnce(e, r, isPlayer, S);
         collideOnce(e, r, isPlayer, S);
+        isPlayer && climbOut(e, S, e.x - x0, e.z - z0);
         near = S;
       }
       if (!near) e.__bp = null;
