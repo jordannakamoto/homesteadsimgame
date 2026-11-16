@@ -10,6 +10,7 @@ export const OPERATION = Object.freeze({
   fixed: 'does not open', swing: 'swings on hinges', slide: 'slides sideways', tilt_in: 'tilts in from the top',
   awning: 'tilts out from the bottom', double_hung: 'sashes slide up and down', fold: 'folds in panels', roll: 'rolls up overhead',
   casement: 'swings out on side hinges', dutch: 'top and bottom open separately', pocket: 'slides into the wall', barn: 'slides on a track outside',
+  pivot: 'turns on a pivot pin set in from the edge',
 });
 
 // sill presets for windows, metres above the floor
@@ -47,11 +48,16 @@ export const OPENING_TYPES = Object.freeze([
   T('slot', 'Vertical slot window', 'window', 'fixed', [0.3, 0.45, 0.6], [1.5, 1.8, 2.1, 2.3], 0.3, { mass: 14, price: 240, look: { slim: true }, finish: 'black', range: { w: [0.2, 0.9], h: [0.6, 2.45] }, blurb: 'Tall and narrow. Set several at different heights for a modern facade.' }),
   T('ribbon', 'Ribbon window', 'window', 'fixed', [1.8, 2.4, 3.6], [0.4, 0.6, 0.9], 1.2, { mass: 30, price: 680, look: { slim: true, lites: [3, 1] }, finish: 'black', range: { w: [1.0, 6.0], h: [0.25, 1.2] }, blurb: 'A long low band of glass, at eye level or up under the roof.' }),
   T('tilt_turn', 'Tilt-turn window', 'window', 'tilt_in', [0.6, 0.9, 1.2], [1.2, 1.5], 0.9, { mass: 18, price: 330, look: { slim: true }, finish: 'black', blurb: 'European: tips in at the top to air the room.' }),
-  // ---- doors
-  T('door_single', 'Single door, pre-hung', 'door', 'swing', [0.76, 0.81, 0.915], [2.03, 2.13], 0, { mass: 38, price: 180, look: { grid: [1, 1] } }),
-  T('door_french', 'Double / French door', 'door', 'swing', [1.22, 1.52, 1.83], [2.03, 2.13], 0, { mass: 70, price: 520, look: { panels: 2, grid: [3, 5] } }),
+  // ---- doors. The swinging ones are presets of the door designer (look: face, glass, bars, hw, metal; finish).
+  T('door_single', 'Six-panel door (colonial)', 'door', 'swing', [0.76, 0.81, 0.915], [2.03, 2.13], 0, { mass: 38, price: 180, finish: 'white', look: { grid: [1, 1], face: 'p6', hw: 'knob', metal: 'brass' } }),
+  T('door_craftsman', 'Craftsman door', 'door', 'swing', [0.81, 0.915, 1.07], [2.03, 2.13], 0, { mass: 44, price: 420, finish: 'oak', look: { face: 'p3', glass: 'craft', hw: 'lever', metal: 'black' } }),
+  T('door_farmhouse', 'Farmhouse plank door', 'door', 'swing', [0.81, 0.915], [2.03, 2.13], 0, { mass: 46, price: 300, finish: 'sage', look: { face: 'plank', glass: 'top', bars: true, hw: 'lever', metal: 'black' } }),
+  T('door_pivot', 'Modern pivot door', 'door', 'pivot', [1.07, 1.22, 1.52], [2.13, 2.44], 0, { mass: 80, price: 1400, finish: 'walnut', look: { face: 'groove', glass: 'slot', hw: 'pull', metal: 'black' } }),
+  T('door_glass', 'Steel-frame glass door', 'door', 'swing', [0.81, 0.915, 1.07], [2.03, 2.13, 2.44], 0, { mass: 52, price: 900, finish: 'black', look: { face: 'flush', glass: 'full', bars: true, hw: 'pull', metal: 'black' } }),
+  T('door_interior', 'Interior shaker door', 'door', 'swing', [0.61, 0.71, 0.76, 0.81], [2.03], 0, { mass: 14, price: 95, finish: 'white', look: { face: 'shaker', hw: 'lever', metal: 'steel' }, more: { thin: true } }),
+  T('door_french', 'Double / French door', 'door', 'swing', [1.22, 1.52, 1.83], [2.03, 2.13], 0, { mass: 70, price: 520, finish: 'white', look: { panels: 2, grid: [3, 5], face: 'shaker', glass: 'full', bars: true, hw: 'lever', metal: 'brass' } }),
+  T('door_dutch', 'Dutch door', 'door', 'dutch', [0.81, 0.915], [2.03], 0, { mass: 42, price: 340, finish: 'blue', look: { panels: 2, face: 'shaker', glass: 'half', bars: true, hw: 'knob', metal: 'brass' } }),
   T('door_patio', 'Sliding patio door', 'door', 'slide', [1.83, 2.44, 3.05], [2.03, 2.13], 0, { mass: 95, price: 780, look: { panels: 2, track: true } }),
-  T('door_dutch', 'Dutch door', 'door', 'dutch', [0.81, 0.915], [2.03], 0, { mass: 42, price: 340, look: { panels: 2 } }),
   T('door_barn', 'Barn door on a track', 'door', 'barn', [0.915, 1.07, 1.22], [2.03, 2.13], 0, { mass: 55, price: 290, look: { track: true }, more: { surface: true, leafOver: 0.1 } }),
   T('door_pocket', 'Pocket door', 'door', 'pocket', [0.76, 0.81, 0.915], [2.03], 0, { mass: 36, price: 320, frame: 'pocket', more: { pocket: true } }),
   T('door_bifold', 'Bifold closet door', 'door', 'fold', [0.76, 0.91, 1.22, 1.52], [2.03], 0, { mass: 20, price: 140, look: { panels: 2 } }),
@@ -67,7 +73,25 @@ export const FINISHES = Object.freeze({
   white: { name: 'White', hex: 0xf1eee6 }, cream: { name: 'Cream', hex: 0xe3d7bb }, black: { name: 'Black', hex: 0x1d1f21 },
   bronze: { name: 'Dark bronze', hex: 0x3c2f25 }, wood: { name: 'Natural wood', hex: 0x9a6c43 }, sage: { name: 'Sage green', hex: 0x7c8a6c },
   green: { name: 'Hunter green', hex: 0x2f4a36 }, red: { name: 'Barn red', hex: 0x7c2a22 }, blue: { name: 'Slate blue', hex: 0x4a5b6e },
+  // door stains and paints
+  oak: { name: 'Oak stain', hex: 0xa7743f }, walnut: { name: 'Walnut', hex: 0x48301f }, charcoal: { name: 'Charcoal', hex: 0x45484b }, mustard: { name: 'Mustard', hex: 0xc99a34 },
 });
+// ---- the door designer: what a swinging door looks like (sp.look). Keys a door type sets in its look, and a placed
+// door may override in f.look. face: the panel layout. glass: where the lites are. bars: muntins divide the glass.
+// side: sidelights beside the leaf (one rough opening, one unit). transom: a lite over it. hw / metal: the handle.
+export const DOOR_FACES = Object.freeze({
+  flush: 'Flush', groove: 'Grooved', shaker: 'Shaker', p2: '2 panel', p3: '3 panel', p5: '5 panel', p6: '6 panel', plank: 'Plank',
+});
+export const DOOR_GLASS = Object.freeze({ none: 'No glass', top: 'Top lite', half: 'Half lite', three: '¾ lite', full: 'Full glass', craft: 'Craftsman', slot: 'Slot' });
+export const DOOR_SIDES = Object.freeze({ none: 'None', left: 'Left', right: 'Right', both: 'Both' });
+export const DOOR_HW = Object.freeze({ knob: 'Knob', lever: 'Lever', pull: 'Long pull' });
+export const DOOR_METALS = Object.freeze({ brass: { name: 'Brass', hex: 0xb89a4c }, black: { name: 'Black', hex: 0x18181a }, steel: { name: 'Steel', hex: 0x9fa2a5 } });
+export const SIDE_W = 0.36;              // a sidelight unit, frame included
+export const TRANSOM_H = 0.36;           // a transom over the door, frame included
+const DESIGN_OPS = new Set(['swing', 'dutch', 'pivot']);
+// which door types the designer shapes (hinged and pivot leaves), and which of them may take sidelights and a transom
+export const designable = (t) => !!t && t.kind === 'door' && DESIGN_OPS.has(t.op) && t.frame === 'wall' && !t.surface;
+export const DOOR_LOOK = Object.freeze({ face: 'flush', glass: 'none', bars: false, side: 'none', transom: false, hw: 'knob', metal: 'brass' });
 export const GRILLES = Object.freeze({
   none: 'No grille', colonial: 'Colonial grid', cottage: 'Cottage (top only)', farmhouse: 'Farmhouse 2 over 2', craftsman: 'Craftsman (upright top)',
   prairie: 'Prairie border', diamond: 'Diamond', sunburst: 'Sunburst',
@@ -86,11 +110,13 @@ export const LOOKS = Object.freeze({
 });
 // the look a free opening ends up with: the type's defaults under the designer's choices (f.look, f.finish)
 export function lookOf(t, f = {}) {
-  const L = { shape: t.look.arch ? 'arch' : 'rect', lites: [1, 1], slim: false, shutters: 'none', ...t.look, ...(f.look || {}) };
+  const own = (f && f.look) || {};
+  if (designable(t)) return { ...DOOR_LOOK, ...t.look, ...own };
+  if (t.kind === 'door') return { ...t.look, ...own };
+  const L = { shape: t.look.arch ? 'arch' : 'rect', lites: [1, 1], slim: false, shutters: 'none', ...t.look, ...own };
   if (!L.grille) L.grille = L.grid[0] > 1 || L.grid[1] > 1 ? 'colonial' : 'none';
   return L;
 }
-
 // The old fixed 1 m module shapes, mapped to the nearest type and size (so old saves keep their look).
 export const LEGACY_OPEN = Object.freeze({
   door: ['door_single', 0.81, 2.03], door2: ['door_single', 0.915, 2.13], gate: ['door_single', 0.81, 2.13], railgate: ['door_single', 0.76, 1.1],
@@ -168,8 +194,16 @@ export function freeSpec(f) {
   if (f.w > 0 && f.h > 0) s = fitSize(t, f.w, f.h);
   else { const sizes = openingSizes(t); s = sizes[Math.min(Math.max(0, f.sizeIdx | 0), sizes.length - 1)]; }
   const sill = t.kind === 'door' ? 0 : (f.sill === undefined ? t.sill : f.sill);
-  const rough = roughOpening(t, s.w, s.h, sill);
-  return { type: t, w: s.w, h: s.h, sill, head: sill + s.h, rough, header: headerSpec(rough.width), itemId: openingItemId(t.id, s.w, s.h), finish: f.finish || t.finish, look: lookOf(t, f) };
+  const look = lookOf(t, f);
+  // a designed door with sidelights or a transom is one bigger unit in one rough opening; the leaf sits inside it
+  let w = s.w, h = s.h, leaf = null;
+  if (designable(t)) {
+    const sl = look.side === 'left' || look.side === 'both' ? SIDE_W : 0, sr = look.side === 'right' || look.side === 'both' ? SIDE_W : 0;
+    w = Math.round((s.w + sl + sr) * 1000) / 1000; h = Math.round((s.h + (look.transom ? TRANSOM_H : 0)) * 1000) / 1000;
+    leaf = { a: sl, b: sl + s.w, h: s.h };
+  }
+  const rough = roughOpening(t, w, h, sill);
+  return { type: t, w, h, sill, head: sill + h, rough, header: headerSpec(rough.width), itemId: openingItemId(t.id, w, h), finish: f.finish || t.finish, look, leaf };
 }
 // the opening as the framing wants it: offset is along the run, the rough opening is wider than the unit
 export function freeToFraming(f, offset) {

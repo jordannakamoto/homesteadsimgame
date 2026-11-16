@@ -57,6 +57,9 @@
     oflip: false,
     // the window designer's choices for the next window: a made-to-order size (w, h), frame colour, and look
     od: { w: null, h: null, finish: null, look: {} },
+    dlook: {},
+    dfin: null,
+    dnote: "",
     fsel: null,
     pkind: "pillar",
     dstyle: "door",
@@ -2268,6 +2271,7 @@
       y1 = y0 + h,
       fw = 0.05,
       L = t.look;
+    if (sp.leaf && OP.designable(t)) return designedDoorGeo(gF, F, sp, flip, mode, out);
     if (t.frame === "pocket") flip = false;
     const M = (a, b) => (flip ? [w - b, w - a] : [a, b]),
       mu = (u) => (flip ? w - u : u),
@@ -2576,6 +2580,332 @@
         else if (t.op === "tilt_in") mv = { k: "tilt", py: by, e: 1, ang: 0.6, side: -out };
         sash(mv ? mover(mv) : fb, a, b, by, top, zOff, "all");
       }
+    }
+  }
+  // ---- the door designer's doors (OP.designable): frame, sidelights, transom, and leaves with their faces. Cheap
+  // geometry: rails and stiles at full thickness, recessed or raised panels as thinner boxes a shade darker, plank
+  // and groove lines as thin dark strips, glass as GLASS_C boxes with muntins. Each leaf is one mover (one mesh).
+  const METAL_C = {},
+    metalC = (k) => METAL_C[k] || (METAL_C[k] = col((OP.DOOR_METALS[k] || OP.DOOR_METALS.brass).hex)),
+    finishC = (k) => (OP.FINISHES[k] ? finishCol(k) : col(0x6f4d2c));
+  // panel rows from the top: [height weight, panels across]
+  const FACE_ROWS = { shaker: [[1, 1]], p2: [[0.58, 1], [0.42, 1]], p3: [[1, 3]], p5: [[1, 1], [1, 1], [1, 1], [1, 1], [1, 1]], p6: [[0.2, 2], [0.42, 2], [0.38, 2]] };
+  function designedDoorGeo(gF, F, sp, flip, mode, out) {
+    const { w, type: t, look: K, leaf } = sp,
+      y0 = 0.02,
+      y1 = y0 + sp.h,
+      yD = y0 + leaf.h,
+      fw = 0.05,
+      thin = !!t.thin,
+      T2 = thin ? 0.0175 : 0.0225,
+      fin = finishC(sp.finish),
+      lum = 0.3 * fin[0] + 0.59 * fin[1] + 0.11 * fin[2],
+      frameC = lum < 0.12 || t.op === "pivot" ? shade(fin, 1.04) : FRAME_C,
+      metal = metalC(K.metal),
+      inSide = -out;
+    const mu = (u) => (flip ? w - u : u);
+    // a drawer in the unit's own frame (u along the wall from the left, y up, v across), flipped as the unit is
+    const drawer = (g) => {
+      const d = (a, b, ya, yb, va, vb, c) => g && b - a > 1e-4 && yb - ya > 1e-4 && lbox(g, F, flip ? w - b : a, flip ? w - a : b, ya, yb, va, vb, c);
+      // a brace from (ua, ya) to (ub, yb), th wide, between va and vb across the wall
+      d.diag = (ua, ya, ub, yb, th, va, vb, c) => {
+        if (!g) return;
+        const pa = mu(ua),
+          pb = mu(ub),
+          du = (pb - pa) / 2,
+          dy = (yb - ya) / 2,
+          len = Math.hypot(du, dy) || 1,
+          px = (-dy / len) * (th / 2),
+          py = (du / len) * (th / 2),
+          cu = F.pos + (pa + pb) / 2,
+          cv = F.line + (va + vb) / 2,
+          hv = (vb - va) / 2,
+          U = (x) => (F.d === 0 ? [x, 0, 0] : [0, 0, x]);
+        const c0 = F.d === 0 ? [cu, (ya + yb) / 2, cv] : [cv, (ya + yb) / 2, cu],
+          A = U(du),
+          Bv = U(px);
+        A[1] = dy;
+        Bv[1] = py;
+        g.obox(c0, A, Bv, F.d === 0 ? [0, 0, hv] : [hv, 0, 0], c);
+      };
+      return d;
+    };
+    const fb = drawer(gF);
+    const mover = (mv) => {
+      let g = null;
+      if (mode === "all") g = gF;
+      else if (Array.isArray(mode)) (mode.push({ geo: (g = new Geo()), mv }), (g.glass = new Geo()));
+      return drawer(g);
+    };
+    // glass with optional muntins: a pane across [a,b] x [ya,yb], bars cols x rows
+    const pane = (d, a, b, ya, yb, cols, rows, barC) => {
+      d(a, b, ya, yb, -0.006, 0.006, GLASS_C);
+      for (let k = 1; k < cols; k++) d(a + ((b - a) * k) / cols - 0.011, a + ((b - a) * k) / cols + 0.011, ya, yb, -0.014, 0.014, barC);
+      for (let k = 1; k < rows; k++) d(a, b, ya + ((yb - ya) * k) / rows - 0.011, ya + ((yb - ya) * k) / rows + 0.011, -0.014, 0.014, barC);
+    };
+    const bars = (a, b, ya, yb) => (K.bars ? [Math.max(1, Math.round((b - a) / 0.27)), Math.max(1, Math.round((yb - ya) / 0.3))] : [1, 1]);
+    // ---- the frame: outer jambs and head, mullions beside sidelights, a transom bar, a threshold outside
+    const la = leaf.a,
+      lb = leaf.b,
+      ySide = yD - fw;
+    fb(0, fw, y0, y1, -0.07, 0.07, frameC);
+    fb(w - fw, w, y0, y1, -0.07, 0.07, frameC);
+    fb(fw, w - fw, y1 - fw, y1, -0.07, 0.07, frameC);
+    if (la > 0) fb(la, la + fw, y0, ySide, -0.07, 0.07, frameC);
+    if (lb < w - 1e-6) fb(lb - fw, lb, y0, ySide, -0.07, 0.07, frameC);
+    if (K.transom) fb(fw, w - fw, yD - fw, yD, -0.07, 0.07, frameC);
+    if (!thin) fb(fw, w - fw, y0 - 0.02, y0 + 0.006, -0.07, 0.07, [0.42, 0.38, 0.32]);
+    // sidelights: a kick panel, then glass up to the head (horizontal bars when the door has bars)
+    const sideLite = (s0, s1) => {
+      const kick = Math.min(0.6, Math.max(0.24, K.glass === "half" || K.glass === "three" ? 0.24 : 0.3));
+      fb(s0, s1, y0, y0 + kick, -T2, T2, fin);
+      fb(s0 + 0.04, s1 - 0.04, y0 + 0.07, y0 + kick - 0.05, -T2 - 0.004, T2 + 0.004, shade(fin, 0.9));
+      fb(s0, s0 + 0.035, y0 + kick, ySide, -T2, T2, fin);
+      fb(s1 - 0.035, s1, y0 + kick, ySide, -T2, T2, fin);
+      fb(s0 + 0.035, s1 - 0.035, ySide - 0.035, ySide, -T2, T2, fin);
+      pane(fb, s0 + 0.035, s1 - 0.035, y0 + kick, ySide - 0.035, 1, K.bars ? Math.max(1, Math.round((ySide - y0 - kick) / 0.32)) : 1, fin);
+    };
+    if (la > 0) sideLite(fw, la);
+    if (lb < w - 1e-6) sideLite(lb, w - fw);
+    if (K.transom) {
+      const ta = fw,
+        tb = w - fw,
+        tya = yD,
+        tyb = y1 - fw;
+      fb(ta, tb, tya, tya + 0.035, -T2, T2, fin);
+      fb(ta, tb, tyb - 0.035, tyb, -T2, T2, fin);
+      // mullions in line with the sidelights below, then bars across the door's width
+      const cuts = [ta];
+      if (la > 0) cuts.push(la + fw / 2);
+      if (lb < w - 1e-6) cuts.push(lb - fw / 2);
+      cuts.push(tb);
+      for (let k = 1; k < cuts.length - 1; k++) fb(cuts[k] - 0.02, cuts[k] + 0.02, tya + 0.035, tyb - 0.035, -T2, T2, fin);
+      for (let k = 0; k + 1 < cuts.length; k++) {
+        const a = cuts[k] + (k ? 0.02 : 0),
+          b = cuts[k + 1] - (k + 2 < cuts.length ? 0.02 : 0);
+        pane(fb, a, b, tya + 0.035, tyb - 0.035, K.bars ? Math.max(1, Math.round((b - a) / 0.3)) : 1, 1, fin);
+      }
+    }
+    // ---- the leaves
+    const x0 = la + fw,
+      x1 = lb - fw,
+      ly0 = y0 + 0.004,
+      ly1 = ySide - 0.003,
+      pair = (t.look.panels || 1) === 2 && t.op === "swing",
+      pivot = t.op === "pivot";
+    const leaves = pair
+      ? [
+          [x0 + 0.003, (x0 + x1) / 2 - 0.002, x0, 1],
+          [(x0 + x1) / 2 + 0.002, x1 - 0.003, x1, -1],
+        ]
+      : [[x0 + 0.003, x1 - 0.003, pivot ? x0 + Math.min(0.26, (x1 - x0) * 0.2) : x0, 1]];
+    for (let n = 0; n < leaves.length; n++) {
+      const [a, b, hinge, s] = leaves[n],
+        mv = { k: "swing", pu: mu(hinge), s: s * (flip ? -1 : 1), ang: pivot ? 1.45 : 1.5, side: -out };
+      if (t.op === "dutch") {
+        // the bottom and top halves: two meshes on the same hinge
+        const cut = y0 + 1.07,
+          lo = mover(mv),
+          hi = mover({ ...mv });
+        const half = FACE_ROWS[K.face] && K.face !== "p3" ? "shaker" : K.face;
+        leafFace(lo, a, b, ly0, cut - 0.003, { ...K, face: half, glass: "none" }, fin, T2, inSide, false);
+        leafFace(hi, a, b, cut + 0.003, ly1, { ...K, face: half, glass: K.glass === "none" ? "none" : K.glass === "slot" ? "slot" : "full" }, fin, T2, inSide, true);
+        hardware(lo, a, b, ly0, false, K, metal, T2, thin);
+        lo(a + 0.02, b - 0.02, cut - 0.03, cut - 0.003, -T2 - 0.035, T2 + 0.035, shade(fin, 1.02));
+        continue;
+      }
+      const d = mover(mv);
+      leafFace(d, a, b, ly0, ly1, K, fin, T2, inSide, false);
+      hardware(d, a, b, ly0, n === 1, K, metal, T2, thin, ly1);
+    }
+  }
+  // one leaf's face: rails, stiles, panels, glass, grooves or planks. d is the leaf's drawer; latch side is b.
+  function leafFace(d, a, b, ya, yb, K, fin, T2, inSide, upper) {
+    const W = b - a,
+      plank = K.face === "plank",
+      slab = K.face === "flush" || K.face === "groove" || plank,
+      steel = K.face === "flush" && K.glass === "full",
+      st = steel ? 0.055 : Math.min(0.115, W * 0.16),
+      topR = steel ? 0.055 : Math.min(0.115, (yb - ya) * 0.12),
+      botR = upper ? topR : steel ? 0.11 : slab ? st : Math.min(0.2, (yb - ya) * 0.12),
+      yi0 = ya + botR,
+      yi1 = yb - topR,
+      H = yi1 - yi0,
+      dark = shade(fin, 0.62),
+      rows = []; // { y0, y1, cells: [{ u0, u1, k }] }, top to bottom; cells k: glass, panel, raised, solid
+    const ua = a + st,
+      ub = b - st;
+    // the glass first, from the top
+    let g0 = yi1;
+    if (K.glass === "slot") {
+      const sw = Math.min(0.14, W * 0.16),
+        s1 = ub - Math.min(0.12, W * 0.12),
+        s0 = s1 - sw;
+      rows.push({ y0: yi0 + H * 0.05, y1: yi1 - H * 0.05, cells: [{ u0: s0, u1: s1, k: "glass" }] });
+      g0 = yi0;
+    } else if (K.glass !== "none") {
+      const frac = K.glass === "top" ? Math.min(0.42, H * 0.24) / H : K.glass === "half" ? 0.48 : K.glass === "three" ? 0.72 : K.glass === "craft" ? 0.27 : 1;
+      g0 = yi1 - H * frac;
+      const cells = [];
+      if (K.glass === "craft") {
+        const n = W > 0.95 ? 4 : 3,
+          m = 0.035;
+        for (let k = 0; k < n; k++) cells.push({ u0: ua + ((ub - ua + m) * k) / n, u1: ua + ((ub - ua + m) * (k + 1)) / n - m, k: "glass", bars: false });
+      } else if (plank) cells.push({ u0: ua + 0.03, u1: ub - 0.03, k: "glass" });
+      else cells.push({ u0: ua, u1: ub, k: "glass" });
+      rows.push({ y0: g0, y1: yi1, cells });
+      if (K.glass === "craft") rows.shelf = g0;
+    }
+    // then the panels below the glass, in the bottom rows of the layout that still fit
+    const rest0 = yi0,
+      rest1 = K.glass === "slot" ? yi0 : K.glass === "none" ? yi1 : g0 - 0.1;
+    if (!slab && rest1 - rest0 > 0.12) {
+      let R = FACE_ROWS[K.face] || FACE_ROWS.shaker;
+      const keep = K.glass === "none" ? R.length : Math.max(1, Math.round((R.length * (rest1 - rest0)) / H));
+      R = R.slice(R.length - keep);
+      const rail = 0.1,
+        tot = R.reduce((q, r) => q + r[0], 0),
+        span = rest1 - rest0 - rail * (R.length - 1);
+      let y = rest1;
+      for (const [wt, nc] of R) {
+        const hh = (span * wt) / tot,
+          cells = [],
+          mul = 0.1,
+          cw = (ub - ua - mul * (nc - 1)) / nc;
+        for (let k = 0; k < nc; k++) cells.push({ u0: ua + k * (cw + mul), u1: ua + k * (cw + mul) + cw, k: K.face === "p6" ? "raised" : "panel" });
+        rows.push({ y0: y - hh, y1: y, cells });
+        y -= hh + rail;
+      }
+    }
+    // ---- planks: boards across the whole leaf, cut round the glass, with a ledge-and-brace on the inside face
+    if (plank) {
+      const n = Math.max(3, Math.round(W / 0.14)),
+        bw = W / n,
+        gl = rows.filter((r) => r.cells.some((c) => c.k === "glass"));
+      for (let k = 0; k < n; k++) {
+        const u0 = a + k * bw,
+          u1 = u0 + bw,
+          c = shade(fin, 0.92 + 0.14 * hash(k, 7, Math.round(W * 100))),
+          ys = [[ya, yb]];
+        for (const r of gl)
+          for (const cl of r.cells)
+            if (cl.u1 > u0 + 1e-4 && cl.u0 < u1 - 1e-4) {
+              const nx = [];
+              for (const [p, q] of ys) (p < r.y0 && nx.push([p, Math.min(q, r.y0)]), q > r.y1 && nx.push([Math.max(p, r.y1), q]));
+              ys.splice(0, ys.length, ...nx);
+            }
+        for (const [p, q] of ys) {
+          // a board, cut to the glass where it crosses it
+          d(u0 + 0.003, u1 - 0.003, p, q, -T2, T2, c);
+          k && d(u0 - 0.004, u0 + 0.004, p, q, -T2 + 0.006, T2 - 0.006, dark);
+        }
+        // the boards beside the glass fill the gap between the glass cell and the board edge
+        for (const r of gl)
+          for (const cl of r.cells) {
+            if (cl.u0 > u0 && cl.u0 < u1) d(u0 + 0.003, cl.u0, r.y0, r.y1, -T2, T2, c);
+            if (cl.u1 > u0 && cl.u1 < u1) d(cl.u1, u1 - 0.003, r.y0, r.y1, -T2, T2, c);
+          }
+      }
+      for (const r of gl) for (const cl of r.cells) glassCell(d, cl, r, K, fin, T2);
+      // the ledges and the brace, on the inside face
+      const v0 = inSide > 0 ? T2 : -T2 - 0.022,
+        v1 = inSide > 0 ? T2 + 0.022 : -T2,
+        bc = shade(fin, 0.95),
+        top = gl.length ? Math.min(...gl.map((r) => r.y0)) - 0.08 : yb - 0.2,
+        lo = ya + 0.14,
+        mid = (lo + top) / 2;
+      for (const yy of gl.length ? [lo, top] : [lo, mid, top]) d(a + 0.04, b - 0.04, yy - 0.06, yy + 0.06, v0, v1, bc);
+      d.diag(a + 0.1, lo + 0.06, b - 0.1, (gl.length ? top : mid) - 0.06, 0.1, v0 + 0.002, v1 - 0.002, bc);
+      gl.length || d.diag(a + 0.1, mid + 0.06, b - 0.1, top - 0.06, 0.1, v0 + 0.002, v1 - 0.002, bc);
+      return;
+    }
+    // ---- rails and stiles at full thickness: everything the cells leave
+    d(a, ua, ya, yb, -T2, T2, fin);
+    d(ub, b, ya, yb, -T2, T2, fin);
+    const sorted = rows.slice().sort((p, q) => q.y1 - p.y1);
+    let y = yb;
+    for (const r of sorted) {
+      d(ua, ub, r.y1, y, -T2, T2, fin);
+      let u = ua;
+      for (const cl of r.cells.slice().sort((p, q) => p.u0 - q.u0)) {
+        d(u, cl.u0, r.y0, r.y1, -T2, T2, fin);
+        u = cl.u1;
+      }
+      d(u, ub, r.y0, r.y1, -T2, T2, fin);
+      y = r.y0;
+    }
+    d(ua, ub, ya, y, -T2, T2, fin);
+    // the cells
+    for (const r of rows)
+      for (const cl of r.cells) {
+        if (cl.k === "glass") glassCell(d, cl, r, K, fin, T2);
+        else if (cl.k === "panel") d(cl.u0, cl.u1, r.y0, r.y1, -T2 + 0.009, T2 - 0.009, shade(fin, 0.9));
+        else if (cl.k === "raised") {
+          d(cl.u0, cl.u1, r.y0, r.y1, -T2 + 0.012, T2 - 0.012, shade(fin, 0.86));
+          const m = Math.min(0.045, (cl.u1 - cl.u0) * 0.2);
+          d(cl.u0 + m, cl.u1 - m, r.y0 + m, r.y1 - m, -T2 + 0.004, T2 - 0.004, shade(fin, 0.98));
+        }
+      }
+    // the craftsman shelf under the lites
+    if (rows.shelf !== undefined) d(ua - 0.015, ub + 0.015, rows.shelf - 0.05, rows.shelf - 0.022, -T2 - 0.018, T2 + 0.018, shade(fin, 1.04));
+    // grooves: thin dark lines across the slab, broken where glass is
+    if (K.face === "groove") {
+      const gl = rows.flatMap((r) => r.cells.filter((c) => c.k === "glass").map((c) => ({ ...c, y0: r.y0, y1: r.y1 }))),
+        n = Math.max(3, Math.round((yb - ya) / 0.3));
+      for (let k = 1; k < n; k++) {
+        const gy = ya + ((yb - ya) * k) / n;
+        let u = a;
+        for (const c of gl.filter((c) => gy > c.y0 - 0.02 && gy < c.y1 + 0.02).sort((p, q) => p.u0 - q.u0)) {
+          d(u, c.u0 - 0.02, gy - 0.004, gy + 0.004, -T2 - 0.0015, T2 + 0.0015, shade(fin, 0.55));
+          u = c.u1 + 0.02;
+        }
+        d(u, b, gy - 0.004, gy + 0.004, -T2 - 0.0015, T2 + 0.0015, shade(fin, 0.55));
+      }
+    }
+  }
+  function glassCell(d, cl, r, K, fin, T2) {
+    // a small bead round the glass, then the pane and its bars
+    const bc = shade(fin, 0.94),
+      [cx, cy] = cl.bars === false || !K.bars ? [1, 1] : [Math.max(1, Math.round((cl.u1 - cl.u0) / 0.27)), Math.max(1, Math.round((r.y1 - r.y0) / 0.3))];
+    d(cl.u0, cl.u1, r.y0, r.y0 + 0.012, -T2 + 0.006, T2 - 0.006, bc);
+    d(cl.u0, cl.u1, r.y1 - 0.012, r.y1, -T2 + 0.006, T2 - 0.006, bc);
+    d(cl.u0, cl.u0 + 0.012, r.y0, r.y1, -T2 + 0.006, T2 - 0.006, bc);
+    d(cl.u1 - 0.012, cl.u1, r.y0, r.y1, -T2 + 0.006, T2 - 0.006, bc);
+    const a = cl.u0 + 0.012,
+      b = cl.u1 - 0.012,
+      ya = r.y0 + 0.012,
+      yb = r.y1 - 0.012;
+    d(a, b, ya, yb, -0.006, 0.006, GLASS_C);
+    for (let k = 1; k < cx; k++) d(a + ((b - a) * k) / cx - 0.011, a + ((b - a) * k) / cx + 0.011, ya, yb, -0.014, 0.014, fin);
+    for (let k = 1; k < cy; k++) d(a, b, ya + ((yb - ya) * k) / cy - 0.011, ya + ((yb - ya) * k) / cy + 0.011, -0.014, 0.014, fin);
+  }
+  // the handle on both faces, near the latch edge (b, or a for the second leaf of a pair)
+  function hardware(d, a, b, ya, left, K, mc, T2, thin, yb) {
+    const u = left ? a + 0.065 : b - 0.065,
+      sg = left ? 1 : -1,
+      hy = ya + 0.95;
+    for (const s of [-1, 1]) {
+      const v0 = s > 0 ? T2 : -T2,
+        V = (p, q) => (s > 0 ? [v0 + p, v0 + q] : [v0 - q, v0 - p]);
+      if (K.hw === "pull") {
+        const L = Math.min(1.0, ((yb || ya + 2) - ya) * 0.45),
+          p0 = hy - 0.3,
+          p1 = p0 + L;
+        d(u - 0.014, u + 0.014, p0, p1, ...V(0.05, 0.075), mc);
+        d(u - 0.008, u + 0.008, p0 + 0.05, p0 + 0.08, ...V(0, 0.05), mc);
+        d(u - 0.008, u + 0.008, p1 - 0.08, p1 - 0.05, ...V(0, 0.05), mc);
+        continue;
+      }
+      d(u - 0.03, u + 0.03, hy - 0.03, hy + 0.03, ...V(0, 0.008), mc);
+      if (K.hw === "lever") {
+        d(u - 0.01, u + 0.01, hy - 0.01, hy + 0.01, ...V(0.008, 0.055), mc);
+        d(sg > 0 ? u - 0.01 : u - 0.12, sg > 0 ? u + 0.12 : u + 0.01, hy - 0.011, hy + 0.011, ...V(0.045, 0.067), mc);
+      } else {
+        d(u - 0.009, u + 0.009, hy - 0.009, hy + 0.009, ...V(0.008, 0.035), mc);
+        d(u - 0.027, u + 0.027, hy - 0.027, hy + 0.027, ...V(0.035, 0.068), mc);
+      }
+      // a deadbolt over the latch on an outside door
+      thin || d(u - 0.024, u + 0.024, hy + 0.13, hy + 0.178, ...V(0, 0.014), mc);
     }
   }
   // ---- the moving parts of built free doors and windows: one mesh each, a cheap matrix tween, nothing when idle
@@ -4021,7 +4351,7 @@
       return finishOp(op);
     }
     if (t === "opening") {
-      const f0 = { typeId: B.otype, sizeIdx: B.osize, sill: OP.sillFor(B.otype, B.osill), ...designOf() },
+      const f0 = { typeId: B.otype, sizeIdx: B.osize, sill: OP.sillFor(B.otype, B.osill), ...designOf(), ...nextDesign() },
         sp0 = OP.freeSpec(f0),
         hit = h.F.isNew ? null : wallUnder(h);
       op.label = sp0.type.name + " " + fmtM(sp0.w) + " × " + fmtM(sp0.h);
@@ -4049,7 +4379,7 @@
       const mine = grab ? grab.f : null,
         spec = mine ? grab.sp : sp0,
         sn = OP.snapFree({ L, at: along - run.t0, w: spec.w, h: spec.h, sill: mine ? mine.sill : f0.sill, others: runOthers(S, run, mine && mine.id), snap: snapOn() && !B.ctrl }),
-        f = { id: mine ? mine.id : null, typeId: mine ? mine.typeId : B.otype, sizeIdx: mine ? mine.sizeIdx : B.osize, ...(mine ? designOf(mine) : designOf()), d: run.d, line: run.line, pos: run.t0 + sn.offset, sill: spec.type.kind === "door" ? 0 : sn.sill, flip: mine ? !!mine.flip : B.oflip },
+        f = { id: mine ? mine.id : null, typeId: mine ? mine.typeId : B.otype, sizeIdx: mine ? mine.sizeIdx : B.osize, d: run.d, line: run.line, pos: run.t0 + sn.offset, sill: spec.type.kind === "door" ? 0 : sn.sill, flip: mine ? !!mine.flip : B.oflip, ...(mine ? keepDesign(mine) : { ...designOf(), ...nextDesign() }) },
         sp = OP.freeSpec(f),
         Hh = EAVE * S.hs;
       f.out = freeOut(S, f, sp.w);
@@ -7115,13 +7445,13 @@
     g.push(G_.tiles("otype", "Type", OP.OPENING_TYPES.map((x) => ({ v: x.id, name: x.name, icon: "o-" + x.id })), typeId, "Shift wheel"));
     g.push(G_.chips("osize", "Size", [...OP.openingSizes(typeId).map((z, n) => ({ v: n, name: Math.round(z.w * 1000) + " × " + Math.round(z.h * 1000) })), ...(custom ? [{ v: -1, name: "Custom" }] : [])], custom ? -1 : sel ? sel.f.sizeIdx : B.osize));
     if (t.kind === "window") g.push(G_.chips("osill", "Sill", [{ v: "auto", name: "Default", note: fmtM(t.sill) }, ...Object.keys(OP.SILL_NAMES).map((k) => ({ v: k, name: OP.SILL_NAMES[k], note: fmtM(OP.SILL_PRESETS[k]) }))], B.osill));
-    const sp = sel ? sel.sp : OP.freeSpec({ typeId, sizeIdx: B.osize, sill: OP.sillFor(typeId, B.osill), ...designOf() }),
+    const sp = sel ? sel.sp : OP.freeSpec({ typeId, sizeIdx: B.osize, sill: OP.sillFor(typeId, B.osill), ...designOf(), ...nextDesign() }),
       hd = sp.header;
     g.push(G_.info(sel ? "Selected: " + sp.type.name : "Next: " + sp.type.name, (sp.type.blurb ? sp.type.blurb + " · " : "") + "rough opening " + fmtM(sp.rough.width) + " × " + fmtM(sp.rough.height) + " · header " + (hd.engineered ? "glulam beam, double jacks" : hd.plies + " × " + hd.size.replace("x", " x ")) + " · " + OP.OPERATION[sp.type.op] + (custom ? " · made to order" : "")));
     g.push(G_.act("oflip", sel ? "Flip" : B.oflip ? "Flipped" : "Flip", "turn", "F"));
     sel && g.push(G_.act("odel", "Delete", "bin", "Del", true));
     if (t.kind === "window") windowDesigner(g, sp);
-    else if (typeof doorDesignerView === "function") doorDesignerView(g, sp);
+    else doorDesignerView(g);
   }
   // ---- the window designer: on the second row, a live drawing of the window on its wall, then every choice. It edits
   // the selected window in place, or else sets up the next one.
@@ -7189,6 +7519,75 @@
       else if (k === "shut") o.look.shutters = v;
     });
   }
+  // ---- the door designer (OP.designable doors): panels, glass, sidelights, transom, colour and handle. With a placed
+  // door selected it edits that door (undoable); otherwise it shapes the next one. Choices live in f.look and f.finish.
+  const DOOR_FIN = ["white", "cream", "black", "charcoal", "sage", "green", "blue", "red", "mustard", "oak", "wood", "walnut"];
+  const nextDesign = () => {
+    if (!OP.designable(OP.openingType(B.otype))) return {};
+    const o = {};
+    if (Object.keys(B.dlook).length) o.look = { ...B.dlook };
+    if (B.dfin) o.finish = B.dfin;
+    return o;
+  };
+  const keepDesign = (f) => {
+    const o = {};
+    for (const k of ["look", "finish", "w", "h"]) if (f[k] !== undefined) o[k] = f[k];
+    return o;
+  };
+  function doorDesignerView(g) {
+    const sel = B.fsel ? fselOpen() : null,
+      t = OP.openingType(sel ? sel.f.typeId : B.otype);
+    if (!OP.designable(t)) return;
+    const K = sel ? sel.sp.look : OP.lookOf(t, { look: B.dlook }),
+      fin = sel ? sel.sp.finish : B.dfin || t.finish,
+      own = sel ? !!(sel.f.look || sel.f.finish) : !!(Object.keys(B.dlook).length || B.dfin);
+    g.push(G_.tiles("d:face", "Panels", Object.keys(OP.DOOR_FACES).map((k) => ({ v: k, name: OP.DOOR_FACES[k], icon: "df-" + k })), K.face));
+    g.push(G_.tiles("d:glass", "Glass", Object.keys(OP.DOOR_GLASS).map((k) => ({ v: k, name: OP.DOOR_GLASS[k], icon: "dg-" + k })), K.glass));
+    if (K.glass !== "none" && K.glass !== "craft" && K.glass !== "slot") g.push(G_.toggle("d:bars", "Bars", !!K.bars, "dg-bars", "Divide the glass into small lites with muntins"));
+    g.push(G_.chips("d:side", "Sidelights", Object.keys(OP.DOOR_SIDES).map((k) => ({ v: k, name: OP.DOOR_SIDES[k], note: k === "none" ? "" : "+" + fmtM(OP.SIDE_W * (k === "both" ? 2 : 1)) + " wide" })), K.side));
+    g.push(G_.toggle("d:transom", "Transom", !!K.transom, "dg-transom", "A glass lite over the door, inside the same rough opening (+" + fmtM(OP.TRANSOM_H) + ")"));
+    g.push(G_.sw("d:fin", "Colour", DOOR_FIN.filter((k) => OP.FINISHES[k]).map((k) => ({ v: k, name: OP.FINISHES[k].name, sw: [k === "oak" || k === "wood" || k === "walnut" ? "planks" : "plain", "#" + OP.FINISHES[k].hex.toString(16).padStart(6, "0"), "#" + new T.Color(OP.FINISHES[k].hex).multiplyScalar(0.7).getHexString()] })), fin));
+    g.push(G_.chips("d:hw", "Handle", Object.keys(OP.DOOR_HW).map((k) => ({ v: k, name: OP.DOOR_HW[k] })), K.hw));
+    g.push(G_.sw("d:metal", "Metal", Object.keys(OP.DOOR_METALS).map((k) => ({ v: k, name: OP.DOOR_METALS[k].name, sw: ["plain", "#" + OP.DOOR_METALS[k].hex.toString(16).padStart(6, "0"), "#000000"] })), K.metal));
+    own && g.push(G_.act("d:reset", "As sold", "turn", "", false));
+    B.dnote && g.push(G_.info("Won't fit", B.dnote));
+  }
+  // a selected door grown by sidelights or a transom must still fit its wall: it grows about its centre
+  function doorFits(q, f2) {
+    const sp = OP.freeSpec(f2),
+      run = q.g,
+      L = run.t1 - run.t0,
+      c = q.f.pos + q.sp.w / 2 - run.t0,
+      sn = OP.snapFree({ L, at: c, w: sp.w, h: sp.h, sill: 0, others: runOthers(q.S, run, q.f.id), snap: false, wantSill: false });
+    if (!sn.ok) return { ok: false, why: sn.reason };
+    if (sp.rough.sill + sp.rough.height + 0.19 > EAVE * q.S.hs) return { ok: false, why: "Too tall for this wall" };
+    return { ok: true, pos: run.t0 + sn.offset };
+  }
+  function doorChoose(k, v) {
+    const q = B.fsel ? fselOpen() : null;
+    B.dnote = "";
+    if (q && !OP.designable(q.sp.type)) return;
+    if (!q && !OP.designable(OP.openingType(B.otype))) return;
+    if (k === "reset") {
+      if (q) {
+        const f2 = { ...q.f, look: undefined, finish: undefined },
+          fit = doorFits(q, f2);
+        if (!fit.ok) return void (B.dnote = fit.why);
+        selFree((f) => (delete f.look, delete f.finish, (f.pos = fit.pos)));
+      } else ((B.dlook = {}), (B.dfin = null));
+    } else if (k === "fin") q ? selFree((f) => (f.finish = v)) : (B.dfin = v);
+    else {
+      const cur = q ? q.sp.look : OP.lookOf(OP.openingType(B.otype), { look: B.dlook }),
+        val = k === "bars" || k === "transom" ? !cur[k] : v;
+      if (q) {
+        const look = { ...(q.f.look || {}), [k]: val },
+          fit = k === "side" || k === "transom" ? doorFits(q, { ...q.f, look }) : { ok: true, pos: q.f.pos };
+        if (!fit.ok) return void ((B.dnote = (k === "side" ? "Sidelights: " : "Transom: ") + fit.why.toLowerCase()), touchUi());
+        selFree((f) => ((f.look = look), (f.pos = fit.pos)));
+      } else B.dlook = { ...B.dlook, [k]: val };
+    }
+    B.key = "";
+  }
   function selFree(fn) {
     const q = fselOpen();
     if (!q) return;
@@ -7239,12 +7638,13 @@
     else if (id === "rturn") B.rshape = roofIndex(RS[0], RS[3] > 1, turnOf + 1);
     else if (id === "otype") {
       if (B.fsel && fselOpen()) selFree((f) => ((f.typeId = v), (f.sizeIdx = Math.floor(OP.openingSizes(v).length / 2)), delete f.w, delete f.h, (f.sill = OP.sillFor(v, "auto"))));
-      else ((B.otype = v), (B.osize = Math.floor(OP.openingSizes(v).length / 2)), (B.osill = "auto"), (B.od = { w: null, h: null, finish: null, look: {} }));
+      else ((B.otype = v), (B.osize = Math.floor(OP.openingSizes(v).length / 2)), (B.osill = "auto"), (B.od = { w: null, h: null, finish: null, look: {} }), (B.dlook = {}), (B.dfin = null), (B.dnote = ""));
     } else if (id === "osize") {
       if (v < 0) return;
       if (B.fsel && fselOpen()) selFree((f) => ((f.sizeIdx = v), delete f.w, delete f.h));
       else ((B.osize = v), (B.od.w = B.od.h = null));
     } else if (id.startsWith("w:")) designChoose(id, v);
+    else if (id.startsWith("d:")) doorChoose(id.slice(2), v);
     else if (id === "osill") {
       B.osill = v;
       B.fsel && selFree((f) => (f.sill = OP.sillFor(f.typeId, v)));
@@ -7714,8 +8114,10 @@
     S.doorGaps = new Map();
     for (const o of S.fopen) {
       if (o.sp.type.kind !== "door") continue;
-      const a = o.f.pos - OP.ROUGH_GAP,
-        b = o.f.pos + o.sp.w + OP.ROUGH_GAP;
+      // a door with sidelights is open only across its leaf
+      const lf = o.sp.leaf,
+        a = o.f.pos + (lf && lf.a > 0 ? lf.a : -OP.ROUGH_GAP),
+        b = o.f.pos + (lf && lf.b < o.sp.w - 1e-6 ? lf.b : o.sp.w + OP.ROUGH_GAP);
       for (const e of o.g.m) {
         if (e.t + 1 <= a || e.t >= b) continue;
         const c0 = Math.max(0, a - e.t),

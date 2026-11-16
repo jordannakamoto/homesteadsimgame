@@ -167,3 +167,15 @@ test('window designer: made-to-order sizes, looks, and items made from their ids
   assert.equal(ITEMS.op_nope_100x100, undefined);
   assert.equal(freeSpec({ typeId: 'double_hung', sizeIdx: 1 }).look.grille, 'colonial');
 });
+
+// ---- the door designer: sidelights and a transom make one bigger unit in one rough opening
+import { designable, SIDE_W, TRANSOM_H } from '../src/sim/content/openings.js';
+test('a designed door with sidelights and a transom is one bigger rough opening, with its leaf inside', () => {
+  const plain = freeSpec({ typeId: 'door_craftsman', sizeIdx: 2 }), big = freeSpec({ typeId: 'door_craftsman', sizeIdx: 2, look: { side: 'both', transom: true }, finish: 'green' });
+  assert.ok(designable(plain.type) && !designable(OPENING_BY_ID.door_garage) && !designable(OPENING_BY_ID.door_barn));
+  assert.ok(Math.abs(big.w - plain.w - 2 * SIDE_W) < 1e-9 && Math.abs(big.h - plain.h - TRANSOM_H) < 1e-9);
+  assert.ok(big.rough.width > plain.rough.width && big.header.size !== plain.header.size);
+  assert.ok(Math.abs(big.leaf.a - SIDE_W) < 1e-9 && Math.abs(big.leaf.b - big.leaf.a - plain.w) < 1e-9);
+  assert.equal(big.finish, 'green'); assert.equal(plain.finish, 'oak'); assert.equal(big.look.face, 'p3');
+  assert.equal(freeToFraming({ id: 'x', typeId: 'door_craftsman', sizeIdx: 2, look: { side: 'left' } }, 1).width, freeSpec({ typeId: 'door_craftsman', sizeIdx: 2, look: { side: 'left' } }).rough.width);
+});
