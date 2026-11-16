@@ -98,7 +98,7 @@ if (await G(() => !!(window.__build && __build.pieces().some((p) => p.kind === '
 await G(() => __game.setSpeed(1000));
 const ready = await until(() => Object.values(__game.sim.state.sys.garden.plants).some((p) => p.crop === 'radish' && p.readyT != null), 900000);
 await G(() => __game.setSpeed(0));
-const lifeDays = await G(() => { const s = __game.sim.state, p = Object.values(s.sys.garden.plants).find((q) => q.crop === 'radish'); return p ? ((p.readyT - p.sownT) / 86400) * (365 / s.yearDays) : null; });
+const lifeDays = await G(() => { const s = __game.sim.state, p = Object.values(s.sys.garden.plants).find((q) => q.crop === 'radish' && q.readyT != null); return p ? ((p.readyT - p.sownT) / 86400) * (365 / s.yearDays) : null; });
 check('radishes ready in about four weeks of their life', ready && lifeDays > 18 && lifeDays < 55, lifeDays && lifeDays.toFixed(0) + ' days');
 // harvest: hold nothing, press on a radish and pull upward until it comes free
 await page.keyboard.press('Digit1'); await wait(400);
