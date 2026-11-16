@@ -49,15 +49,17 @@ async function open(fresh = true) {
   const state = async () => { const q = await state0(); q.played += T0.base; return q; };
   // walk with W toward a point until within `range` of it
   const walkTo = async (t, range) => {
-    let down = false;
+    let down = false, lastD = 1e9;
     for (let i = 0; i < 500; i++) {
       const d = await G((t) => { const P = __game.player, dx = t.x - P.x, dz = t.z - P.z; __game.cam.yaw = Math.atan2(-dx, -dz); return Math.hypot(dx, dz); }, t);
       if (d <= range) break;
+      if (i % 25 === 24) { if (d > lastD - 0.3) { if (process.env.E2E_DEBUG) console.log('     (stalled ' + d.toFixed(1) + ' m from ' + JSON.stringify(t).slice(0, 80) + ')'); break; } lastD = d; }
       if (!down) { await page.keyboard.down('KeyW'); down = true; }
       await tick(2);
     }
     if (down) await page.keyboard.up('KeyW');
     await tick(1);
+    return G((t) => Math.hypot(t.x - __game.player.x, t.z - __game.player.z), t).then((d) => d <= range + 0.3);
   };
   return { ctx, page, G, boot, tick, shot, state, walkTo, T0 };
 }
@@ -124,6 +126,7 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
       s = await state();
       if (s.banner) banners.add(s.banner.split(' ').slice(0, 2).join(' '));
       if (s.done || until(s)) return;
+      if (process.env.E2E_DEBUG && guard % 25 === 24) console.log('     ..', s.stage, s.built, s.ctx, s.prompt, JSON.stringify(s.np || s.target || null).slice(0, 120), s.px.toFixed(1), s.pz.toFixed(1));
       if (s.stage !== lastStage) { console.log('     ' + Math.round(s.played - t0) + ' s  ' + s.stage + '  (' + s.built + ' of ' + s.total + ')'); lastStage = s.stage; }
       if (s.raise) {
         await walkTo(s.shed, s.shed.r);
@@ -138,11 +141,18 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
       const note = (q) => { if (q.banner) banners.add(q.banner.split(' ').slice(0, 2).join(' ')); };
       if (s.np) {
         // by hand: walk to the piece, point at it, hold the mouse button: it is set in place, then nailed blow by blow
-        await walkTo(s.np, 1.2);
+        const pointAt = async (np) => { await page.mouse.move(np.sx, np.sy); await tick(1); return (await state()).ctx === 'hands'; };
+        if (!(await walkTo(s.np, 1.2)) && !(await pointAt((await state()).np || s.np))) {
+          // a standing wall is in the way: go round the building and come at the piece from its own side
+          const c = await G(() => { const b = __build.structs()[0]; return { x: b.x, z: b.z }; }), dx = s.np.x - c.x, dz = s.np.z - c.z, L = Math.hypot(dx, dz) || 1, R = 4.2;
+          await walkTo({ x: c.x - (dz / L) * R, z: c.z + (dx / L) * R }, 0.6);
+          await walkTo({ x: c.x + (dx / L) * R, z: c.z + (dz / L) * R }, 0.6);
+          await walkTo(s.np, 1.2);
+        }
         if (s.carried && s.carried.itemId === 'lumber_2x4' && !taken.carry) { taken.carry = 1; check('the load is on the shoulder and walking is a little slower', await G(() => __construct.carry.loadForm === 'lumber' && __game.player.carryK > 0.7 && __game.player.carryK < 1)); await shot('05-carrying-studs'); }
         for (let k = 0; k < 40; k++) {
           const q = await state(); note(q);
-          if (!q.np || q.raise || Math.hypot(q.np.x - q.px, q.np.z - q.pz) > 1.7) break;
+          if (!q.np || q.raise) break;
           await page.mouse.move(q.np.sx, q.np.sy); await tick(1);
           const c = await state();
           if (c.ctx !== 'hands') { await tick(4); break; }

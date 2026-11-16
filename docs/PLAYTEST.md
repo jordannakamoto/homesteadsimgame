@@ -305,11 +305,11 @@ Water, electricity and room heat are merged and tested headlessly. They become p
 - **Build panel (L, or the Build button on the left).** The plan book offers the tool shed (the small cabin opens when the shed is finished). Choose it, and a ghost of the whole plan follows the pointer: the wheel or Q / E turns it, a click sets it down, red means the ground will not do.
 - **Stages in order**, each with what it is, why it exists, its materials in plain words with cost, its state, and one next action. A note on the left of the screen always says what to do next, and an arrow in the world points at it.
 - **Order one stage or everything.** A delivery takes about an hour of game time (under a minute; "Instant deliveries" is an option) and lands as stacks beside the building: lumber, sheets, pier blocks, rolls, bundles, boxes, the door leaning on a trestle.
-- **Carry (F).** Walk to a stack and press F for an armful by weight (about 30 kg: eight studs, one sheet, one pier block). It shows on the shoulder and you walk a little slower.
-- **Work (hold F).** At the building the pieces that can go in glow. Hold F and they go in one after another, each knocked home in three or four blows with a sound. Let go any time.
-- **Walls are framed flat on the deck and tilted up**: hold F to raise, it comes up heavy and lands with a thud, and gets a brace until the sheathing is on.
+- **By hand, at arm's reach.** A ring on the ground shows where your hands are (the pointer, held within about 2 m of you). Point at a stack and click (or F) for an armful by weight: eight studs on the shoulder, one sheet overhead, one pier block. The first time, a line says what the piece is.
+- **Set, then nail.** With the right material, the open places within reach glow. Point at one and click: the piece swings into place and sits loose. Click it again to strike: two blows seat a stud, three a sheet, two stamps level a pier block. Holding the button keeps a steady rhythm: set, strike, strike, next. A wrong material says what the place needs.
+- **Walls are framed flat on the deck and tilted up**: hold the button and push the mouse up (or just hold): it comes up heavy and lands with a thud, and gets a brace until the sheathing is on.
 - **Moments:** the deck, each wall up, framed, the first rafter, dried in, the door, finished.
-- **How hands-on** is a choice per building, any time: Guided (one press a stage), Hands-on, Piece by piece (click each glowing piece). "Work until done" keeps a stage going while you watch.
+- **How hands-on** is a choice per building, any time: Guided (one press a stage) or Hands-on. "Work until done" keeps a stage going while you watch.
 - **The first project card, "Build your first shed"**, is ticked when it is finished; the cabin plan and drawing your own plans open.
 - **Sandbox** (in the Build panel, and a button in Plan mode) gives back instant building. Saves with buildings load as they were.
 - The tool bar's B is now labelled Plan. Start money is $4,000 (the shed's materials are about $2,850).
@@ -326,6 +326,9 @@ Water, electricity and room heat are merged and tested headlessly. They become p
 
 **Known gaps**
 
+- Sound is switched off by default (the Sound box in the Build panel turns it on); it has not been tuned.
+- Aiming and the reach ring are construction's own (`createReach` in `src/engine/carry.js`), not yet `window.__hands`; the two should be merged.
+- Wrap, door, insulation and lining use the same set-and-nail motion; they have no special gesture yet.
 - No delivery truck: the stacks drop in with a bump.
 - Stacks sit level on sloping ground and can land on things already there; they are not solid.
 - "Work until done" fetches from the stacks without walking: the character stays put and the armful appears.
