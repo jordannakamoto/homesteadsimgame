@@ -7458,12 +7458,15 @@
     return { pts, len: Math.round(L * 1000) / 1000 };
   }
   function fxDraw() {
-    if (FX.drawn === FX.v) return;
+    // the port dots belong to the Equip tool: leaving the tool or build mode redraws, so none linger
+    const eq = B.on && B.tool === "equip";
+    if (FX.drawn === FX.v && FX.eq === eq) return;
     FX.drawn = FX.v;
+    FX.eq = eq;
     for (const m of [...FX.group.children]) (FX.group.remove(m), m.geometry.dispose());
     for (const f of FX.list) {
       const d = fxDef(f.fixture);
-      if (!d) continue;
+      if (!d || f.settings.viewOwned) continue;   // viewOwned: an add-on draws this one itself (a pump with a working handle)
       const m = new T.Mesh(fxGeo(d, fxTilt(f)).build(), fxMat);
       m.position.set(f.x, f.y, f.z);
       m.rotation.order = "YXZ";
@@ -7488,8 +7491,9 @@
     if (g.p.length) FX.group.add(new T.Mesh(g.build(), wireMat));
     // the dots the interface draws on ports and in the middle of each run
     const pv = [];
-    if (B.on && B.tool === "equip") {
-      for (const f of FX.list) for (const p of (fxDef(f.fixture) || { ports: [] }).ports) pv.push({ p: portPos(f, p.id), type: p.type, fid: f.id, pid: p.id, from: !!FX.from && FX.from.piece === f.id && FX.from.port === p.id });
+    if (eq) {
+      // water ports get no dots: pipes are fitted by hand, part by part (docs/FIRST_WATER.md). Wires and flues stay here for now.
+      for (const f of FX.list) for (const p of (fxDef(f.fixture) || { ports: [] }).ports) if (p.type !== "water") pv.push({ p: portPos(f, p.id), type: p.type, fid: f.id, pid: p.id, from: !!FX.from && FX.from.piece === f.id && FX.from.port === p.id });
       for (const ln of FX.links) {
         const r = linkRoute(ln);
         r && pv.push({ p: [(r.pts[1][0] + r.pts[3][0]) / 2, r.pts[1][1], (r.pts[1][2] + r.pts[3][2]) / 2], type: "link", lid: ln.id, text: fmtM(r.len), sel: ln.id === FX.sel });
