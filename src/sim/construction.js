@@ -34,6 +34,8 @@ export function initConstruction() {
     ladder: null,                     // { x, z, yaw, topY, structId } when one is leaned on a wall
     offcuts: {},                      // { [itemId]: [area m2, ...] } pieces of sheet goods kept from cutting
     waste: {},                        // { [itemId]: area m2 } offcuts too small to keep
+    horses: null,                     // { x, z, yaw }: the sawhorses, the cut station, set by the work once lumber has come
+    scaffold: null,                   // a rented scaffold bay: { until, x, z, set: { x, z, yaw, len, deckY, structId } | null }
     unlocked: [...C.UNLOCKS[0].opens],
     tutorial: { card: false, shed: null, seen: {}, done: false },
     options: { sandbox: false, instant: false, cards: true, auto: false, mute: true, gesture: 3 },   // sound is off until it has been tuned
@@ -54,11 +56,20 @@ export function sheetSource(s, ln, area) {
   for (let i = 0; i < pool.length; i++) if (pool[i] >= area - 1e-9 && (idx < 0 || pool[i] < pool[idx])) idx = i;
   return idx >= 0 ? { how: 'offcut', idx } : { how: 'new' };
 }
-// does putting this piece in want a sheet from the stacks or the arms?
+// does putting this piece in want a sheet or a stick from the stacks or the arms?
 export function needsStock(s, pr, id) {
   const m = pr.members[id], ln = m && m.line ? pr.lines[m.line] : null;
+  if (ln && ln.stick && !placed(m)) return stickSource(s, pr, id).metres > 0;
   if (!ln || !ln.sheet || placed(m)) return true;
   return sheetSource(s, ln, m.area).how === 'new';
+}
+// how much of its item putting this member in takes from the stacks or the arms (a sheet, metres of new sticks, or its share)
+export function stockNeed(s, pr, id) {
+  const m = pr.members[id], ln = m && m.line ? pr.lines[m.line] : null;
+  if (!ln || placed(m)) return 0;
+  if (ln.stick) return stickSource(s, pr, id).metres;
+  if (ln.sheet) return sheetSource(s, ln, m.area).how === 'new' ? 1 : 0;
+  return round6(m.need - m.got);
 }
 // the whole sheets a sheet line still takes for the pieces not yet cut (all of them, or only those of open stages)
 function sheetsLeft(s, pr, key, onlyOpen) {
@@ -67,7 +78,7 @@ function sheetsLeft(s, pr, key, onlyOpen) {
 }
 // a sheet line's quantity is what has been cut plus what the pieces still to cut will take, given the offcuts held
 function requote(s, pr) {
-  for (const key in pr.lines) { const ln = pr.lines[key]; if (ln.sheet) ln.qty = round6(ln.used + sheetsLeft(s, pr, key, false)); }
+  for (const key in pr.lines) { const ln = pr.lines[key]; if (ln.sheet) ln.qty = round6(ln.used + sheetsLeft(s, pr, key, false)); else if (ln.stick) ln.qty = round6(ln.used + unopened(ln)); }
 }
 // area conservation for sheet goods: sheets cut (whole) = area placed + offcuts held + waste. Returns the differences by item.
 export function sheetImbalance(s) {
@@ -80,6 +91,68 @@ export function sheetImbalance(s) {
   return out;
 }
 const keepOrWaste = (s, itemId, area) => { if (area >= C.SHEET.minKeepM2) (s.offcuts[itemId] || (s.offcuts[itemId] = [])).push(round6(area)); else if (area > 1e-9) s.waste[itemId] = round6((s.waste[itemId] || 0) + area); };
+
+// ---------------------------------------------------------------- lumber: stock lengths sawn to length, offcuts reused
+// A stick line is bought as whole sticks of stock length (C.STICK); each member is one or more pieces (a doubled header is
+// two) sawn from them. The line keeps its cut list: line.cut = { sticks: [{ L, left, open, back? }], at: { pieceId: stick } }.
+// A stick is opened (taken from stock, all L metres of it) when its first piece is sawn; what is left of it is an offcut the
+// rest of its pieces come from. The list is drawn up longest piece first, each from the shortest stick or offcut that holds
+// it, and drawn up again only when the plan changes or pieces come back: so a line buys exactly what it uses.
+// line.scrap: metres of sawdust and ends too short to keep.
+const piecesOf = (pr, id, left) => { const m = pr.members[id], out = [], k0 = left && m.len > 0 ? Math.min(m.pcs || 1, Math.round((m.got || 0) / m.len)) : 0; for (let k = k0; k < (m.pcs || 1); k++) out.push({ id: id + '#' + k, len: m.len }); return out; };
+function replan(pr, key) {
+  const ln = pr.lines[key], cut = ln.cut || (ln.cut = { sticks: [], at: {} }), K = C.STICK;
+  cut.sticks = cut.sticks.filter((st) => st.open && st.left >= K.minKeepM - 1e-9);
+  cut.at = {};
+  const list = [];
+  for (const id in pr.members) { const m = pr.members[id]; if (m.line === key && !placed(m)) list.push(...piecesOf(pr, id, true)); }
+  list.sort((p, q) => q.len - p.len || (p.id < q.id ? -1 : 1));
+  const room = cut.sticks.map((st) => st.left);
+  for (const p of list) {
+    let k = -1;
+    for (let i = 0; i < room.length; i++) if (room[i] >= p.len - 1e-9 && (k < 0 || room[i] < room[k])) k = i;
+    if (k < 0) { const L = C.stockFor(p.len); cut.sticks.push({ L, left: L, open: false }); room.push(L); k = room.length - 1; }
+    cut.at[p.id] = k;
+    const r = C.restAfter(room[k], p.len);
+    room[k] = r >= K.minKeepM ? round6(r) : 0;
+  }
+}
+const unopened = (ln) => (ln.cut ? ln.cut.sticks.reduce((n, st) => n + (st.open ? 0 : st.L), 0) : 0);
+// the sticks still to open for the members of a line's open stages (onlyOpen) or all of them
+function sticksToOpen(pr, key, onlyOpen) {
+  const ln = pr.lines[key], ks = new Set();
+  if (!ln.cut) return [];
+  for (const id in pr.members) { const m = pr.members[id]; if (m.line !== key || placed(m) || (onlyOpen && !stageOpen(pr, m.stage))) continue; for (const q of piecesOf(pr, id, true)) { const k = ln.cut.at[q.id]; if (k !== undefined && !ln.cut.sticks[k].open) ks.add(k); } }
+  return [...ks].map((k) => ln.cut.sticks[k].L);
+}
+// what sawing this member takes from stock now: metres of the sticks it opens, and each piece's stick
+export function stickSource(s, pr, id) {
+  const m = pr.members[id], ln = m && m.line ? pr.lines[m.line] : null;
+  if (!ln || !ln.stick || placed(m)) return { metres: 0, steps: [] };
+  if (!ln.cut) replan(pr, m.line);
+  const ks = new Set(), steps = [];
+  let metres = 0;
+  for (const q of piecesOf(pr, id, true)) {
+    const k = ln.cut.at[q.id], st = k === undefined ? null : ln.cut.sticks[k];
+    if (st && !st.open && !ks.has(k)) { metres += st.L; ks.add(k); }
+    steps.push({ len: q.len, k, how: st && st.open ? 'offcut' : 'new', from: st ? (st.open ? st.left : st.L) : C.stockFor(q.len) });
+  }
+  return { metres: round6(metres), steps };
+}
+const keepOrScrap = (ln, len) => { if (len >= C.STICK.minKeepM) { if (!ln.cut) ln.cut = { sticks: [], at: {} }; ln.cut.sticks.push({ L: round6(len), left: round6(len), open: true, back: true }); } else if (len > 1e-9) ln.scrap = round6((ln.scrap || 0) + len); };
+// length conservation for lumber: metres of whole sticks opened = metres in place + offcuts held + scrap
+export function stickImbalance(s) {
+  const out = {};
+  for (const sid in s.progress) for (const key in s.progress[sid].lines) { const ln = s.progress[sid].lines[key]; if (!ln.stick) continue; out[ln.itemId] = (out[ln.itemId] || 0) + ln.used - (ln.scrap || 0); for (const st of (ln.cut && ln.cut.sticks) || []) if (st.open) out[ln.itemId] -= st.left; }
+  for (const sid in s.progress) for (const id in s.progress[sid].members) { const m = s.progress[sid].members[id], ln = m.line && s.progress[sid].lines[m.line]; if (ln && ln.stick && m.got > 0) out[ln.itemId] -= m.got; }
+  for (const k of Object.keys(out)) if (Math.abs(out[k]) < 1e-4) delete out[k];
+  return out;
+}
+// a stick line's cut list as bought: stock lengths counted, for the Build panel ("26 x 3.0 m (10 ft)")
+export function cutList(pr, key) {
+  const ln = pr.lines[key];
+  return C.stickCount(((ln.cut && ln.cut.sticks) || []).filter((st) => !st.back).map((st) => st.L));
+}
 
 // ---------------------------------------------------------------- reading a building's progress (pure)
 const membersOfStage = (pr, stage) => Object.keys(pr.members).filter((id) => pr.members[id].stage === stage);
@@ -153,7 +226,8 @@ export function quoteStage(pr, stage) {
   const lines = [];
   for (const key in pr.lines) {
     const ln = pr.lines[key];
-    if (stage !== 'all' && ln.stage !== stage) continue;
+    // the ladder belongs to the first stage, but any order for work at height brings it if it has not come yet
+    if (stage !== 'all' && ln.stage !== stage && !(key === LADDER_KEY && C.LADDER.with.includes(stage))) continue;
     const qty = round6(ln.qty - ln.ordered);
     if (qty > 1e-6) lines.push({ itemId: ln.itemId, qty, key });
   }
@@ -168,11 +242,12 @@ export function wanted(s, itemId) {
     const pr = s.progress[sid], open = {};
     for (const id in pr.members) {
       const m = pr.members[id];
-      if (m.built || !m.line || pr.lines[m.line].itemId !== itemId || pr.lines[m.line].sheet) continue;
+      if (m.built || !m.line || pr.lines[m.line].itemId !== itemId || pr.lines[m.line].sheet || pr.lines[m.line].stick) continue;
       if (open[m.stage] === undefined) open[m.stage] = stageOpen(pr, m.stage);
       if (open[m.stage]) n += m.need - m.got;
     }
     for (const key in pr.lines) if (pr.lines[key].sheet && pr.lines[key].itemId === itemId) n += sheetsLeft(s, pr, key, true);
+    for (const key in pr.lines) if (pr.lines[key].stick && pr.lines[key].itemId === itemId) n += sticksToOpen(pr, key, true).reduce((a, L) => a + L, 0);
   }
   return round6(n);
 }
@@ -184,13 +259,14 @@ export function armful(s, itemId, cap) {
     const pr = s.progress[sid], open = {}, rs = [];
     for (const id in pr.members) {
       const m = pr.members[id];
-      if (m.built || !m.line || pr.lines[m.line].itemId !== itemId || pr.lines[m.line].sheet) continue;
+      if (m.built || !m.line || pr.lines[m.line].itemId !== itemId || pr.lines[m.line].sheet || pr.lines[m.line].stick) continue;
       if (open[m.stage] === undefined) open[m.stage] = stageOpen(pr, m.stage);
       if (!open[m.stage]) continue;
       const r = m.need - m.got;
       if (r > 1e-6) rs.push(r);
     }
     for (const key in pr.lines) if (pr.lines[key].sheet && pr.lines[key].itemId === itemId) for (let i = sheetsLeft(s, pr, key, true); i > 0; i--) rs.push(1);
+    for (const key in pr.lines) if (pr.lines[key].stick && pr.lines[key].itemId === itemId) for (const L of sticksToOpen(pr, key, true)) rs.push(L);
     for (const r of rs) {
       any = true;
       if (sum + r <= cap + 1e-6) sum += r;
@@ -204,7 +280,7 @@ export function stageView(s, pr, stage) {
   const def = C.STAGE[stage], t = pr.tally[stage] || [0, 0];
   const lines = Object.keys(pr.lines).filter((k) => pr.lines[k].stage === stage).map((k) => {
     const ln = pr.lines[k], it = item(ln.itemId);
-    return { key: k, label: ln.label, why: ln.why, qty: ln.qty, unit: ln.unit, count: ln.count, itemId: ln.itemId, itemName: it ? it.name : ln.itemId, costUsd: it ? cents(it.priceUsd * ln.qty) : 0, ordered: ln.ordered, used: ln.used, supply: ln.supply };
+    return { key: k, label: ln.label, why: ln.why, qty: ln.qty, unit: ln.unit, count: ln.count, itemId: ln.itemId, itemName: it ? it.name : ln.itemId, costUsd: it ? cents(it.priceUsd * ln.qty) : 0, ordered: ln.ordered, used: ln.used, supply: ln.supply, sticks: ln.stick ? cutList(pr, k) : null };
   });
   const q = quoteStage(pr, stage);
   const need = lines.some((l) => l.ordered + 1e-6 < l.qty);
@@ -241,7 +317,7 @@ export const carriedMassKg = (s) => (s.carried ? s.carried.qty * item(s.carried.
 // Build mode's pieces and shopping lines for one building, as the payload of construction.setPlan.
 export function planFromPieces(structId, pieces, lines, extra = {}) {
   const members = [];
-  for (const p of pieces) if (p.struct === structId && p.stage && p.parent && C.STAGE[p.stage]) members.push({ id: p.id, stage: p.stage, kind: p.kind, parent: p.parent, built: p.built !== false || p.area === 0 || (p.length === 0 && p.area === undefined && !p.volume) });
+  for (const p of pieces) if (p.struct === structId && p.stage && p.parent && C.STAGE[p.stage]) members.push({ id: p.id, stage: p.stage, kind: p.kind, parent: p.parent, len: p.length, pcs: p.plies || 1, built: p.built !== false || p.area === 0 || (p.length === 0 && p.area === undefined && !p.volume) });
   return { structId, members, lines: lines.map((l) => ({ key: l.key, stage: l.stage, itemId: l.itemId, qty: l.qty, unit: l.unit, label: l.label, why: l.why, count: l.count, members: l.members })), ...extra };
 }
 
@@ -337,22 +413,28 @@ function takeLadder(ctx) {
   ctx.emit('construction.ladder', { up: false });
   return { ok: true };
 }
-// a build ordered before the ladder came with the order (or one lost): move its old line to the first stage and put a
-// ladder at the stacks, so "bring the ladder" always has a ladder to bring
+// Work at height always has a ladder. A building whose open work is out of reach from the ground (top plates, rafters,
+// roof, the top of the sheathing), that has had anything ordered, gets a ladder at its stacks when there is none anywhere:
+// none leaned, carried, in the barrow, on the stacks or on its way. That covers a build ordered stage by stage after the
+// site was dug (the ladder's line is in the site stage), a plan with walls but no roof, an old save, and a ladder lost.
+const isLadderAt = (s) => !!s.ladder || (s.carried && s.carried.itemId === C.LADDER.itemId) || s.stacks.some((k) => k.itemId === C.LADDER.itemId) || s.deliveries.some((d) => d.lines.some((l) => l.itemId === C.LADDER.itemId));
+export function needsHeight(pr) {
+  return C.LADDER.with.some((st) => pr.tally[st] && pr.tally[st][1] && !stageComplete(pr, st) && stageOpen(pr, st));
+}
 function ensureLadder(ctx) {
-  const s = ctx.s, oldKey = 'top-plates|ladder', L = s.ledger.ladder;
+  const s = ctx.s, oldKey = 'top-plates|ladder';
   let any = null;
   for (const id in s.progress) {
     const pr = s.progress[id];
     if (pr.lines[oldKey] && oldKey !== LADDER_KEY) { const o = pr.lines[oldKey]; delete pr.lines[oldKey]; if (!pr.lines[LADDER_KEY]) pr.lines[LADDER_KEY] = { ...o, stage: C.LADDER.stage }; }
-    if (pr.lines[LADDER_KEY] && Object.values(pr.lines).some((l) => l.ordered > 0)) any = pr;
+    if (!any && !pr.done && Object.values(pr.lines).some((l) => l.ordered > 0) && (needsHeight(pr) || (pr.lines[LADDER_KEY] && pr.lines[LADDER_KEY].ordered > 0))) any = pr;
   }
-  if (!any || (L && L.bought > 0) || s.ladder || (s.carried && s.carried.itemId === C.LADDER.itemId)) return;
-  if (s.stacks.some((k) => k.itemId === C.LADDER.itemId) || s.deliveries.some((d) => d.lines.some((l) => l.itemId === C.LADDER.itemId))) return;
-  const near = s.stacks[0], at = near ? { x: near.x - 1.6, z: near.z } : dropOf(s, any);
+  if (!any || isLadderAt(s)) return;
+  const near = s.stacks.find((k) => !k.barrow), at = near ? { x: near.x - 1.6, z: near.z } : dropOf(s, any);
   SUP.addToStacks(s, C.LADDER.itemId, 1, at.x, at.z, C.DELIVERY.layout);
-  s.ledger.ladder = { bought: 1, used: 0, spent: 0 };
-  any.lines[LADDER_KEY].ordered = 1;
+  const L = s.ledger.ladder || (s.ledger.ladder = { bought: 0, used: 0, spent: 0 });
+  L.bought = round6(L.bought + 1);
+  if (any.lines[LADDER_KEY]) any.lines[LADDER_KEY].ordered = Math.max(1, any.lines[LADDER_KEY].ordered);
   ctx.emit('construction.ladderGranted', {});
 }
 const dropOf = (s, pr) => s.dropPoint || { x: pr.x + pr.r + 2.5, z: pr.z };
@@ -368,6 +450,7 @@ function setPlan(ctx, p) {
     if (!C.STAGE[m.stage]) continue;
     const o = old && old.members[m.id];
     pr.members[m.id] = { stage: m.stage, kind: m.kind, parent: m.parent || null, line: null, need: 0, got: o ? o.got : 0, built: o ? o.built : m.built ? 1 : 0 };
+    if (m.len > 0) { pr.members[m.id].len = round6(m.len); pr.members[m.id].pcs = m.pcs > 1 ? m.pcs : 1; }
   }
   for (const ln of p.lines) {
     if (!C.STAGE[ln.stage]) continue;
@@ -379,7 +462,19 @@ function setPlan(ctx, p) {
     const L = { stage: ln.stage, itemId, qty, unit: each ? 'each' : ln.unit, label: (map && map.label) || ln.label, why: ln.why || '', count: ln.count || own.length, supply: isSupply(itemId), ordered: o ? o.ordered : 0, used: 0 };
     if (!item(itemId) || !(qty > 0)) continue;
     if (!each && isSheetItem(itemId) && own.length && own.every((q) => q[1] > 0)) L.sheet = true;
+    // an old save's half-sawn line stays by the metre; new and untouched lines are bought as whole sticks
+    else if (!each && C.isStickItem(itemId) && own.length && own.every((q) => pr.members[q[0]].len > 0) && (!o || o.stick || o.used <= 1e-9)) L.stick = true;
     pr.lines[ln.key] = L;
+    if (L.stick) {                         // sawn from stock lengths: each member's share is its own length, the line is the sticks it takes
+      for (const q of own) { const m = pr.members[q[0]]; m.line = ln.key; m.need = round6(m.len * (m.pcs || 1)); if (m.built) m.got = m.need; else if (m.got > m.need) m.got = m.need; m.cut = o_cut(old, q[0]); }
+      if (o && o.cut) { L.used = o.used; L.scrap = o.scrap || 0; L.cut = { sticks: o.cut.sticks.map((st) => ({ ...st })), at: {} }; }
+      else {                                // members already built (a plan sent as built): their sticks are opened and sawn
+        const pk = C.packSticks(own.filter((q) => pr.members[q[0]].built).flatMap((q) => piecesOf(pr, q[0])), []);
+        L.used = pk.metres; L.scrap = pk.waste; L.cut = { sticks: pk.left.map((x) => ({ L: x, left: x, open: true, back: true })), at: {} };
+      }
+      replan(pr, ln.key);
+      continue;
+    }
     if (L.sheet) {                         // cut to fit: each piece's share is its own area, and the line is the sheets that cutting them takes
       const A = sheetAreaOf(itemId);
       for (const q of own) { const m = pr.members[q[0]]; m.line = ln.key; m.area = round6(Math.min(q[1], A)); m.need = round6(m.area / A); if (m.built) m.got = m.need; else if (m.got > m.need) m.got = m.need; m.cut = o_cut(old, q[0]); }
@@ -404,7 +499,7 @@ function setPlan(ctx, p) {
   if (old) for (const k in old.raised) pr.raised[k] = true;
   if (!old) for (const st of C.STAGES) if (st.flat) for (const par of flatParents(pr, st.id)) if (frameReady(pr, st.id, par)) pr.raised[par] = true;
   retally(pr);
-  if (!pr.lines[LADDER_KEY] && pr.tally[C.LADDER.stage] && pr.tally['roof-frame'] && item(C.LADDER.itemId)) {   // a roof is worked from a ladder: it comes with the order
+  if (!pr.lines[LADDER_KEY] && C.LADDER.with.some((st) => pr.tally[st] && pr.tally[st][1]) && item(C.LADDER.itemId)) {   // work at height is done from a ladder: it comes with the order
     const o = old && old.lines[LADDER_KEY];
     pr.lines[LADDER_KEY] = { stage: C.LADDER.stage, itemId: C.LADDER.itemId, qty: 1, unit: 'each', label: 'Ladder', why: C.LADDER.why, count: 1, supply: false, ordered: o ? o.ordered : 0, used: o ? o.used : 0 };
   }
@@ -435,9 +530,49 @@ function order(ctx, p) {
   if (s.options.instant) land(ctx, s, r.delivery.id);
   return out;
 }
+// ---- scaffolding, rented by the day: it comes as a bundle by the stacks, is set up along a wall and taken down again
+function rentScaffold(ctx, p) {
+  const s = ctx.s, pr = s.progress[p && p.structId], days = Math.max(1, Math.min(14, Math.round((p && p.days) || C.SCAFFOLD.days))), usd = cents(C.SCAFFOLD.usdPerDay * days);
+  if (s.scaffold) {                     // more days on the one you have
+    if (!pay(ctx, usd)) return { ok: false, reason: 'not enough money', costUsd: usd };
+    s.scaffold.until = round6(Math.max(s.scaffold.until, ctx.state.t) + days * 86400);
+    ctx.emit('construction.scaffold', { rented: true, days });
+    return { ok: true, costUsd: usd, until: s.scaffold.until };
+  }
+  if (!pr) return { ok: false, reason: 'unknown building' };
+  if (!pay(ctx, usd)) return { ok: false, reason: 'not enough money', costUsd: usd };
+  const at = s.stacks.find((k) => !k.barrow) || dropOf(s, pr);
+  s.scaffold = { until: round6(ctx.state.t + days * 86400), x: round6(at.x + 1.8), z: round6(at.z - 1.6), set: null };
+  ctx.emit('construction.scaffold', { rented: true, days });
+  return { ok: true, costUsd: usd, until: s.scaffold.until };
+}
+function setScaffold(ctx, p) {
+  const s = ctx.s, sc = s.scaffold;
+  if (!sc) return { ok: false, reason: 'no scaffold' };
+  if (sc.set) return { ok: false, reason: 'already up' };
+  if (!p || ![p.x, p.z, p.yaw, p.len, p.deckY].every(Number.isFinite) || p.len < 0.8 || p.len > 4) return { ok: false, reason: 'bad place' };
+  sc.set = { x: round6(p.x), z: round6(p.z), yaw: round6(p.yaw), len: round6(p.len), deckY: round6(p.deckY), structId: p.structId === undefined ? null : p.structId };
+  sc.x = sc.set.x; sc.z = sc.set.z;
+  ctx.emit('construction.scaffold', { up: true });
+  return { ok: true, set: sc.set };
+}
+function strikeScaffold(ctx, p) {
+  const sc = ctx.s.scaffold;
+  if (!sc || !sc.set) return { ok: false, reason: 'not up' };
+  if (p && Number.isFinite(p.x) && Number.isFinite(p.z)) { sc.x = round6(p.x); sc.z = round6(p.z); }
+  sc.set = null;
+  ctx.emit('construction.scaffold', { up: false });
+  return { ok: true };
+}
+// the sawhorses: set up at the edge of the work, on the side the lumber comes from, a stick's length clear of the building
+function setUpHorses(s, pr, dx, dz) {
+  const L = Math.hypot(dx - pr.x, dz - pr.z) || 1, ux = (dx - pr.x) / L, uz = (dz - pr.z) / L, d = Math.min(L * 0.6, pr.r + 0.4);
+  s.horses = { x: round6(pr.x + ux * d), z: round6(pr.z + uz * d), yaw: round6(Math.atan2(-uz, ux)) };
+}
 function land(ctx, s, id) {
   const r = SUP.deliver(s, id, C.DELIVERY.layout);
   if (r.ok && !s.barrow) s.barrow = { x: round6(r.delivery.x - 2.4), z: round6(r.delivery.z + 1.2), yaw: 0.6, held: false };
+  if (r.ok && !s.horses && r.delivery.lines.some((l) => C.isStickItem(l.itemId))) { const pr = r.delivery.tag && s.progress[r.delivery.tag.structId]; if (pr) setUpHorses(s, pr, r.delivery.x, r.delivery.z); }
   if (r.ok) ctx.emit('construction.delivered', { deliveryId: id, stacks: r.stacks, x: r.delivery.x, z: r.delivery.z, tag: r.delivery.tag });
   return r;
 }
@@ -513,8 +648,15 @@ function install(ctx, p) {
     const why = blocked(pr, id);
     if (why) { out.refused.push({ id, reason: why, missing: why === 'support missing' ? supportMissing(pr, id) : undefined }); break; }
     const ln = m.line ? pr.lines[m.line] : null;
-    let need = round6(m.need - m.got), give = 0, cut = null;
-    if (ln && ln.sheet && need > 1e-6) {       // a sheet piece: from an offcut if one will do, else a whole sheet is cut
+    let need = round6(m.need - m.got), give = 0, cut = null, saw = null;
+    if (ln && ln.stick && need > 1e-6) {       // lumber: sawn from offcuts or new sticks, as the cut list says
+      saw = stickSource(s, pr, id);
+      if (saw.metres > 0) {
+        const have = fromStacks ? SUP.stackQty(s, ln.itemId) : s.carried && s.carried.itemId === ln.itemId ? s.carried.qty : 0;
+        if (have + 1e-6 < saw.metres) { out.refused.push({ id, reason: !fromStacks && s.carried && s.carried.itemId !== ln.itemId ? 'wrong material' : 'no material', itemId: ln.itemId }); break; }
+      }
+      need = 0;
+    } else if (ln && ln.sheet && need > 1e-6) {       // a sheet piece: from an offcut if one will do, else a whole sheet is cut
       cut = sheetSource(s, ln, m.area);
       if (cut.how === 'new') {
         const have = fromStacks ? SUP.stackQty(s, ln.itemId) : s.carried && s.carried.itemId === ln.itemId ? s.carried.qty : 0;
@@ -529,6 +671,23 @@ function install(ctx, p) {
       }
     }
     const completes = !ln || give + 1e-6 >= need;
+    const doSaw = () => {
+      if (!saw) return;
+      const cuts = [];
+      for (const st0 of saw.steps) {
+        let st = st0.k === undefined ? null : ln.cut.sticks[st0.k];
+        if (!st || (st.open && st.left < st0.len - 1e-9)) { st = { L: C.stockFor(st0.len), open: false }; st.left = st.L; ln.cut.sticks.push(st); }   // never short: a fresh stick
+        const how = st.open ? 'offcut' : 'new', from = st.open ? st.left : st.L;
+        if (!st.open) { fromStacks ? SUP.useFromStacks(s, ln.itemId, st.L, pr.x, pr.z) : SUP.useCarried(s, ln.itemId, st.L); ln.used = round6(ln.used + st.L); st.open = true; st.left = st.L; }
+        const rest = C.restAfter(st.left, st0.len), keep = rest >= C.STICK.minKeepM;
+        ln.scrap = round6((ln.scrap || 0) + st.left - st0.len - (keep ? rest : 0));
+        st.left = keep ? round6(rest) : 0;
+        m.got = round6(Math.min(m.need, m.got + st0.len));
+        cuts.push({ how, stockM: from, lenM: st0.len, keptM: keep ? round6(rest) : 0, sawn: from - st0.len > 1e-6 });
+      }
+      m.got = m.need; m.cut = cuts.some((c) => c.how === 'new') ? 'new' : 'offcut';
+      out.cuts.push({ id, how: m.cut, stick: true, pieces: cuts, sawn: cuts.some((c) => c.sawn) });
+    };
     const doCut = () => {
       if (!cut) return;
       const A = sheetAreaOf(ln.itemId);
@@ -540,6 +699,7 @@ function install(ctx, p) {
       out.cuts.push({ id, how: cut.how, keptM2: rest >= C.SHEET.minKeepM2 ? round6(rest) : 0 });
     };
     if (p.hold) {                          // set in place by hand: the material goes in, the piece stays loose until it is fastened
+      if (saw) { doSaw(); out.set.push(id); continue; }
       if (cut) { doCut(); out.set.push(id); continue; }
       if (!ln || need <= 1e-6) { out.refused.push({ id, reason: 'already set' }); break; }
       const used = fromStacks ? SUP.useFromStacks(s, ln.itemId, give, pr.x, pr.z) : SUP.useCarried(s, ln.itemId, give);
@@ -548,7 +708,7 @@ function install(ctx, p) {
       continue;
     }
     if (completes) { const lack = supplies(s, pr, m.stage, pr.tally[m.stage][0] + 1, true, ctx.get('stock')); if (lack) { out.refused.push({ id, reason: 'no fasteners', itemId: lack }); break; } }
-    doCut();
+    doCut(); doSaw();
     if (give > 0) {
       const used = fromStacks ? SUP.useFromStacks(s, ln.itemId, give, pr.x, pr.z) : SUP.useCarried(s, ln.itemId, give);
       m.got = round6(m.got + used); ln.used = round6(ln.used + used);
@@ -606,7 +766,10 @@ function dismantle(ctx, p) {
     if (!m || !(m.built || m.got > 0)) { out.refused.push({ id, reason: 'not built' }); continue; }
     if (standsOn(m.stage).some((q) => anyBuilt(q))) { out.refused.push({ id, reason: 'something stands on it' }); continue; }
     const ln = m.line ? pr.lines[m.line] : null;
-    if (ln && ln.sheet && m.got > 0) {       // a cut piece comes off as an offcut of its own size: the sheet it was cut from stays used
+    if (ln && ln.stick && m.got > 0) {       // sawn pieces come off as offcuts of their own length
+      for (const q of piecesOf(pr, id)) keepOrScrap(ln, q.len);
+      m.cut = null;
+    } else if (ln && ln.sheet && m.got > 0) {       // a cut piece comes off as an offcut of its own size: the sheet it was cut from stays used
       if (!s.offcuts) s.offcuts = {};
       (s.offcuts[ln.itemId] || (s.offcuts[ln.itemId] = [])).push(m.area);
       m.cut = null;
@@ -622,6 +785,7 @@ function dismantle(ctx, p) {
   }
   out.ok = out.removed.length > 0;
   if (!out.ok) { out.reason = out.refused[0] ? out.refused[0].reason : 'nothing to take apart'; return out; }
+  for (const key of new Set(out.removed.map((id) => pr.members[id].line))) if (key && pr.lines[key].stick) replan(pr, key);   // the pieces back are offcuts the list can use again
   requote(s, pr);
   refresh(ctx, s, pr);
   ctx.emit('construction.dismantled', { structId: pr.id, ids: out.removed });
@@ -635,7 +799,12 @@ export const constructionSystem = () => ({
   step: (ctx) => {
     const s = ctx.s;
     if (!s.tutorial.card) ensureCard(ctx, s);
-    if (!s.deliveries.length) { ensureLadder(ctx); return; }
+    if (s.scaffold && ctx.state.t >= s.scaffold.until) { s.scaffold = null; ctx.emit('construction.scaffold', { returned: true }); }   // the rental is over: it is collected
+    if (!s.deliveries.length) {
+      ensureLadder(ctx);
+      if (!s.horses) for (const id in s.progress) { const pr = s.progress[id]; if (!pr.done && s.stacks.some((k) => C.isStickItem(k.itemId))) { const k = s.stacks.find((q) => C.isStickItem(q.itemId)); setUpHorses(s, pr, k.x, k.z); break; } }
+      return;
+    }
     for (const d of SUP.dueDeliveries(s, ctx.state.t)) land(ctx, s, d.id);
   },
   commands: {
@@ -658,6 +827,13 @@ export const constructionSystem = () => ({
     'construction.leanLadder': leanLadder,
     'construction.takeLadder': takeLadder,
     'construction.raise': raise,
+    'construction.rentScaffold': rentScaffold,
+    'construction.setScaffold': setScaffold,
+    'construction.strikeScaffold': strikeScaffold,
+    'construction.returnScaffold': (c) => { if (!c.s.scaffold) return { ok: false, reason: 'no scaffold' }; c.s.scaffold = null; c.emit('construction.scaffold', { returned: true }); return { ok: true }; },
+    'construction.moveScaffold': (c, p) => { const sc = c.s.scaffold; if (!sc || sc.set) return { ok: false, reason: 'not a bundle' }; if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.z)) return { ok: false, reason: 'bad place' }; sc.x = round6(p.x); sc.z = round6(p.z); return { ok: true }; },
+    // the sawhorses are picked up and set down where the work is
+    'construction.moveHorses': (c, p) => { if (!p || ![p.x, p.z, p.yaw].every(Number.isFinite)) return { ok: false, reason: 'bad place' }; c.s.horses = { x: round6(p.x), z: round6(p.z), yaw: round6(p.yaw) }; return { ok: true }; },
     'construction.barrowGrab': barrowGrab,
     'construction.barrowLoad': barrowLoad,
     'construction.barrowMove': (c, p) => { if (!c.s.barrow || !c.s.barrow.held) return { ok: false, reason: 'not held' }; barrowPlace(c.s, p.x, p.z, p.yaw); return { ok: true }; },
@@ -684,5 +860,5 @@ export const constructionSystem = () => ({
     },
     'construction.seeCard': (c, p) => { c.s.tutorial.seen[p.stage] = true; return { ok: true }; },
   },
-  api: { content: C, feelOf: (s) => C.feelOf(s), knows: (s, kind) => !!(s.learn && s.learn.known[C.learnGroup(kind)]), sheetSource, needsStock, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance },
+  api: { content: C, feelOf: (s) => C.feelOf(s), knows: (s, kind) => !!(s.learn && s.learn.known[C.learnGroup(kind)]), sheetSource, needsStock, stockNeed, stickSource, stickImbalance, cutList, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance },
 });

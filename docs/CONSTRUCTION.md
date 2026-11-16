@@ -10,7 +10,7 @@ A building is designed in Plan mode and then raised by hand, in the order a real
 
 | Real | Abstracted |
 |---|---|
-| The order of construction | Measuring and cutting: members arrive the right length |
+| The order of construction | Measuring: each piece is sawn to its length from a stock stick at the sawhorses (lumber is bought in 8 to 20 ft sticks; long runs are spliced over a support) |
 | Every member exists: each stud, joist, rafter and sheet | Fasteners: nails and screws are bought by the box and used up, not placed |
 | Real sizes and spacings (studs at 40 cm, real lumber sections) | Squaring, plumbing and levelling: the ghost is always true |
 | What each layer does, with consequences if it is missing | Tool handling: one "work" action, speed set by the tools you own |

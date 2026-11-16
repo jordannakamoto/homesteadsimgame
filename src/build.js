@@ -7142,7 +7142,7 @@
     try {
       document.pointerLockElement && document.exitPointerLock();
     } catch {}
-    shellMat.opacity = 0.5;
+    shellMat.uniforms.uOp.value = 0.5;
     B.camSaved = { pitch: G.cam.pitch, dist: G.cam.dist };
     B.camT = 0.6;
     G.refreshLock && G.refreshLock();
@@ -7164,7 +7164,7 @@
       B.camSaved = null;
     }
     G.refreshLock && G.refreshLock();
-    shellMat.opacity = 0.3;
+    shellMat.uniforms.uOp.value = 0.3;
     B.drag = null;
     B.tapMode = "";
     B.press = B.marq = B.ov.marq = null;
@@ -7771,6 +7771,43 @@
   }
 
   /* ---------- hooks called by the engine ---------- */
+  // A room with no door is a trap. Inside a building with no doorway at all, pushing into a wall for a moment climbs you
+  // out over it (through the framing, or over the top with a hand up): never stuck, and never a way through a wall that
+  // has a door to use instead.
+  function hasWayOut(S) {
+    if (S.wayVer === S.ver) return S.way;
+    let way = S.fopen.some((o) => o.sp.type.kind === "door") || S.segs.some((sg) => isDoor(sg[4])) || S.rings.length > 0;
+    if (!way) for (const t of S.walls.values()) if (isDoor(t)) ((way = true), 0);
+    S.wayVer = S.ver;
+    return (S.way = way);
+  }
+  function climbOut(e, S, px, pz) {
+    const mv = Math.hypot(e.mvx || 0, e.mvz || 0),
+      pushed = Math.hypot(px, pz);
+    if (mv < 0.5 || pushed < 1e-4 || (px * e.mvx + pz * e.mvz) / (mv * pushed) > -0.3 || e.climbY != null) {
+      e.__stuck = 0;
+      return;
+    }
+    const now = performance.now();
+    if (!e.__stuck || now - e.__stuckLast > 200) e.__stuck = now;
+    e.__stuckLast = now;
+    if (now - e.__stuck < 650) return;
+    const [lx, lz] = toLocal(S, e.x, e.z);
+    if (!onFloorAt(S, lx, lz) || hasWayOut(S)) return;
+    // step out the way you are pushing until clear of the floor, then a little more
+    const ux = e.mvx / mv,
+      uz = e.mvz / mv;
+    let k = 0.3;
+    for (; k < 12; k += 0.15) {
+      const [qx, qz] = toLocal(S, e.x + ux * k, e.z + uz * k);
+      if (!onFloorAt(S, qx, qz)) break;
+    }
+    e.x += ux * (k + 0.55);
+    e.z += uz * (k + 0.55);
+    e.__bp = null;
+    e.__stuck = 0;
+    B.onClimbOut && B.onClimbOut(e);
+  }
   function collideOnce(e, r, isPlayer, S) {
     let [lx, lz] = toLocal(S, e.x, e.z);
     const prev = e.__bp && e.__bp.id === S.id ? e.__bp : null;
@@ -7789,7 +7826,7 @@
         for (let d = 0; d < 2; d++) {
           const wk = ek(i, j, d),
             ty = S.walls.get(wk);
-          if (ty && ((S.hid.size && S.hid.has(wk)) || (isThick(ty) && ey > wallTop) || (S.ghostW && S.ghostW.has(wk)))) continue;
+          if (ty && ((S.hid.size && S.hid.has(wk)) || (isThick(ty) && ey > wallTop) || (S.ghostW && S.ghostW.has(wk)) || (isPlayer && S.studW && S.studW.has(wk)))) continue;
           let block = blocks(ty, isPlayer, low);
           const R = isThick(ty) ? r + 0.52 : R0;
           if (!block && !ty && low && !S.deckGhost) {
@@ -7842,6 +7879,7 @@
     for (const sg of S.colSegs) {
       const ty = sg[4];
       if (!blocks(ty, isPlayer, low) || (isThick(ty) && ey > wallTop)) continue;
+      if (isPlayer && S.studSegs && S.studSegs.size && S.studSegs.has(sg[0] + "," + sg[1] + "," + sg[2] + "," + sg[3])) continue;
       const R = isThick(ty) ? r + 0.52 : R0;
       const ax = sg[0],
         az = sg[1],
@@ -8397,6 +8435,8 @@
     S.sitePlanned = mem.list.some((m) => m.kind === "site" && S.plan.has(m.id));
     const st = { all: !S.plan.size, mem, finRun: null, finFloor: null, finRoof: null, cur: null, built: null, shell: null };
     S.ghostW = null;
+    S.studW = null;
+    S.studSegs = null;
     S.deckGhost = false;
     if (st.all) return st;
     const P = (id) => S.plan.has(id),
@@ -8415,6 +8455,13 @@
       S.ghostW = new Set();
       for (const g of S.runs) if (!stands(g.id)) for (const e of g.m) S.ghostW.add(e.k);
       for (const g of S.fruns) if (!stands(g.id)) for (const n of g.m) gone.add(S.segs[n].slice(0, 4).join(","));
+      // bare framing, studs with no sheathing on them yet, is no wall to a person: you step through between the studs, the
+      // way framers do. Only the player passes; a wall is solid once its first sheet is on (and a raised wall never traps you)
+      const bareFrame = (id) => kids(id) && kids(id).some((m) => m.kind === "sheathing") && kids(id).every((m) => m.kind !== "sheathing" || P(m.id));
+      S.studW = new Set();
+      S.studSegs = new Set();
+      for (const g of S.runs) if (stands(g.id) && bareFrame(g.id)) for (const e of g.m) S.studW.add(e.k);
+      for (const g of S.fruns) if (stands(g.id) && bareFrame(g.id)) for (const n of g.m) S.studSegs.add(S.segs[n].slice(0, 4).join(","));
       if (gone.size) S.colSegs = S.colSegs.filter((sg) => !gone.has(sg.slice(0, 4).join(",")));
       S.deckGhost = mem.list.some((m) => (m.stage === "site" || m.stage === "foundation" || m.stage === "floor-frame" || m.stage === "subfloor") && P(m.id));
     }
@@ -8473,13 +8520,22 @@
       new T.ShaderMaterial({
         transparent: true,
         depthWrite: false,
-        uniforms: { uFill: { value: fill }, uRim: { value: rim }, uCol: { value: new T.Color(0xaedcff) } },
+        uniforms: { uFill: { value: fill }, uRim: { value: rim }, uCol: { value: new T.Color(0x4cbcff) } },
         vertexShader: "varying vec2 vUv;\nvoid main(){\n vUv = uv;\n vec4 p = vec4(position, 1.0);\n#ifdef USE_INSTANCING\n p = instanceMatrix * p;\n#endif\n gl_Position = projectionMatrix * modelViewMatrix * p;\n}",
         fragmentShader: "uniform float uFill; uniform float uRim; uniform vec3 uCol; varying vec2 vUv;\nvoid main(){\n vec2 d = abs(vUv - 0.5) * 2.0;\n float e = smoothstep(0.82, 1.0, max(d.x, d.y));\n gl_FragColor = vec4(mix(uCol, vec3(1.0), 0.5 * e), uFill + uRim * e);\n}",
       }),
-    GHOST = { cur: ghostMat(0.2, 0.55), later: ghostMat(0.1, 0.28), dim: ghostMat(0.05, 0.14) },
+    GHOST = { cur: ghostMat(0.22, 0.7), later: ghostMat(0.1, 0.28), dim: ghostMat(0.05, 0.14) },
     GHOSTP = Object.fromEntries(Object.entries(GHOST).map(([k, m]) => [k, Object.assign(m.clone(), { side: T.DoubleSide })])),
-    shellMat = new T.MeshLambertMaterial({ vertexColors: true, color: 0xd4e8f8, transparent: true, opacity: 0.3, depthWrite: false, side: T.DoubleSide });
+    // the shell of a plan nobody has started: a blueprint, not a pale copy of the finished colours. Cyan-blue fill, a line every
+    // 0.4 m across (the stud spacing) and 0.6 m up, drawn in the building's own metres, and a brighter rim where a face turns away
+    shellMat = new T.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: T.DoubleSide,
+      uniforms: { uOp: { value: 0.3 }, uCol: { value: new T.Color(0x3fb4ff) } },
+      vertexShader: "varying vec3 vP; varying vec3 vN; varying vec3 vV;\nvoid main(){\n vP = position; vN = normal;\n vec4 w = modelMatrix * vec4(position, 1.0);\n vV = (inverse(modelMatrix) * vec4(cameraPosition, 1.0)).xyz - position;\n gl_Position = projectionMatrix * viewMatrix * w;\n}",
+      fragmentShader: "uniform float uOp; uniform vec3 uCol; varying vec3 vP; varying vec3 vN; varying vec3 vV;\nvoid main(){\n vec3 n = normalize(vN);\n vec2 uv = abs(n.y) > 0.7 ? vP.xz / 0.4 : vec2((abs(n.x) > abs(n.z) ? vP.z : vP.x) / 0.4, vP.y / 0.6);\n vec2 g = abs(fract(uv - 0.5) - 0.5) / max(fwidth(uv), vec2(1e-4));\n float line = 1.0 - min(min(g.x, g.y), 1.0);\n float rim = pow(1.0 - abs(dot(n, normalize(vV))), 3.0);\n gl_FragColor = vec4(mix(uCol, vec3(0.85, 0.97, 1.0), 0.6 * line + 0.4 * rim), uOp * (0.55 + 1.4 * line + 0.9 * rim));\n}",
+    });
   // house wrap: a thin white sheet with a faint printed band, made once
   const wrapMat = (() => {
     const cv = document.createElement("canvas");
@@ -8556,7 +8612,7 @@
       if (pos.length) {
         const geo = new T.BufferGeometry();
         geo.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
-        const ln = new T.LineSegments(geo, new T.LineBasicMaterial({ color: 0xaedcff, transparent: true, opacity: 0.45, depthWrite: false }));
+        const ln = new T.LineSegments(geo, new T.LineBasicMaterial({ color: 0x4cbcff, transparent: true, opacity: 0.6, depthWrite: false }));
         ln.userData.own = true;
         ln.renderOrder = 3;
         S.group.add(ln);
@@ -9928,6 +9984,10 @@
       return { matrix: S.group.matrixWorld, y0: S.y0, list: membersOf(S).list, planned: S.plan };
     },
     memberLook: () => ({ geo: boxGeo, mat: memMat, colors: MCOL }),
+    // called when the player climbs out of a room that has no door (see climbOut)
+    setOnClimbOut(fn) {
+      B.onClimbOut = fn;
+    },
     // the pale shell of everything still unbuilt: shown for a plan nobody has started, hidden once work is under way
     setShell(structId, on) {
       const S = B.structs.find((O) => O.id === structId);
@@ -9978,8 +10038,11 @@
         const ey = e.y === undefined ? S.y0 : e.y;
         S.rings.length && ringHold(e, r, S);
         if (S.level ? ey < S.y0 + FLOOR_T - 0.65 || ey > S.y0 + EAVE * S.hs : ey > S.y0 + EAVE * S.hs - 0.3 || ey < S.y0 - 1.2) continue;
+        const x0 = e.x,
+          z0 = e.z;
         collideOnce(e, r, isPlayer, S);
         collideOnce(e, r, isPlayer, S);
+        isPlayer && climbOut(e, S, e.x - x0, e.z - z0);
         near = S;
       }
       if (!near) e.__bp = null;
