@@ -65,7 +65,7 @@
     // the order pieces go in: by stage, then by kind, then along the building
     for (const m of g.byId.values()) {
       const mx = (m.a[0] + m.b[0]) / 2, mz = (m.a[2] + m.b[2]) / 2, my = (m.a[1] + m.b[1]) / 2;
-      g.rank.set(m.id, C.STAGE_ORDER.indexOf(m.stage) * 1e6 + ((KR[m.kind] || 0) + (TR[m.type] || 0) + 2) * 1e4 + (m.kind === 'sheathing' || m.kind === 'stud' && m.type === 'cripple' ? my * 300 : 0) + (mx - g.cx) + 0.37 * (mz - g.cz) + 50);
+      g.rank.set(m.id, C.STAGE_ORDER.indexOf(m.stage) * 1e6 + ((KR[m.kind] || 0) + (TR[m.type] || 0) + 2) * 1e4 + (m.kind === 'sheathing' || m.kind === 'cladding' || m.kind === 'stud' && m.type === 'cripple' ? my * 300 : 0) + (mx - g.cx) + 0.37 * (mz - g.cz) + 50);
     }
     // each framed wall: the line it swings up about (the inner edge of its bottom plate)
     for (const m of g.byId.values()) {
@@ -194,7 +194,7 @@
       asm.hinge(id, cur, hw.pivot, hw.axis, V.raise && V.raise.parent === cur ? V.raise.angle : hw.flat, 48);
       asm.setSolid(id, cur, list, 48);
     }
-    for (const [layer, mid] of loose) asm.lift(id, layer, mid, proud(mid));
+    for (const [layer, mid] of loose) liftTo(id, layer, mid, proud(mid));
     dotsFor(id);
     V.glowSig = '';
     B.setShell(id, !Object.values(pr.tally).some((t) => t[0] > 0));
@@ -280,6 +280,11 @@
 
   // ------------------------------------------------------------------ by hand: aim within reach, set a piece, fasten it
   // how far a set piece still stands proud of its seat: it goes in a little with every blow
+  // hold a piece clear of its seat: up for most things, out from the wall for siding
+  function liftTo(id, layer, mid, h) {
+    const m = geom(id) && geom(id).byId.get(mid);
+    if (m && m.kind === 'cladding' && m.out) asm.lift(id, layer, mid, h * 0.5, m.out); else asm.lift(id, layer, mid, h);
+  }
   const proud = (mid) => { const sw = V.swingIn; if (sw && sw.mid === mid) return 0.045 + 0.55 * (1 - Math.min(1, sw.t / 0.2)) ** 2; const b = V.blows[mid]; return 0.045 * (1 - (b ? b.n / b.of : 0)); };
   const qTmp = new T.Quaternion(), aTmp = new T.Vector3(), wA = new T.Vector3(), wB = new T.Vector3(), wM = new T.Vector3();
   // a point of a member in the world, wherever its frame lies just now
@@ -461,6 +466,11 @@
     if (!m0 || !ln0 || m0.type === 'ridge' || pm0.kind === 'door' || pm0.kind === 'window' || pm0.kind === 'site') return [];
     if (pm0.kind === 'rafter' && !Object.values(pr.members).some((q) => q.kind === 'rafter' && q.built)) return [];
     const mx = (m0.a[0] + m0.b[0]) / 2, mz = (m0.a[2] + m0.b[2]) / 2, out = [];
+    if (pm0.kind === 'cladding') {       // one gesture lays the whole course (the rest of it, past an opening), and as many courses above as the multiplier says
+      const rows = [];
+      for (const mid of ctx.q || []) { const pm = pr.members[mid], m = g.byId.get(mid); if (mid !== ctx.mid && pm && m && pm.kind === 'cladding' && pm.parent === pm0.parent && pm.type === pm0.type && pm.need - pm.got > 1e-6 && m.row >= m0.row && m.row <= m0.row + n) rows.push({ mid, k: m.row * 100 + Math.abs((m.a[0] + m.b[0]) / 2 - mx) + Math.abs((m.a[2] + m.b[2]) / 2 - mz) }); }
+      return rows.sort((a, b) => a.k - b.k).map((o) => o.mid);
+    }
     for (const mid of ctx.q || []) {
       if (mid === ctx.mid) continue;
       const pm = pr.members[mid], m = g.byId.get(mid);
@@ -473,9 +483,11 @@
   function aimHands(pr) {
     const pl = plan(pr.id), g = geom(pr.id), P = G.player, c = S().carried, st = V.structs.get(pr.id);
     let best = null, bs = 1e9, want = null, ws = 1e9, high = false;
-    const q = [];
+    const q = [], low0 = new Map();     // siding goes on from the bottom course up: the lowest course not yet set, per wall
+    for (const mid of pl.inst) { const pm = pr.members[mid], m = g.byId.get(mid); if (m && pm.kind === 'cladding' && m.type === 'boards' && pm.need - pm.got > 1e-6) low0.set(pm.parent, Math.min(low0.has(pm.parent) ? low0.get(pm.parent) : 1e9, m.row)); }
     for (const mid of pl.inst) {
       const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid);
+      if (m && pm.kind === 'cladding' && m.type === 'boards' && pm.need - pm.got > 1e-6 && m.row > low0.get(pm.parent)) continue;
       const set = !ln || pm.need - pm.got < 1e-6, act = pm.kind === 'site' ? 'dig' : set ? 'nail' : (c && c.itemId === ln.itemId) || !api.needsStock(S(), pr, mid) || stackWithin(ln.itemId, TAKE_M) ? 'set' : 'want';
       let score;
       if (!m) { if (Math.hypot(P.x - st.x, P.z - st.z) > g.reach + 0.5) continue; score = 0; }
@@ -489,6 +501,7 @@
         if (reach.free) { score = 1e9; for (const t of [0.5, 0.15, 0.85]) { wM.lerpVectors(wA, wB, t).project(G.camera); score = Math.min(score, Math.hypot((wM.x * 0.5 + 0.5) * reach.w - reach.px, (-wM.y * 0.5 + 0.5) * reach.h - reach.py)); } }
         else score = segDist(reach.x, reach.z, wA, wB) * 100;
       }
+      V.aimed.add(mid);
       if (act === 'want') { if (score < ws) { ws = score; want = mid; } continue; }
       q.push(mid);
       // a piece already set comes first when the pointer is about as near to both: finish what is started
@@ -511,12 +524,30 @@
     }
     redraw(id);
   }
+  // siding: a board slides in along its wall and drops the last few centimetres (0.15 s)
+  const SLIDE_S = 0.15;
+  function slideIn(id, layer, mid) {
+    const m = geom(id).byId.get(mid);
+    if (!m) return;
+    const L = Math.hypot(m.b[0] - m.a[0], m.b[2] - m.a[2]) || 1;
+    (V.slides || (V.slides = [])).push({ id, layer, mid, t: 0, u: [(m.b[0] - m.a[0]) / L, 0, (m.b[2] - m.a[2]) / L], len: Math.min(1.2, L) });
+  }
+  function tickSlides(dt) {
+    if (!V.slides || !V.slides.length) return;
+    for (const w of V.slides) {
+      w.t += dt;
+      const p = Math.min(1, w.t / SLIDE_S), along = p < 0.7 ? (1 - p / 0.7) ** 2 * w.len : 0, up = p < 0.7 ? 0.04 : 0.04 * (1 - (p - 0.7) / 0.3);
+      asm.lift(w.id, w.layer, w.mid, 1, [-w.u[0] * along, up, -w.u[2] * along]);
+    }
+    for (const w of V.slides) if (w.t >= SLIDE_S) { const pm = S().progress[w.id] && S().progress[w.id].members[w.mid]; liftTo(w.id, w.layer, w.mid, pm && !pm.built ? proud(w.mid) : 0); }
+    V.slides = V.slides.filter((w) => w.t < SLIDE_S);
+  }
   // set one piece in place with its small moment; returns the install result, or null when it did not work
   function setPiece(id, mid, pm, layer, m, at, swp, quiet) {
     const pr = S().progress[id], r = cmd('install', { structId: id, memberIds: [mid], hold: true });
     if (!r.ok) { if (!quiet) flash(reason(r, pm.kind)); return null; }
     if (r.cuts && r.cuts.length && !quiet) flash(r.cuts[0].how === 'offcut' ? 'Cut from an offcut' : 'Cut to fit; offcut kept');
-    if (r.set.length) { if (swp) V.stick = { id, mid }; if (!quiet) V.swingIn = { mid, id, layer, t: 0 }; sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
+    if (r.set.length) { if (swp) V.stick = { id, mid }; if (pm.kind === 'cladding') slideIn(id, layer, mid); else if (!quiet) V.swingIn = { mid, id, layer, t: 0 }; sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
     else if (!quiet) { const q = r.partial[0]; sounds.play('rustle'); flash(plain(lineOf(pr, mid).label) + ': ' + Math.round((100 * q.got) / q.need) + '% there. Fetch more.'); }
     return r;
   }
@@ -536,6 +567,7 @@
       const r = setPiece(ctx.id, ctx.mid, pm, layer, m, wM, swp);
       if (!r) return;
       if (r.set.length) {
+        joinSmall(ctx.id, ctx.mid);
         const more = nextPlaces(pr, g, ctx, gesture() - 1);
         more.forEach((mid, i) => setTimeout(() => {
           const p2 = S().progress[ctx.id], pm2 = p2 && p2.members[mid];
@@ -577,7 +609,7 @@
     G.cam.shake = Math.min(G.cam.shake + (last ? 0.07 : 0.035), 0.3);
     if (G.juice) G.juice.hitStop = last ? 0.07 : 0.035;
     V.jolt = m ? { id: ctx.id, layer, mid: ctx.mid, t: 0, built: last } : null;
-    if (!last) { if (m) asm.lift(ctx.id, layer, ctx.mid, proud(ctx.mid)); if (pts) dotsFor(ctx.id); return; }
+    if (!last) { if (m) liftTo(ctx.id, layer, ctx.mid, proud(ctx.mid)); if (pts) dotsFor(ctx.id); return; }
     delete V.blows[ctx.mid];
     if (V.stick && V.stick.mid === ctx.mid) V.stick = null;
     const r = cmd('install', { structId: ctx.id, memberIds: [ctx.mid], hand: !swp });
@@ -603,6 +635,110 @@
     }
   }
 
+
+  // ------------------------------------------------------------------ small places and beacons: nothing is left to hunt for
+  // A place under about 0.35 m2 (sheets, siding) or 0.6 m (sticks) is set and fastened with the larger piece beside it.
+  const SMALL_M2 = 0.35, SMALL_M = 0.6;
+  function isSmall(pr, g, mid) {
+    const pm = pr.members[mid], m = g.byId.get(mid);
+    if (!pm || !m || pm.kind === 'site' || pm.kind === 'door' || pm.kind === 'window' || pm.kind === 'pier') return false;
+    if (SHEETS.has(pm.kind)) return (pm.area || m.area || 1e9) < SMALL_M2;
+    if (STICKS.has(pm.kind)) return Math.hypot(m.b[0] - m.a[0], m.b[1] - m.a[1], m.b[2] - m.a[2]) < SMALL_M;
+    return false;
+  }
+  function joinSmall(id, mid) {
+    const pr = S().progress[id], g = geom(id);
+    if (!pr || !g || isSmall(pr, g, mid)) return;
+    const pm0 = pr.members[mid], m0 = g.byId.get(mid), pl = plan(id);
+    if (!pm0 || !m0 || !pl) return;
+    const mx = (m0.a[0] + m0.b[0]) / 2, my = (m0.a[1] + m0.b[1]) / 2, mz = (m0.a[2] + m0.b[2]) / 2;
+    let n = 0;
+    for (const sid of pl.inst) {
+      const pm = pr.members[sid], m = g.byId.get(sid);
+      if (sid === mid || !pm || !m || pm.built || pm.stage !== pm0.stage || pm.parent !== pm0.parent || pm.need - pm.got < 1e-6 || !isSmall(pr, g, sid)) continue;
+      if (Math.hypot((m.a[0] + m.b[0]) / 2 - mx, (m.a[1] + m.b[1]) / 2 - my, (m.a[2] + m.b[2]) / 2 - mz) > 1.6 || n >= 6) continue;
+      const lay = C.STAGE[pm.stage].flat && g.walls.has(pm.parent) ? pm.parent : 'main';
+      let r = cmd('install', { structId: id, memberIds: [sid], hold: true });
+      if (!r.ok && (r.reason === 'no material' || r.reason === 'wrong material')) r = cmd('install', { structId: id, memberIds: [sid], hold: true, from: 'stacks' });
+      if (!r.ok) continue;
+      const r2 = cmd('install', { structId: id, memberIds: [sid] });
+      if (r2.ok && r2.installed.length) { n++; finishInstall(id, sid, lay, pm.kind, r2); if (pm.kind === 'cladding') slideIn(id, lay, sid); }
+    }
+    if (n) redraw(id);
+  }
+  // Beacons: with 5 or fewer places left in a stage, each gets a tall thin pulsing marker, and the hint line says where.
+  const beaconMat = new T.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.55, depthWrite: false, fog: false }),
+    beaconMesh = new T.InstancedMesh(new T.BoxGeometry(1, 1, 1), beaconMat, 6);
+  beaconMesh.frustumCulled = false; beaconMesh.visible = false; beaconMesh.renderOrder = 6; beaconMesh.count = 0;
+  G.scene.add(beaconMesh);
+  V.aimed = new Set(); V.beacons = []; V.beaconT = 0;
+  const STAGE_PART = { 'roof-frame': 'roof', 'roof-deck': 'roof', roofing: 'roof', foundation: 'floor', 'floor-frame': 'floor', subfloor: 'floor' };
+  function yRange(g) {
+    if (g.yr) return g.yr;
+    let lo = 1e9, hi = -1e9;
+    for (const m of g.byId.values()) { lo = Math.min(lo, m.a[1], m.b[1]); hi = Math.max(hi, m.a[1], m.b[1]); }
+    return (g.yr = [lo + g.matrix.elements[13], hi + g.matrix.elements[13]]);
+  }
+  // the places left in the next stage when there are few: { stage, list: [{ mid, x, y, z, where, high }], text } or null
+  function leftInStage(pr) {
+    const g = geom(pr.id), pl = plan(pr.id);
+    if (!g || !pl || !pl.view.next) return null;
+    const ids = Object.keys(pr.members).filter((k) => { const pm = pr.members[k]; return pm.stage === pl.view.next && !pm.built && pm.kind !== 'site' && g.byId.has(k); });
+    if (!ids.length || ids.length > 5) return null;
+    const [ylo, yhi] = yRange(g), P = G.player, c = wB.set(g.cx, 0, g.cz).applyMatrix4(g.matrix), cx = c.x, cz = c.z, list = [], seen = [];
+    let high = false;
+    for (const mid of ids) {
+      const pm = pr.members[mid], m = g.byId.get(mid), hw = C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null;
+      worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wM); wM.add(wA).multiplyScalar(0.5);
+      const dx = wM.x - cx, dz = wM.z - cz, dir = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 'east' : 'west') : (dz > 0 ? 'south' : 'north'), f = (wM.y - ylo) / Math.max(0.5, yhi - ylo), part = STAGE_PART[pm.stage];
+      const where = pm.kind === 'door' || pm.kind === 'window' ? 'the ' + pm.kind + ' in the ' + dir + ' wall' : part === 'roof' ? 'the ' + dir + ' side of the roof' : part === 'floor' ? 'the ' + dir + ' side of the floor' : (f > 0.66 ? 'top' : f < 0.33 ? 'bottom' : 'middle') + ' of the ' + dir + ' wall';
+      if (wM.y - P.y > LAD.reachUpM && !V.climb) high = true;
+      list.push({ mid, x: wM.x, y: wM.y, z: wM.z, where, top: yhi });
+      seen.includes(where) || seen.push(where);
+    }
+    return { stage: pl.view.next, list, high, text: list.length + ' left: ' + seen.slice(0, 3).join(' and ') + (high ? ' · bring the ladder' : '') };
+  }
+  function drawBeacons(dt) {
+    const pr = current(), P = G.player;
+    V.beaconT -= dt;
+    if (V.beaconT <= 0) {
+      V.beaconT = 0.3;
+      const L = pr && !pr.done && !S().options.sandbox && !OFF[P.tool] && !V.placing ? leftInStage(pr) : null;
+      V.beacons = L ? L.list.map((b) => ({ ...b, id: pr.id })) : [];
+      V.left = L;
+      beaconMesh.count = V.beacons.length;
+      V.beacons.forEach((b, i) => { const top = b.top + 4, y0 = Math.max(G.heightAt(b.x, b.z), b.y - 0.3); beaconMesh.setMatrixAt(i, new T.Matrix4().makeScale(0.07, top - y0, 0.07).setPosition(b.x, (top + y0) / 2, b.z)); });
+      beaconMesh.instanceMatrix.needsUpdate = true;
+    }
+    beaconMesh.visible = V.beacons.length > 0;
+    if (beaconMesh.visible) beaconMat.opacity = 0.4 + 0.25 * Math.sin(performance.now() / 260);
+  }
+  // clicking a beacon finishes a place that never had a valid aim: a stage never waits on what cannot be reached or seen
+  function beaconAt(cx, cy) {
+    const r = canvas.getBoundingClientRect();
+    let best = null, bd = 30;
+    for (const b of V.beacons) {
+      if (V.aimed.has(b.mid)) continue;
+      const a = wA.set(b.x, b.y, b.z).project(G.camera), t = wB.set(b.x, b.top + 4, b.z).project(G.camera);
+      if (a.z > 1 || t.z > 1) continue;
+      const ax = (a.x * 0.5 + 0.5) * r.width + r.left, ay = (-a.y * 0.5 + 0.5) * r.height + r.top, tx = (t.x * 0.5 + 0.5) * r.width + r.left, ty = (-t.y * 0.5 + 0.5) * r.height + r.top;
+      const dx = tx - ax, dy = ty - ay, L2 = dx * dx + dy * dy, k = L2 > 1 ? Math.max(0, Math.min(1, ((cx - ax) * dx + (cy - ay) * dy) / L2)) : 0, d = Math.hypot(cx - ax - dx * k, cy - ay - dy * k);
+      if (d < bd) { bd = d; best = b; }
+    }
+    return best;
+  }
+  function finishPlace(b) {
+    const pr = S().progress[b.id], pm = pr && pr.members[b.mid], g = geom(b.id);
+    if (!pm || pm.built || !g) return;
+    const lay = C.STAGE[pm.stage].flat && g.walls.has(pm.parent) ? pm.parent : 'main';
+    if (pm.need - pm.got > 1e-6) { const r = cmd('install', { structId: b.id, memberIds: [b.mid], hold: true, from: 'stacks' }); if (!r.ok) { flash(reason(r, pm.kind)); return; } }
+    const r2 = cmd('install', { structId: b.id, memberIds: [b.mid], from: 'stacks' });
+    if (!r2.ok) { flash(reason(r2, pm.kind)); redraw(b.id); return; }
+    sounds.play('seat'); flash('Finished: ' + b.where);
+    finishInstall(b.id, b.mid, lay, pm.kind, r2);
+    V.beaconT = 0;
+  }
+
   // ------------------------------------------------------------------ what F does here and now
   function nearBuilding(x, z) {
     let best = null, bd = 1e9;
@@ -612,7 +748,9 @@
   const wantedStack = (d) => d.itemId === V.wantItem;
   const wantsHere = (pr, pl, c) => pl.inst.some((id) => { const ln = lineOf(pr, id); return ln && ln.itemId === c.itemId && pr.members[id].need - pr.members[id].got > 1e-6; });
   const pickable = (d) => !C.SITE_SUPPLY.includes(d.itemId);
-  function context() {
+  // whatever is in the arms can always be put down: a hint with nothing to press gets that
+  function context() { const x = contextRaw(); if (x && x.kind === 'hint' && !x.drop && S().carried) return { ...x, drop: true }; return x; }
+  function contextRaw() {
     const P = G.player, s = S(), c = s.carried;
     if (OFF[P.tool] || V.placing || s.options.sandbox) return null;
     if (V.auto) return { kind: 'stop', id: V.auto.id };
@@ -642,7 +780,7 @@
     if (c) return pr ? { kind: 'hint', text: (c.itemId === 'door_prehung' || c.itemId === 'window_shed') && !api.stageOpen(pr, 'openings') ? (c.itemId === 'door_prehung' ? 'Wrap the wall before the door goes in' : 'Wrap the wall before the window goes in') : (c.itemId === 'door_prehung' || c.itemId === 'window_shed') ? 'Walk to the opening: it glows' : 'Nothing here needs ' + stackName(c.itemId) + ' yet', drop: true } : { kind: 'drop' };
     return null;
   }
-  function homeStack(itemId) { const P = G.player; let best = null, bd = 14; for (const k of S().stacks) if (k.itemId === itemId) { const d = Math.hypot(k.x - P.x, k.z - P.z); if (d < bd) { bd = d; best = k; } } return best; }
+  function homeStack(itemId) { const P = G.player; let best = null, bd = 3; for (const k of S().stacks) if (k.itemId === itemId) { const d = Math.hypot(k.x - P.x, k.z - P.z); if (d < bd) { bd = d; best = k; } } return best; }
   function putDown() {
     const c = S().carried; if (!c) return;
     const h = homeStack(c.itemId), P = G.player;
@@ -767,7 +905,8 @@
   function tickWork(dt) {
     const ctx = V.ctx, held = !!G.keys.KeyE || V.mDown, s = S();
     V.cool -= dt * (C.workSpeed(G.sim.state.sys.stock.tools, G.powerAvailable && G.powerAvailable()));
-    if (V.jolt) { const j = V.jolt; j.t += dt; asm.lift(j.id, j.layer, j.mid, Math.max(-0.02, (j.built ? 0 : proud(j.mid)) - 0.03 * Math.exp(-j.t * 16) * Math.cos(j.t * 46))); if (j.t > 0.28) { asm.lift(j.id, j.layer, j.mid, j.built ? 0 : proud(j.mid)); V.jolt = null; } }
+    if (V.jolt) { const j = V.jolt; j.t += dt; liftTo(j.id, j.layer, j.mid, Math.max(-0.02, (j.built ? 0 : proud(j.mid)) - 0.03 * Math.exp(-j.t * 16) * Math.cos(j.t * 46))); if (j.t > 0.28) { asm.lift(j.id, j.layer, j.mid, j.built ? 0 : proud(j.mid)); V.jolt = null; } }
+    tickSlides(dt);
     if (V.swingIn) { V.swingIn.t += dt; const w = V.swingIn; asm.lift(w.id, w.layer, w.mid, proud(w.mid)); if (w.t > 0.2) V.swingIn = null; }
     const speed = C.workSpeed(G.sim.state.sys.stock.tools, G.powerAvailable && G.powerAvailable());
     if (V.auto) {
@@ -801,7 +940,7 @@
       if (held && ctx && ctx.kind === 'hands' && !V.raise && V.cool <= 0) handAct({ ...ctx, repeat: true });
       if (W.job) W.cancel();
     }
-    if (V.working && !V.working.partial && V.working.m.draw !== 0) asm.lift(V.working.id, V.working.layer, V.working.memberId, 0.24 * (1 - W.progress()));
+    if (V.working && !V.working.partial && V.working.m.draw !== 0) liftTo(V.working.id, V.working.layer, V.working.memberId, 0.24 * (1 - W.progress()));
     // the character's arms: a blow for each beat, both up under a wall, one up under a load
     const P = G.player, pose = V.pose || (V.pose = { kind: '', k: 0 });
     if (V.raise && !V.raise.landed) pose.kind = 'lift';
@@ -863,7 +1002,7 @@
     else if (ctx.kind === 'pick') setPrompt('E', (ctx.more ? 'Take more ' : 'Pick up ') + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'back') setPrompt('E', 'Put back the ' + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'swap') setPrompt('E', 'Swap for ' + stackName(ctx.stack.itemId), '', null);
-    else if (ctx.kind === 'drop') setPrompt('E', 'Put down the ' + stackName(s.carried.itemId), '', null);
+    else if (ctx.kind === 'drop') setPrompt(s.carried ? 'E' : '', s.carried ? 'Put down the ' + stackName(s.carried.itemId) : '', '', null);
     else if (ctx.kind === 'hint') setPrompt(ctx.drop ? 'E' : '', ctx.text + (ctx.drop ? ' · put down' : ''), '', null);
   }
 
@@ -892,6 +1031,8 @@
       if (v.pending || s.deliveries.some((d) => d.lines.some((l) => l.itemId === ln.itemId))) { const d = s.deliveries[0], mins = Math.max(1, Math.ceil((d.dueT - G.sim.state.t) / 60)); return { ...out, line: 'Your delivery arrives in about ' + mins + ' min of game time.' + (G.speed === 0 ? ' Time is paused.' : ''), wait: true }; }
       return { ...out, line: 'Order the materials for this stage.', btn: ['order:' + v.id, 'Order this stage, ' + money(v.toOrderUsd || v.costUsd)], btn2: pl.view.toOrderUsd > (v.toOrderUsd || 0) + 1 ? ['order:all', 'Order everything, ' + money(pl.view.toOrderUsd)] : null };
     }
+    const lf = pr.level !== 'guided' && !V.auto ? leftInStage(pr) : null;
+    if (lf) return { ...out, line: lf.text, target: { x: lf.list[0].x, z: lf.list[0].z, y: lf.list[0].y + 1.5 } };
     if (pr.level === 'guided') return { ...out, line: 'Stand by the ' + low(pr.name) + ' and press <kbd>E</kbd>, or use the button.', btn: ['auto:' + v.id, v.verb], target: at };
     if (!ln) return { ...out, line: 'Stand on the plan and hold <kbd>E</kbd> (or the mouse button) to dig it level.', target: at };
     const looseOne = pl.inst.find((id) => pr.members[id].need > 0 && pr.members[id].got >= pr.members[id].need - 1e-6);
@@ -1173,8 +1314,8 @@
         V.ctx = context();
       }
     }
-    if (V.fTap) { V.fTap = false; if (!OFF[G.player.tool]) press(V.ctx); }
-    tickLadder(dt); drawLadder(); tickMark(dt);
+    if (V.fTap) { V.fTap = false; if (!OFF[G.player.tool]) { press(V.ctx); V.ctx = context(); V.ctxSig = -1; } }   // what the press changed is read at once: a stale 'put down' with empty arms threw
+    tickLadder(dt); drawLadder(); tickMark(dt); drawBeacons(dt);
     if (!s.options.sandbox) tickWork(dt);
     glow(V.ctx);
     {
@@ -1231,6 +1372,7 @@
   canvas.addEventListener('pointerdown', (e) => {
     ptr.x = e.clientX; ptr.y = e.clientY; ptr.has = true; sounds.wake();
     if (V.placing) { e.stopImmediatePropagation(); e.preventDefault(); if (e.button === 2) endPlacing(); else { tickPlacing(); commitPlacing(); } return; }
+    if (e.button === 0 && V.beacons.length && !OFF[G.player.tool] && !V.auto) { const rc = canvas.getBoundingClientRect(), lk = !!document.pointerLockElement, hit = beaconAt(lk ? rc.left + rc.width / 2 : e.clientX, lk ? rc.top + rc.height / 2 : e.clientY); if (hit) { e.stopImmediatePropagation(); finishPlace(hit); return; } }
     // the left button is the hands: whatever F would do here
     if (e.button === 0 && !OFF[G.player.tool] && V.ctx && V.ctx.kind !== 'hint' && V.ctx.kind !== 'drop') { e.stopImmediatePropagation(); V.mDown = true; V.fTap = true; return; }
     const ctx = V.ctx;
@@ -1265,5 +1407,5 @@
     for (const mid of pl.inst) { const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid), set = !ln || pm.need - pm.got < 1e-6; if (!set && !(c && c.itemId === ln.itemId)) continue; if (!m) return { mid, x: V.structs.get(pr.id).x, z: V.structs.get(pr.id).z, site: true }; const hw = C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null; worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); wM.lerpVectors(wA, wB, 0.5); const w = { x: wM.x, y: wM.y, z: wM.z }; wM.project(G.camera); return { mid, ...w, sx: (wM.x * 0.5 + 0.5) * reach.w, sy: (-wM.y * 0.5 + 0.5) * reach.h, set }; }
     return null;
   }
-  window.__construct = { nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };
+  window.__construct = { beaconAt, finishPlace, nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };
 })();

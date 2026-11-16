@@ -13,7 +13,7 @@
       m4 = new T.Matrix4(), m4b = new T.Matrix4(), v = new T.Vector3(), c = new T.Color(), up = new T.Vector3(0, 1, 0);
     let pulse = 0;
     // the box that is a member: columns along it, across its depth, across its breadth (the same as its owner draws it)
-    function matrixOf(m, out, grow = 0, lift = null, h = 0) {
+    function matrixOf(m, out, grow = 0, lift = null, h = 0) {   // lift: the direction (and, times h, the distance) it is held clear along
       const ax = m.b[0] - m.a[0], ay = m.b[1] - m.a[1], az = m.b[2] - m.a[2], L = Math.hypot(ax, ay, az) || 1,
         d = m.section.d + grow, b = (m.section.b + grow) / L, nx = m.n[0], ny = m.n[1], nz = m.n[2],
         lx = lift ? lift.x * h : 0, ly = lift ? lift.y * h : 0, lz = lift ? lift.z * h : 0;
@@ -50,7 +50,7 @@
       if (!L) return;
       t.root.remove(L.group); L.solid.dispose(); L.glow.dispose(); L.dots && L.dots.dispose(); t.layers.delete(id);
     }
-    const local = (L, m, out, grow, h) => { matrixOf(m, out, grow, L.lift, h); out.elements[12] -= L.pivot.x; out.elements[13] -= L.pivot.y; out.elements[14] -= L.pivot.z; return out; };
+    const local = (L, m, out, grow, h, dir) => { matrixOf(m, out, grow, dir ? v.set(dir[0], dir[1], dir[2]) : L.lift, h); out.elements[12] -= L.pivot.x; out.elements[13] -= L.pivot.y; out.elements[14] -= L.pivot.z; return out; };
     return {
       setFrame(key, matrix) { const t = thing(key); t.root.matrix.copy(matrix); t.root.matrixWorldNeedsUpdate = true; },
       remove(key) { const t = things.get(key); if (!t) return; for (const id of [...t.layers.keys()]) dropLayer(t, id); G.scene.remove(t.root); things.delete(key); },
@@ -78,7 +78,7 @@
         members.forEach((m, n) => {
           L.at.set(m.id, n);
           L.solid.setMatrixAt(n, local(L, m, m4, 0, 0));
-          const k = look.colorOf(m), s = 0.92 + 0.16 * ((n * 7919) % 13) / 13;
+          const k = look.colorOf(m), s = /^siding/.test(m.col || '') ? 0.98 + 0.04 * ((n * 7919) % 13) / 13 : 0.92 + 0.16 * ((n * 7919) % 13) / 13;
           L.solid.setColorAt(n, c.setRGB(k[0] * s, k[1] * s, k[2] * s));
         });
         L.solid.count = members.length;
@@ -86,10 +86,11 @@
         if (L.solid.instanceColor) L.solid.instanceColor.needsUpdate = true;
       },
       // hold one solid member h metres clear of its seat (it is being knocked in)
-      lift(key, id, memberId, h) {
+      // dir (optional): a vector to hold it away along, in place of "up" (a board slides in along its wall)
+      lift(key, id, memberId, h, dir) {
         const L = layer(key, id), n = L.at.get(memberId);
         if (n === undefined) return;
-        L.solid.setMatrixAt(n, local(L, L.list[n], m4, 0, h));
+        L.solid.setMatrixAt(n, local(L, L.list[n], m4, 0, h, dir));
         L.solid.instanceMatrix.needsUpdate = true;
       },
       // nail points: small boxes that ride with the layer. list: [{ p: [x, y, z], k: 0 (bright, waiting) | 1 (driven, dark) }]

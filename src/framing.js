@@ -181,6 +181,30 @@
 
   /* ---------- walls ---------- */
   const headerFor = (w) => (w <= 1.25 ? "2x6" : w <= 1.85 ? "2x8" : "2x10");
+  // Siding: lap boards in even courses CH tall, each course one board along the wall, broken only at openings; a trim
+  // board at each end. The boards lean a few degrees (bottom out) so each course throws a shadow line on the one below.
+  const CH = 0.18,
+    TRIM_W = 0.09,
+    LEAN = (4 * Math.PI) / 180;
+  function sidingCourses(out, id, c) {
+    const [ux, uz] = c.u,
+      col = c.mat === "dark" ? "sidingDark" : "siding",
+      upV = [-c.out[0] * Math.sin(LEAN), Math.cos(LEAN), -c.out[2] * Math.sin(LEAN)],
+      common = { thickness: T.clad, col, out: c.out, u: [ux, uz] };
+    // corner trim: a vertical board at each end of the wall
+    if (c.trim !== false) for (const [s0, s1] of [[0, TRIM_W], [c.L - TRIM_W, c.L]]) M(out, id("tr"), "cladding", "trim", "cladding", c.parent, c.mat || "timber", 0.03, TRIM_W, c.at((s0 + s1) / 2, c.y0, c.off + 0.006), c.at((s0 + s1) / 2, c.y1, c.off + 0.006), [ux, 0, uz], { ...common, area: r3(TRIM_W * (c.y1 - c.y0)), row: -1 });
+    let row = 0;
+    for (let y = c.y0; y < c.y1 - 0.05; y += CH, row++) {
+      const ya = y,
+        yb = Math.min(c.y1, y + CH);
+      for (const [xa, xb] of c.spans(ya, yb, row)) {
+        const tw = c.trim === false ? 0 : TRIM_W, sa = Math.max(xa, tw), sb = Math.min(xb, c.L - tw);
+        if (sb - sa < 0.1) continue;
+        const ym = (ya + yb) / 2;
+        M(out, id("cl"), "cladding", "boards", "cladding", c.parent, c.mat || "timber", T.clad, yb - ya, c.at(sa, ym, c.off), c.at(sb, ym, c.off), upV, { ...common, area: r3((sb - sa) * (yb - ya)), row });
+      }
+    }
+  }
   // w: { id, a: [x, z], b: [x, z], y0, h, out (1: outside is to the left of a->b, -1: to the right, 0: an inside wall),
   //      mat, openings: [{ id, offset, width, sill, height }] (sill measured from y0) }
   function wallMembers(out, w, spec) {
@@ -241,17 +265,37 @@
     const net = L * (yt - yb) - cut(0, L, yb, yt),
       face = SD / 2;
     if (o) {
-      // sheets stood on end across the studs, from the floor frame up; then wrap, then boards
-      const lo = w.foot === undefined ? w.y0 + J_BOT : yb;
+      // sheets stood on end across the studs, from the floor frame up; then wrap, then boards. Every layer leaves the
+      // rough openings open: a sheet or a roll that crosses one is cut into the pieces round it.
+      const lo = w.foot === undefined ? w.y0 + J_BOT : yb,
+        free = (x0, x1, y0, y1) => {
+          const cov = opens.filter((q) => q.y0 < y1 - 1e-4 && q.y1 > y0 + 1e-4 && q.s1 > x0 && q.s0 < x1).sort((p, q) => p.s0 - q.s0),
+            r = [];
+          let s = x0;
+          for (const q of cov) {
+            q.s0 - s > 0.02 && r.push([s, Math.min(q.s0, x1)]);
+            s = Math.max(s, q.s1);
+          }
+          x1 - s > 0.02 && r.push([s, x1]);
+          return r;
+        },
+        holes = (x0, x1, y0, y1) => {
+          const ys = [y0, y1];
+          for (const q of opens) if (q.s1 > x0 && q.s0 < x1) for (const v of [q.y0, q.y1]) v > y0 + 1e-3 && v < y1 - 1e-3 && ys.push(v);
+          ys.sort((p, q) => p - q);
+          const r = [];
+          for (let k = 0; k + 1 < ys.length; k++) if (ys[k + 1] - ys[k] > 0.02) for (const [xa, xb] of free(x0, x1, ys[k], ys[k + 1])) r.push([xa, xb, ys[k], ys[k + 1]]);
+          return r;
+        },
+        outV = [nrm[0] * o, 0, nrm[2] * o];
       for (let x = 0; x < L - 0.01; x += SHEET.w)
-        for (let y = lo; y < yt - 0.01; y += SHEET.l) {
-          const x1 = Math.min(L, x + SHEET.w),
-            y1 = Math.min(yt, y + SHEET.l),
-            a = (x1 - x) * (y1 - y) - cut(x, x1, y, y1);
-          a > 0.02 && M(out, id("sh"), "sheathing", "wall", "sheathing", w.id, "osb", T.osb, x1 - x, at((x + x1) / 2, y, o * (face + T.osb / 2)), at((x + x1) / 2, y1, o * (face + T.osb / 2)), [ux, 0, uz], { area: r3(a), thickness: T.osb, col: "osb" });
-        }
-      M(out, w.id + ".wr", "membrane", "housewrap", "wrap", w.id, "housewrap", T.wrap + 0.004, yt - lo, at(0, (lo + yt) / 2, o * (face + T.osb + 0.004)), at(L, (lo + yt) / 2, o * (face + T.osb + 0.004)), UP, { area: r3(net + L * (yb - lo)), thickness: T.wrap, col: "wrap" });
-      M(out, w.id + ".cl", "cladding", "boards", "cladding", w.id, w.mat || "timber", T.clad, yt - lo, at(0, (lo + yt) / 2, o * (face + T.osb + 0.012)), at(L, (lo + yt) / 2, o * (face + T.osb + 0.012)), UP, { area: r3(net + L * (yb - lo)), thickness: T.clad, draw: 0 });
+        for (let y = lo; y < yt - 0.01; y += SHEET.l)
+          for (const [xa, xb, ya, yb2] of holes(x, Math.min(L, x + SHEET.w), y, Math.min(yt, y + SHEET.l))) {
+            const a = (xb - xa) * (yb2 - ya);
+            a > 0.02 && M(out, id("sh"), "sheathing", "wall", "sheathing", w.id, "osb", T.osb, xb - xa, at((xa + xb) / 2, ya, o * (face + T.osb / 2)), at((xa + xb) / 2, yb2, o * (face + T.osb / 2)), [ux, 0, uz], { area: r3(a), thickness: T.osb, col: "osb" });
+          }
+      for (const [xa, xb, ya, yb2] of holes(0, L, lo, yt)) M(out, id("wr"), "membrane", "housewrap", "wrap", w.id, "housewrap", T.wrap + 0.004, xb - xa, at((xa + xb) / 2, ya, o * (face + T.osb + 0.004)), at((xa + xb) / 2, yb2, o * (face + T.osb + 0.004)), [ux, 0, uz], { area: r3((xb - xa) * (yb2 - ya)), thickness: T.wrap, col: "wrap" });
+      sidingCourses(out, id, { u: [ux, uz], out: outV, mat: w.mat, parent: w.id, y0: lo, y1: yt, off: o * (face + T.osb + 0.012), at, spans: (ya, yb2) => free(0, L, ya, yb2), L });
       if (spec.ins) {
         ups.sort((p, q) => p - q);
         for (let k = 0; k + 1 < ups.length; k++) {
@@ -363,7 +407,14 @@
         ext = { area: r3(g.area || area), draw: 0 };
       M(out, g.id + ".sh", "sheathing", "wall", "sheathing", g.id, "osb", T.osb, L, mid, [mid[0], g.y1 || g.y0 + 1, mid[2]], [ux, 0, uz], { ...ext, thickness: T.osb });
       M(out, g.id + ".wr", "membrane", "housewrap", "wrap", g.id, "housewrap", T.wrap, L, mid, [mid[0], g.y1 || g.y0 + 1, mid[2]], [ux, 0, uz], { ...ext, thickness: T.wrap });
-      M(out, g.id + ".cl", "cladding", "boards", "cladding", g.id, g.mat || "timber", T.clad, L, mid, [mid[0], g.y1 || g.y0 + 1, mid[2]], [ux, 0, uz], { ...ext, thickness: T.clad });
+      {
+        // siding on the gable: the same courses, each cut to the roof slope (stepped lengths)
+        const gt = (q) => g.top(g.a[0] + ux * q, g.a[1] + uz * q) - 0.16;
+        let gn = 0;
+        sidingCourses(out, (c) => g.id + "." + c + gn++, { u: [ux, uz], out: [nrm[0] * o, 0, nrm[2] * o], mat: g.mat, parent: g.id, y0: g.y0, y1: g.y1 || g.y0 + 1, trim: false, off: o * (0.0445 + T.osb + 0.012), L,
+          at: (q, y, off) => [g.a[0] + ux * q + nrm[0] * (off || 0), y, g.a[1] + uz * q + nrm[2] * (off || 0)],
+          spans: (ya) => { let lo = -1, hi = -1; for (let q = 0; q <= L + 1e-6; q += 0.02) if (gt(q) > ya + 0.1) { lo < 0 && (lo = q); hi = q; } return lo >= 0 && hi - lo > 0.1 ? [[lo, hi]] : []; } });
+      }
       void o;
     }
   }
