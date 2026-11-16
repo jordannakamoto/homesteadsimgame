@@ -87,3 +87,66 @@ export function openingItems() {
   }
   return out;
 }
+
+// ---- free openings: placed anywhere along a wall run, not tied to the 1 m modules (docs/FRAMING.md, phase 1).
+// A free opening is saved as { id, typeId, sizeIdx, d, line, pos, sill, flip }: d and line say which grid wall line
+// (d 0 runs along x), pos is where the unit's left edge is along that line in metres, sill the height above the floor
+// (doors: 0), flip mirrors the swing or slide. Its offset along a run is pos - run.t0.
+export const END_GAP = 0.1;              // a rough opening stays this far from a wall end
+export const OPEN_GAP = 0.15;            // and this far from the next rough opening (a king and a jack stand between)
+export const SNAP_DIST = 0.22;           // how close the pointer must be for a snap to take
+export const SILL_NAMES = Object.freeze({ standard: 'Standard', counter: 'Kitchen counter', low: 'Low view', high: 'High privacy' });
+
+export const openingSizes = (type) => { const t = typeof type === 'string' ? OPENING_BY_ID[type] : type, out = []; for (const w of t.w) for (const h of t.h) out.push({ w, h }); return out; };
+export const sillFor = (type, preset) => { const t = typeof type === 'string' ? OPENING_BY_ID[type] : type; return t.kind === 'door' ? 0 : preset && SILL_PRESETS[preset] !== undefined ? SILL_PRESETS[preset] : t.sill; };
+
+// everything a free opening needs: the type, its size, the unit box, the rough opening and the header it needs
+export function freeSpec(f) {
+  const t = OPENING_BY_ID[f.typeId];
+  if (!t) return null;
+  const sizes = openingSizes(t), s = sizes[Math.min(Math.max(0, f.sizeIdx | 0), sizes.length - 1)];
+  const sill = t.kind === 'door' ? 0 : (f.sill === undefined ? t.sill : f.sill);
+  const rough = roughOpening(t, s.w, s.h, sill);
+  return { type: t, w: s.w, h: s.h, sill, head: sill + s.h, rough, header: headerSpec(rough.width), itemId: openingItemId(t.id, s.w, s.h) };
+}
+// the opening as the framing wants it: offset is along the run, the rough opening is wider than the unit
+export function freeToFraming(f, offset) {
+  const sp = freeSpec(f);
+  return { id: f.id, kind: sp.type.kind, type: f.typeId, offset: offset - ROUGH_GAP, width: sp.rough.width, sill: sp.rough.sill, height: sp.rough.height, frame: sp.type.frame === 'wall' ? undefined : sp.type.frame, free: true };
+}
+
+// Where a new opening of unit width w and height h goes, given the pointer's position along the run (centre `at`).
+// L: run length. others: [{ a, b, sill, head }] the rough extents of what is there (a < b along the run).
+// Returns { offset (unit left edge), centre, sill, snap (a short name or ''), guides: [{ x }|{ y }], ok, reason }.
+export function snapFree({ L, at, w, h, sill, others = [], windowsOnly = true, snap = true, wantSill = true }) {
+  const rw = w + 2 * ROUGH_GAP, os = others.slice().sort((p, q) => p.a - q.a), guides = [];
+  let c = at, name = '';
+  if (snap) {
+    const cand = [[L / 2, 'Wall centre']];
+    for (let i = 0; i + 1 < os.length; i++) { const g0 = os[i].b, g1 = os[i + 1].a; g1 - g0 > rw && cand.push([(g0 + g1) / 2, 'Centre between']); }
+    if (os.length) {
+      const f = os[0], l = os[os.length - 1];
+      if (f.a > END_GAP) cand.push([(END_GAP + f.a) / 2, 'Centre between']);
+      if (L - l.b > END_GAP) cand.push([(l.b + L - END_GAP) / 2, 'Centre between']);
+    }
+    if (os.length >= 2) {
+      const m = os.map((q) => (q.a + q.b) / 2), s = m[m.length - 1] - m[m.length - 2], s0 = m[1] - m[0];
+      cand.push([m[m.length - 1] + s, 'Equal spacing'], [m[0] - s0, 'Equal spacing']);
+    }
+    let best = SNAP_DIST;
+    for (const [x, nm] of cand) if (Math.abs(x - at) < best) { best = Math.abs(x - at); c = x; name = nm; }
+    if (name) guides.push({ x: c });
+  }
+  // heads in line with the others (windows only: a door's head is its own)
+  let sl = sill, headLine = false;
+  if (snap && wantSill && sill > 0) {
+    let best = 0.12;
+    for (const q of os) if (q.sill > 0.1 && Math.abs(q.head - (sill + h)) < best) { best = Math.abs(q.head - (sill + h)); sl = q.head - h; guides.push({ y: q.head }); headLine = true; }
+  }
+  const offset = c - w / 2;
+  let ok = true, reason = '';
+  const a = offset - ROUGH_GAP, b = offset + w + ROUGH_GAP;
+  if (a < END_GAP - 1e-9 || b > L - END_GAP + 1e-9) { ok = false; reason = 'Too close to the end of the wall (keep 0.1 m)'; }
+  else for (const q of os) if (a < q.b + OPEN_GAP - 1e-9 && b > q.a - OPEN_GAP + 1e-9) { ok = false; reason = a < q.a ? 'Overlaps the next opening' : 'Overlaps the opening beside it'; break; }
+  return { offset, centre: c, sill: sl, snap: name, headLine, guides, ok, reason };
+}
