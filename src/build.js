@@ -7185,6 +7185,21 @@
     GHOST = { cur: ghostMat(0.2, 0.55), later: ghostMat(0.1, 0.28), dim: ghostMat(0.05, 0.14) },
     GHOSTP = Object.fromEntries(Object.entries(GHOST).map(([k, m]) => [k, Object.assign(m.clone(), { side: T.DoubleSide })])),
     shellMat = new T.MeshLambertMaterial({ vertexColors: true, color: 0xd4e8f8, transparent: true, opacity: 0.3, depthWrite: false, side: T.DoubleSide });
+  // house wrap: a thin white sheet with a faint printed band, made once
+  const wrapMat = (() => {
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = 128;
+    const x = cv.getContext("2d");
+    x.fillStyle = "#f4f6f5";
+    x.fillRect(0, 0, 128, 128);
+    x.fillStyle = "rgba(60,90,140,0.16)";
+    for (let i = 0; i < 128; i += 16) x.fillRect(i + 2, 58, 10, 12);
+    x.fillStyle = "rgba(0,0,0,0.10)";
+    x.fillRect(0, 0, 128, 3);
+    const tex = new T.CanvasTexture(cv);
+    tex.colorSpace = T.SRGBColorSpace;
+    return new T.MeshLambertMaterial({ map: tex, color: 0xffffff });
+  })();
   const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), siding: col(0xc7b79b), sidingDark: col(0x6f5a47), concrete: CONCRETE, gravel: col(0x8f8b82) };
   const _m4 = new T.Matrix4(),
     _c = new T.Color();
@@ -7283,10 +7298,14 @@
     };
     sets.forEach((list, k) => {
       if (!list.length) return;
-      const mesh = new T.InstancedMesh(boxGeo, memMat, list.length);
-      place(mesh, list, k, true);
-      mesh.instanceMatrix.needsUpdate = true;
-      add(mesh, k === 1, true);
+      for (const wr of [false, true]) {
+        const part = list.filter((m) => (m.col === "wrap" && m.kind === "membrane") === wr);
+        if (!part.length) continue;
+        const mesh = new T.InstancedMesh(boxGeo, wr ? wrapMat : memMat, part.length);
+        place(mesh, part, k, true);
+        mesh.instanceMatrix.needsUpdate = true;
+        add(mesh, k === 1, true);
+      }
     });
     for (const key in ghosts) {
       const [level, top, poly] = key.split("|"),

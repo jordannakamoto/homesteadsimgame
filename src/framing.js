@@ -307,7 +307,14 @@
             const a = (xb - xa) * (yb2 - ya);
             a > 0.02 && M(out, id("sh"), "sheathing", "wall", "sheathing", w.id, "osb", T.osb, xb - xa, at((xa + xb) / 2, ya, o * (face + T.osb / 2)), at((xa + xb) / 2, yb2, o * (face + T.osb / 2)), [ux, 0, uz], { area: r3(a), thickness: T.osb, col: "osb" });
           }
-      for (const [xa, xb, ya, yb2] of holes(0, L, lo, yt)) M(out, id("wr"), "membrane", "housewrap", "wrap", w.id, "housewrap", T.wrap + 0.004, xb - xa, at((xa + xb) / 2, ya, o * (face + T.osb + 0.004)), at((xa + xb) / 2, yb2, o * (face + T.osb + 0.004)), [ux, 0, uz], { area: r3((xb - xa) * (yb2 - ya)), thickness: T.wrap, col: "wrap" });
+      // house wrap goes on in horizontal courses 2.7 m wide, from the bottom up; each course laps over the one below by 0.1 m
+      for (let c = 0, ya0 = lo; ya0 < yt - 0.01; c++) {
+        const top = Math.min(yt, ya0 + 2.7),
+          y0c = c ? ya0 - 0.1 : ya0,
+          lift = 0.0015 * c;
+        for (const [xa, xb, ya, yb2] of holes(0, L, y0c, top)) M(out, id("wr"), "membrane", "housewrap", "wrap", w.id, "housewrap", T.wrap + 0.004, xb - xa, at((xa + xb) / 2, ya, o * (face + T.osb + 0.004 + lift)), at((xa + xb) / 2, yb2, o * (face + T.osb + 0.004 + lift)), [ux, 0, uz], { area: r3((xb - xa) * (yb2 - ya)), thickness: T.wrap, col: "wrap" });
+        ya0 = top;
+      }
       sidingCourses(out, id, { u: [ux, uz], out: outV, mat: w.mat, parent: w.id, y0: lo, y1: yt, off: o * (face + T.osb + 0.012), at, spans: (ya, yb2) => free(0, L, ya, yb2), L });
       if (spec.ins) {
         ups.sort((p, q) => p - q);
