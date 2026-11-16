@@ -191,14 +191,15 @@
   // board at each end. The boards lean a few degrees (bottom out) so each course throws a shadow line on the one below.
   const CH = 0.18,
     TRIM_W = 0.09,
-    LEAN = (4 * Math.PI) / 180;
+    LEAN = (5 * Math.PI) / 180,
+    LAP = 0.025;
   function sidingCourses(out, id, c) {
     const [ux, uz] = c.u,
       col = c.mat === "dark" ? "sidingDark" : "siding",
       upV = [-c.out[0] * Math.sin(LEAN), Math.cos(LEAN), -c.out[2] * Math.sin(LEAN)],
       common = { thickness: T.clad, col, out: c.out, u: [ux, uz] };
     // corner trim: a vertical board at each end of the wall
-    if (c.trim !== false) for (const [s0, s1] of [[0, TRIM_W], [c.L - TRIM_W, c.L]]) M(out, id("tr"), "cladding", "trim", "cladding", c.parent, c.mat || "timber", 0.03, TRIM_W, c.at((s0 + s1) / 2, c.y0, c.off + 0.006), c.at((s0 + s1) / 2, c.y1, c.off + 0.006), [ux, 0, uz], { ...common, area: r3(TRIM_W * (c.y1 - c.y0)), row: -1 });
+    if (c.trim !== false) for (const [s0, s1] of [[0, TRIM_W], [c.L - TRIM_W, c.L]]) M(out, id("tr"), "cladding", "trim", "cladding", c.parent, c.mat || "timber", 0.02, TRIM_W, c.at((s0 + s1) / 2, c.y0, c.off + 0.006), c.at((s0 + s1) / 2, c.y1, c.off + 0.006), [ux, 0, uz], { ...common, area: r3(TRIM_W * (c.y1 - c.y0)), row: -1 });
     let row = 0;
     for (let y = c.y0; y < c.y1 - 0.05; y += CH, row++) {
       const ya = y,
@@ -207,7 +208,9 @@
         const tw = c.trim === false ? 0 : TRIM_W, sa = Math.max(xa, tw), sb = Math.min(xb, c.L - tw);
         if (sb - sa < 0.1) continue;
         const ym = (ya + yb) / 2;
-        M(out, id("cl"), "cladding", "boards", "cladding", c.parent, c.mat || "timber", T.clad, yb - ya, c.at(sa, ym, c.off), c.at(sb, ym, c.off), upV, { ...common, area: r3((sb - sa) * (yb - ya)), row });
+        // a thin lapped board: it overlaps the course below by 25 mm and only its bottom edge stands off the wall, so the shadow line carries the look
+        const lap = row ? LAP : 0;
+        M(out, id("cl"), "cladding", "boards", "cladding", c.parent, c.mat || "timber", 0.007, yb - ya + lap, c.at(sa, ym - lap / 2, c.off), c.at(sb, ym - lap / 2, c.off), upV, { ...common, area: r3((sb - sa) * (yb - ya)), row });
       }
     }
   }
