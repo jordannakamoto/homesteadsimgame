@@ -1,7 +1,8 @@
 // The gate: build the tutorial shed from bare ground through real input, as a player would.
 //   node test/shed.e2e.mjs        (needs dist/index.html and Playwright)
 // Part 1, Hands-on: open the Build panel (N), choose the tool shed, set it down with the pointer, order the kit,
-// level the site while the delivery is on its way, then walk to the stacks (W), pick up (F), walk back and hold F,
+// level the site while the delivery is on its way, then walk to the stacks (W), point and click to pick up, walk back,
+// point at each glowing place and hold the mouse button to set the piece and nail it,
 // stage by stage, tilting each wall up; a save and reload in the middle of framing; "Work until done" for the long
 // stages after the roof is on. Part 2, Guided: the same shed with one press a stage.
 // Checks money, stacks, stages, the project card, unlocks, the reload, and that the page logs no errors.
@@ -39,7 +40,7 @@ async function open(fresh = true) {
   const state0 = () => G(() => {
     const c = __construct, s = __game.sim.state.sys.construction, pr = c.current() || Object.values(s.progress)[0] || null, a = c.nextAction(), x = c.context(), st = pr && __build.structs().find((q) => q.id === pr.id);
     return { stage: pr && pr.stage, done: !!(pr && pr.done), built: pr ? Object.values(pr.members).filter((m) => m.built).length : 0, total: pr ? Object.keys(pr.members).length : 0,
-      raised: pr ? Object.keys(pr.raised).length : 0, raise: pr ? c.plan(pr.id).raise : null, target: a && a.target, line: a && a.line, ctx: x && x.kind, carried: s.carried,
+      raised: pr ? Object.keys(pr.raised).length : 0, raise: pr ? c.plan(pr.id).raise : null, np: c.nextPiece(), px: __game.player.x, pz: __game.player.z, target: a && a.target, line: a && a.line, ctx: x && x.kind, carried: s.carried,
       shed: st && { x: st.x, z: st.z, r: c.geom(pr.id).reach + 0.7 }, money: __game.sim.state.sys.stock.money, stacks: s.stacks.length, deliveries: s.deliveries.length, auto: !!c.V.auto,
       prompt: document.getElementById('cvprompt').hidden ? '' : document.getElementById('cvprompt').innerText.replace(/\s+/g, ' '),
       banner: document.getElementById('cvbanner').hidden ? '' : document.getElementById('cvbanner').innerText.replace(/\s+/g, ' '), played: window.__played };
@@ -94,7 +95,7 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
   // level the site while the delivery is on its way
   await walkTo(s.shed, 1.5);
   s = await state();
-  check('standing on the plan, the prompt offers to level the ground', s.ctx === 'work' && /level the ground/i.test(s.prompt), s.prompt);
+  check('standing on the plan, the prompt offers to level the ground', s.ctx === 'hands' && /dig and level/i.test(s.prompt), s.prompt);
   check('a ghost wall does not block the way: the player stands inside the plan', await G(() => { const st = __build.structs().find((q) => q.planned); return Math.hypot(st.x - __game.player.x, st.z - __game.player.z) < 2.6; }));
   await page.keyboard.down('KeyF'); await tick(20);
   check('letting go of F part way through a piece loses only that piece', await (async () => { await page.keyboard.up('KeyF'); await tick(3); const q = await state(); return q.built === 0 && q.stage === 'site'; })());
@@ -127,42 +128,53 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
       if (s.raise) {
         await walkTo(s.shed, s.shed.r);
         if (!taken.flat) { taken.flat = 1; check('a wall frame lies flat on the deck, waiting to be raised', await G(() => { const pr = __construct.current(), par = __construct.plan(pr.id).raise, mw = __build.membersOf(pr.id); return !!par && Object.keys(pr.members).filter((id) => pr.members[id].parent === par && pr.members[id].stage === 'wall-frame').every((id) => pr.members[id].built && mw.planned.has(id)); })); await shot('06-wall-flat'); }
-        await page.keyboard.down('KeyF'); await tick(22);
+        await page.keyboard.down('KeyF'); await tick(30);
         if (!taken.half) { taken.half = 1; check('holding F swings it up about its bottom plate', await G(() => { const R = __construct.V.raise; return !!R && R.p > 0.1 && R.p < 0.95 && Math.abs(R.angle) > 0.2 && Math.abs(R.angle) < 1.5; })); await shot('07-wall-half-raised'); }
         for (let i = 0; i < 40 && (await state()).raise; i++) await tick(5);
         await page.keyboard.up('KeyF'); await tick(30);
         if (!taken.up) { taken.up = 1; await shot('08-wall-up'); }
         continue;
       }
-      if (!s.target) { await tick(20); continue; }
-      const atShed = Math.hypot(s.target.x - s.shed.x, s.target.z - s.shed.z) < 0.1;
-      await walkTo(s.target, atShed ? s.shed.r : 1.0);
-      const c = await state();
-      if (c.ctx === 'work') {
-        if (c.carried && c.carried.itemId === 'lumber_2x4' && !taken.carry) { taken.carry = 1; check('the load is on the shoulder and walking is a little slower', await G(() => __construct.carry.loadForm === 'lumber' && __game.player.carryK > 0.7 && __game.player.carryK < 1)); await shot('05-carrying-studs'); }
-        await page.keyboard.down('KeyF');
-        for (let i = 0; i < 300; i++) {
-          await tick(5);
-          const q = await state();
-          if (q.banner) banners.add(q.banner.split(' ').slice(0, 2).join(' '));
-          if (q.ctx !== 'work') break;
+      const note = (q) => { if (q.banner) banners.add(q.banner.split(' ').slice(0, 2).join(' ')); };
+      if (s.np) {
+        // by hand: walk to the piece, point at it, hold the mouse button: it is set in place, then nailed blow by blow
+        await walkTo(s.np, 1.2);
+        if (s.carried && s.carried.itemId === 'lumber_2x4' && !taken.carry) { taken.carry = 1; check('the load is on the shoulder and walking is a little slower', await G(() => __construct.carry.loadForm === 'lumber' && __game.player.carryK > 0.7 && __game.player.carryK < 1)); await shot('05-carrying-studs'); }
+        for (let k = 0; k < 40; k++) {
+          const q = await state(); note(q);
+          if (!q.np || q.raise || Math.hypot(q.np.x - q.px, q.np.z - q.pz) > 1.7) break;
+          await page.mouse.move(q.np.sx, q.np.sy); await tick(1);
+          const c = await state();
+          if (c.ctx !== 'hands') { await tick(4); break; }
+          if (!taken.loose && c.stage === 'floor-frame') {
+            taken.loose = 1; await page.mouse.down(); await tick(2); await page.mouse.up(); await tick(8);
+            check('a click sets a piece in place: its material leaves the arms and it sits loose until it is nailed', await G(() => { const pr = __construct.current(); return Object.values(pr.members).some((m) => !m.built && m.need > 0 && m.got >= m.need - 1e-6); }) && /Nail it/.test((await state()).prompt), (await state()).prompt);
+            await shot('05a-set-loose');
+          }
+          await page.mouse.down(); await tick(24); await page.mouse.up(); await tick(1);
           // save and reload in the middle of framing the second wall, with studs in the arms
-          if (!reloaded && q.stage === 'wall-frame' && q.raised === 1 && q.built - 24 > 22 && q.carried && q.carried.qty > 3) {
-            await page.keyboard.up('KeyF'); await tick(20);
+          if (!reloaded && c.stage === 'wall-frame' && c.raised === 1 && c.built - 24 > 22 && c.carried && c.carried.qty > 3) {
+            await tick(20);
+            const q2 = await state();
             const snap = await G(() => { __game.saveGame(); const s = __game.sim.state.sys.construction, pr = __construct.current(); return { c: JSON.stringify(s), money: __game.sim.state.sys.stock.money, built: Object.values(pr.members).filter((m) => m.built).length, flat: Object.keys(pr.members).filter((id) => pr.members[id].built && pr.members[id].stage === 'wall-frame' && !pr.raised[pr.members[id].parent]).length }; });
-            T.T0.base = q.played;
+            T.T0.base = q2.played;
             await T.page.reload({ waitUntil: 'domcontentloaded', timeout: 120000 }); await T.boot(); await tick(10);
             const back = await G(() => { const s = __game.sim.state.sys.construction, pr = __construct.current(), mw = __build.membersOf(pr.id); return { c: JSON.stringify(s), money: __game.sim.state.sys.stock.money, load: __construct.carry.loadForm, stacks: __construct.carry.pieceCount,
               agree: Object.keys(pr.members).every((id) => { const m = pr.members[id], lying = m.stage === 'wall-frame' && !pr.raised[m.parent]; return mw.planned.has(id) === !(m.built && !lying); }) }; });
             check('a save in the middle of a wall reloads exactly: stacks, the load in the arms, every piece', back.c === snap.c && back.money === snap.money && back.load === 'lumber' && back.stacks > 50 && back.agree && snap.flat > 3, snap.built + ' built, ' + snap.flat + ' lying flat');
             reloaded = true; break;
           }
-          if (q.stage === 'sheathing' && !taken.sheath && q.built > 122) { taken.sheath = 1; await shot('10-sheathing'); }
         }
-        await page.keyboard.up('KeyF'); await tick(16);
         const z = await state();
         if (z.stage === 'roof-deck' && !taken.rafters) { taken.rafters = 1; await shot('09-rafters'); }
-      } else if (c.ctx === 'pick' || c.ctx === 'swap' || c.ctx === 'back') { await page.keyboard.press('KeyF'); await tick(2); trips++; }
+        continue;
+      }
+      if (!s.target) { await tick(20); continue; }
+      await walkTo(s.target, 1.0);
+      const sp = await G((t) => { const v = new __game.THREE.Vector3(t.x, __game.heightAt(t.x, t.z) + 0.2, t.z).project(__game.camera); return { x: (v.x * 0.5 + 0.5) * __construct.reach.w, y: (-v.y * 0.5 + 0.5) * __construct.reach.h }; }, s.target);
+      await page.mouse.move(sp.x, sp.y); await tick(2);
+      const c = await state();
+      if (c.ctx === 'pick' || c.ctx === 'swap' || c.ctx === 'back') { await page.mouse.down(); await tick(1); await page.mouse.up(); await tick(2); trips++; }
       else await tick(10);
     }
   };
