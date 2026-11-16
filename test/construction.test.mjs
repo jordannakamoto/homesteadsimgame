@@ -395,3 +395,11 @@ test('support order: beams wait for the pier blocks, posts for piers', () => {
   P.members.p.built = true; P.tally.foundation[0] = 1;
   assert.equal(K.blocked(P, 'b'), null);
 });
+
+test('feel settings: defaults, clamped, presets, reset', () => {
+  const sim = start();
+  assert.deepEqual(K.feelOf(cs(sim)), { ...C.FEEL });
+  assert.equal(sim.commandNow('construction.setFeel', { key: 'setCount', value: 99 }).feel.setCount, 6);
+  assert.equal(sim.commandNow('construction.setFeel', { preset: 'fast' }).feel.nails, 0);
+  assert.deepEqual(sim.commandNow('construction.setFeel', { reset: true }).feel, { ...C.FEEL });
+});

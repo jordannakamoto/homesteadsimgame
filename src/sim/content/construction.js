@@ -121,12 +121,39 @@ export const DELIVERY = Object.freeze({
 
 // ---- carrying: by hand about what a person lifts comfortably; a tool that carries more raises it
 export const GESTURES = Object.freeze([1, 2, 3, 4]);       // pieces per gesture: one place to read it (setting `gesture`, saved with the world)
-export const gestureOf = (options) => (options && GESTURES.includes(options.gesture) ? options.gesture : 3);
+export const gestureOf = (options) => (options && Number.isFinite(options.gesture) && options.gesture > 0 ? options.gesture : 3);
 export const CARRY = Object.freeze({ byHandKg: 30, tools: Object.freeze([{ tool: 'wheelbarrow', kg: 60 }]), slow: 0.85 });
 export function carryLimitKg(tools = [], gesture = 3) {
   let kg = CARRY.byHandKg;
   for (const t of CARRY.tools) if (tools.includes(t.tool)) kg = Math.max(kg, t.kg);
   return kg * gesture;
+}
+
+// ---- how construction feels: every number the hands-on work is tuned by. Saved with the world; the Build panel edits them.
+// nails: nails driven per strike (0 = all of the piece's nails). Multipliers: 1 is the default strength.
+export const FEEL = Object.freeze({ setCount: 2, nails: 1, strikesPerSec: 3, dropDelayMs: 140, armful: 3, takeM: 4, climbMps: 3.8, learnNeeded: 2, sweepSpeed: 2, hitStop: 1, shake: 1 });
+export const FEEL_SPEC = Object.freeze([
+  { key: 'setCount', label: 'Pieces set per click', min: 1, max: 6, step: 1, tip: 'How many pieces one click sets in place, loose, ready to nail' },
+  { key: 'nails', label: 'Nails per strike', min: 0, max: 2, step: 1, words: ['all', '1', '2'], tip: 'How many nails one strike of the hammer drives' },
+  { key: 'strikesPerSec', label: 'Strikes a second (held)', min: 1, max: 8, step: 0.5, tip: 'How fast the hammer falls while the button is held' },
+  { key: 'dropDelayMs', label: 'Delay between pieces (ms)', min: 0, max: 600, step: 20, tip: 'The pause between pieces dropping into place' },
+  { key: 'armful', label: 'Armful size (x)', min: 0.5, max: 6, step: 0.5, tip: 'How much you carry at once' },
+  { key: 'takeM', label: 'Auto-take from stack (m)', min: 0, max: 12, step: 0.5, tip: 'Within this distance of a stack, pieces come off it without a trip' },
+  { key: 'climbMps', label: 'Ladder climb (m/s)', min: 1, max: 8, step: 0.5, tip: 'How fast you climb' },
+  { key: 'learnNeeded', label: 'Pieces by hand before learned', min: 0, max: 8, step: 1, tip: 'After this many of a kind by hand, you set and nail it as you sweep along' },
+  { key: 'sweepSpeed', label: 'Sweep speed (x)', min: 0.5, max: 5, step: 0.5, tip: 'How fast a learned kind goes in as you sweep' },
+  { key: 'hitStop', label: 'Hit-stop (x)', min: 0, max: 3, step: 0.25, tip: 'The tiny freeze on each hit' },
+  { key: 'shake', label: 'Shake (x)', min: 0, max: 3, step: 0.25, tip: 'Screen shake on each hit' },
+]);
+export const FEEL_PRESETS = Object.freeze({
+  relaxed: { setCount: 1, nails: 1, strikesPerSec: 2.5, dropDelayMs: 240, armful: 2, takeM: 3, climbMps: 3, learnNeeded: 3, sweepSpeed: 1.5, hitStop: 1.25, shake: 1.25 },
+  standard: { ...FEEL },
+  fast: { setCount: 4, nails: 0, strikesPerSec: 5, dropDelayMs: 80, armful: 4, takeM: 6, climbMps: 4.5, learnNeeded: 1, sweepSpeed: 3, hitStop: 0.5, shake: 0.5 },
+});
+export function feelOf(s) {
+  const o = { ...FEEL }, f = (s && s.feel) || {};
+  for (const sp of FEEL_SPEC) if (Number.isFinite(f[sp.key])) o[sp.key] = Math.max(sp.min, Math.min(sp.max, f[sp.key]));
+  return o;
 }
 
 // ---- work: blows to put in one member of each kind, and how fast the blows come by the best tool owned

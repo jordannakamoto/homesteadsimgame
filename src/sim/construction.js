@@ -36,6 +36,7 @@ export function initConstruction() {
     unlocked: [...C.UNLOCKS[0].opens],
     tutorial: { card: false, shed: null, seen: {}, done: false },
     options: { sandbox: false, instant: false, cards: true, auto: false, mute: true, gesture: 3 },   // sound is off until it has been tuned
+    feel: { ...C.FEEL },
     finished: 0,
   };
 }
@@ -429,7 +430,7 @@ function pickUp(ctx, p) {
   if (isSupply(st.itemId)) return { ok: false, reason: 'stays by the stacks' };
   const it = item(st.itemId), tools = (ctx.get('stock') || {}).tools || [];
   const have = s.carried && s.carried.itemId === st.itemId ? s.carried.qty : 0;
-  const limitKg = C.carryLimitKg(tools, C.gestureOf(s.options)), minQty = it.unit === 'each' ? 1 : 0, cap = Math.max(minQty, limitKg / it.massKgPerUnit);
+  const limitKg = C.carryLimitKg(tools, C.feelOf(s).armful), minQty = it.unit === 'each' ? 1 : 0, cap = Math.max(minQty, limitKg / it.massKgPerUnit);
   const want = p.qty > 0 ? have + p.qty : armful(s, st.itemId, cap);
   const r = SUP.takeFromStack(s, st.id, { massKgPerUnit: it.massKgPerUnit, limitKg, want, minQty });
   if (r.ok) ctx.emit('construction.carry', { itemId: r.itemId, qty: r.carried.qty });
@@ -506,7 +507,7 @@ function install(ctx, p) {
       const g = C.learnGroup(pr.members[id].kind);
       if (!g || s.learn.known[g]) continue;
       s.learn.counts[g] = (s.learn.counts[g] || 0) + 1;
-      if (s.learn.counts[g] >= C.LEARN.needed) { s.learn.known[g] = true; out.learned.push(g); }
+      if (s.learn.counts[g] >= C.feelOf(s).learnNeeded) { s.learn.known[g] = true; out.learned.push(g); }
     }
   }
   out.ok = out.installed.length > 0 || out.partial.length > 0 || out.set.length > 0;
@@ -604,7 +605,14 @@ export const constructionSystem = () => ({
     'construction.setLevel': (c, p) => { if (!LEVELS.includes(p.level)) return { ok: false, reason: 'unknown level' }; const pr = c.s.progress[p.structId]; if (pr) pr.level = p.level; else c.s.level = p.level; return { ok: true }; },
     'construction.setOption': (c, p) => { if (!p || !(p.key in c.s.options)) return { ok: false, reason: 'unknown option' }; c.s.options[p.key] = !!p.value; if (p.key === 'sandbox') c.emit('construction.sandbox', { on: !!p.value }); return { ok: true }; },
     'construction.setGesture': (c, p) => { if (!p || !C.GESTURES.includes(p.n)) return { ok: false, reason: 'unknown amount' }; c.s.options.gesture = p.n; return { ok: true }; },
+    'construction.setFeel': (c, p) => {
+      if (!p) return { ok: false, reason: 'nothing' };
+      if (p.reset) c.s.feel = { ...C.FEEL };
+      else if (p.preset) { if (!C.FEEL_PRESETS[p.preset]) return { ok: false, reason: 'unknown preset' }; c.s.feel = { ...C.FEEL_PRESETS[p.preset] }; }
+      else { const sp = C.FEEL_SPEC.find((q) => q.key === p.key); if (!sp || !Number.isFinite(p.value)) return { ok: false, reason: 'unknown setting' }; c.s.feel = { ...C.feelOf(c.s), [sp.key]: Math.max(sp.min, Math.min(sp.max, p.value)) }; }
+      return { ok: true, feel: C.feelOf(c.s) };
+    },
     'construction.seeCard': (c, p) => { c.s.tutorial.seen[p.stage] = true; return { ok: true }; },
   },
-  api: { content: C, knows: (s, kind) => !!(s.learn && s.learn.known[C.learnGroup(kind)]), sheetSource, needsStock, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance },
+  api: { content: C, feelOf: (s) => C.feelOf(s), knows: (s, kind) => !!(s.learn && s.learn.known[C.learnGroup(kind)]), sheetSource, needsStock, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance },
 });
