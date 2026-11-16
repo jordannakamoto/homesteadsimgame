@@ -612,7 +612,9 @@
   const wantedStack = (d) => d.itemId === V.wantItem;
   const wantsHere = (pr, pl, c) => pl.inst.some((id) => { const ln = lineOf(pr, id); return ln && ln.itemId === c.itemId && pr.members[id].need - pr.members[id].got > 1e-6; });
   const pickable = (d) => !C.SITE_SUPPLY.includes(d.itemId);
-  function context() {
+  // whatever is in the arms can always be put down: a hint with nothing to press gets that
+  function context() { const x = contextRaw(); if (x && x.kind === 'hint' && !x.drop && S().carried) return { ...x, drop: true }; return x; }
+  function contextRaw() {
     const P = G.player, s = S(), c = s.carried;
     if (OFF[P.tool] || V.placing || s.options.sandbox) return null;
     if (V.auto) return { kind: 'stop', id: V.auto.id };
@@ -642,7 +644,7 @@
     if (c) return pr ? { kind: 'hint', text: (c.itemId === 'door_prehung' || c.itemId === 'window_shed') && !api.stageOpen(pr, 'openings') ? (c.itemId === 'door_prehung' ? 'Wrap the wall before the door goes in' : 'Wrap the wall before the window goes in') : (c.itemId === 'door_prehung' || c.itemId === 'window_shed') ? 'Walk to the opening: it glows' : 'Nothing here needs ' + stackName(c.itemId) + ' yet', drop: true } : { kind: 'drop' };
     return null;
   }
-  function homeStack(itemId) { const P = G.player; let best = null, bd = 14; for (const k of S().stacks) if (k.itemId === itemId) { const d = Math.hypot(k.x - P.x, k.z - P.z); if (d < bd) { bd = d; best = k; } } return best; }
+  function homeStack(itemId) { const P = G.player; let best = null, bd = 3; for (const k of S().stacks) if (k.itemId === itemId) { const d = Math.hypot(k.x - P.x, k.z - P.z); if (d < bd) { bd = d; best = k; } } return best; }
   function putDown() {
     const c = S().carried; if (!c) return;
     const h = homeStack(c.itemId), P = G.player;
@@ -863,7 +865,7 @@
     else if (ctx.kind === 'pick') setPrompt('E', (ctx.more ? 'Take more ' : 'Pick up ') + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'back') setPrompt('E', 'Put back the ' + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'swap') setPrompt('E', 'Swap for ' + stackName(ctx.stack.itemId), '', null);
-    else if (ctx.kind === 'drop') setPrompt('E', 'Put down the ' + stackName(s.carried.itemId), '', null);
+    else if (ctx.kind === 'drop') setPrompt(s.carried ? 'E' : '', s.carried ? 'Put down the ' + stackName(s.carried.itemId) : '', '', null);
     else if (ctx.kind === 'hint') setPrompt(ctx.drop ? 'E' : '', ctx.text + (ctx.drop ? ' · put down' : ''), '', null);
   }
 
@@ -1173,7 +1175,7 @@
         V.ctx = context();
       }
     }
-    if (V.fTap) { V.fTap = false; if (!OFF[G.player.tool]) press(V.ctx); }
+    if (V.fTap) { V.fTap = false; if (!OFF[G.player.tool]) { press(V.ctx); V.ctx = context(); V.ctxSig = -1; } }   // what the press changed is read at once: a stale 'put down' with empty arms threw
     tickLadder(dt); drawLadder(); tickMark(dt);
     if (!s.options.sandbox) tickWork(dt);
     glow(V.ctx);
