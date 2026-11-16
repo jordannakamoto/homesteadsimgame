@@ -217,8 +217,9 @@ test('pumping by hand: three strokes prime it, then each stroke lifts a litre, t
   near(W(sim).totals.wellL - before, 20, 1e-9);
   // collected + well = stored + used + leaked
   near(W(sim).totals.wellL, freshStoredL(W(sim)) + W(sim).totals.usedL + W(sim).totals.leakedL + W(sim).totals.overflowL, 1e-6);
-  // left for an hour it loses its prime
-  sim.runTicks(60);
+  // an hour later it still has its prime; left for a day it has drained back
+  sim.runTicks(60); assert.equal(stroke().priming, undefined);
+  sim.runTicks(1440);
   assert.equal(stroke().priming, true);
 });
 

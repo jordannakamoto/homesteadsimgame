@@ -639,7 +639,7 @@ function leakStep(R, lk) {
 // One stroke of a manual hand pump: lifts up to its stroke volume from whatever its inlet is piped to and
 // sends it out of the spout or up to the tank its outlet is piped to (the diverter). The first strokes only
 // prime it. Applied at once, so the handle and the water agree.
-const PRIME_STROKES = 3, PRIME_HOLD_MIN = 30;
+const PRIME_STROKES = 3, PRIME_HOLD_MIN = 720;      // it holds its prime for half a day (ten minutes of play at 1x)
 function pumpStroke(ctx, p = {}) {
   const s = ensure(ctx), pieces = piecesFor(ctx), net = pieces && netFor(pieces), f = net && net.fx.get(p.id), pm = f && s.pumps[p.id];
   const out = (o) => ({ ok: false, litres: 0, to: null, ...o });
