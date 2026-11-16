@@ -4,6 +4,7 @@
 import { createSim } from './sim.js';
 import { stockSystem } from './stock.js';
 import { weather } from './weather.js';
+import { streams } from './streams.js';
 import { siteSystem } from './site.js';
 import { physicalKitchenSystem } from './physical-kitchen.js';
 import { cookingSystem } from './cooking.js';
@@ -27,6 +28,7 @@ export * from './items.js';
 export * from './stock.js';
 export * as calendar from './calendar.js';
 export { weather, CLIMATES, conditionWord } from './weather.js';
+export { streams, streamLook } from './streams.js';
 export * from './site.js';
 export { water, overlayData as waterOverlay, freshStoredL } from './water.js';
 export * from './fixtures-water.js';
@@ -53,7 +55,7 @@ export * from './content/plumbing-parts.js';
 // Kit parts fitted by hand (generic), then plumbing, which compiles them for water, which runs after both.
 const partsSystem = createPartsSystem({ name: 'parts', stepM: PLUMBING_STEP_M, kinds: PLUMBING_KINDS, mates: PLUMBING_MATES });
 const plumbing = plumbingSystem({ kinds: PLUMBING_KINDS, mates: PLUMBING_MATES, stepM: PLUMBING_STEP_M, material: PLUMBING_PIPE, kit: STARTER_KIT });
-export const GAME_SYSTEMS = [weather, stockSystem(), siteSystem(), structure, electrical, partsSystem, plumbing, water, thermal, cookingSystem(), chickensSystem(), physicalKitchenSystem(), garden, constructionSystem()];
+export const GAME_SYSTEMS = [weather, streams, stockSystem(), siteSystem(), structure, electrical, partsSystem, plumbing, water, thermal, cookingSystem(), chickensSystem(), physicalKitchenSystem(), garden, constructionSystem()];
 
 export function createGameSim(seed, opts = {}) {
   return createSim({ seed, systems: GAME_SYSTEMS, ...opts });

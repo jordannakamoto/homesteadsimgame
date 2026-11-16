@@ -609,7 +609,10 @@
   /* ================= water to fill the can: a pump, tap or tank of the water system, or a pond ================= */
   const source = { kind: 'none', fixtures: false, t: 0 };
   const waterPieces = () => { try { return (window.__build ? window.__build.pieces() : []).filter((p) => p.kind === 'fixture' && p.system === 'water' && /^(outlet|pump|storage)$/.test(p.category)); } catch (e) { return []; } };
-  const isPond = (x, z) => G.heightAt(x, z) < (G.sea || 0) - 0.08;
+  // the sea's shallows, or a stream deep enough to dip a can in (G.streamWaterAt: src/engine.js)
+  const streamAt = (x, z) => { const w = G.streamWaterAt ? G.streamWaterAt(x, z) : null; return w && w.depth > 0.06 ? w : null; };
+  const isPond = (x, z) => G.heightAt(x, z) < (G.sea || 0) - 0.08 || !!streamAt(x, z);
+  const waterY = (x, z) => { const w = streamAt(x, z); return w ? G.heightAt(x, z) + w.depth : (G.sea || 0); };
   function findSources() {
     const P = G.player;
     source.fixtures = waterPieces().length > 0; source.kind = source.fixtures ? 'fixture' : 'none';
@@ -807,7 +810,7 @@
         if (room < 0.05) say('The can is full.'); else drawFrom(act.piece, Math.min(3, room));
       }
     } else if (k === 'dip') {
-      if (act.acc >= 0.15) { const step = act.acc; act.acc = 0; if (S().can.litres < 8.99) { cmd('garden.refill', { litres: 6 * step }); G.burst(a.x, (G.sea || 0) + 0.05, a.z, 3, 0xcfeaf7, 0.8, 0.6, 0.04, 0.4); } else if (!act.n) { act.n = 1; say('The can is full.'); } }
+      if (act.acc >= 0.15) { const step = act.acc; act.acc = 0; if (S().can.litres < 8.99) { const l = Math.min(6 * step, 9 - S().can.litres); cmd('garden.refill', { litres: l }); if (G.riverLive && streamAt(a.x, a.z)) G.riverLive.pour(2, a.x, a.z, 0.4, -l / 1000 / step); G.burst(a.x, waterY(a.x, a.z) + 0.05, a.z, 3, 0xcfeaf7, 0.8, 0.6, 0.04, 0.4); } else if (!act.n) { act.n = 1; say('The can is full.'); } }
     } else if (k.startsWith('seed:')) sowAt(a, false);
     else if (k === 'hands') handsFrame(a);
     else if ((k === 'mulch' || k === 'compost') && act.acc >= 0.16) {

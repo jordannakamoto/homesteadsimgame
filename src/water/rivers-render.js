@@ -1,28 +1,21 @@
 // Streams and rivers on screen, baked tier: one water mesh per chunk that a channel crosses, built from the channel
-// data in rivers-gen.js, drawn with a shader of their own (not the sea's).
+// data in rivers-gen.js, drawn with a shader of their own (not the sea's; the look is in river-shade.js).
 //
 // The surface. Flat across the channel, so where it meets the banks the depth test cuts a crisp shoreline, and
 // stepped along it: a pool holds 0.6 of bankfull depth above its lip, a riffle carries a thin sheet down to the next
-// pool. Each vertex carries its flow velocity, its depth over the ground and how much white water it has.
-//
-// The look, from what makes real streams read as real (see the design doc):
-//  - colour is reflection plus "water fog", never reflection alone: light is absorbed per channel, red first, so
-//    clear shallows go green-gold over the bed and deeper water olive-brown; sediment (more with more flow) clouds it
-//  - the bed shows through the shallows (transparency), with caustics where the sun reaches it
-//  - flow shows in the surface: detail flowed along the velocity in two layers half a phase apart (Valve's flow
-//    maps), glassy in pools, broken on riffles
-//  - sky reflection darkened under trees (the baked sky-visibility map), sun glints, Fresnel
-//  - white water on riffles and at the water's edge, posterised with an ordered dither
-//  - everything evaluated per world texel (6.4 a metre, the terrain's), so the water is pixel-crisp like the ground
+// pool. Each vertex carries the surface on an ordinary day, the bed lip it rides on, the ground under it, its flow
+// velocity and how much white water it has; the vertex shader raises or lowers the water and speeds or slows it
+// with the stream flow of the day (uWetDepth, uWetSpeed from src/sim/streams.js), so rain shows without a rebuild.
+// Each chunk also keeps that data (ch.riverData) for the live simulation to start from and feed its edges with.
 import * as THREE from 'three';
-
-const TPM = 6.4;
+import { RIVER_SHADE } from './river-shade.js';
 
 export function createRiverWater({ U, sea, CS, P, SEA }) {
   const N = CS + 1;
   const su = sea.uniforms;
   const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
-    uTurbid: { value: 1 }, uSnap: { value: 1 }, uSkyMap: { value: null }, uSkyK: { value: 1 }, uTex: { value: null },
+    uTurbid: { value: 1 }, uSnap: { value: 1 }, uTPM: { value: 12.8 }, uSkyMap: { value: null }, uSkyK: { value: 1 }, uTex: { value: null },
+    uWin: { value: new THREE.Vector4(1, 1, 0, 0) }, uWetDepth: { value: 1 }, uWetSpeed: { value: 1 },
   }]);
   // shared, not copied: time, sun and sky move with the world; the detail texture is the sea's
   uniforms.uTime = U.time; uniforms.uTex = su.uTex;
@@ -31,80 +24,31 @@ export function createRiverWater({ U, sea, CS, P, SEA }) {
   const material = new THREE.ShaderMaterial({
     uniforms, fog: true, transparent: true, depthWrite: false,
     vertexShader: `
-      attribute vec4 aFlow;                 // xy velocity (m/s), z depth over the ground (m), w white water
+      attribute vec4 aFlow;                 // xy velocity on an ordinary day (m/s), z the ground, w white water
+      attribute float aBed;                 // the bed lip the surface rides on
+      uniform float uWetDepth, uWetSpeed;
       varying vec3 vWorld; varying vec4 vFlow;
       #include <fog_pars_vertex>
       void main() {
-        vec4 wp = modelMatrix * vec4(position, 1.0);
-        vWorld = wp.xyz; vFlow = aFlow;
+        vec3 p = position;
+        p.y = aBed + (p.y - aBed) * uWetDepth;
+        vec4 wp = modelMatrix * vec4(p, 1.0);
+        vWorld = wp.xyz; vFlow = vec4(aFlow.xy * uWetSpeed, p.y - aFlow.z, aFlow.w * mix(0.7, 1.3, clamp(uWetSpeed - 0.5, 0.0, 1.0)));
         vec4 mvPosition = viewMatrix * wp;
         gl_Position = projectionMatrix * mvPosition;
         #include <fog_vertex>
       }`,
     fragmentShader: `
-      uniform float uTime, uTurbid, uSnap, uSkyK; uniform sampler2D uTex, uSkyMap;
-      uniform vec3 uSunDir, uSunCol, uAmb, uSky, uZenith;
       varying vec3 vWorld; varying vec4 vFlow;
       #include <common>
       #include <fog_pars_fragment>
-      const mat4 BAYER = mat4(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
-      float bayer4(vec2 c) { ivec2 i = ivec2(mod(c, 4.0)); return (BAYER[i.y][i.x] + 0.5) / 16.0; }
+      ${RIVER_SHADE}
       void main() {
-        vec2 p = vWorld.xz;
-        vec2 cell = floor(p * ${TPM.toFixed(1)});
-        vec2 q = uSnap > 0.5 ? (cell + 0.5) / ${TPM.toFixed(1)} : p;
-        vec2 v = vFlow.xy; float sp = length(v);
-        float d = max(vFlow.z, 0.0);
-        // flowed detail, two layers half a phase apart, the phase offset in 4 m patches to hide the pulse
-        float ph = uTime * 0.32 + texture2D(uTex, floor(q / 4.0) * 0.173).b;
-        float t0 = fract(ph), t1 = fract(ph + 0.5), wb = abs(1.0 - 2.0 * t0);
-        vec2 uvA = q * 0.31 - v * t0 * 0.55, uvB = q * 0.31 - v * t1 * 0.55 + 0.37;
-        vec3 dA = texture2D(uTex, uvA).rgb, dB = texture2D(uTex, uvB).rgb;
-        vec3 det = mix(dA, dB, wb);
-        float rough = 0.12 + 0.88 * smoothstep(0.05, 1.1, sp);           // pools glassy, riffles broken
-        vec2 g = (det.rg - 0.5) * rough * 1.1;
-        g = floor(g * 8.0 + 0.5) / 8.0;                                  // ripples as pixel facets
-        vec3 N = normalize(vec3(-g.x, 1.0, -g.y));
-        vec3 V = normalize(cameraPosition - vWorld);
-        float ndv = max(dot(N, V), 0.0);
-        float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
-        float skyVis = mix(1.0, texture2D(uSkyMap, (q + 0.5) / 512.0).r, uSkyK);
-        vec3 R = reflect(-V, N); R.y = abs(R.y);
-        // low reflections hit the banks and the plants on them, not open sky: a small stream mirrors dark green
-        vec3 bank = uAmb * vec3(0.16, 0.2, 0.11) + uSunCol * vec3(0.04, 0.05, 0.025);
-        vec3 sky = mix(bank, mix(uSky, uZenith, pow(clamp(R.y, 0.0, 1.0), 0.7)), smoothstep(0.04, 0.3, R.y)) * mix(0.35, 1.0, skyVis);
-        float sd = max(dot(R, uSunDir), 0.0);
-        vec3 glint = uSunCol * (pow(sd, mix(600.0, 120.0, rough)) * mix(40.0, 6.0, rough)) * skyVis;
-        // light through the water: absorbed per channel along the path down and back, clouded by sediment
-        float path = d * (1.0 + 1.0 / max(V.y, 0.25));
-        vec3 sigma = vec3(1.9, 0.55, 0.85) + uTurbid * vec3(0.55, 0.65, 1.1);
-        vec3 T = exp(-sigma * path);
-        float opaque = 1.0 - dot(T, vec3(0.3, 0.45, 0.25));
-        vec3 lightIn = uAmb * mix(0.55, 1.0, skyVis) + uSunCol * 0.55 * skyVis * (0.6 + 0.4 * max(uSunDir.y, 0.0));
-        // clear water mostly absorbs: it darkens and tints the bed rather than glowing over it
-        vec3 scatter = mix(vec3(0.045, 0.065, 0.035), vec3(0.075, 0.062, 0.04), clamp(uTurbid * 0.4, 0.0, 1.0));
-        float fwd = pow(max(dot(-V, uSunDir), 0.0), 6.0);                 // looking upstream into a low sun
-        vec3 body = scatter * lightIn * (1.0 + 2.5 * fwd);
-        // caustics on the bed, seen through the shallows where the sun reaches
-        vec2 bedP = q - V.xz / max(V.y, 0.3) * d;
-        float ca = texture2D(uTex, bedP * 0.42 + uTime * vec2(0.03, 0.017) + g).b * texture2D(uTex, bedP * 0.61 - uTime * vec2(0.021, 0.031)).b;
-        ca = step(0.42, ca);
-        vec3 caust = uSunCol * vec3(0.9, 1.0, 0.75) * ca * 0.22 * (1.0 - opaque) * skyVis * smoothstep(0.03, 0.15, d);
-        vec3 col = mix(body + caust, sky, fres) + glint;
-        float alpha = max(max(opaque, fres * 0.85), 0.12);
-        // white water: riffle foam carried in the flow, and lace where the water thins to nothing at the edge
-        float lace = 1.0 - smoothstep(0.0, 0.06, d);
-        // foam breaks into streaks along the flow: noise stretched down the current
-        vec2 fd = sp > 0.01 ? v / sp : vec2(1.0, 0.0);
-        vec2 fq = vec2(dot(q, fd) * 0.35, dot(q, vec2(-fd.y, fd.x)) * 1.6) - vec2(uTime * sp * 0.35, 0.0);
-        float streak = texture2D(uTex, fq * 0.5).b;
-        float fa = clamp(vFlow.w * 0.75 * (streak * 1.7 - 0.6) + lace * (det.b * 1.4 - 0.45), 0.0, 1.0);
-        float foam = step(bayer4(cell), fa * fa * 1.6) + step(0.75, fa);
-        foam = min(foam, 1.0) * mix(0.75, 1.0, step(0.75, fa));
-        col = mix(col, lightIn * vec3(0.92, 0.95, 0.95) * 1.05, foam);
-        alpha = max(alpha, foam * 0.92);
-        alpha *= smoothstep(0.0, 0.008, vFlow.z + 0.004);
-        gl_FragColor = vec4(col, alpha);
+        vec2 p = vWorld.xz, cell = waterCell(p), q = waterTexel(p);
+        if (bayer4(cell) < liveShare(q)) discard;                      // the live water draws here
+        vec4 c = shadeRiver(q, cell, vWorld, vFlow.xy, vFlow.z, vFlow.w);
+        c.a *= smoothstep(0.0, 0.008, vFlow.z + 0.004);
+        gl_FragColor = c;
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
         #include <fog_fragment>
@@ -112,39 +56,44 @@ export function createRiverWater({ U, sea, CS, P, SEA }) {
   });
   const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
-  // the water mesh for one chunk, or null if no channel crosses it
-  function build(ch, R) {
+  // a chunk's water on an ordinary day, on its 1 m grid: surface (NaN where there is none), the bed lip it rides on,
+  // the ground, velocity and white water. Kept on the chunk for the live simulation.
+  function sample(ch, R) {
     if (!R || !R.segmentsIn(ch.ox, ch.oz, ch.ox + CS, ch.oz + CS).length) return null;
-    const surf = new Float32Array(N * N).fill(NaN), flow = new Float32Array(N * N * 4);
+    const surf = new Float32Array(N * N).fill(NaN), bed = new Float32Array(N * N), ground = new Float32Array(N * N), vel = new Float32Array(N * N * 2), foam = new Float32Array(N * N);
     let any = false;
     for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
       const x = ch.ox + i, z = ch.oz + j, info = R.riverInfo(x, z);
       if (!info || info.dist > info.w / 2 + 1.5 * info.D + 1.5) continue;
       const rif = smooth(0.74, 0.92, info.phase);
-      let s = info.bedLip + info.D * (0.62 - 0.4 * rif);
+      const s = info.bedLip + info.D * (0.62 - 0.4 * rif);
       if (s <= SEA + 0.02) continue;                                   // the sea takes over here
-      const k = j * N + i, ground = ch.h[(j + 1) * P + i + 1];
-      const depth = s - ground;
+      const k = j * N + i, gr = ch.h[(j + 1) * P + i + 1];
       const speed = Math.min(2.5, info.Q / Math.max(0.2, info.w * Math.max(0.12, 0.6 * info.D)) * (1 + 1.6 * rif));
-      surf[k] = s;
-      flow[k * 4] = info.dir[0] * speed; flow[k * 4 + 1] = info.dir[1] * speed; flow[k * 4 + 2] = depth;
-      flow[k * 4 + 3] = Math.min(1, rif * (0.35 + 0.5 * speed) + (info.fall ? 0.6 : 0) + smooth(0.6, 0.9, info.phase) * 0.3 * (1 - smooth(0.92, 1, info.phase)));
-      if (depth > 0.004) any = true;
+      surf[k] = s; bed[k] = Math.min(info.bedLip, s); ground[k] = gr;
+      vel[k * 2] = info.dir[0] * speed; vel[k * 2 + 1] = info.dir[1] * speed;
+      foam[k] = Math.min(1, rif * (0.35 + 0.5 * speed) + (info.fall ? 0.6 : 0) + smooth(0.6, 0.9, info.phase) * 0.3 * (1 - smooth(0.92, 1, info.phase)));
+      if (s - gr > 0.004) any = true;
     }
-    if (!any) return null;
-    const pos = [], att = [], idx = [], map = new Int32Array(N * N).fill(-1);
+    return any ? { surf, bed, ground, vel, foam, ox: ch.ox, oz: ch.oz } : null;
+  }
+  function build(D) {
+    const { surf, bed, ground, vel, foam } = D;
+    const pos = [], att = [], beds = [], idx = [], map = new Int32Array(N * N).fill(-1);
     const vert = (k) => {
       if (map[k] >= 0) return map[k];
       const i = k % N, j = (k / N) | 0;
       map[k] = pos.length / 3;
-      pos.push(ch.ox + i, surf[k], ch.oz + j);
-      att.push(flow[k * 4], flow[k * 4 + 1], flow[k * 4 + 2], flow[k * 4 + 3]);
+      pos.push(D.ox + i, surf[k], D.oz + j);
+      att.push(vel[k * 2], vel[k * 2 + 1], ground[k], foam[k]);
+      beds.push(bed[k]);
       return map[k];
     };
     for (let j = 0; j < CS; j++) for (let i = 0; i < CS; i++) {
       const a = j * N + i, b = a + 1, c = a + N, d = c + 1;
       if (isNaN(surf[a]) || isNaN(surf[b]) || isNaN(surf[c]) || isNaN(surf[d])) continue;
-      if (Math.max(flow[a * 4 + 2], flow[b * 4 + 2], flow[c * 4 + 2], flow[d * 4 + 2]) <= 0.004) continue;
+      // keep quads that could hold water on a wet day (the surface rises up to half again)
+      if (Math.max(surf[a] + 0.5 * (surf[a] - bed[a]) - ground[a], surf[b] + 0.5 * (surf[b] - bed[b]) - ground[b], surf[c] + 0.5 * (surf[c] - bed[c]) - ground[c], surf[d] + 0.5 * (surf[d] - bed[d]) - ground[d]) <= 0.004) continue;
       const va = vert(a), vb = vert(b), vc = vert(c), vd = vert(d);
       idx.push(va, vc, vb, vb, vc, vd);
     }
@@ -152,6 +101,7 @@ export function createRiverWater({ U, sea, CS, P, SEA }) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
     geo.setAttribute('aFlow', new THREE.BufferAttribute(new Float32Array(att), 4));
+    geo.setAttribute('aBed', new THREE.BufferAttribute(new Float32Array(beds), 1));
     geo.setIndex(idx);
     geo.computeBoundingSphere();
     const mesh = new THREE.Mesh(geo, material);
@@ -161,11 +111,13 @@ export function createRiverWater({ U, sea, CS, P, SEA }) {
   // (re)build a chunk's water: called when the chunk is built and whenever its ground changes
   function refresh(ch, R) {
     if (ch.riverMesh) { ch.group.remove(ch.riverMesh); ch.riverMesh.geometry.dispose(); ch.riverMesh = null; }
-    const m = build(ch, R);
+    ch.riverData = sample(ch, R);
+    const m = ch.riverData && build(ch.riverData);
     if (m) { ch.riverMesh = m; ch.group.add(m); }
   }
   function dispose(ch) {
     if (ch.riverMesh) { ch.riverMesh.geometry.dispose(); ch.riverMesh = null; }
+    ch.riverData = null;
   }
   return { material, uniforms, refresh, dispose };
 }
