@@ -29,6 +29,7 @@ export function initConstruction() {
     ...SUP.initSupply(),
     level: 'hands-on',
     progress: {},
+    learn: { counts: {}, known: {} },   // pieces nailed by hand, by kind of work; a kind with enough of them is known
     ladder: null,                     // { x, z, yaw, topY, structId } when one is leaned on a wall
     offcuts: {},                      // { [itemId]: [area m2, ...] } pieces of sheet goods kept from cutting
     waste: {},                        // { [itemId]: area m2 } offcuts too small to keep
@@ -419,7 +420,7 @@ function install(ctx, p) {
   const s = ctx.s, pr = s.progress[p && p.structId];
   if (!pr) return { ok: false, reason: 'unknown building' };
   const fromStacks = p.from === 'stacks';
-  const out = { ok: false, installed: [], set: [], partial: [], refused: [], cuts: [], stagesDone: [], done: false };
+  const out = { ok: false, installed: [], set: [], partial: [], refused: [], cuts: [], learned: [], stagesDone: [], done: false };
   if (!s.offcuts) s.offcuts = {};
   if (!s.waste) s.waste = {};
   const before = new Set(C.STAGE_ORDER.filter((st) => stageComplete(pr, st)));
@@ -473,6 +474,15 @@ function install(ctx, p) {
       supplies(s, pr, m.stage, pr.tally[m.stage][0], false);
       out.installed.push(id);
     } else { out.partial.push({ id, got: m.got, need: m.need }); break; }
+  }
+  if (p.hand && out.installed.length) {         // nailed with your own blows: practice
+    if (!s.learn) s.learn = { counts: {}, known: {} };
+    for (const id of out.installed) {
+      const g = C.learnGroup(pr.members[id].kind);
+      if (!g || s.learn.known[g]) continue;
+      s.learn.counts[g] = (s.learn.counts[g] || 0) + 1;
+      if (s.learn.counts[g] >= C.LEARN.needed) { s.learn.known[g] = true; out.learned.push(g); }
+    }
   }
   out.ok = out.installed.length > 0 || out.partial.length > 0 || out.set.length > 0;
   requote(s, pr);
@@ -561,5 +571,5 @@ export const constructionSystem = () => ({
     'construction.setOption': (c, p) => { if (!p || !(p.key in c.s.options)) return { ok: false, reason: 'unknown option' }; c.s.options[p.key] = !!p.value; if (p.key === 'sandbox') c.emit('construction.sandbox', { on: !!p.value }); return { ok: true }; },
     'construction.seeCard': (c, p) => { c.s.tutorial.seen[p.stage] = true; return { ok: true }; },
   },
-  api: { content: C, sheetSource, needsStock, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance },
+  api: { content: C, knows: (s, kind) => !!(s.learn && s.learn.known[C.learnGroup(kind)]), sheetSource, needsStock, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance },
 });

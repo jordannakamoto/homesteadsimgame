@@ -364,3 +364,23 @@ test('the ladder comes with the shed order; lean it, take it down, and the books
   assert.equal(s.ladder, null); assert.equal(s.carried.itemId, 'ladder'); assert.deepEqual(SUP.imbalance(s), {});
   const back = JSON.parse(JSON.stringify(s)); assert.equal(back.ladder, null);
 });
+
+test('learn once: three of a kind nailed by hand and the kind is known; auto work does not count', () => {
+  const sim = start(), s = cs(sim);
+  sim.commandNow('construction.setOption', { key: 'instant', value: true });
+  sim.commandNow('construction.order', { structId: shed.struct, stage: 'all' });
+  const P = pr(sim);
+  assert.deepEqual(s.learn, { counts: {}, known: {} });
+  const nailByHand = (id) => { const ln = P.lines[P.members[id].line]; if (!s.carried || s.carried.itemId !== ln.itemId) { if (s.carried) sim.commandNow('construction.putDown', { x: 44, z: 40 }); assert.ok(sim.commandNow('construction.pickUp', { stackId: s.stacks.find((k) => k.itemId === ln.itemId).id }).ok); } assert.ok(sim.commandNow('construction.install', { structId: P.id, memberIds: [id], hold: true }).ok); return sim.commandNow('construction.install', { structId: P.id, memberIds: [id], hand: true }); };
+  // get to the floor frame by auto work (not counted)
+  for (let g = 0; g < 200; g++) { const ids = K.installable(P).filter((i) => ['site', 'foundation'].includes(P.members[i].stage)); if (!ids.length) break; sim.commandNow('construction.install', { structId: P.id, memberIds: [ids[0]], from: 'stacks' }); }
+  assert.deepEqual(s.learn.counts, {});
+  const joists = K.installable(P).filter((i) => P.members[i].kind === 'joist');
+  assert.ok(joists.length >= 4);
+  assert.equal(nailByHand(joists[0]).learned.length, 0); assert.equal(nailByHand(joists[1]).learned.length, 0);
+  assert.equal(s.learn.counts.joist, 2);
+  assert.deepEqual(nailByHand(joists[2]).learned, ['joist']);
+  assert.ok(s.learn.known.joist); assert.equal(nailByHand(joists[3]).learned.length, 0); assert.equal(s.learn.counts.joist, 3);
+  // saved and loaded, it is still known
+  const back = JSON.parse(JSON.stringify(s)); assert.ok(back.learn.known.joist);
+});
