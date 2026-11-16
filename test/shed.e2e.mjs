@@ -165,7 +165,7 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
           if (c.ctx !== 'hands') { await tick(4); break; }
           if (!taken.loose && c.stage === 'floor-frame') {
             taken.loose = 1; await page.mouse.down(); await tick(2); await page.mouse.up(); await tick(8);
-            check('a click sets a piece in place: its material leaves the arms and it sits loose until it is nailed', await G(() => { const pr = __construct.current(); return Object.values(pr.members).some((m) => !m.built && m.need > 0 && m.got >= m.need - 1e-6); }) && /Nail it/.test((await state()).prompt), (await state()).prompt);
+            check('a click sets a piece in place: its material leaves the arms and it sits loose until it is nailed', await G(() => { const pr = __construct.current(); return Object.values(pr.members).some((m) => !m.built && m.need > 0 && m.got >= m.need - 1e-6); }) && /Nail the/.test((await state()).prompt), (await state()).prompt);
             await shot('05a-set-loose');
           }
           await page.mouse.down(); await tick(24); await page.mouse.up(); await tick(1);

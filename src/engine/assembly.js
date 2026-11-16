@@ -9,6 +9,7 @@
     const T = G.THREE,
       glowMat = new T.MeshBasicMaterial({ color: 0xffcf70, transparent: true, opacity: 0.45, depthWrite: false, fog: false }),
       things = new Map(),
+      dotGeo = new T.BoxGeometry(1, 1, 1), dotMat = new T.MeshBasicMaterial({ color: 0xffffff, fog: false }),
       m4 = new T.Matrix4(), m4b = new T.Matrix4(), v = new T.Vector3(), c = new T.Color(), up = new T.Vector3(0, 1, 0);
     let pulse = 0;
     // the box that is a member: columns along it, across its depth, across its breadth (the same as its owner draws it)
@@ -33,7 +34,7 @@
       let L = t.layers.get(id);
       if (L && L.cap < cap) { dropLayer(t, id); L = null; }
       if (!L) {
-        L = { cap, group: new T.Group(), solid: new T.InstancedMesh(look.geo, look.mat, cap), glow: new T.InstancedMesh(look.geo, glowMat, cap), at: new Map(), list: [], pivot: new T.Vector3(), lift: new T.Vector3(0, 1, 0), angle: 0, axis: new T.Vector3(1, 0, 0) };
+        L = { cap, dots: null, group: new T.Group(), solid: new T.InstancedMesh(look.geo, look.mat, cap), glow: new T.InstancedMesh(look.geo, glowMat, cap), at: new Map(), list: [], pivot: new T.Vector3(), lift: new T.Vector3(0, 1, 0), angle: 0, axis: new T.Vector3(1, 0, 0) };
         L.solid.castShadow = L.solid.receiveShadow = true;
         L.solid.count = L.glow.count = 0;
         L.solid.frustumCulled = L.glow.frustumCulled = false;
@@ -47,7 +48,7 @@
     function dropLayer(t, id) {
       const L = t.layers.get(id);
       if (!L) return;
-      t.root.remove(L.group); L.solid.dispose(); L.glow.dispose(); t.layers.delete(id);
+      t.root.remove(L.group); L.solid.dispose(); L.glow.dispose(); L.dots && L.dots.dispose(); t.layers.delete(id);
     }
     const local = (L, m, out, grow, h) => { matrixOf(m, out, grow, L.lift, h); out.elements[12] -= L.pivot.x; out.elements[13] -= L.pivot.y; out.elements[14] -= L.pivot.z; return out; };
     return {
@@ -90,6 +91,27 @@
         if (n === undefined) return;
         L.solid.setMatrixAt(n, local(L, L.list[n], m4, 0, h));
         L.solid.instanceMatrix.needsUpdate = true;
+      },
+      // nail points: small boxes that ride with the layer. list: [{ p: [x, y, z], k: 0 (bright, waiting) | 1 (driven, dark) }]
+      setDots(key, id, list) {
+        const L = layer(key, id, 16);
+        if (!L.dots || L.dots.instanceMatrix.count < list.length) {
+          if (L.dots) { L.group.remove(L.dots); L.dots.dispose(); }
+          if (!list.length) return;
+          L.dots = new T.InstancedMesh(dotGeo, dotMat, Math.max(256, list.length * 2));
+          L.dots.frustumCulled = false; L.dots.renderOrder = 5;
+          L.group.add(L.dots);
+        }
+        if (!L.dots) return;
+        list.forEach((d, n) => {
+          const sz = d.k ? 0.034 : 0.05;
+          const h = d.h || 0;
+          L.dots.setMatrixAt(n, m4.makeScale(sz, sz, sz).setPosition(d.p[0] + L.lift.x * h - L.pivot.x, d.p[1] + L.lift.y * h - L.pivot.y, d.p[2] + L.lift.z * h - L.pivot.z));
+          L.dots.setColorAt(n, d.k ? c.setRGB(0.1, 0.09, 0.08) : c.setRGB(1, 0.86, 0.3));
+        });
+        L.dots.count = list.length;
+        L.dots.instanceMatrix.needsUpdate = true;
+        if (L.dots.instanceColor) L.dots.instanceColor.needsUpdate = true;
       },
       setGlow(key, id, members) {
         const L = layer(key, id, Math.max(members.length, 16));

@@ -46,8 +46,20 @@ export const ITEMS_CONSTRUCTION = Object.freeze({
   door_prehung: { id: 'door_prehung', name: 'Exterior door, pre-hung', category: 'glass', unit: 'each', massKgPerUnit: 38, priceUsd: 180, dims: { lengthM: 2.03, widthM: 0.915, thicknessM: 0.045 }, blurb: 'Comes in its frame with hinges on: set it in the opening and fix it' },
   window_shed: { id: 'window_shed', name: 'Shed window 600 x 900', category: 'glass', unit: 'each', massKgPerUnit: 9, priceUsd: 95, dims: { lengthM: 0.9, widthM: 0.6, thicknessM: 0.08 }, blurb: 'A small fixed window in its own frame' },
   framing_nailer: { id: 'framing_nailer', name: 'Framing nail gun', category: 'tools_power', unit: 'each', massKgPerUnit: 3.8, priceUsd: 230, powerW: 1500, blurb: 'Drives a nail a second. Needs power' },
+  ladder: { id: 'ladder', name: 'Extension ladder', category: 'tools_hand', unit: 'each', massKgPerUnit: 11, priceUsd: 140, blurb: 'Lean it on a wall or the eave and climb it: anything higher than you can reach from the ground is worked from the ladder' },
   wheelbarrow: { id: 'wheelbarrow', name: 'Wheelbarrow', category: 'tools_hand', unit: 'each', massKgPerUnit: 18, priceUsd: 120, blurb: 'Carries three armfuls at once' },
 });
+
+// ---- the ladder: it comes with the shed order (a line of the top-plates stage), is leaned by hand and climbed
+export const LADDER = Object.freeze({ itemId: 'ladder', stage: 'top-plates', lenM: 3.9, footOutM: 0.95, reachUpM: 2.2, climbMps: 1.5, topBelowM: 0.9, why: 'Anything higher than you can reach from the ground is worked from a ladder: the top plates, the roof.' });
+
+// ---- learn once, then sweep: after nailing a few of a kind by hand, that kind is learned and is set and nailed as you sweep along its run
+export const LEARN = Object.freeze({
+  needed: 3,
+  group: Object.freeze({ stud: 'stud', plate: 'plate', header: 'header', joist: 'joist', rafter: 'rafter', beam: 'beam', post: 'post', skid: 'skid', sheathing: 'sheet', membrane: 'sheet', roofing: 'sheet', lining: 'sheet', cladding: 'sheet', insulation: 'sheet' }),
+  says: Object.freeze({ stud: 'frame a stud wall', plate: 'lay wall plates', header: 'frame an opening', joist: 'frame a floor', rafter: 'set rafters', beam: 'set a beam', post: 'set posts', skid: 'lay skids', sheet: 'lay sheets' }),
+});
+export const learnGroup = (kind) => LEARN.group[kind] || null;
 
 // ---- how each item sits in a stack and in the arms: the page draws these forms.
 export function itemForm(itemId) {
@@ -64,6 +76,32 @@ export function itemForm(itemId) {
   if (itemId === 'concrete_mix' || itemId === 'mortar_mix') return 'bag';
   if (itemId === 'gravel') return 'pile';
   return 'box';
+}
+
+// ---- sheet goods are cut to fit. A piece that needs less than a whole sheet takes a matching offcut if one is held,
+// else cuts a whole sheet and keeps the rest as an offcut. Offcuts below minKeepM2 are waste.
+export const SHEET = Object.freeze({ areaM2: 1.22 * 2.44, minKeepM2: 0.06 });
+// How many whole sheets do these pieces take (areas in m2), given the offcuts already held? Pieces are cut biggest first,
+// each from the smallest offcut that will do. { sheets, from: ['offcut' | 'new' per piece, in the order given], left: offcuts afterwards }
+export function packSheets(areas, held = [], sheetA = SHEET.areaM2, minKeep = SHEET.minKeepM2) {
+  const pool = [...held].sort((a, b) => a - b), from = new Array(areas.length);
+  let sheets = 0;
+  const order = areas.map((a, i) => i).sort((i, j) => areas[j] - areas[i] || i - j);
+  for (const i of order) {
+    const a = Math.min(areas[i], sheetA);
+    let k = pool.findIndex((o) => o >= a - 1e-9);
+    if (k >= 0) {
+      const rest = pool.splice(k, 1)[0] - a;
+      if (rest >= minKeep) { pool.push(Math.round(rest * 1e6) / 1e6); pool.sort((x, y) => x - y); }
+      from[i] = 'offcut';
+    } else {
+      sheets++;
+      const rest = sheetA - a;
+      if (rest >= minKeep) { pool.push(Math.round(rest * 1e6) / 1e6); pool.sort((x, y) => x - y); }
+      from[i] = 'new';
+    }
+  }
+  return { sheets, from, left: pool };
 }
 
 // ---- deliveries

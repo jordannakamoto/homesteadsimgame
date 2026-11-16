@@ -420,6 +420,22 @@
     if (k === "window") return ["window", "glass_float_4", "m2", m.area || 0.6, "Window glass", "Lets light in while keeping the weather out."];
     return null;
   }
+  // Sheet goods are cut to fit: pieces are cut biggest first, each from the smallest offcut that will do, else from a new sheet
+  // whose rest is kept (a rest under MIN_KEEP is waste). Same rule as src/sim/content/construction.js (packSheets).
+  const MIN_KEEP = 0.06;
+  function packSheets(areas) {
+    const A = SHEET.w * SHEET.l, pool = [];
+    let sheets = 0;
+    for (const a0 of areas.slice().sort((p, q) => q - p)) {
+      const a = Math.min(a0, A),
+        k = pool.findIndex((o) => o >= a - 1e-9);
+      let rest;
+      if (k >= 0) rest = pool.splice(k, 1)[0] - a;
+      else (sheets++, (rest = A - a));
+      if (rest >= MIN_KEEP) (pool.push(Math.round(rest * 1e6) / 1e6), pool.sort((x, y) => x - y));
+    }
+    return sheets;
+  }
   // members (or pieces with the same fields) -> lines to buy, in stage order: { stage, itemId, qty, unit, label, why }
   function materialsList(members) {
     const lines = new Map(),
@@ -444,7 +460,7 @@
     }
     const out = [...lines.values()];
     for (const ln of out) {
-      if (ln.unit === "sheet") ((ln.areaM2 = r3(ln.qty)), (ln.qty = Math.ceil(ln.qty / (SHEET.w * SHEET.l) - 1e-6)), (ln.unit = "each"));
+      if (ln.unit === "sheet") ((ln.areaM2 = r3(ln.qty)), (ln.qty = packSheets(ln.members.map((q) => q[1]))), (ln.unit = "each"));
       else if (ln.unit === "each") ln.qty = Math.round(ln.qty);
       else if (ln.unit === "kg") ln.qty = ln.itemId === "concrete_mix" ? Math.ceil(ln.qty / 25) * 25 : Math.ceil(ln.qty * 2) / 2;
       else ln.qty = Math.ceil(ln.qty * 10 - 1e-6) / 10;
@@ -452,5 +468,5 @@
     return out.sort((p, q) => STAGES.indexOf(p.stage) - STAGES.indexOf(q.stage) || (p.label < q.label ? -1 : 1));
   }
 
-  globalThis.__framing = { STAGES, STAGE_NAME, LUMBER, SHEET, FOUNDATIONS, generate, materialsList, floorMembers, wallMembers, roofMembers, FLOOR_T };
+  globalThis.__framing = { packSheets, STAGES, STAGE_NAME, LUMBER, SHEET, FOUNDATIONS, generate, materialsList, floorMembers, wallMembers, roofMembers, FLOOR_T };
 })();

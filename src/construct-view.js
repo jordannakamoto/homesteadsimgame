@@ -103,7 +103,7 @@
     return list.length ? list[list.length - 1] : null;
   }
   const lineOf = (pr, memberId) => { const m = pr.members[memberId]; return m && m.line ? pr.lines[m.line] : null; };
-  const usable = (pr, pl, c) => pl.inst.filter((id) => { const ln = lineOf(pr, id); return !ln || pr.members[id].need - pr.members[id].got < 1e-6 || (c && c.itemId === ln.itemId); });
+  const usable = (pr, pl, c) => pl.inst.filter((id) => { const ln = lineOf(pr, id); return !ln || pr.members[id].need - pr.members[id].got < 1e-6 || (c && c.itemId === ln.itemId) || !api.needsStock(S(), pr, id); });
 
   // ------------------------------------------------------------------ keeping build mode and the simulation in step
   function attach() {
@@ -195,6 +195,7 @@
       asm.setSolid(id, cur, list, 48);
     }
     for (const [layer, mid] of loose) asm.lift(id, layer, mid, proud(mid));
+    dotsFor(id);
     V.glowSig = '';
     B.setShell(id, !Object.values(pr.tally).some((t) => t[0] > 0));
     braces(id);
@@ -238,6 +239,7 @@
   function describe(itemId, qty) {
     const it = CAT[itemId], f = C.itemForm(itemId), d = (it && it.dims) || {};
     const n = (per) => Math.max(1, Math.min(140, Math.ceil(qty / per - 0.02)));
+    if (itemId === 'ladder') return { form: 'lumber', w: 0.42, h: 0.05, l: 3.6, n: 1, color: COLORS.lumber };
     if (f === 'lumber') { const l = itemId === 'lumber_2x4' ? 2.6 : 3; return { form: 'lumber', w: Math.max(d.depthM, d.widthM), h: Math.min(d.depthM, d.widthM), l, n: n(l), color: COLORS.lumber }; }
     if (f === 'boards') return { form: 'lumber', w: 0.14, h: 0.019, l: 3, n: n(3 * 4), color: COLORS.boards, scaleH: 4 };
     if (f === 'sheet') return { form: 'sheet', w: 1.22, l: 2.44, h: Math.max(0.011, d.thicknessM || 0.011), n: n(1), color: /gypsum/.test(itemId) ? 0xd8d6cf : COLORS.osb };
@@ -287,20 +289,148 @@
     return out.applyMatrix4(g.matrix);
   }
   const segDist = (px, pz, a, b) => { const dx = b.x - a.x, dz = b.z - a.z, L = dx * dx + dz * dz, t = L > 1e-9 ? Math.max(0, Math.min(1, ((px - a.x) * dx + (pz - a.z) * dz) / L)) : 0; return Math.hypot(px - a.x - dx * t, pz - a.z - dz * t); };
+
+  // ---- nail points: where a builder really nails. A stick takes a nail at each end; a sheet takes a few along its edges.
+  const STICKS = new Set(['post', 'beam', 'skid', 'joist', 'plate', 'stud', 'header', 'rafter']);
+  const SHEETS = new Set(['sheathing', 'membrane', 'roofing', 'lining', 'insulation', 'cladding']);
+  // the layer that hides a stage's nail heads once it is complete
+  const COVER = { 'floor-frame': 'subfloor', subfloor: 'lining', 'wall-frame': 'lining', 'top-plates': 'lining', 'roof-frame': 'roof-deck', 'roof-deck': 'roofing', sheathing: 'wrap', wrap: 'cladding' };
+  // a member's nail points in its own frame, or null when it is fastened with plain blows (piers, the site, doors)
+  function nailLocal(g, mid) {
+    const nm = g.nails || (g.nails = new Map());
+    if (nm.has(mid)) return nm.get(mid);
+    const m = g.byId.get(mid);
+    let out = null;
+    if (m && m.draw !== 0 && m.section && (STICKS.has(m.kind) || SHEETS.has(m.kind))) {
+      const ax = m.b[0] - m.a[0], ay = m.b[1] - m.a[1], az = m.b[2] - m.a[2], L = Math.hypot(ax, ay, az);
+      if (L > 0.05) {
+        const u = [ax / L, ay / L, az / L], n = m.n, cr = [(ay * n[2] - az * n[1]) / L, (az * n[0] - ax * n[2]) / L, (ax * n[1] - ay * n[0]) / L];
+        const d = m.section.d, b = m.section.b, thinN = d <= b, t = thinN ? n : cr, w = thinN ? cr : n, thick = Math.min(d, b), wide = Math.max(d, b);
+        const mx = (m.a[0] + m.b[0]) / 2, my = (m.a[1] + m.b[1]) / 2, mz = (m.a[2] + m.b[2]) / 2;
+        // the face that shows: up, else away from the middle of the building (the inside for a lining)
+        let sg = Math.abs(t[1]) > 0.3 ? Math.sign(t[1]) : (t[0] * (mx - g.cx) + t[2] * (mz - g.cz) >= 0 ? 1 : -1);
+        if (m.kind === 'lining') sg = -sg;
+        const off = sg * (thick / 2 + 0.012);
+        const at = (ut, v) => [mx + u[0] * ut + w[0] * v + t[0] * off, my + u[1] * ut + w[1] * v + t[1] * off, mz + u[2] * ut + w[2] * v + t[2] * off];
+        out = [];
+        if (STICKS.has(m.kind) || m.kind === 'insulation' || L < 0.4) { out.push(at(-L / 2 + 0.035, 0), at(L / 2 - 0.035, 0)); }
+        else {
+          const per = L > 1.8 && wide > 0.5 ? 3 : 2, rows = wide > 0.25 ? [-1, 1] : [0];
+          for (const r of rows) for (let k = 0; k < per; k++) out.push(at(-L / 2 + 0.12 + ((L - 0.24) * k) / (per - 1), r * Math.max(0, wide / 2 - 0.07)));
+        }
+      }
+    }
+    nm.set(mid, out);
+    return out;
+  }
+  const nailCount = (g, pm, mid) => { const p = nailLocal(g, mid); return p ? p.length : C.memberNails(pm.kind); };
+  const blowsOf = (g, pm, mid) => V.blows[mid] || (V.blows[mid] = { n: 0, of: nailCount(g, pm, mid), d: [] });
+  // the dots on every set piece, and the dark heads of the nails in, until a later layer covers them
+  const dotLayers = new Map();
+  function dotsFor(id) {
+    const pr = S().progress[id], g = geom(id);
+    if (!pr || !g) return;
+    const by = new Map();
+    for (const mid in pr.members) {
+      const pm = pr.members[mid];
+      if (!pm.built && !(pm.need > 0 && pm.got >= pm.need - 1e-6)) continue;
+      const pts = nailLocal(g, mid);
+      if (!pts) continue;
+      const cv = COVER[pm.stage];
+      if (pm.built && cv && pr.tally[cv] && api.stageComplete(pr, cv)) continue;
+      const b = V.blows[mid], flat = C.STAGE[pm.stage].flat && g.walls.has(pm.parent) && !pr.raised[pm.parent], layer = flat ? pm.parent : 'main', h = pm.built ? 0 : 0.045 * (1 - (b ? b.n / b.of : 0));
+      let list = by.get(layer);
+      if (!list) by.set(layer, (list = []));
+      pts.forEach((p, i) => list.push({ p, h, k: pm.built || (b && b.d[i]) ? 1 : 0 }));
+    }
+    const old = dotLayers.get(id) || new Set();
+    for (const layer of new Set([...old, ...by.keys()])) {
+      if (layer !== 'main') { const hw = g.walls.get(layer); if (!hw) continue; asm.hinge(id, layer, hw.pivot, hw.axis, V.raise && V.raise.parent === layer ? V.raise.angle : hw.flat, 48); }
+      asm.setDots(id, layer, by.get(layer) || []);
+    }
+    dotLayers.set(id, new Set(by.keys()));
+  }
+
+  // ---- the ladder: a few boxes, leaned by hand on a wall, climbed with E
+  const LAD = C.LADDER;
+  const ladMat = new T.MeshLambertMaterial({ color: 0xc9a468 }), ladGeo = new T.BoxGeometry(1, 1, 1), ladG = new T.Group(), ladParts = [];
+  for (let i = 0; i < 2 + 7; i++) { const b = new T.Mesh(ladGeo, ladMat); b.castShadow = true; ladG.add(b); ladParts.push(b); }
+  ladG.visible = false; G.scene.add(ladG);
+  const ladD = LAD.footOutM + 0.1;
+  const ladPts = (L) => { const fy = G.heightAt(L.x, L.z), cx = L.x + Math.sin(L.yaw) * ladD, cz = L.z + Math.cos(L.yaw) * ladD; return { fx: L.x, fy, fz: L.z, cx, cy: L.topY, cz, len: Math.hypot(ladD, L.topY - fy) }; };
+  function drawLadder() {
+    const L = S().ladder, sig = L ? [L.x, L.z, L.yaw, L.topY].join() : '';
+    if (sig === V.ladSig) return;
+    V.ladSig = sig; ladG.visible = !!L;
+    if (!L) return;
+    const q = ladPts(L);
+    ladG.position.set(q.fx, q.fy, q.fz); ladG.lookAt(q.cx, q.cy, q.cz);
+    for (let i = 0; i < 2; i++) { ladParts[i].scale.set(0.05, 0.05, q.len); ladParts[i].position.set(i ? 0.2 : -0.2, 0, q.len / 2); }
+    for (let i = 0; i < 7; i++) { ladParts[2 + i].scale.set(0.4, 0.03, 0.04); ladParts[2 + i].position.set(0, 0, ((i + 0.6) / 7.2) * q.len); }
+  }
+  // where a ladder would lean if the pointer says so: the raised wall nearest it, the foot a step out
+  function ladderSpot(pr) {
+    const g = geom(pr.id);
+    if (!g) return null;
+    const inv = g.matrix.clone().invert(), lp = new T.Vector3(reach.x, 0, reach.z).applyMatrix4(inv);
+    let best = null, bd = 3.2;
+    for (const [par, hw] of g.walls) {
+      if (!pr.raised[par]) continue;
+      const t = Math.max(-hw.len / 2, Math.min(hw.len / 2, (lp.x - hw.mid[0]) * hw.u[0] + (lp.z - hw.mid[1]) * hw.u[1])), qx = hw.mid[0] + hw.u[0] * t, qz = hw.mid[1] + hw.u[1] * t, d = Math.hypot(lp.x - qx, lp.z - qz);
+      if (d < bd) { bd = d; best = { hw, qx, qz }; }
+    }
+    if (!best) return null;
+    const { hw, qx, qz } = best, ix = hw.inward[0], iz = hw.inward[1];
+    const foot = new T.Vector3(qx - ix * ladD, 0, qz - iz * ladD).applyMatrix4(g.matrix), top = new T.Vector3(qx - ix * 0.1, hw.top, qz - iz * 0.1).applyMatrix4(g.matrix);
+    return { x: foot.x, z: foot.z, yaw: Math.atan2(top.x - foot.x, top.z - foot.z), topY: top.y, structId: pr.id };
+  }
+  function ladderCtx(strong) {
+    const L = S().ladder, P = G.player;
+    if (!L || V.climb) return null;
+    const hold = !!S().carried, ft = Math.hypot(P.x - L.x, P.z - L.z), rp = Math.hypot(reach.x - L.x, reach.z - L.z);
+    if (strong) return rp < 0.6 && ft < 1.3 ? { kind: 'ladder', act: 'climb' } : rp < 0.9 && ft < 4 && ft >= 1.3 && !hold ? { kind: 'ladder', act: 'take' } : null;
+    return ft < 1.0 ? { kind: 'ladder', act: 'climb' } : null;
+  }
+  function tickLadder(dt) {
+    const cl = V.climb, P = G.player, L = S().ladder;
+    if (!cl) { if (P.climbY != null) P.climbY = null; return; }
+    if (!L) { V.climb = null; P.climbY = null; return; }
+    const q = ladPts(L), top = Math.max(q.fy, q.cy - LAD.topBelowM);
+    if (G.keys.KeyW || G.keys.KeyA || G.keys.KeyS || G.keys.KeyD || G.keys.ArrowUp || G.keys.ArrowDown || G.keys.ArrowLeft || G.keys.ArrowRight || G.keys.Space) cl.dir = -1;
+    cl.t = Math.max(0, Math.min(1, cl.t + (cl.dir * dt * LAD.climbMps) / Math.max(1, q.len)));
+    if (cl.dir > 0 && cl.t >= 1) { cl.dir = 0; V.rev++; }
+    if (cl.t <= 0 && cl.dir < 0) { V.climb = null; P.climbY = null; V.rev++; return; }
+    const reachOut = Math.max(0, ladD - 0.38) * cl.t;
+    P.x = q.fx + Math.sin(L.yaw) * reachOut; P.z = q.fz + Math.cos(L.yaw) * reachOut;
+    P.climbY = q.fy + (top - q.fy) * cl.t;
+    P.faceTarget = L.yaw;
+  }
+  // a kind that is learned is set and nailed as you sweep along its run; the big moments stay manual (the ridge, the first rafter)
+  function sweepable(pr, mid, g) {
+    const pm = pr.members[mid];
+    if (!pm || !api.knows(S(), pm.kind)) return false;
+    const m = g.byId.get(mid);
+    if (!m || m.type === 'ridge' || !nailLocal(g, mid)) return false;
+    if (pm.kind === 'rafter' && !Object.values(pr.members).some((q) => q.kind === 'rafter' && q.built)) return false;
+    return true;
+  }
   // what the hands can do from here: every open piece within reach, and the one the pointer is on
   function aimHands(pr) {
     const pl = plan(pr.id), g = geom(pr.id), P = G.player, c = S().carried, st = V.structs.get(pr.id);
-    let best = null, bs = 1e9, want = null, ws = 1e9;
+    let best = null, bs = 1e9, want = null, ws = 1e9, high = false;
     const q = [];
     for (const mid of pl.inst) {
       const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid);
-      const set = !ln || pm.need - pm.got < 1e-6, act = pm.kind === 'site' ? 'dig' : set ? 'nail' : c && c.itemId === ln.itemId ? 'set' : 'want';
+      const set = !ln || pm.need - pm.got < 1e-6, act = pm.kind === 'site' ? 'dig' : set ? 'nail' : (c && c.itemId === ln.itemId) || !api.needsStock(S(), pr, mid) ? 'set' : 'want';
       let score;
       if (!m) { if (Math.hypot(P.x - st.x, P.z - st.z) > g.reach + 0.5) continue; score = 0; }
       else {
         const hw = C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null;
         worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB);
         if (segDist(P.x, P.z, wA, wB) > REACH) continue;
+        const dy = (wA.y + wB.y) / 2 - P.y;
+        if (dy > LAD.reachUpM) { high = true; continue; }        // out of reach from here: it is worked from a ladder
+        if (dy < -3.2) continue;
         if (reach.free) { score = 1e9; for (const t of [0.5, 0.15, 0.85]) { wM.lerpVectors(wA, wB, t).project(G.camera); score = Math.min(score, Math.hypot((wM.x * 0.5 + 0.5) * reach.w - reach.px, (-wM.y * 0.5 + 0.5) * reach.h - reach.py)); } }
         else score = segDist(reach.x, reach.z, wA, wB) * 100;
       }
@@ -309,8 +439,11 @@
       // a piece already set comes first when the pointer is about as near to both: finish what is started
       if (score - (act === 'nail' ? 14 : 0) < bs) { bs = score - (act === 'nail' ? 14 : 0); best = { mid, act }; }
     }
+    const sk = V.stick;
+    if (sk && sk.id === pr.id) { const pm = pr.members[sk.mid]; if (pm && !pm.built && pm.need > 0 && pm.got >= pm.need - 1e-6 && q.includes(sk.mid)) best = { mid: sk.mid, act: 'nail' }; else V.stick = null; }
     if (best) return { kind: 'hands', id: pr.id, act: best.act, mid: best.mid, q };
     if (want) return { kind: 'hint', text: 'Needs ' + low(plain(lineOf(pr, want).label)), id: pr.id };
+    if (high) return { kind: 'hint', text: 'Too high: bring the ladder', id: pr.id };
     return null;
   }
   function finishInstall(id, mid, layer, kind, r) {
@@ -328,17 +461,30 @@
     const pr = S().progress[ctx.id], g = geom(ctx.id), pm = pr.members[ctx.mid], m = g.byId.get(ctx.mid), P = G.player;
     const hw = m && C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null, layer = hw ? pm.parent : 'main';
     if (m) { worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); wM.lerpVectors(wA, wB, 0.5); P.faceTarget = Math.atan2(wM.x - P.x, wM.z - P.z); } else wM.set(reach.x, P.y, reach.z);
-    V.cool = C.WORK.swingS;
+    const swp = ctx.act !== 'dig' && sweepable(pr, ctx.mid, g);
+    V.cool = swp ? C.WORK.swingS * 0.5 : C.WORK.swingS;
     if (ctx.act === 'set') {
       const r = cmd('install', { structId: ctx.id, memberIds: [ctx.mid], hold: true });
       if (!r.ok) { flash(reason(r)); return; }
-      if (r.set.length) { V.swingIn = { mid: ctx.mid, id: ctx.id, layer, t: 0 }; sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); V.poseT = 0.25; V.poseKind = 'lift'; G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(wM.x, wM.y, wM.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
+      if (r.cuts && r.cuts.length) flash(r.cuts[0].how === 'offcut' ? 'Cut from an offcut' : 'Cut to fit; offcut kept');
+      if (r.set.length) { if (swp) V.stick = { id: ctx.id, mid: ctx.mid }; V.swingIn = { mid: ctx.mid, id: ctx.id, layer, t: 0 }; sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); V.poseT = 0.25; V.poseKind = 'lift'; G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(wM.x, wM.y, wM.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
       else { const q = r.partial[0]; sounds.play('rustle'); flash(plain(lineOf(pr, ctx.mid).label) + ': ' + Math.round((100 * q.got) / q.need) + '% there. Fetch more.'); }
       redraw(ctx.id);
       return;
     }
-    // a blow (a stamp on a pier block, a stroke of the shovel on the site)
-    const of = C.memberNails(pm.kind), b = V.blows[ctx.mid] || (V.blows[ctx.mid] = { n: 0, of });
+    // a blow: one nail at the dot nearest the pointer (a stamp on a pier block, a stroke of the shovel on the site)
+    const pts = m ? nailLocal(g, ctx.mid) : null, b = blowsOf(g, pm, ctx.mid), of = b.of;
+    let ni = -1, nbest = 1e18;
+    if (pts) for (let i = 0; i < pts.length; i++) {
+      if (b.d[i]) continue;
+      worldPt(g, hw, pts[i], wA);
+      let sc;
+      if (reach.free) { wB.copy(wA).project(G.camera); sc = Math.hypot((wB.x * 0.5 + 0.5) * reach.w - reach.px, (-wB.y * 0.5 + 0.5) * reach.h - reach.py); }
+      else sc = Math.hypot(wA.x - reach.x, wA.z - reach.z) * 100;
+      if (sc < nbest) { nbest = sc; ni = i; }
+    }
+    if (ni >= 0 && ctx.repeat && !swp && nbest > 150) { V.cool = 0.03; return; }     // holding only drives the nails the pointer passes over
+    if (ni >= 0) { worldPt(g, hw, pts[ni], wM); b.d[ni] = 1; }
     b.n++;
     V.poseT = 0.24; V.poseKind = 'hammer';
     const snd = pm.kind === 'pier' ? 'thud' : C.WORK.sound[pm.kind] === 'dig' ? 'dig' : 'knock', last = b.n >= of;
@@ -348,10 +494,12 @@
     G.cam.shake = Math.min(G.cam.shake + (last ? 0.07 : 0.035), 0.3);
     if (G.juice) G.juice.hitStop = last ? 0.07 : 0.035;
     V.jolt = m ? { id: ctx.id, layer, mid: ctx.mid, t: 0, built: last } : null;
-    if (!last) { if (m) asm.lift(ctx.id, layer, ctx.mid, proud(ctx.mid)); return; }
+    if (!last) { if (m) asm.lift(ctx.id, layer, ctx.mid, proud(ctx.mid)); if (pts) dotsFor(ctx.id); return; }
     delete V.blows[ctx.mid];
-    const r = cmd('install', { structId: ctx.id, memberIds: [ctx.mid] });
+    if (V.stick && V.stick.mid === ctx.mid) V.stick = null;
+    const r = cmd('install', { structId: ctx.id, memberIds: [ctx.mid], hand: !swp });
     if (!r.ok) { flash(reason(r)); redraw(ctx.id); return; }
+    if (r.learned && r.learned.length) showBanner('Learned', 'You know how to ' + C.LEARN.says[r.learned[0]] + ' now', true, 5);
     finishInstall(ctx.id, ctx.mid, layer, pm.kind, r);
   }
 
@@ -368,16 +516,23 @@
     const P = G.player, s = S(), c = s.carried;
     if (OFF[P.tool] || V.placing || s.options.sandbox) return null;
     if (V.auto) return { kind: 'stop', id: V.auto.id };
+    if (V.climb) { const pc = nearBuilding(P.x, P.z), h = pc && !pc.done && plan(pc.id) && !plan(pc.id).raise ? aimHands(pc) : null; return h && h.kind === 'hands' ? h : { kind: 'ladder', act: 'down' }; }
+    const strong = ladderCtx(true);
+    if (strong) return strong;
     const pr = nearBuilding(P.x, P.z), stack = carry.nearest(reach.x, reach.z, 1.0, pickable) || (V.wantItem && carry.nearest(P.x, P.z, 2.1, wantedStack)) || carry.nearest(P.x, P.z, 2.1, pickable) || carry.nearest(P.x, P.z, 1.3);
+    if (c && c.itemId === LAD.itemId && !s.ladder) {
+      if (pr) { const spot = ladderSpot(pr); if (spot) return { kind: 'lean', id: pr.id, spot }; return { kind: 'hint', text: 'Point at a wall: the ladder leans there', id: pr.id, drop: true }; }
+    }
     if (pr) {
       const pl = plan(pr.id);
       if (pl) {
         if (pl.raise) return { kind: 'raise', id: pr.id, parent: pl.raise };
         const mine = usable(pr, pl, c);
         if (pr.level === 'guided' || s.options.auto) { if (pl.inst.length && !(stack && !c && pr.level !== 'guided' && !mine.length && false)) return { kind: 'auto', id: pr.id, q: pl.inst, stage: pr.members[pl.inst[0]].stage, guided: pr.level === 'guided' }; }
-        else { const near = carry.nearest(reach.x, reach.z, 0.9, pickable), h = near && !(c && wantsHere(pr, pl, c)) ? null : aimHands(pr); if (h && (h.kind === 'hands' || !stack)) return h; }
+        else { const near = carry.nearest(reach.x, reach.z, 0.9, pickable), h = near && !(c && wantsHere(pr, pl, c)) ? null : aimHands(pr); if (h && (h.kind === 'hands' || !stack)) return h.kind === 'hands' ? h : ladderCtx(false) || h; }
       }
     }
+    { const soft = ladderCtx(false); if (soft) return soft; }
     if (stack) {
       if (C.SITE_SUPPLY.includes(stack.itemId)) return { kind: 'hint', text: plain(CAT[stack.itemId].name) + ': used up as you build' };
       if (!c) return { kind: 'pick', stack };
@@ -412,6 +567,12 @@
     else if (ctx.kind === 'swap') { putDown(); pickUp(ctx.stack); }
     else if (ctx.kind === 'auto') startAuto(ctx.id, ctx.stage, ctx.guided);
     else if (ctx.kind === 'stop') stopAuto();
+    else if (ctx.kind === 'lean') { const r = cmd('leanLadder', ctx.spot); if (r.ok) { sounds.play('thunk'); flash('Ladder up. Stand at its foot and press E to climb'); } else flash(r.reason); }
+    else if (ctx.kind === 'ladder') {
+      if (ctx.act === 'climb') { V.climb = { t: 0, dir: 1 }; V.rev++; }
+      else if (ctx.act === 'down' && V.climb) V.climb.dir = -1;
+      else if (ctx.act === 'take') { const r = cmd('takeLadder'); if (r.ok) sounds.play('thunk'); else flash('Put down what you are carrying first'); }
+    }
   }
   function startAuto(id, stage, guided) {
     const pr = S().progress[id];
@@ -454,7 +615,7 @@
   function beginMember(id, memberId, from) {
     const pr = S().progress[id], g = geom(id), m = g.byId.get(memberId) || { id: memberId, kind: 'site', a: [g.cx, 0, g.cz], b: [g.cx, 0, g.cz], n: [0, 1, 0], section: { b: 0, d: 0 }, draw: 0 }, pm = pr.members[memberId], ln = lineOf(pr, memberId);
     const need = pm.need - pm.got, c = S().carried;
-    const partial = from !== 'stacks' && ln && need > 1e-6 && (!c || c.qty + 1e-6 < need);
+    const partial = from !== 'stacks' && ln && need > 1e-6 && !(ln.sheet && !api.needsStock(S(), pr, memberId)) && (!c || c.qty + 1e-6 < (ln.sheet ? 1 : need));
     const layer = C.STAGE[pm.stage].flat && g.walls.has(pm.parent) ? pm.parent : 'main';
     V.working = { id, memberId, layer, m, partial };
     W.begin({ id, memberId, layer, m, from, kind: pm.kind, beats: partial ? 2 : C.memberBeats(pm.kind) });
@@ -520,7 +681,7 @@
         if (!q.length) { const was = A.stage; stopAuto(); if (!api.stageComplete(pr, was)) flash('Stopped: ' + C.STAGE[was].name + ' is waiting on something else'); return; }
         const ln = lineOf(pr, q[0]), pm = pr.members[q[0]], c = s.carried;
         if (A.guided || !ln || pm.need - pm.got < 1e-6) beginMember(A.id, q[0], A.guided ? 'stacks' : 'carried');
-        else if (c && c.itemId === ln.itemId) beginMember(A.id, q[0], 'carried');
+        else if ((c && c.itemId === ln.itemId) || !api.needsStock(s, pr, q[0])) beginMember(A.id, q[0], 'carried');
         else {                                        // fetch the next armful: a short pause for the walk
           A.wait += dt;
           if (A.wait > 0.8) {
@@ -538,7 +699,7 @@
       }
       if (V.raise) tickRaise(dt, held && ctx && (ctx.kind === 'raise' || V.raise.landed));
       // holding keeps the hands going at a steady rhythm: set, strike, strike, the next piece
-      if (held && ctx && ctx.kind === 'hands' && !V.raise && V.cool <= 0) handAct(ctx);
+      if (held && ctx && ctx.kind === 'hands' && !V.raise && V.cool <= 0) handAct({ ...ctx, repeat: true });
       if (W.job) W.cancel();
     }
     if (V.working && !V.working.partial && V.working.m.draw !== 0) asm.lift(V.working.id, V.working.layer, V.working.memberId, 0.24 * (1 - W.progress()));
@@ -594,7 +755,9 @@
       const A = V.auto, w = V.working && workLabel(pr, V.working.memberId), v = plan(A.id).view.stages.find((q) => q.id === A.stage);
       setPrompt('E', 'Stop · ' + (V.raise ? 'raising the wall' : w ? low(w.text) : A.wait > 0 ? 'fetching more' : low(C.STAGE[A.stage].name)), v ? v.built + ' of ' + v.total : '', V.raise ? Math.min(1, V.raise.p) : W.job ? W.progress() : null);
     } else if (ctx.kind === 'raise') setPrompt('E', 'Hold and push up to raise the wall', '', V.raise ? Math.min(1, V.raise.p) : 0);
-    else if (ctx.kind === 'hands') { const w = workLabel(pr, ctx.mid), b = V.blows[ctx.mid], pm = pr.members[ctx.mid], of = C.memberNails(pm.kind); setPrompt('E', ctx.act === 'set' ? 'Set it in place: ' + low(w.text).replace(/s$/, '') : ctx.act === 'dig' ? 'Dig and level' : pm.kind === 'pier' ? 'Stamp it level' : 'Nail it: ' + low(w.text).replace(/s$/, ''), ctx.act === 'set' ? w.count : (b ? b.n : 0) + ' of ' + of, ctx.act === 'set' ? null : (b ? b.n : 0) / of); }
+    else if (ctx.kind === 'hands') { const w = workLabel(pr, ctx.mid), pm = pr.members[ctx.mid], b = V.blows[ctx.mid], of = b ? b.of : nailCount(geom(ctx.id), pm, ctx.mid); setPrompt('E', ctx.act === 'set' ? (api.knows(S(), pm.kind) && sweepable(pr, ctx.mid, geom(ctx.id)) ? 'Hold and drag along the run: ' : 'Set it in place: ') + low(w.text).replace(/s$/, '') + (pm.line && pr.lines[pm.line].sheet && !api.needsStock(S(), pr, ctx.mid) ? ' (from an offcut)' : '') : ctx.act === 'dig' ? 'Dig and level' : pm.kind === 'pier' ? 'Stamp it level' : 'Nail the ' + low(w.text).replace(/s$/, ''), ctx.act === 'set' ? w.count : (b ? b.n : 0) + ' of ' + of, ctx.act === 'set' ? null : (b ? b.n : 0) / of); }
+    else if (ctx.kind === 'lean') setPrompt('E', 'Lean the ladder here', '', null);
+    else if (ctx.kind === 'ladder') setPrompt('E', ctx.act === 'climb' ? 'Climb the ladder' : ctx.act === 'take' ? 'Take the ladder down' : 'Climb down', '', null);
     else if (ctx.kind === 'work') { const w = workLabel(pr, V.working ? V.working.memberId : ctx.q[0]); setPrompt('E', 'Hold to build: ' + low(w.text), w.count, W.job ? W.progress() : 0); }
     else if (ctx.kind === 'piece') setPrompt('', 'Click a glowing piece to set it', ctx.q.length + ' ready', W.job ? W.progress() : null);
     else if (ctx.kind === 'auto') setPrompt('E', (ctx.guided ? 'Build: ' : 'Work until done: ') + low(C.STAGE[ctx.stage].name), '', null);
@@ -633,9 +796,11 @@
     if (pr.level === 'guided') return { ...out, line: 'Stand by the ' + low(pr.name) + ' and press <kbd>E</kbd>, or use the button.', btn: ['auto:' + v.id, v.verb], target: at };
     if (!ln) return { ...out, line: 'Stand on the plan and hold <kbd>E</kbd> (or the mouse button) to dig it level.', target: at };
     const looseOne = pl.inst.find((id) => pr.members[id].need > 0 && pr.members[id].got >= pr.members[id].need - 1e-6);
-    if (looseOne) return { ...out, line: 'A piece is set but loose. Point at it and press <kbd>E</kbd> or click to ' + (pr.members[looseOne].kind === 'pier' ? 'stamp it level' : 'nail it') + '.', target: at };
+    if (looseOne) return { ...out, line: 'A piece is set but loose. ' + (pr.members[looseOne].kind === 'pier' ? 'Point at it and click to stamp it level.' : 'Click each bright dot to drive a nail, or hold and drag across them.'), target: at };
+    if (['top-plates', 'roof-frame', 'roof-deck', 'roofing'].includes(v.id) && !s.ladder && !V.climb && !s.options.auto && pr.level !== 'guided' && ((s.carried && s.carried.itemId === LAD.itemId) || s.stacks.some((k) => k.itemId === LAD.itemId))) return { ...out, line: 'This is out of reach from the ground. Carry the ladder to a wall and click to lean it, then stand at its foot and press <kbd>E</kbd>.', target: at };
     const c = s.carried;
-    if (c && c.itemId === ln.itemId) return { ...out, line: 'Carry the ' + stackName(c.itemId) + ' to the ' + low(pr.name) + '. Point at a glowing place: click sets a piece, click again nails it. Hold to keep going.', target: at };
+    if (c && c.itemId === ln.itemId && first && api.knows(s, pr.members[first].kind)) return { ...out, line: 'You know this work: hold the button and drag along the glowing places. Each piece is set and nailed as you pass.', target: at };
+    if (c && c.itemId === ln.itemId) return { ...out, line: 'Carry the ' + stackName(c.itemId) + ' to the ' + low(pr.name) + '. Point at a glowing place: click sets a piece, then click its bright dots to nail it. Hold to keep going.', target: at };
     const stack = homeStack(ln.itemId) || s.stacks.find((k) => k.itemId === ln.itemId);
     return { ...out, line: (s.options.auto ? 'Press <kbd>E</kbd> by the ' + low(pr.name) + ' to work until done, or pick' : 'Pick') + ' up ' + stackName(ln.itemId) + ' at the stacks: point at them and click, or <kbd>E</kbd>.', target: s.options.auto ? at : stack ? { x: stack.x, z: stack.z, y: 1.9 } : null, item: ln.itemId };
   }
@@ -908,6 +1073,7 @@
       }
     }
     if (V.fTap) { V.fTap = false; if (!OFF[G.player.tool]) press(V.ctx); }
+    tickLadder(dt); drawLadder();
     if (!s.options.sandbox) tickWork(dt);
     glow(V.ctx);
     {
