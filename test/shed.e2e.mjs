@@ -3,8 +3,8 @@
 // Part 1, Hands-on: open the Build panel (L), choose the tool shed, set it down with the pointer, order the kit,
 // level the site while the delivery is on its way, then walk to the stacks (W), point and click to pick up, walk back,
 // point at each glowing place and hold the mouse button to set the piece and nail it,
-// stage by stage, tilting each wall up; a save and reload in the middle of framing; "Work until done" for the long
-// stages after the roof is on. Part 2, Guided: the same shed with one press a stage.
+// through the four walls, tilting each up; a save and reload in the middle of framing; then "Work until done" for
+// the plates, roof and finishes. Part 2, Guided: the same shed with one press a stage.
 // Checks money, stacks, stages, the project card, unlocks, the reload, and that the page logs no errors.
 // Walking is the W key; the camera is turned toward where the player is going from the page (a headless browser
 // cannot capture the mouse). Software rendering is slow, so drawing is off and frames are stepped by hand.
@@ -195,15 +195,10 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
       else await tick(10);
     }
   };
-  await byHand((q) => ['sheathing', 'wrap', 'openings', 'cladding', 'insulation', 'lining'].includes(q.stage));
+  await byHand((q) => q.stage !== 'foundation' && q.stage !== 'floor-frame' && q.stage !== 'subfloor' && q.stage !== 'wall-frame' && q.stage !== 'site');
   s = await state();
-  handsOnRoofed = s.played - t0;
-  check('by hand from bare ground to a roof: foundation, floor, four walls tilted up, plates, rafters, deck, roofing', s.stage === 'sheathing' && s.raised === 4 && reloaded, Math.round(handsOnRoofed) + ' s of play, ' + trips + ' trips to the stacks');
-  // real budget: about ten minutes; the bound is generous because the machine is shared
-  check('roofed in about ten minutes of play, hands-on', handsOnRoofed < 780, (handsOnRoofed / 60).toFixed(1) + ' min');
-  check('the moments were marked: a deck, wall up, framed, first rafter, dried in', ['You have', 'Wall up', 'Framed It', 'First rafter', 'Dried in'].every((b) => banners.has(b)), [...banners].join(' | '));
+  check('by hand: pier blocks stamped, floor framed, deck laid, four walls framed flat, nailed and tilted up', s.stage === 'top-plates' && s.raised === 4 && reloaded, Math.round(s.played - t0) + ' s of play, ' + trips + ' trips to the stacks');
   check('built walls now stop the player; the deck carries them', await G(() => { const st = __build.structs()[0]; const e = { x: st.x + 5, z: st.z, y: st.y0 }; let hit = false; for (let i = 0; i < 80; i++) { const was = e.x; e.x -= 0.1; __build.collide(e, 0.28, true); if (Math.abs(e.x - (was - 0.1)) > 1e-6) hit = true; } return hit && __build.ground(st.x, st.z, st.y0 + 0.2, -50) > st.y0; }));
-  await shot('11-dried-in');
   // the long stages: work until done
   await page.keyboard.press('KeyL'); await tick(2);
   await page.click('#cvbody input[data-opt="auto"]'); await tick(2);
@@ -212,6 +207,7 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
     s = await state();
     if (s.done) break;
     if (s.banner) banners.add(s.banner.split(' ').slice(0, 2).join(' '));
+    if (!handsOnRoofed && !['top-plates', 'roof-frame', 'roof-deck', 'roofing'].includes(s.stage)) { handsOnRoofed = s.played - t0; await shot('11-dried-in'); }
     if (!s.auto) { await walkTo(s.shed, s.shed.r); if ((await state()).ctx === 'auto') await page.keyboard.press('KeyE'); await tick(4); }
     for (let i = 0; i < 400; i++) { await tick(10); const q = await state(); if (q.banner) banners.add(q.banner.split(' ').slice(0, 2).join(' ')); if (!q.auto) break; }
   }
@@ -220,6 +216,9 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
   handsOnAll = s.played - t0;
   await shot('12-finished');
   check('the shed is finished: every piece built in the simulation and in build mode', s.done && s.built === s.total && await G(() => __build.structs().every((q) => q.planned === 0) && __build.pieces().every((p) => p.built !== false)), Math.round(handsOnAll) + ' s of play in all');
+  // real budget: about ten minutes; the bound is generous because the machine is shared
+  check('roofed in about ten minutes of play (walls by hand, the rest on "Work until done")', handsOnRoofed > 0 && handsOnRoofed < 780, (handsOnRoofed / 60).toFixed(1) + ' min');
+  check('the moments were marked: a deck, wall up, framed, first rafter, dried in', ['You have', 'Wall up', 'Framed It', 'First rafter', 'Dried in'].every((b) => banners.has(b)), [...banners].join(' | '));
   check('the door was hung and the finish was marked', banners.has('Door hung') && banners.has('Finished You'));
   const end = await G(() => { const s = __game.sim.state.sys.construction, st = __game.sim.state.sys.stock; return { money: st.money, card: st.projects.find((p) => p.id === 'first-shed').status, unlocked: s.unlocked, carried: s.carried, left: s.stacks.map((k) => k.itemId + ' ' + k.qty), off: __game.sim.systems.find((q) => q.name === 'construction').api.imbalance(s), step: __game.sim.systems.find((q) => q.name === 'construction').api.tutorialStep(s) }; });
   check('money: only the order was paid for', Math.abs(4000 - cost - end.money) < 0.011, '$' + end.money);
@@ -268,7 +267,7 @@ let guidedAll = 0;
 }
 
 check('no page errors', errors.length === 0, errors.slice(0, 4).join(' | '));
-console.log('\nhands-on: roofed in ' + (handsOnRoofed / 60).toFixed(1) + ' min, finished in ' + (handsOnAll / 60).toFixed(1) + ' min (the later stages on "Work until done");  guided: ' + (guidedAll / 60).toFixed(1) + ' min');
+console.log('\nhands-on (walls by hand, then "Work until done"): roofed in ' + (handsOnRoofed / 60).toFixed(1) + ' min, finished in ' + (handsOnAll / 60).toFixed(1) + ' min;  guided: ' + (guidedAll / 60).toFixed(1) + ' min');
 await browser.close();
 if (fails.length) { console.log('\n' + fails.length + ' failed'); process.exit(1); }
 console.log('\nall passed');
