@@ -7008,7 +7008,59 @@
       if (!L) byParent.set(m.parent, (L = []));
       L.push(m);
     }
-    return (S.mem = { ver: S.ver, list, byParent, byId, planes: new Map(desc.roofs.map((R) => [R.id, R.planes.map((p) => p.id)])) });
+    // blueprint shapes for pieces that are not boxes: roof planes (the real outline, hips and valleys included) and gables
+    const polys = new Map(),
+      planePoly = new Map();
+    for (const R of desc.roofs)
+      for (const pl of R.planes) {
+        const e0 = pl.pts[0],
+          e1 = pl.pts[1],
+          EL = Math.hypot(e1[0] - e0[0], e1[1] - e0[1]) || 1,
+          ev = [(e1[0] - e0[0]) / EL, (e1[1] - e0[1]) / EL],
+          up = pl.run ? [-pl.facing[0], -pl.facing[1]] : [-ev[1], ev[0]],
+          k = pl.run ? (pl.ridgeY - pl.eaveY) / pl.run : 0;
+        planePoly.set(
+          pl.id,
+          pl.pts.map((q) => [q[0], pl.eaveY + k * ((q[0] - e0[0]) * up[0] + (q[1] - e0[1]) * up[1]), q[1]])
+        );
+      }
+    for (const m of list) {
+      const pp = planePoly.get(m.parent);
+      if (pp && m.draw === 0 && (m.stage === "roof-deck" || m.stage === "roofing" || m.type === "ceiling")) {
+        // lift along the plane's normal by how far this layer sits off it
+        const nl = Math.hypot(m.n[0], m.n[1], m.n[2]) || 1,
+          lift = ((m.a[0] - pp[0][0]) * m.n[0] + (m.a[1] - pp[0][1]) * m.n[1] + (m.a[2] - pp[0][2]) * m.n[2]) / nl;
+        polys.set(m.id, pp.map((q) => [q[0] + (m.n[0] / nl) * lift, q[1] + (m.n[1] / nl) * lift, q[2] + (m.n[2] / nl) * lift]));
+      }
+    }
+    for (const R of desc.roofs)
+      for (const g of R.infills) {
+        const L = Math.hypot(g.b[0] - g.a[0], g.b[1] - g.a[1]) || 1,
+          n = Math.max(2, Math.ceil(L / 0.3)),
+          top = [],
+          ux = (g.b[0] - g.a[0]) / L,
+          uz = (g.b[1] - g.a[1]) / L,
+          o = (g.out || 1) * 0.0;
+        for (let i = 0; i <= n; i++) {
+          const q = (L * i) / n;
+          top.push([g.a[0] + ux * q, Math.max(g.y0 + 0.02, g.top(g.a[0] + ux * q, g.a[1] + uz * q)), g.a[1] + uz * q]);
+        }
+        const poly = [[g.a[0], g.y0, g.a[1]], [g.b[0], g.y0, g.b[1]], ...top.reverse()];
+        void o;
+        for (const suffix of [".sh", ".wr"]) polys.set(g.id + suffix, poly);
+      }
+    // the doors and windows: a thin panel in each opening
+    const opens = [];
+    for (const w of desc.walls) {
+      const L = Math.hypot(w.b[0] - w.a[0], w.b[1] - w.a[1]) || 1,
+        ux = (w.b[0] - w.a[0]) / L,
+        uz = (w.b[1] - w.a[1]) / L;
+      for (const q of w.openings || []) {
+        const c = q.offset + q.width / 2;
+        opens.push({ id: q.id, stage: "openings", kind: q.kind, parent: w.id, a: [w.a[0] + ux * c, q.sill, w.a[1] + uz * c], b: [w.a[0] + ux * c, q.sill + q.height, w.a[1] + uz * c], n: [-uz, 0, ux], section: { b: q.width, d: q.kind === "door" ? 0.05 : 0.04 }, col: q.kind === "door" ? "timber" : "wrap" });
+      }
+    }
+    return (S.mem = { ver: S.ver, list, byParent, byId, polys, opens, planes: new Map(desc.roofs.map((R) => [R.id, R.planes.map((p) => p.id)])) });
   }
   // every id of a structure that can be planned or built on its own: members, doors and windows, and the pieces
   // that are not made of members (stone walls, round rooms, stairs, pillars)
@@ -7119,7 +7171,17 @@
   // members are drawn as instances of one box: built ones solid, the next ones to build as a calm pale ghost
   const boxGeo = new T.BoxGeometry(1, 1, 1),
     memMat = new T.MeshLambertMaterial({ color: 0xffffff }),
-    memGhost = new T.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.3, depthWrite: false, fog: false }),
+    // one blueprint material for every piece not yet built: pale blue fill, a brighter rim near each edge (from the uv, so no post pass), three strengths
+    ghostMat = (fill, rim) =>
+      new T.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        uniforms: { uFill: { value: fill }, uRim: { value: rim }, uCol: { value: new T.Color(0xaedcff) } },
+        vertexShader: "varying vec2 vUv;\nvoid main(){\n vUv = uv;\n vec4 p = vec4(position, 1.0);\n#ifdef USE_INSTANCING\n p = instanceMatrix * p;\n#endif\n gl_Position = projectionMatrix * modelViewMatrix * p;\n}",
+        fragmentShader: "uniform float uFill; uniform float uRim; uniform vec3 uCol; varying vec2 vUv;\nvoid main(){\n vec2 d = abs(vUv - 0.5) * 2.0;\n float e = smoothstep(0.82, 1.0, max(d.x, d.y));\n gl_FragColor = vec4(mix(uCol, vec3(1.0), 0.5 * e), uFill + uRim * e);\n}",
+      }),
+    GHOST = { cur: ghostMat(0.2, 0.55), later: ghostMat(0.1, 0.28), dim: ghostMat(0.05, 0.14) },
+    GHOSTP = Object.fromEntries(Object.entries(GHOST).map(([k, m]) => [k, Object.assign(m.clone(), { side: T.DoubleSide })])),
     shellMat = new T.MeshLambertMaterial({ vertexColors: true, color: 0xd4e8f8, transparent: true, opacity: 0.3, depthWrite: false, side: T.DoubleSide });
   const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), siding: col(0xc7b79b), sidingDark: col(0x6f5a47), concrete: CONCRETE, gravel: col(0x8f8b82) };
   const _m4 = new T.Matrix4(),
@@ -7132,29 +7194,43 @@
     }
     S.memMeshes = [];
   }
+  const GHOST_LATER = new Set(["insulation"]);
   function drawMembers(S, st) {
     dropMembers(S);
     const mem = st.mem,
       P = (id) => S.plan.has(id),
       gs = B.gstage || st.cur,
-      sets = [[], [], [], []]; // solid, solid under the roof, ghost, ghost under the roof
+      gi = STAGES.indexOf(gs),
+      sk = B.supportKinds || {},
+      open = new Map(); // stage -> kinds still planned in it, for "needs the piers first"
+    for (const m of mem.list) if (P(m.id)) (open.get(m.stage) || open.set(m.stage, new Set()).get(m.stage)).add(m.kind);
+    const sets = [[], []], // solid, solid under the roof
+      ghosts = {}, // "level|top|poly" -> members
+      ghostAdd = (m, top) => {
+        const idx = STAGES.indexOf(m.stage);
+        if (m.kind === "site" || idx < gi || (idx > gi && GHOST_LATER.has(m.kind))) return;
+        const need = sk[m.kind],
+          waits = idx === gi && need && need.some((k) => k !== m.kind && open.get(m.stage) && open.get(m.stage).has(k)),
+          level = idx === gi ? (waits ? "dim" : "cur") : "later",
+          key = level + "|" + top + "|" + (mem.polys.has(m.id) ? 1 : 0);
+        (ghosts[key] || (ghosts[key] = [])).push(m);
+      };
     for (const m of mem.list) {
-      if (m.draw === 0) continue;
-      const roofId = m.roof || (/^(roof-frame|roof-deck|roofing)$/.test(m.stage) || m.type === "roof-batt" ? m.parent.split(".")[0] : null),
+      const roofId = m.roof || (/^(roof-frame|roof-deck|roofing)$/.test(m.stage) || m.type === "roof-batt" || m.type === "ceiling" ? m.parent.split(".")[0] : null),
         top = roofId ? 1 : 0;
       if (P(m.id)) {
-        if (m.stage === gs && m.kind !== "site") sets[2 + top].push(m);
+        ghostAdd(m, top);
         continue;
       }
+      if (m.draw === 0) continue;
       if (m.stage === "foundation" || m.stage === "floor-frame") sets[0].push(m);
       else if (roofId) (st.all || st.finRoof.has(roofId)) || sets[1].push(m);
       else if (m.stage === "subfloor" || m.type === "floor-batt") (st.all || st.finFloor.has(m.parent)) || sets[0].push(m);
       else if (m.kind === "cladding") sets[0].push(m); // siding stays drawn as boards, even once the wall is finished
       else (st.all || st.finRun.has(m.parent)) || sets[0].push(m);
     }
-    sets.forEach((list, k) => {
-      if (!list.length) return;
-      const mesh = new T.InstancedMesh(boxGeo, k < 2 ? memMat : memGhost, list.length);
+    for (const m of mem.opens) P(m.id) && ghostAdd(m, 0);
+    const place = (mesh, list, k, solid) =>
       list.forEach((m, n) => {
         const ax = m.b[0] - m.a[0],
           ay = m.b[1] - m.a[1],
@@ -7168,21 +7244,60 @@
         // columns: along the member, across its depth, across its breadth
         _m4.set(ax, nx * d, (ay * nz - az * ny) * b, (m.a[0] + m.b[0]) / 2, ay, ny * d, (az * nx - ax * nz) * b, (m.a[1] + m.b[1]) / 2, az, nz * d, (ax * ny - ay * nx) * b, (m.a[2] + m.b[2]) / 2, 0, 0, 0, 1);
         mesh.setMatrixAt(n, _m4);
-        if (k < 2) {
+        if (solid) {
           const c = MCOL[m.col || "timber"],
             v = /^siding/.test(m.col || "") ? 0.975 + 0.05 * hash(n, list.length, 7) : 0.9 + 0.2 * hash(n, list.length, 7);
           mesh.setColorAt(n, _c.setRGB(c[0] * v, c[1] * v, c[2] * v));
         }
       });
-      mesh.instanceMatrix.needsUpdate = true;
-      if (k < 2) mesh.castShadow = mesh.receiveShadow = true;
+    const add = (mesh, roof, solid) => {
+      if (solid) mesh.castShadow = mesh.receiveShadow = true;
       else mesh.renderOrder = 3;
-      mesh.userData.roof = k % 2 === 1;
-      mesh.visible = !mesh.userData.roof || S.roofOp > 0.5;
-      mesh.computeBoundingSphere();
+      mesh.userData.roof = roof;
+      mesh.visible = !roof || S.roofOp > 0.5;
+      mesh.computeBoundingSphere && mesh.computeBoundingSphere();
       S.group.add(mesh);
       S.memMeshes.push(mesh);
+    };
+    sets.forEach((list, k) => {
+      if (!list.length) return;
+      const mesh = new T.InstancedMesh(boxGeo, memMat, list.length);
+      place(mesh, list, k, true);
+      mesh.instanceMatrix.needsUpdate = true;
+      add(mesh, k === 1, true);
     });
+    for (const key in ghosts) {
+      const [level, top, poly] = key.split("|"),
+        list = ghosts[key];
+      if (poly === "1") {
+        // a fan of triangles from the middle of each outline: uv is 0.5 there and 1 at the edge, so the rim glows
+        const pos = [],
+          uv = [];
+        for (const m of list) {
+          const v = mem.polys.get(m.id),
+            c = [0, 0, 0];
+          for (const q of v) for (let i = 0; i < 3; i++) c[i] += q[i] / v.length;
+          for (let i = 0; i < v.length; i++) {
+            const q = v[i],
+              r = v[(i + 1) % v.length];
+            pos.push(c[0], c[1], c[2], q[0], q[1], q[2], r[0], r[1], r[2]);
+            uv.push(0.5, 0.5, 1, 1, 1, 1);
+          }
+        }
+        const g = new T.BufferGeometry();
+        g.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+        g.setAttribute("uv", new T.Float32BufferAttribute(uv, 2));
+        const mesh = new T.Mesh(g, GHOSTP[level]);
+        mesh.userData.own = true;
+        mesh.frustumCulled = false;
+        add(mesh, top === "1", false);
+      } else {
+        const mesh = new T.InstancedMesh(boxGeo, GHOST[level], list.length);
+        place(mesh, list, 0, false);
+        mesh.instanceMatrix.needsUpdate = true;
+        add(mesh, top === "1", false);
+      }
+    }
     if (st.shell && !S.noShell) {
       const ga = buildGeo(st.shell, S.depth),
         g = ga.main,
@@ -8401,6 +8516,10 @@
     },
     setBuilt,
     setStageBuilt,
+    setSupportKinds(t) {
+      B.supportKinds = t;
+      for (const S of B.structs) B.dirty.add(S);
+    },
     setAllBuilt,
     showStage(stage) {
       B.gstage = stage || null;

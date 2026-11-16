@@ -107,6 +107,7 @@
 
   // ------------------------------------------------------------------ keeping build mode and the simulation in step
   function attach() {
+    B.setSupportKinds && B.setSupportKinds(C.SUPPORT);
     V.sim = G.sim; V.rev++; V.bv = -1; V.sel = null;
     for (const k of asm.keys()) asm.remove(k);
     V.structs.clear(); V.geom.clear(); V.plans.clear(); V.planVer.clear(); V.fresh.clear(); V.flushing = []; V.working = null; V.auto = null; V.raise = null; V.placing && endPlacing();
