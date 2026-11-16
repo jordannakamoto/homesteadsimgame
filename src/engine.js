@@ -2988,6 +2988,8 @@ window.__game = {
   light: SKY, noise: fbm, palette: PAL, quality: () => quality.level, composer: () => composer, treeGeo, pineLite: pineLiteGeo, markStockDirty: () => { hudDirty = true; },
   garden: gardenRead,
   handPose: null, sea: SEA,
+  // the sky as reflections see it (world sun direction and colour, horizon and zenith), kept up to date each frame
+  skyU: { uGSunDir: waterUniforms.uSunDir, uGSunCol: waterUniforms.uSunCol, uGSky: waterUniforms.uSky, uGZen: waterUniforms.uZenith },
 };
 window.__game.cooking = createCookingView(window.__game);
 requestAnimationFrame(frame);

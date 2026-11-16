@@ -36,7 +36,7 @@ export const OPENING_TYPES = Object.freeze([
   T('awning', 'Awning window', 'window', 'awning', [0.6, 0.9, 1.2, 1.8], [0.4, 0.6, 0.9], 1.2, { mass: 10, price: 170, blurb: 'Hinged at the top, tilts out: open in the rain.' }),
   T('hopper', 'Hopper window', 'window', 'tilt_in', [0.6, 0.9, 1.2], [0.4, 0.6], 0.5, { mass: 9, price: 150, blurb: 'Hinged at the bottom, tips in. Cellars, baths, under a picture window.' }),
   T('arched', 'Round-top window', 'window', 'fixed', [0.6, 0.9, 1.2], [1.2, 1.5], 0.9, { mass: 22, price: 380, look: { arch: true, shape: 'arch', grid: [2, 2] }, blurb: 'A rectangle with a half-round top. Victorian, Italianate, farmhouse gables.' }),
-  T('gothic', 'Gothic arch window', 'window', 'fixed', [0.6, 0.9, 1.2], [1.5, 1.8], 0.8, { mass: 22, price: 420, look: { shape: 'gothic', grille: 'diamond' }, blurb: 'A pointed arch. Gothic revival, chapels, storybook cottages.' }),
+  T('gothic', 'Gothic arch window', 'window', 'fixed', [0.6, 0.9, 1.2], [1.5, 1.8], 0.8, { mass: 22, price: 420, look: { shape: 'gothic', grille: 'diamond', grid: [2, 4] }, blurb: 'A pointed arch. Gothic revival, chapels, storybook cottages.' }),
   T('half_round', 'Half-round fanlight', 'window', 'fixed', [0.6, 0.9, 1.2, 1.8], [0.3, 0.45, 0.6, 0.9], 2.0, { mass: 9, price: 260, look: { shape: 'half', grille: 'sunburst' }, range: { w: [0.4, 3.0], h: [0.2, 1.5] }, more: { aboveDoor: true }, blurb: 'A half-moon over a door or a window, with a sunburst grille.' }),
   T('round', 'Round window', 'window', 'fixed', [0.45, 0.6, 0.9], [0.45, 0.6, 0.9], 1.4, { mass: 8, price: 230, look: { shape: 'round', grid: [2, 2] }, range: { w: [0.3, 1.5], h: [0.3, 1.5] }, blurb: 'An oculus: gables, stair halls, a ship-shape bath.' }),
   T('transom', 'Transom window', 'window', 'fixed', [0.9, 1.2, 1.8, 2.4], [0.3, 0.4, 0.5], 2.1, { mass: 8, price: 110, look: { grid: [3, 1] }, more: { aboveDoor: true }, blurb: 'A short fixed strip over a door or a window.' }),
@@ -151,7 +151,7 @@ export const SNAP_DIST = 0.22;           // how close the pointer must be for a 
 export const SILL_NAMES = Object.freeze({ standard: 'Standard', counter: 'Kitchen counter', low: 'Low view', high: 'High privacy' });
 
 export const openingSizes = (type) => { const t = typeof type === 'string' ? OPENING_BY_ID[type] : type, out = []; for (const w of t.w) for (const h of t.h) out.push({ w, h }); return out; };
-export const sillFor = (type, preset) => { const t = typeof type === 'string' ? OPENING_BY_ID[type] : type; return t.kind === 'door' ? 0 : preset && SILL_PRESETS[preset] !== undefined ? SILL_PRESETS[preset] : t.sill; };
+export const sillFor = (type, preset) => { const t = typeof type === 'string' ? OPENING_BY_ID[type] : type; return t.kind === 'door' ? 0 : typeof preset === 'number' ? preset : preset && SILL_PRESETS[preset] !== undefined ? SILL_PRESETS[preset] : t.sill; };   // a number is a sill typed in the designer
 
 // a made-to-order size, kept inside the type's range and to the nearest 10 mm
 export const fitSize = (t, w, h) => {

@@ -64,6 +64,15 @@
     "o-transom": '<rect x="4" y="9" width="16" height="5" rx=".5"/><path d="M9.300 9v5M14.700 9v5M4 19h16"/>',
     "o-arched": '<path d="M7 20V10a5 5 0 0 1 10 0v10zM12 5v15M7 13h10"/>',
     "o-clerestory": '<rect x="5" y="9.500" width="14" height="5" rx=".5"/><path d="M5 9.500l3-3h8l3 3"/>',
+    "o-full_panel": '<rect x="7" y="2.5" width="10" height="18.5" rx=".3"/><path d="M3 21h18M9.5 5l3 3"/>',
+    "o-window_wall": '<rect x="2.5" y="3" width="19" height="18" rx=".3"/><path d="M8.8 3v18M15.2 3v18M9.5 6l2 2"/>',
+    "o-slot": '<rect x="5" y="3" width="3.5" height="13" rx=".3"/><rect x="10.3" y="7" width="3.5" height="13" rx=".3"/><rect x="15.6" y="4.5" width="3.5" height="11" rx=".3"/>',
+    "o-ribbon": '<rect x="2.5" y="9" width="19" height="5" rx=".3"/><path d="M8.8 9v5M15.2 9v5M3 19h18"/>',
+    "o-tilt_turn": '<rect x="6" y="4" width="12" height="16" rx=".3"/><path d="M6 20l6-16 6 16M6 4l12 8"/>',
+    "o-hopper": '<rect x="4" y="8" width="16" height="9" rx=".5"/><path d="M4 17l2 3h12l2-3"/>',
+    "o-gothic": '<path d="M7 20V11c0-3.500 2.500-5.500 5-7.500 2.500 2 5 4 5 7.500v9zM12 3.500V20M7 14h10"/>',
+    "o-half_round": '<path d="M3.5 16a8.5 8.5 0 0 1 17 0zM12 16V7.5M12 16l-6-6M12 16l6-6"/>',
+    "o-round": '<circle cx="12" cy="12" r="8"/><path d="M12 4v16M4 12h16"/>',
     "o-door_single": '<path d="M7 20.500V4h10v16.500M4.500 20.500h15"/><circle cx="14.300" cy="12.800" r=".9" fill="currentColor"/>',
     "o-door_french": '<path d="M4.500 20.500V4h15v16.500M12 4v16.500M3 20.500h18"/><circle cx="10.300" cy="12.800" r=".8" fill="currentColor"/><circle cx="13.700" cy="12.800" r=".8" fill="currentColor"/>',
     "o-door_patio": '<path d="M3.500 4h17v16.500h-17zM12 4v16.500M8 12h2.500M13.500 12h2.500"/>',
@@ -166,6 +175,97 @@
         : '<p class="none">Nothing to list yet. Draw a room, or set down a plan.</p>');
   }
 
+  /* ---------- the window designer's drawing: the window to scale on its wall, floor to eave ---------- */
+  function winPreview(g) {
+    const H = 92,
+      W = 132,
+      k = (H - 14) / g.wallH,
+      L = g.look,
+      ww = g.w * k,
+      wh = g.h * k,
+      x0 = (W - ww) / 2,
+      yF = H - 6,
+      y0 = yF - (g.sill + g.h) * k,
+      y1 = yF - g.sill * k,
+      fw = Math.max(1.5, (L.slim ? 0.04 : 0.055) * k),
+      gx0 = x0 + fw,
+      gx1 = x0 + ww - fw,
+      gy0 = y0 + fw,
+      gy1 = y1 - fw,
+      hw = (gx1 - gx0) / 2,
+      cx = (gx0 + gx1) / 2,
+      shape = L.shape || "rect",
+      f = (v) => Math.round(v * 10) / 10;
+    // the glass outline as a path
+    let glass;
+    if (shape === "round") glass = '<ellipse cx="' + f(cx) + '" cy="' + f((gy0 + gy1) / 2) + '" rx="' + f(hw) + '" ry="' + f((gy1 - gy0) / 2) + '"/>';
+    else if (shape === "half") glass = '<path d="M' + f(gx0) + " " + f(gy1) + "A" + f(hw) + " " + f(gy1 - gy0) + " 0 0 1 " + f(gx1) + " " + f(gy1) + 'Z"/>';
+    else if (shape === "arch") {
+      const r = Math.min(hw, (gy1 - gy0) * 0.45);
+      glass = '<path d="M' + f(gx0) + " " + f(gy1) + "V" + f(gy0 + r) + "A" + f(hw) + " " + f(r) + " 0 0 1 " + f(gx1) + " " + f(gy0 + r) + "V" + f(gy1) + 'Z"/>';
+    } else if (shape === "gothic") {
+      const r = Math.min(hw * 1.732, (gy1 - gy0) * 0.6);
+      glass = '<path d="M' + f(gx0) + " " + f(gy1) + "V" + f(gy0 + r) + "Q" + f(gx0) + " " + f(gy0 + r * 0.25) + " " + f(cx) + " " + f(gy0) + "Q" + f(gx1) + " " + f(gy0 + r * 0.25) + " " + f(gx1) + " " + f(gy0 + r) + "V" + f(gy1) + 'Z"/>';
+    } else glass = '<rect x="' + f(gx0) + '" y="' + f(gy0) + '" width="' + f(gx1 - gx0) + '" height="' + f(gy1 - gy0) + '"/>';
+    let lines = "";
+    const ln = (a, b, c, d, w2) => (lines += '<path d="M' + f(a) + " " + f(b) + "L" + f(c) + " " + f(d) + '" stroke-width="' + w2 + '"/>');
+    const [lx, ly] = L.lites;
+    for (let i = 1; i < lx; i++) ln(gx0 + ((gx1 - gx0) * i) / lx, gy0, gx0 + ((gx1 - gx0) * i) / lx, gy1, 2);
+    for (let j = 1; j < ly; j++) ln(gx0, gy0 + ((gy1 - gy0) * j) / ly, gx1, gy0 + ((gy1 - gy0) * j) / ly, 2);
+    if (g.op === "double_hung" && shape === "rect") ln(gx0, (gy0 + gy1) / 2, gx1, (gy0 + gy1) / 2, 2.2);
+    // the grille, drawn per pane
+    const gr = L.grille,
+      [nx, ny] = L.grid;
+    for (let i = 0; i < lx; i++)
+      for (let j = 0; j < ly; j++) {
+        const a = gx0 + ((gx1 - gx0) * i) / lx,
+          b = gx0 + ((gx1 - gx0) * (i + 1)) / lx,
+          p = gy0 + ((gy1 - gy0) * j) / ly,
+          q = gy0 + ((gy1 - gy0) * (j + 1)) / ly;
+        if (gr === "colonial") {
+          for (let u = 1; u < nx; u++) ln(a + ((b - a) * u) / nx, p, a + ((b - a) * u) / nx, q, 0.8);
+          for (let v = 1; v < ny; v++) ln(a, p + ((q - p) * v) / ny, b, p + ((q - p) * v) / ny, 0.8);
+        } else if (gr === "cottage" || gr === "craftsman") {
+          const yc = g.op === "double_hung" ? (p + q) / 2 : p + (q - p) * (gr === "cottage" ? 0.36 : 0.34),
+            n = gr === "craftsman" ? Math.max(2, nx) : nx;
+          g.op === "double_hung" || ln(a, yc, b, yc, 0.8);
+          for (let u = 1; u < n; u++) ln(a + ((b - a) * u) / n, p, a + ((b - a) * u) / n, yc, 0.8);
+          if (gr === "cottage" && g.op === "double_hung") for (let v = 1; v < Math.round(ny / 2); v++) ln(a, p + ((yc - p) * v) / Math.round(ny / 2), b, p + ((yc - p) * v) / Math.round(ny / 2), 0.8);
+        } else if (gr === "farmhouse") ln((a + b) / 2, p, (a + b) / 2, q, 0.8), g.op === "double_hung" || ln(a, (p + q) / 2, b, (p + q) / 2, 0.8);
+        else if (gr === "prairie") {
+          const e = Math.min(0.09 * k, 0.2 * Math.min(b - a, q - p));
+          ln(a + e, p, a + e, q, 0.8), ln(b - e, p, b - e, q, 0.8), ln(a, p + e, b, p + e, 0.8), ln(a, q - e, b, q - e, 0.8);
+        } else if (gr === "diamond") {
+          const sx = (b - a) / nx;
+          for (let u = -ny * 2; u <= nx + ny * 2; u++) ln(a + u * sx, q, a + u * sx + (q - p) * (sx / ((q - p) / ny)), p, 0.7), ln(a + u * sx, q, a + u * sx - (q - p) * (sx / ((q - p) / ny)), p, 0.7);
+        } else if (gr === "sunburst") {
+          const n = Math.max(4, nx + 3);
+          for (let u = 1; u < n; u++) ln((a + b) / 2, q, (a + b) / 2 + Math.cos((Math.PI * u) / n) * (b - a), q - Math.sin((Math.PI * u) / n) * (b - a), 0.8);
+        }
+      }
+    let shut = "";
+    if (g.shutter && (shape === "rect" || shape === "arch") && g.w < 2.2) {
+      const sw = Math.min(0.75, g.w / 2) * k,
+        gp = 0.04 * k;
+      shut = '<g fill="' + g.shutter + '" stroke="rgba(0,0,0,.35)" stroke-width=".6"><rect x="' + f(x0 - gp - sw) + '" y="' + f(y0) + '" width="' + f(sw) + '" height="' + f(wh) + '"/><rect x="' + f(x0 + ww + gp) + '" y="' + f(y0) + '" width="' + f(sw) + '" height="' + f(wh) + '"/></g>';
+    }
+    const id = "wpc" + ((Math.random() * 1e6) | 0);
+    return (
+      '<svg class="bwp" viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '" aria-label="Window preview">' +
+      '<defs><clipPath id="' + id + '">' + glass + '</clipPath><linearGradient id="' + id + 'g" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#cfe3ef"/><stop offset=".55" stop-color="#7d9fb4"/><stop offset=".56" stop-color="#4c5f58"/><stop offset="1" stop-color="#3a4741"/></linearGradient></defs>' +
+      '<rect x="0" y="' + f(yF - g.wallH * k) + '" width="' + W + '" height="' + f(g.wallH * k) + '" fill="rgba(255,255,255,.06)"/>' +
+      '<path d="M0 ' + f(yF) + "H" + W + '" stroke="currentColor" stroke-width="1.2" opacity=".6"/>' +
+      '<path d="M0 ' + f(yF - g.wallH * k) + "H" + W + '" stroke="currentColor" stroke-width=".8" stroke-dasharray="3 3" opacity=".4"/>' +
+      shut +
+      '<rect x="' + f(x0) + '" y="' + f(y0) + '" width="' + f(ww) + '" height="' + f(wh) + '" fill="' + g.finish + '" stroke="rgba(0,0,0,.4)" stroke-width=".6"/>' +
+      '<g fill="url(#' + id + 'g)">' + glass + "</g>" +
+      '<g clip-path="url(#' + id + ')" stroke="' + g.finish + '" fill="none">' + lines + "</g>" +
+      '<text x="' + f(W / 2) + '" y="9" text-anchor="middle" font-size="8.5" fill="currentColor">' + (Math.round(g.w * 100) / 100).toFixed(2) + " × " + (Math.round(g.h * 100) / 100).toFixed(2) + " m</text>" +
+      '<text x="' + f(x0 + ww + 3) + '" y="' + f(Math.min(yF - 2, y1 + 3)) + '" font-size="7.5" fill="currentColor" opacity=".75">sill ' + (Math.round(g.sill * 100) / 100).toFixed(2) + "</text>" +
+      "</svg>"
+    );
+  }
+
   /* ---------- the options strip and inspector ---------- */
   const opts = $("bopts"),
     row2 = $("bdecor");
@@ -174,6 +274,7 @@
   function groupHtml(g, n) {
     const lab = (extra) => '<span class="blab">' + esc(g.label || "") + (extra !== undefined ? ' <b class="bval">' + esc(extra) + "</b>" : "") + keyHint(g.key) + "</span>";
     const cur = g.items ? g.items.find((x) => x.v === g.value) : null;
+    if (g.type === "winprev") return '<div class="bgroup bwinprev">' + lab() + winPreview(g) + "</div>";
     if (g.type === "info") return '<div class="bgroup binfo"><span class="btitle">' + esc(g.title) + '</span><span class="bnum">' + esc(g.text) + "</span></div>";
     if (g.type === "swatches") return '<div class="bgroup">' + lab(cur ? cur.name : g.value === null ? "mixed" : "") + '<div class="bitems">' + g.items.map((x, m) => '<button type="button" class="bsw" data-g="' + n + '" data-i="' + m + '" title="' + esc(x.name) + '" aria-label="' + esc(x.name) + '" aria-pressed="' + (x.v === g.value) + '">' + swatch(x.sw) + "</button>").join("") + "</div></div>";
     // tiles are icons; the label above names the one that is chosen (or the one under the pointer)

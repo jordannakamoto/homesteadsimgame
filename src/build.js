@@ -55,6 +55,8 @@
     osize: 1,
     osill: "auto",
     oflip: false,
+    // the window designer's choices for the next window: a made-to-order size (w, h), frame colour, and look
+    od: { w: null, h: null, finish: null, look: {} },
     fsel: null,
     pkind: "pillar",
     dstyle: "door",
@@ -240,6 +242,7 @@
       this.c = [];
     }
     tri(a, b, c, n, colr) {
+      if (colr === GLASS_C && this.glass) return ((this.glass.yo = this.yo), this.glass.tri(a, b, c, n, colr));   // glass has its own mesh
       // keep the winding in step with the normal, so lighting is right on both sides
       const ux = b[0] - a[0],
         uy = b[1] - a[1],
@@ -634,6 +637,7 @@
       ebox(g, i, j, d, 0.28, 0.33, 1.05, 1.95, 0.09, PAL.beam);
       ebox(g, i, j, d, 0.67, 0.72, 1.05, 1.95, 0.09, PAL.beam);
       ebox(g, i, j, d, 0.49, 0.51, 1.11, 1.89, 0.03, PAL.beam);
+      ebox(g, i, j, d, 0.33, 0.67, 1.11, 1.89, 0.003, GLASS_C);
       for (const off of [-0.1, 0.1]) {
         ob(0.07, 0.27, 1.08, 1.92, off, 0.02, shade(C.door, 0.9));
         ob(0.73, 0.93, 1.08, 1.92, off, 0.02, shade(C.door, 0.9));
@@ -676,6 +680,7 @@
           yb = 1.78 + 0.42 * Math.sin(Math.PI * ((k + 0.5) / 6));
         ebox(g, i, j, d, 0.24 + 0.52 * u0, 0.24 + 0.52 * u1, yb, WALL_H, 0.07, shade(PAL.plank, hs(k % 4)));
         ebox(g, i, j, d, 0.24 + 0.52 * u0, 0.24 + 0.52 * u1, yb - 0.07, yb, 0.09, PAL.beam);
+        ebox(g, i, j, d, 0.24 + 0.52 * u0, 0.24 + 0.52 * u1, 0.86, yb - 0.07, 0.003, GLASS_C);
       }
       ebox(g, i, j, d, 0.2, 0.8, 0.78, 0.86, 0.12, PAL.beam);
       ebox(g, i, j, d, 0.2, 0.26, 0.86, 1.8, 0.09, PAL.beam);
@@ -716,6 +721,7 @@
         ebox(g, i, j, d, 0.9, 1, 1.05, 1.95, 0.09, PAL.beam);
         ebox(g, i, j, d, 0.475, 0.525, 1.11, 1.89, 0.03, PAL.beam);
         ebox(g, i, j, d, 0.1, 0.9, 1.475, 1.525, 0.03, PAL.beam);
+        ebox(g, i, j, d, 0.1, 0.9, 1.11, 1.89, 0.003, GLASS_C);
       } else planks(0.3, WALL_H);
     }
     ebox(g, i, j, d, 0, 1, WALL_H, EAVE, 0.095, PAL.beam);
@@ -2183,8 +2189,74 @@
       cu = F.pos + (u0 + u1) / 2,
       cv = F.line + (v0 + v1) / 2,
       c = F.d === 0 ? [cu, (y0 + y1) / 2, cv] : [cv, (y0 + y1) / 2, cu];
+    if (colr === GLASS_C && g.glass) g = g.glass;   // glass goes to its own mesh (see glassMat)
     g.obox(c, F.d === 0 ? [hu, 0, 0] : [0, 0, hu], [0, (y1 - y0) / 2, 0], F.d === 0 ? [0, 0, hv] : [hv, 0, 0], colr);
   }
+  const P3 = (F, u, y, v) => (F.d === 0 ? [F.pos + u, y, F.line + v] : [F.line + v, y, F.pos + u]);
+  // a convex outline in the opening's own (u, y) plane, given thickness from v0 to v1 across the wall
+  function lpoly(g, F, pts, v0, v1, colr) {
+    const glass = colr === GLASS_C && g.glass;
+    if (glass) g = g.glass;
+    const n = pts.length,
+      nv = F.d === 0 ? [0, 0, 1] : [1, 0, 0],
+      A = pts.map((p) => P3(F, p[0], p[1], v1)),
+      Bk = pts.map((p) => P3(F, p[0], p[1], v0));
+    for (let i = 1; i + 1 < n; i++) (g.tri(A[0], A[i], A[i + 1], nv, colr), g.tri(Bk[0], Bk[i + 1], Bk[i], [-nv[0], 0, -nv[2]], colr));
+    if (glass) return;
+    let cu = 0,
+      cy = 0;
+    for (const p of pts) ((cu += p[0] / n), (cy += p[1] / n));
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n,
+        du = pts[j][0] - pts[i][0],
+        dy = pts[j][1] - pts[i][1],
+        len = Math.hypot(du, dy);
+      if (len < 1e-5) continue;
+      let nu = dy / len,
+        ny = -du / len;
+      if (nu * (pts[i][0] - cu) + ny * (pts[i][1] - cy) < 0) ((nu = -nu), (ny = -ny));
+      const N = F.d === 0 ? [nu, ny, 0] : [0, ny, nu];
+      g.tri(A[i], A[j], Bk[j], N, colr);
+      g.tri(A[i], Bk[j], Bk[i], N, colr);
+    }
+  }
+  // a bar from (u0, y0) to (u1, y1) in the opening's plane, th wide, v0 to v1 across the wall
+  function lseg(g, F, u0, y0, u1, y1, th, v0, v1, colr) {
+    const len = Math.hypot(u1 - u0, y1 - y0);
+    if (len < 1e-4) return;
+    const U = F.d === 0 ? [1, 0, 0] : [0, 0, 1],
+      V = F.d === 0 ? [0, 0, 1] : [1, 0, 0],
+      au = (u1 - u0) / 2,
+      ay = (y1 - y0) / 2,
+      pu = (-(y1 - y0) / len) * (th / 2),
+      py = ((u1 - u0) / len) * (th / 2),
+      hv = (v1 - v0) / 2;
+    g.obox(P3(F, (u0 + u1) / 2, (y0 + y1) / 2, (v0 + v1) / 2), [U[0] * au, ay, U[2] * au], [U[0] * pu, py, U[2] * pu], [V[0] * hv, 0, V[2] * hv], colr);
+  }
+  // the part of a segment inside a rectangle (Liang-Barsky), or null
+  function clipSeg(u0, y0, u1, y1, a, b, ya, yb) {
+    let t0 = 0,
+      t1 = 1;
+    const du = u1 - u0,
+      dy = y1 - y0;
+    for (const [p, q] of [[-du, u0 - a], [du, b - u0], [-dy, y0 - ya], [dy, yb - y0]]) {
+      if (Math.abs(p) < 1e-12) {
+        if (q < 0) return null;
+      } else {
+        const r = q / p;
+        if (p < 0) {
+          if (r > t1) return null;
+          if (r > t0) t0 = r;
+        } else {
+          if (r < t0) return null;
+          if (r < t1) t1 = r;
+        }
+      }
+    }
+    return t1 - t0 < 1e-4 ? null : [u0 + du * t0, y0 + dy * t0, u0 + du * t1, y0 + dy * t1];
+  }
+  const FIN_C = {};
+  const finishCol = (id) => FIN_C[id] || (FIN_C[id] = col((OP.FINISHES[id] || OP.FINISHES.white).hex));
   // The unit of a free opening, closed, in the opening's own frame: F = { d, line, pos }; sp is OP.freeSpec(f); flip
   // mirrors it along the wall; out is +1 when the outside of the wall is on the +v side. The frame goes to gF.
   // What moves (a leaf, a sash) goes by mode: "all" into gF too; "static" is left out; an array gets { geo, mv } for
@@ -2199,12 +2271,19 @@
     if (t.frame === "pocket") flip = false;
     const M = (a, b) => (flip ? [w - b, w - a] : [a, b]),
       mu = (u) => (flip ? w - u : u),
-      fb = (a, b, ya, yb, va, vb, c) => gF && lbox(gF, F, ...M(a, b), ya, yb, va, vb, c),
+      // a drawer: (u0, u1, y0, y1, v0, v1, colour) draws a box; .seg draws a slanted bar, .poly a convex outline
+      drawer = (g) => {
+        const d = (a, b, ya, yb, va, vb, c) => g && lbox(g, F, ...M(a, b), ya, yb, va, vb, c);
+        d.seg = (u0, y0, u1, y1, th, va, vb, c) => g && lseg(g, F, mu(u0), y0, mu(u1), y1, th, va, vb, c);
+        d.poly = (pts, va, vb, c) => g && lpoly(g, F, pts.map((q) => [mu(q[0]), q[1]]), va, vb, c);
+        return d;
+      },
+      fb = drawer(gF),
       mover = (mv) => {
         let g = null;
         if (mode === "all") g = gF;
-        else if (Array.isArray(mode)) mode.push({ geo: (g = new Geo()), mv });
-        return (a, b, ya, yb, va, vb, c) => g && lbox(g, F, ...M(a, b), ya, yb, va, vb, c);
+        else if (Array.isArray(mode)) mode.push({ geo: (g = new Geo()), mv }), (g.glass = new Geo());
+        return drawer(g);
       },
       leafC = door ? LEAF_C : FRAME_C;
     if (t.frame === "pocket") {
@@ -2227,6 +2306,7 @@
       for (let k = 0; k < n; k++) pb(fw, w - fw, y0 + ((y1 - fw - y0) * k) / n + 0.01, y0 + ((y1 - fw - y0) * (k + 1)) / n - 0.01, -0.03, 0.03, shade(FRAME_C, 0.96 - 0.04 * (k % 2)));
       return;
     }
+    if (!door) return windowUnit(sp, w, y0, y1, flip, out, fb, mover);
     // the frame: jambs, head and (windows) sill
     fb(0, fw, y0, y1, -0.07, 0.07, FRAME_C);
     fb(w - fw, w, y0, y1, -0.07, 0.07, FRAME_C);
@@ -2290,6 +2370,214 @@
     }
     if (L.arch) fb(x0, x1, ty - 0.01, ty, -0.03, 0.03, FRAME_C);
   }
+  // ---- a window as the window designer sets it (src/sim/content/openings.js: look, finish): the frame round its
+  // outline (a rectangle, a round top, a pointed arch, a half or a whole circle), panes between mullions, the sashes that
+  // open, the grille over the glass, a classic sill and shutters. Glass is drawn with GLASS_C and so lands in the glass mesh.
+  function windowUnit(sp, w, y0, y1, flip, out, fb, mover) {
+    const L = sp.look,
+      t = sp.type,
+      FC = finishCol(sp.finish),
+      slim = !!L.slim,
+      fw = slim ? 0.04 : 0.055,
+      fd = 0.07,
+      shape = L.shape || "rect",
+      x0 = fw,
+      x1 = w - fw,
+      by = y0 + fw,
+      ty = y1 - fw,
+      cx = w / 2,
+      hw = (x1 - x0) / 2,
+      mt = slim ? 0.007 : 0.0095,
+      nx = (u) => clamp((u - cx) / hw, -1, 1),
+      sq = (u) => Math.sqrt(Math.max(0, 1 - nx(u) ** 2));
+    let topAt = () => ty,
+      botAt = () => by;
+    if (shape === "arch") {
+      const r = Math.min(hw, (ty - by) * 0.45);
+      topAt = (u) => ty - r + r * sq(u);
+    } else if (shape === "gothic") {
+      const r = Math.min(hw * 1.732, (ty - by) * 0.6);
+      topAt = (u) => ty - r + (r * Math.sqrt(Math.max(0, 4 - (Math.abs(nx(u)) + 1) ** 2))) / 1.732;
+    } else if (shape === "half") topAt = (u) => by + (ty - by) * sq(u);
+    else if (shape === "round") {
+      const cy = (by + ty) / 2,
+        ry = (ty - by) / 2;
+      topAt = (u) => cy + ry * sq(u);
+      botAt = (u) => cy - ry * sq(u);
+    }
+    // the grille over one pane (a, b, ya, yb) at depth z; part is "top" or "bottom" for a double-hung sash, else "all"
+    const grille = (d, a, b, ya, yb, z, part) => {
+      const G = L.grille,
+        gx = Math.max(1, L.grid[0] | 0),
+        gy0 = Math.max(1, L.grid[1] | 0),
+        dhs = part !== "all",
+        gy = dhs ? Math.max(1, Math.round(gy0 / 2)) : gy0,
+        vb = (u, p, q) => d(u - mt, u + mt, p, q, z - 0.02, z + 0.02, FC),
+        hb = (y, p, q) => d(p, q, y - mt, y + mt, z - 0.02, z + 0.02, FC),
+        sb = (s) => s && d.seg(s[0], s[1], s[2], s[3], 2 * mt, z - 0.02, z + 0.02, FC);
+      if (G === "none" || b - a < 0.08 || yb - ya < 0.08) return;
+      if (G === "colonial" || (G === "cottage" && dhs && part === "top")) {
+        for (let k = 1; k < gx; k++) vb(a + ((b - a) * k) / gx, ya, yb);
+        for (let k = 1; k < gy; k++) hb(ya + ((yb - ya) * k) / gy, a, b);
+      } else if (G === "cottage" && !dhs) {
+        const yc = yb - (yb - ya) * 0.36;
+        hb(yc, a, b);
+        for (let k = 1; k < gx; k++) vb(a + ((b - a) * k) / gx, yc, yb);
+      } else if (G === "farmhouse") {
+        vb((a + b) / 2, ya, yb);
+        dhs || hb((ya + yb) / 2, a, b);
+      } else if (G === "craftsman") {
+        const n = Math.max(2, gx);
+        if (dhs) {
+          if (part === "top") for (let k = 1; k < n; k++) vb(a + ((b - a) * k) / n, ya, yb);
+        } else {
+          const yc = yb - (yb - ya) * 0.34;
+          hb(yc, a, b);
+          for (let k = 1; k < n; k++) vb(a + ((b - a) * k) / n, yc, yb);
+        }
+      } else if (G === "prairie") {
+        if (part === "bottom") return;
+        const e = Math.min(0.09, 0.2 * Math.min(b - a, yb - ya));
+        vb(a + e, ya, yb);
+        vb(b - e, ya, yb);
+        hb(ya + e, a, b);
+        hb(yb - e, a, b);
+      } else if (G === "diamond") {
+        const sx = (b - a) / Math.max(1, gx),
+          syy = (yb - ya) / Math.max(1, gy),
+          n = gx + gy + 2;
+        for (let k = -n; k <= n; k++) {
+          sb(clipSeg(a + (k + n) * sx, ya - n * syy, a + (k - n) * sx, ya + n * syy, a, b, ya, yb));
+          sb(clipSeg(a + (k - n) * sx, ya - n * syy, a + (k + n) * sx, ya + n * syy, a, b, ya, yb));
+        }
+      } else if (G === "sunburst") {
+        const c0 = (a + b) / 2,
+          R = Math.hypot(b - a, yb - ya),
+          r0 = Math.min((b - a) * 0.13, (yb - ya) * 0.28),
+          n = Math.max(4, gx + 3);
+        for (let k = 1; k < n; k++) {
+          const ang = (Math.PI * k) / n,
+            c = Math.cos(ang),
+            sn = Math.sin(ang);
+          sb(clipSeg(c0 + c * r0, ya + sn * r0, c0 + c * R, ya + sn * R, a, b, ya, yb));
+        }
+        for (let k = 0; k < 6; k++) {
+          const p = (Math.PI * k) / 6,
+            q = (Math.PI * (k + 1)) / 6;
+          sb(clipSeg(c0 + Math.cos(p) * r0, ya + Math.sin(p) * r0, c0 + Math.cos(q) * r0, ya + Math.sin(q) * r0, a, b, ya, yb));
+        }
+      }
+    };
+    // a sash: rails round a pane of glass, and its grille
+    const rim = slim ? 0.032 : 0.045;
+    const sash = (d, a, b, ya, yb, z, part) => {
+      d(a, a + rim, ya, yb, z - 0.025, z + 0.025, FC);
+      d(b - rim, b, ya, yb, z - 0.025, z + 0.025, FC);
+      d(a + rim, b - rim, ya, ya + rim, z - 0.025, z + 0.025, FC);
+      d(a + rim, b - rim, yb - rim, yb, z - 0.025, z + 0.025, FC);
+      d(a + rim, b - rim, ya + rim, yb - rim, z - 0.003, z + 0.003, GLASS_C);
+      grille(d, a + rim, b - rim, ya + rim, yb - rim, z, part);
+    };
+    // classic: a sill that sticks out under the window, and shutters either side
+    if (!slim && shape !== "round") fb(-0.035, w + 0.035, y0 - 0.035, y0 + 0.004, out > 0 ? -fd : -0.125, out > 0 ? 0.125 : fd, FC);
+    if (L.shutters && L.shutters !== "none" && (shape === "rect" || shape === "arch") && w < 2.2) {
+      const SC = finishCol(L.shutters),
+        sw = Math.min(0.75, w / 2),
+        gap = 0.04,
+        va = out > 0 ? 0.08 : -0.105,
+        vv = out > 0 ? 0.105 : -0.08,
+        h = y1 - y0,
+        n = Math.max(3, Math.floor((h - 0.14) / 0.075));
+      for (const [a, b] of [[-gap - sw, -gap], [w + gap, w + gap + sw]]) {
+        fb(a, a + 0.055, y0, y1, va, vv, SC);
+        fb(b - 0.055, b, y0, y1, va, vv, SC);
+        fb(a + 0.055, b - 0.055, y0, y0 + 0.07, va, vv, SC);
+        fb(a + 0.055, b - 0.055, y1 - 0.07, y1, va, vv, SC);
+        fb(a + 0.055, b - 0.055, y0 + h * 0.48, y0 + h * 0.48 + 0.06, va, vv, SC);
+        for (let k = 0; k < n; k++) {
+          const yy = y0 + 0.07 + ((h - 0.14) * (k + 0.5)) / n;
+          fb(a + 0.055, b - 0.055, yy - 0.024, yy + 0.024, va + (out > 0 ? 0.004 : -0.006), vv + (out > 0 ? 0.006 : -0.004), shade(SC, 0.78 + 0.1 * (k % 2)));
+        }
+      }
+    }
+    const lx = Math.max(1, L.lites[0] | 0),
+      ly = Math.max(1, L.lites[1] | 0),
+      mw = slim ? 0.022 : 0.035;
+    // a shaped window is a fixed one: the frame fills the rectangle round the outline
+    if (shape !== "rect") {
+      fb(0, fw, y0, y1, -fd, fd, FC);
+      fb(w - fw, w, y0, y1, -fd, fd, FC);
+      if (shape !== "round") fb(fw, w - fw, y0, by, -fd, fd, FC);
+      const N = 20;
+      for (let k = 0; k < N; k++) {
+        const ua = x0 + ((x1 - x0) * k) / N,
+          ub = x0 + ((x1 - x0) * (k + 1)) / N,
+          ta = topAt(ua),
+          tb = topAt(ub),
+          ba = botAt(ua),
+          bb = botAt(ub);
+        fb.poly([[ua, ta], [ub, tb], [ub, y1], [ua, y1]], -fd, fd, FC);
+        if (shape === "round") fb.poly([[ua, y0], [ub, y0], [ub, bb], [ua, ba]], -fd, fd, FC);
+        if (ta - ba > 1e-3 || tb - bb > 1e-3) fb.poly([[ua, ba], [ub, bb], [ub, tb], [ua, ta]], -0.003, 0.003, GLASS_C);
+      }
+      for (let k = 1; k < lx; k++) fb(x0 + ((x1 - x0) * k) / lx - mw, x0 + ((x1 - x0) * k) / lx + mw, by, ty, -0.055, 0.055, FC);
+      for (let k = 1; k < ly; k++) fb(x0, x1, by + ((ty - by) * k) / ly - mw, by + ((ty - by) * k) / ly + mw, -0.055, 0.055, FC);
+      for (let i = 0; i < lx; i++) for (let j = 0; j < ly; j++) grille(fb, x0 + ((x1 - x0) * i) / lx + (i ? mw : 0), x0 + ((x1 - x0) * (i + 1)) / lx - (i < lx - 1 ? mw : 0), by + ((ty - by) * j) / ly + (j ? mw : 0), by + ((ty - by) * (j + 1)) / ly - (j < ly - 1 ? mw : 0), 0, "all");
+      return;
+    }
+    // the outer frame
+    fb(0, fw, y0, y1, -fd, fd, FC);
+    fb(w - fw, w, y0, y1, -fd, fd, FC);
+    fb(fw, w - fw, y1 - fw, y1, -fd, fd, FC);
+    fb(fw, w - fw, y0, by, -fd, fd, FC);
+    // a fixed transom over opening sashes when the panes go two or more high
+    let top = ty;
+    if (t.op !== "fixed" && ly >= 2 && ty - by > 0.9) {
+      top = ty - (ty - by) * 0.3;
+      fb(x0, x1, top - mw, top + mw, -fd, fd, FC);
+      for (let i = 0; i < lx; i++) {
+        const a = x0 + ((x1 - x0) * i) / lx + (i ? mw : 0),
+          b = x0 + ((x1 - x0) * (i + 1)) / lx - (i < lx - 1 ? mw : 0);
+        i && fb(a - 2 * mw, a, top + mw, ty, -0.055, 0.055, FC);
+        fb(a, b, top + mw, ty, -0.003, 0.003, GLASS_C);
+        grille(fb, a, b, top + mw, ty, 0, "all");
+      }
+      top -= mw;
+    }
+    if (t.op === "fixed") {
+      fb(x0, x1, by, ty, -0.003, 0.003, GLASS_C);
+      for (let k = 1; k < lx; k++) fb(x0 + ((x1 - x0) * k) / lx - mw, x0 + ((x1 - x0) * k) / lx + mw, by, ty, -0.055, 0.055, FC);
+      for (let k = 1; k < ly; k++) fb(x0, x1, by + ((ty - by) * k) / ly - mw, by + ((ty - by) * k) / ly + mw, -0.055, 0.055, FC);
+      for (let i = 0; i < lx; i++) for (let j = 0; j < ly; j++) grille(fb, x0 + ((x1 - x0) * i) / lx + (i ? mw : 0), x0 + ((x1 - x0) * (i + 1)) / lx - (i < lx - 1 ? mw : 0), by + ((ty - by) * j) / ly + (j ? mw : 0), by + ((ty - by) * (j + 1)) / ly - (j < ly - 1 ? mw : 0), 0, "all");
+      return;
+    }
+    // opening sashes: one unit per pane across (a slider's two panes are one unit), mullions between
+    const units = t.op === "slide" ? 1 : lx,
+      pn = t.op === "slide" ? Math.max(2, L.panels) : 1;
+    for (let i = 0; i < units; i++) {
+      const ua = x0 + ((x1 - x0) * i) / units + (i ? mw : 0),
+        ub = x0 + ((x1 - x0) * (i + 1)) / units - (i < units - 1 ? mw : 0);
+      i && fb(ua - 2 * mw, ua, by, top, -fd, fd, FC);
+      if (t.op === "double_hung") {
+        const mid = (by + top) / 2;
+        sash(fb, ua, ub, mid - 0.02, top, -0.035, "top");
+        sash(mover({ k: "rise", dy: (top - by) * 0.42 }), ua, ub, by, mid + 0.02, 0.035, "bottom");
+        continue;
+      }
+      for (let p = 0; p < pn; p++) {
+        const a = ua + ((ub - ua) * p) / pn + (p ? 0.01 : 0),
+          b = ua + ((ub - ua) * (p + 1)) / pn - (p < pn - 1 ? 0.01 : 0),
+          zOff = t.op === "slide" ? (p % 2 ? 0.035 : -0.035) : 0,
+          right = units > 1 && i >= units / 2;
+        let mv = null;
+        if (t.op === "casement") mv = { k: "swing", pu: flip ? w - (right ? b : a) : right ? b : a, s: (right ? -1 : 1) * (flip ? -1 : 1), ang: 1.15, side: out };
+        else if (t.op === "slide" && p === 1) mv = { k: "slide", du: -(b - a) * (flip ? -1 : 1) };
+        else if (t.op === "awning") mv = { k: "tilt", py: top, e: -1, ang: 0.85, side: out };
+        else if (t.op === "tilt_in") mv = { k: "tilt", py: by, e: 1, ang: 0.6, side: -out };
+        sash(mv ? mover(mv) : fb, a, b, by, top, zOff, "all");
+      }
+    }
+  }
   // ---- the moving parts of built free doors and windows: one mesh each, a cheap matrix tween, nothing when idle
   const leafBusy = new Set(),
     _lm = new T.Matrix4();
@@ -2301,6 +2589,7 @@
     for (const L of S.leaves || []) {
       S.group.remove(L.mesh);
       L.mesh.geometry.dispose();
+      if (L.glass) (S.group.remove(L.glass), L.glass.geometry.dispose());
       leafBusy.delete(L);
     }
     S.leaves = [];
@@ -2314,7 +2603,14 @@
         mesh.matrixAutoUpdate = false;
         mesh.frustumCulled = false;
         S.group.add(mesh);
-        const L = { id: o.f.id, S, mesh, mv: p.mv, o, cur: openOf(o.f.id) ? 1 : 0 };
+        const L = { id: o.f.id, S, mesh, mv: p.mv, o, cur: openOf(o.f.id) ? 1 : 0, glass: null };
+        if (p.geo.glass && p.geo.glass.p.length) {
+          L.glass = new T.Mesh(p.geo.glass.build(), S.glassMat);
+          L.glass.matrixAutoUpdate = false;
+          L.glass.frustumCulled = false;
+          L.glass.renderOrder = 2;
+          S.group.add(L.glass);
+        }
         setLeaf(L, L.cur);
         S.leaves.push(L);
       }
@@ -2346,6 +2642,7 @@
     }
     L.mesh.matrix.copy(_lm);
     L.mesh.matrixWorldNeedsUpdate = true;
+    if (L.glass) (L.glass.matrix.copy(_lm), (L.glass.matrixWorldNeedsUpdate = true));
   }
   function leafTick(dt) {
     for (const L of leafBusy) {
@@ -2442,6 +2739,7 @@
   function buildGeo(D, depth) {
     const g = new Geo(),
       rg = new Geo();
+    g.glass = new Geo();
     const hs = D.hs || 1;
     // floors raised well clear of the ground stand on posts instead of a solid plinth
     // a building on a real foundation has no stone skirt: its floor frame shows, and the piers stand under it
@@ -2580,7 +2878,7 @@
     PAL = WALLS.timber;
     RPAL = C.thatch;
     rg.yo = 0;
-    if (hs !== 1) for (let n = 1; n < g.p.length; n += 3) g.p[n] = stretchY(g.p[n], hs);
+    if (hs !== 1) for (const q of [g.p, g.glass.p]) for (let n = 1; n < q.length; n += 3) q[n] = stretchY(q[n], hs);
     for (const st of D.stairs || []) stairPieces(g, st, hs);
     const fr = D.ox !== undefined ? D : D.frame;
     if (fr) (D.paths || []).forEach((p, n) => pathPieces(late, fr, p, n));
@@ -2589,7 +2887,7 @@
     append(g.p, late.p);
     append(g.n, late.n);
     append(g.c, late.c);
-    return { main: g, roof: rg, glow };
+    return { main: g, roof: rg, glow, glass: g.glass };
   }
 
   /* ---------- materials and scene objects ---------- */
@@ -2623,6 +2921,41 @@
     const m = new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide, clippingPlanes: [plane, near, sideA, sideB], clipIntersection: true, clipShadows: true });
     fadeB(m);
     return texel(m);
+  }
+  // ---- glass: one transparent mesh per structure, no extra render pass. It reflects the sky and the ground by the
+  // Fresnel law (faint head-on, nearly a mirror at a glancing angle), catches the sun as a hard glint, tints what is seen
+  // through it a little green, and casts no shadow, so sunlight falls through the windows onto the floor.
+  const GLASS_U = G.skyU || { uGSunDir: { value: new T.Vector3(0.4, 0.8, 0.3) }, uGSunCol: { value: new T.Color(1, 0.95, 0.85) }, uGSky: { value: new T.Color(0xa9c4d6) }, uGZen: { value: new T.Color(0x5b86b5) } };
+  GLASS_U.uGlassA = { value: 0.2 };
+  function makeGlassMat(planes) {
+    const m = new T.MeshLambertMaterial({ color: 0x1e2c2e, transparent: true, depthWrite: false, side: T.FrontSide, clippingPlanes: planes || null, clipIntersection: true });
+    fadeB(m);
+    const before = m.onBeforeCompile,
+      key = m.customProgramCacheKey;
+    m.onBeforeCompile = (sh, r) => {
+      before && before.call(m, sh, r);
+      for (const k in GLASS_U) sh.uniforms[k] = GLASS_U[k];
+      sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nuniform vec3 uGSunDir, uGSunCol, uGSky, uGZen; uniform float uGlassA;").replace(
+        "#include <opaque_fragment>",
+        `{
+          float cosT = clamp(dot(geometryNormal, geometryViewDir), 0.0, 1.0);
+          float fr = 0.07 + 0.93 * pow(1.0 - cosT, 5.0);
+          vec3 Rw = normalize((vec4(reflect(-geometryViewDir, geometryNormal), 0.0) * viewMatrix).xyz);
+          float up = Rw.y;
+          vec3 skyC = mix(uGSky, uGZen, pow(clamp(up, 0.0, 1.0), 0.6));
+          vec3 env = mix(uGSky * vec3(0.27, 0.29, 0.23), skyC, smoothstep(-0.05, 0.03, up));
+          env *= 1.0 - 0.4 * exp(-pow((up - 0.05) / 0.07, 2.0));   // the dark line of far trees on the horizon
+          float sd = max(dot(Rw, normalize(uGSunDir)), 0.0);
+          vec3 refl = env + uGSunCol * (pow(sd, 900.0) * 14.0 + pow(sd, 48.0) * 0.35);
+          float a = clamp(uGlassA + (1.0 - uGlassA) * fr, 0.0, 1.0);
+          outgoingLight = (outgoingLight * uGlassA + refl * fr) / max(a, 1e-3);
+          diffuseColor.a = a;
+        }
+        #include <opaque_fragment>`,
+      );
+    };
+    m.customProgramCacheKey = () => (key ? key.call(m) : "") + "|glass";
+    return m;
   }
   const doorMat = new T.MeshLambertMaterial({ color: 0x6f4d2c });
   const doorGeo = new T.BoxGeometry(0.82, 2.0, 0.05);
@@ -2781,6 +3114,7 @@
       memMeshes: [],
     };
     S.wallMat = makeWallMat(S.clip, S.near, S.sideA, S.sideB);
+    S.glassMat = makeGlassMat([S.clip, S.near, S.sideA, S.sideB]);
     S.group.position.set(S.ox, S.y0, S.oz);
     S.group.rotation.y = S.yaw;
     G.scene.add(S.group);
@@ -2792,6 +3126,8 @@
     for (const m of [S.main, S.roof, S.gapMesh]) m && m.geometry.dispose();
     S.roofMat.dispose();
     S.wallMat.dispose();
+    S.glassMat.dispose();
+    S.glassMesh && S.glassMesh.geometry.dispose();
     S.glow && S.glow.geometry.dispose();
     S.glowMat.dispose();
     dropMembers(S);
@@ -3028,6 +3364,16 @@
       m.castShadow = m.receiveShadow = true;
       S.group.add(m);
       S[key] = m;
+    }
+    if (S.glassMesh) {
+      S.group.remove(S.glassMesh);
+      S.glassMesh.geometry.dispose();
+      S.glassMesh = null;
+    }
+    if (geo.glass.p.length) {
+      S.glassMesh = new T.Mesh(geo.glass.build(), S.glassMat);
+      S.glassMesh.renderOrder = 2;
+      S.group.add(S.glassMesh);
     }
     if (S.glow) {
       S.group.remove(S.glow);
@@ -3675,7 +4021,7 @@
       return finishOp(op);
     }
     if (t === "opening") {
-      const f0 = { typeId: B.otype, sizeIdx: B.osize, sill: OP.sillFor(B.otype, B.osill) },
+      const f0 = { typeId: B.otype, sizeIdx: B.osize, sill: OP.sillFor(B.otype, B.osill), ...designOf() },
         sp0 = OP.freeSpec(f0),
         hit = h.F.isNew ? null : wallUnder(h);
       op.label = sp0.type.name + " " + fmtM(sp0.w) + " × " + fmtM(sp0.h);
@@ -3703,7 +4049,7 @@
       const mine = grab ? grab.f : null,
         spec = mine ? grab.sp : sp0,
         sn = OP.snapFree({ L, at: along - run.t0, w: spec.w, h: spec.h, sill: mine ? mine.sill : f0.sill, others: runOthers(S, run, mine && mine.id), snap: snapOn() && !B.ctrl }),
-        f = { id: mine ? mine.id : null, typeId: mine ? mine.typeId : B.otype, sizeIdx: mine ? mine.sizeIdx : B.osize, d: run.d, line: run.line, pos: run.t0 + sn.offset, sill: spec.type.kind === "door" ? 0 : sn.sill, flip: mine ? !!mine.flip : B.oflip },
+        f = { id: mine ? mine.id : null, typeId: mine ? mine.typeId : B.otype, sizeIdx: mine ? mine.sizeIdx : B.osize, ...(mine ? designOf(mine) : designOf()), d: run.d, line: run.line, pos: run.t0 + sn.offset, sill: spec.type.kind === "door" ? 0 : sn.sill, flip: mine ? !!mine.flip : B.oflip },
         sp = OP.freeSpec(f),
         Hh = EAVE * S.hs;
       f.out = freeOut(S, f, sp.w);
@@ -4150,7 +4496,7 @@
       const all = new Geo();
       for (const it of c.items) {
         const ga = buildGeo({ floors: new Set(it.floors), walls: new Map(it.walls), roofs: it.roofs, segs: it.segs, rings: it.rings, stairs: it.stairs, pillars: it.pillars, wmat: new Map(it.wmat), fmat: new Map(it.fmat), hs: it.hs, lift: it.lift, decor: it.decor }, 0.6);
-        for (const q of [ga.main, ga.roof, ga.glow]) {
+        for (const q of [ga.main, ga.roof, ga.glow, ga.glass]) {
           for (let n = 1; n < q.p.length; n += 3) q.p[n] += it.y0 - c.y0;
           append(all.p, q.p);
           append(all.n, q.n);
@@ -4840,7 +5186,7 @@
   function geoMesh(D, S, mat) {
     const ga = buildGeo(D, S.depth || 0.5),
       g = ga.main;
-    for (const q of [ga.roof, ga.glow]) (append(g.p, q.p), append(g.n, q.n), append(g.c, q.c));
+    for (const q of [ga.roof, ga.glow, ga.glass]) (append(g.p, q.p), append(g.n, q.n), append(g.c, q.c));
     const m = new T.Mesh(g.build(), mat);
     m.position.set(S.ox, S.y0, S.oz);
     m.rotation.y = S.yaw;
@@ -5833,7 +6179,7 @@
     for (const [idx, m, kind] of op.setPillars) A.pillars.push([Sx.pillars[idx][0], Sx.pillars[idx][1], m, kind]);
     const ga = buildGeo(A, depth),
       merged = ga.main;
-    for (const q of [ga.roof, ga.glow]) (append(merged.p, q.p), append(merged.n, q.n), append(merged.c, q.c));
+    for (const q of [ga.roof, ga.glow, ga.glass]) (append(merged.p, q.p), append(merged.n, q.n), append(merged.c, q.c));
     if (op.hline) merged.abox(op.hline.d === 0 ? op.hline.a : op.hline.line - 0.1, op.hline.y - 0.012, op.hline.d === 0 ? op.hline.line - 0.1 : op.hline.a, op.hline.d === 0 ? op.hline.b : op.hline.line + 0.1, op.hline.y + 0.012, op.hline.d === 0 ? op.hline.line + 0.1 : op.hline.b, [1, 1, 1]);
     if (op.marker) merged.abox(op.marker[0] - 0.14, 0, op.marker[1] - 0.14, op.marker[0] + 0.14, d ? EAVE : 0.5, op.marker[1] + 0.14, [1, 1, 1]);
     if (d && d.a && (B.tool === "room" || B.tool === "wall")) merged.abox(d.a.i - 0.14, 0, d.a.j - 0.14, d.a.i + 0.14, EAVE, d.a.j + 0.14, [1, 1, 1]);
@@ -5859,9 +6205,7 @@
     for (const [ri, k, ty] of op.setSides) ty || Dl.segs.push(sideSeg(ri, k, S.rings[ri].sides[k]));
     for (const [ri, on] of op.ringRoofs) on || Dl.rings.push({ ...S.rings[ri], sides: [], roof: true, floor: false });
     const gd = buildGeo(Dl, depth);
-    append(gd.main.p, gd.roof.p);
-    append(gd.main.n, gd.roof.n);
-    append(gd.main.c, gd.roof.c);
+    for (const q of [gd.roof, gd.glass]) (append(gd.main.p, q.p), append(gd.main.n, q.n), append(gd.main.c, q.c));
     setGeo(ghostDel, gd.main);
     // guide lines: from the snapping, and for rooms where the corner lines up with one already built
     const gg = new Geo(),
@@ -6754,18 +7098,96 @@
     }
     return null;
   };
+  // what the designer carries onto a window: a made-to-order size, a frame colour and a look (from B.od, or from f)
+  function designOf(f) {
+    const o = f || B.od,
+      out = {};
+    if (o.w > 0 && o.h > 0) ((out.w = o.w), (out.h = o.h));
+    if (o.finish) out.finish = o.finish;
+    if (o.look && Object.keys(o.look).length) out.look = { ...o.look };
+    return out;
+  }
   function openingView(g) {
     const sel = B.fsel ? fselOpen() : null,
       typeId = sel ? sel.f.typeId : B.otype,
-      t = OP.openingType(typeId);
-    g.push(G_.tiles("otype", "Type", OP.OPENING_TYPES.map((x) => ({ v: x.id, name: x.name, icon: "o-" + x.id })), B.otype, "Shift wheel"));
-    g.push(G_.chips("osize", "Size", OP.openingSizes(B.otype).map((z, n) => ({ v: n, name: Math.round(z.w * 1000) + " × " + Math.round(z.h * 1000) })), B.osize));
-    if (t.kind === "window") g.push(G_.chips("osill", "Sill", [{ v: "auto", name: "Default", note: fmtM(OP.openingType(B.otype).sill) }, ...Object.keys(OP.SILL_NAMES).map((k) => ({ v: k, name: OP.SILL_NAMES[k], note: fmtM(OP.SILL_PRESETS[k]) }))], B.osill));
-    const sp = sel ? sel.sp : OP.freeSpec({ typeId: B.otype, sizeIdx: B.osize, sill: OP.sillFor(B.otype, B.osill) }),
+      t = OP.openingType(typeId),
+      custom = sel ? sel.f.w > 0 : B.od.w > 0;
+    g.push(G_.tiles("otype", "Type", OP.OPENING_TYPES.map((x) => ({ v: x.id, name: x.name, icon: "o-" + x.id })), typeId, "Shift wheel"));
+    g.push(G_.chips("osize", "Size", [...OP.openingSizes(typeId).map((z, n) => ({ v: n, name: Math.round(z.w * 1000) + " × " + Math.round(z.h * 1000) })), ...(custom ? [{ v: -1, name: "Custom" }] : [])], custom ? -1 : sel ? sel.f.sizeIdx : B.osize));
+    if (t.kind === "window") g.push(G_.chips("osill", "Sill", [{ v: "auto", name: "Default", note: fmtM(t.sill) }, ...Object.keys(OP.SILL_NAMES).map((k) => ({ v: k, name: OP.SILL_NAMES[k], note: fmtM(OP.SILL_PRESETS[k]) }))], B.osill));
+    const sp = sel ? sel.sp : OP.freeSpec({ typeId, sizeIdx: B.osize, sill: OP.sillFor(typeId, B.osill), ...designOf() }),
       hd = sp.header;
-    g.push(G_.info(sel ? "Selected: " + sp.type.name : "Next: " + sp.type.name, "rough opening " + fmtM(sp.rough.width) + " × " + fmtM(sp.rough.height) + " · header " + (hd.engineered ? "glulam beam, double jacks" : hd.plies + " × " + hd.size.replace("x", " x ")) + " · " + OP.OPERATION[sp.type.op]));
+    g.push(G_.info(sel ? "Selected: " + sp.type.name : "Next: " + sp.type.name, (sp.type.blurb ? sp.type.blurb + " · " : "") + "rough opening " + fmtM(sp.rough.width) + " × " + fmtM(sp.rough.height) + " · header " + (hd.engineered ? "glulam beam, double jacks" : hd.plies + " × " + hd.size.replace("x", " x ")) + " · " + OP.OPERATION[sp.type.op] + (custom ? " · made to order" : "")));
     g.push(G_.act("oflip", sel ? "Flip" : B.oflip ? "Flipped" : "Flip", "turn", "F"));
     sel && g.push(G_.act("odel", "Delete", "bin", "Del", true));
+    if (t.kind === "window") windowDesigner(g, sp);
+    else if (typeof doorDesignerView === "function") doorDesignerView(g, sp);
+  }
+  // ---- the window designer: on the second row, a live drawing of the window on its wall, then every choice. It edits
+  // the selected window in place, or else sets up the next one.
+  const SHUT_KEYS = ["none", "black", "green", "red", "blue", "wood", "white"];
+  function windowDesigner(g, sp) {
+    const L = sp.look,
+      row = (x) => ((x.row = 2), g.push(x)),
+      lookNow = Object.keys(OP.LOOKS).find((k) => {
+        const o = OP.LOOKS[k];
+        return o.grille === L.grille && o.finish === sp.finish && (o.shutters || "none") === (L.shutters || "none") && (o.grille === "none" || o.grille === "prairie" || (o.grid[0] === L.grid[0] && o.grid[1] === L.grid[1]));
+      });
+    row({ type: "winprev", id: "w:prev", label: "Designer", w: sp.w, h: sp.h, sill: sp.sill, wallH: EAVE, look: L, finish: "#" + OP.FINISHES[sp.finish].hex.toString(16).padStart(6, "0"), shutter: L.shutters && L.shutters !== "none" && OP.FINISHES[L.shutters] ? "#" + OP.FINISHES[L.shutters].hex.toString(16).padStart(6, "0") : null, op: sp.type.op });
+    row(G_.field("w:w", "Width", fmt(sp.w), "m", "Made to order: " + fmtM(sp.type.range.w[0]) + " to " + fmtM(sp.type.range.w[1])));
+    row(G_.field("w:h", "Height", fmt(sp.h), "m", "Made to order: " + fmtM(sp.type.range.h[0]) + " to " + fmtM(sp.type.range.h[1])));
+    row(G_.field("w:sill", "Sill", fmt(sp.sill), "m", "Height of the glass's bottom edge above the floor"));
+    row(G_.chips("w:look", "Look", Object.keys(OP.LOOKS).map((k) => ({ v: k, name: OP.LOOKS[k].name })), lookNow || null));
+    row(G_.chips("w:shape", "Shape", Object.keys(OP.SHAPES).map((k) => ({ v: k, name: OP.SHAPES[k], note: k !== "rect" && sp.type.op !== "fixed" ? "A shaped window does not open" : undefined })), L.shape || "rect"));
+    row(G_.step("w:lx", "Panes across", String(L.lites[0])));
+    row(G_.step("w:ly", "Panes high", String(L.lites[1])));
+    row(G_.chips("w:grille", "Grille", Object.keys(OP.GRILLES).map((k) => ({ v: k, name: OP.GRILLES[k] })), L.grille));
+    if (/colonial|cottage|craftsman|diamond|sunburst/.test(L.grille)) {
+      row(G_.step("w:gx", "Grid across", String(L.grid[0])));
+      L.grille === "sunburst" || row(G_.step("w:gy", "Grid down", String(L.grid[1])));
+    }
+    row(G_.sw("w:finish", "Frame", Object.keys(OP.FINISHES).map((k) => ({ v: k, name: OP.FINISHES[k].name, sw: ["flat", "#" + OP.FINISHES[k].hex.toString(16).padStart(6, "0"), "#" + OP.FINISHES[k].hex.toString(16).padStart(6, "0")] })), sp.finish));
+    row(G_.chips("w:shut", "Shutters", SHUT_KEYS.map((k) => ({ v: k, name: k === "none" ? "None" : OP.FINISHES[k].name })), L.shutters || "none"));
+  }
+  // apply a designer change to the selected window, or to the next one
+  function designSet(fn) {
+    const q = B.fsel ? fselOpen() : null;
+    if (q) return selFree((f) => {
+      f.look = { ...(f.look || {}) };
+      fn(f, q.sp);
+    });
+    const sp = OP.freeSpec({ typeId: B.otype, sizeIdx: B.osize, sill: OP.sillFor(B.otype, B.osill), ...designOf() });
+    B.od.look = { ...(B.od.look || {}) };
+    fn(B.od, sp);
+    B.key = "";
+    touchUi();
+  }
+  function designChoose(id, v) {
+    const k = id.slice(2),
+      st = (a, d, lo, hi) => Math.max(lo, Math.min(hi, (a | 0) + d));
+    designSet((o, sp) => {
+      const L = sp.look;
+      if (k === "w" || k === "h") {
+        const z = OP.fitSize(sp.type, k === "w" ? v : sp.w, k === "h" ? v : sp.h);
+        o.w = z.w;
+        o.h = z.h;
+      } else if (k === "sill") {
+        const y = Math.round(Math.max(0.05, Math.min(EAVE - 0.4, v)) * 100) / 100;
+        if (o === B.od) B.osill = y;
+        else o.sill = y;
+      } else if (k === "look") {
+        const P = OP.LOOKS[v];
+        o.finish = P.finish;
+        Object.assign(o.look, { grille: P.grille, grid: P.grid.slice(), shutters: P.shutters, slim: v === "modern" ? true : sp.type.look.slim || false });
+      } else if (k === "shape") o.look.shape = v;
+      else if (k === "lx") o.look.lites = [st(L.lites[0], v, 1, 12), L.lites[1]];
+      else if (k === "ly") o.look.lites = [L.lites[0], st(L.lites[1], v, 1, 6)];
+      else if (k === "grille") o.look.grille = v;
+      else if (k === "gx") o.look.grid = [st(L.grid[0], v, 1, 8), L.grid[1]];
+      else if (k === "gy") o.look.grid = [L.grid[0], st(L.grid[1], v, 1, 12)];
+      else if (k === "finish") o.finish = v;
+      else if (k === "shut") o.look.shutters = v;
+    });
   }
   function selFree(fn) {
     const q = fselOpen();
@@ -6815,8 +7237,14 @@
     else if (id === "rshape") B.rshape = roofIndex(v, RS[3] > 1, turnOf);
     else if (id === "steep") B.rshape = roofIndex(RS[0], !(RS[3] > 1), turnOf);
     else if (id === "rturn") B.rshape = roofIndex(RS[0], RS[3] > 1, turnOf + 1);
-    else if (id === "otype") ((B.otype = v), (B.osize = Math.floor(OP.openingSizes(v).length / 2)), (B.osill = "auto"));
-    else if (id === "osize") B.osize = v;
+    else if (id === "otype") {
+      if (B.fsel && fselOpen()) selFree((f) => ((f.typeId = v), (f.sizeIdx = Math.floor(OP.openingSizes(v).length / 2)), delete f.w, delete f.h, (f.sill = OP.sillFor(v, "auto"))));
+      else ((B.otype = v), (B.osize = Math.floor(OP.openingSizes(v).length / 2)), (B.osill = "auto"), (B.od = { w: null, h: null, finish: null, look: {} }));
+    } else if (id === "osize") {
+      if (v < 0) return;
+      if (B.fsel && fselOpen()) selFree((f) => ((f.sizeIdx = v), delete f.w, delete f.h));
+      else ((B.osize = v), (B.od.w = B.od.h = null));
+    } else if (id.startsWith("w:")) designChoose(id, v);
     else if (id === "osill") {
       B.osill = v;
       B.fsel && selFree((f) => (f.sill = OP.sillFor(f.typeId, v)));
@@ -7833,7 +8261,9 @@
     }
     if (st.shell && !S.noShell) {
       const ga = buildGeo(st.shell, S.depth),
-        g = ga.main,
+        g = ga.main;
+      append(g.p, ga.glass.p), append(g.n, ga.glass.n), append(g.c, ga.glass.c);
+      const
         mesh = new T.Mesh(g.build(), shellMat),
         rm = new T.Mesh(ga.roof.build(), shellMat);
       mesh.userData.own = rm.userData.own = true;
