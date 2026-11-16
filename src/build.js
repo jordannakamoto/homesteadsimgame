@@ -6092,6 +6092,7 @@
   }
   function enter() {
     B.on = true;
+    for (const S of B.structs) B.dirty.add(S);
     // building wants a free cursor and a higher, steadier view
     try {
       document.pointerLockElement && document.exitPointerLock();
@@ -6111,6 +6112,7 @@
   }
   function exit() {
     B.on = false;
+    for (const S of B.structs) B.dirty.add(S);
     if (B.camSaved) {
       G.cam.pitch = B.camSaved.pitch;
       G.cam.dist = B.camSaved.dist;
@@ -7183,6 +7185,21 @@
     GHOST = { cur: ghostMat(0.2, 0.55), later: ghostMat(0.1, 0.28), dim: ghostMat(0.05, 0.14) },
     GHOSTP = Object.fromEntries(Object.entries(GHOST).map(([k, m]) => [k, Object.assign(m.clone(), { side: T.DoubleSide })])),
     shellMat = new T.MeshLambertMaterial({ vertexColors: true, color: 0xd4e8f8, transparent: true, opacity: 0.3, depthWrite: false, side: T.DoubleSide });
+  // house wrap: a thin white sheet with a faint printed band, made once
+  const wrapMat = (() => {
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = 128;
+    const x = cv.getContext("2d");
+    x.fillStyle = "#f4f6f5";
+    x.fillRect(0, 0, 128, 128);
+    x.fillStyle = "rgba(60,90,140,0.16)";
+    for (let i = 0; i < 128; i += 16) x.fillRect(i + 2, 58, 10, 12);
+    x.fillStyle = "rgba(0,0,0,0.10)";
+    x.fillRect(0, 0, 128, 3);
+    const tex = new T.CanvasTexture(cv);
+    tex.colorSpace = T.SRGBColorSpace;
+    return new T.MeshLambertMaterial({ map: tex, color: 0xffffff });
+  })();
   const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), siding: col(0xc7b79b), sidingDark: col(0x6f5a47), concrete: CONCRETE, gravel: col(0x8f8b82) };
   const _m4 = new T.Matrix4(),
     _c = new T.Color();
@@ -7202,6 +7219,8 @@
       gs = B.gstage || st.cur,
       gi = STAGES.indexOf(gs),
       sk = B.supportKinds || {},
+      // while building (not in Plan mode) only the current stage shows: each stage appears when it starts
+      hideLater = B.cmode && !B.on && !B.showLater && !st.all,
       open = new Map(); // stage -> kinds still planned in it, for "needs the piers first"
     for (const m of mem.list) if (P(m.id)) (open.get(m.stage) || open.set(m.stage, new Set()).get(m.stage)).add(m.kind);
     const sets = [[], []], // solid, solid under the roof
@@ -7209,6 +7228,7 @@
       ghostAdd = (m, top) => {
         const idx = STAGES.indexOf(m.stage);
         if (m.kind === "site" || idx < gi || (idx > gi && GHOST_LATER.has(m.kind))) return;
+        if (idx > gi && hideLater) return;
         const need = sk[m.kind],
           waits = idx === gi && need && need.some((k) => k !== m.kind && open.get(m.stage) && open.get(m.stage).has(k)),
           level = idx === gi ? (waits ? "dim" : "cur") : "later",
@@ -7230,6 +7250,23 @@
       else (st.all || st.finRun.has(m.parent)) || sets[0].push(m);
     }
     for (const m of mem.opens) P(m.id) && ghostAdd(m, 0);
+    // a thin line where the walls will stand, so the site stays readable
+    if (hideLater) {
+      const pos = [],
+        y = 0.04,
+        seg = (x0, z0, x1, z1) => pos.push(x0, y, z0, x1, y, z1);
+      for (const g of S.runs) for (const e of g.m) e.d === 0 ? seg(e.i, e.j, e.i + 1, e.j) : seg(e.i, e.j, e.i, e.j + 1);
+      for (const sg of S.segs) seg(sg[0], sg[1], sg[2], sg[3]);
+      if (pos.length) {
+        const geo = new T.BufferGeometry();
+        geo.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+        const ln = new T.LineSegments(geo, new T.LineBasicMaterial({ color: 0xaedcff, transparent: true, opacity: 0.45, depthWrite: false }));
+        ln.userData.own = true;
+        ln.renderOrder = 3;
+        S.group.add(ln);
+        S.memMeshes.push(ln);
+      }
+    }
     const place = (mesh, list, k, solid) =>
       list.forEach((m, n) => {
         const ax = m.b[0] - m.a[0],
@@ -7261,10 +7298,14 @@
     };
     sets.forEach((list, k) => {
       if (!list.length) return;
-      const mesh = new T.InstancedMesh(boxGeo, memMat, list.length);
-      place(mesh, list, k, true);
-      mesh.instanceMatrix.needsUpdate = true;
-      add(mesh, k === 1, true);
+      for (const wr of [false, true]) {
+        const part = list.filter((m) => (m.col === "wrap" && m.kind === "membrane") === wr);
+        if (!part.length) continue;
+        const mesh = new T.InstancedMesh(boxGeo, wr ? wrapMat : memMat, part.length);
+        place(mesh, part, k, true);
+        mesh.instanceMatrix.needsUpdate = true;
+        add(mesh, k === 1, true);
+      }
     });
     for (const key in ghosts) {
       const [level, top, poly] = key.split("|"),
@@ -8145,6 +8186,8 @@
     return (src.bb = { w: Math.max(0, x1 - x0), d: Math.max(0, z1 - z0), h: y1, r: Math.max(0.3, Math.hypot(x1 - x0, z1 - z0) / 2) });
   }
   function structPieces(S) {
+    // pieces say what is built from the plan: bring the plan up to date first, so a piece made by this very edit starts unbuilt
+    syncKnown(S);
     const out = [],
       pend = [],
       H = EAVE * S.hs,
@@ -8507,6 +8550,13 @@
     // construction (docs/CONSTRUCTION.md): stages, built state, the shopping list and ready-made plans
     STAGES,
     FOUNDATIONS,
+    // building shows only the current stage unless the player asks for the later ones too (Feel: Show later stages)
+    setShowLater(on) {
+      on = !!on;
+      if (B.showLater === on) return;
+      B.showLater = on;
+      for (const S of B.structs) B.dirty.add(S);
+    },
     setConstructionMode(on) {
       B.cmode = !!on;
       touchUi();

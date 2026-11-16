@@ -1037,7 +1037,7 @@
     else if (ctx.kind === 'work') { const w = workLabel(pr, V.working ? V.working.memberId : ctx.q[0]); setPrompt('E', 'Hold to build: ' + low(w.text), w.count, W.job ? W.progress() : 0); }
     else if (ctx.kind === 'piece') setPrompt('', 'Click a glowing piece to set it', ctx.q.length + ' ready', W.job ? W.progress() : null);
     else if (ctx.kind === 'auto') setPrompt('E', (ctx.guided ? 'Build: ' : 'Work until done: ') + low(C.STAGE[ctx.stage].name), '', null);
-    else if (ctx.kind === 'bgrab') setPrompt('E', 'Take the wheelbarrow handles', '', null);
+    else if (ctx.kind === 'bgrab') { const k = s.stacks.find((q) => q.barrow); setPrompt('E', 'Take the wheelbarrow handles', k ? 'holds ' + stackName(k.itemId) + ' (' + describe(k.itemId, k.qty).n + ' left)' : 'empty', null); }
     else if (ctx.kind === 'bload') setPrompt('E', 'Load the wheelbarrow with ' + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'bdown') setPrompt('E', 'Set the wheelbarrow down', '', null);
     else if (ctx.kind === 'pick') setPrompt('E', (ctx.more ? 'Take more ' : 'Pick up ') + stackName(ctx.stack.itemId), '', null);
@@ -1341,6 +1341,7 @@
     const s = S();
     if (B.constructionMode !== !s.options.sandbox) B.setConstructionMode(!s.options.sandbox);
     if (sounds.muted !== s.options.mute) sounds.muted = s.options.mute;
+    if (B.setShowLater) B.setShowLater(feel().showLater >= 0.5);
     if (B.version !== V.bv) { V.bv = B.version; if (!s.options.sandbox) syncPlans(); }
   }
   function update(dt) {
