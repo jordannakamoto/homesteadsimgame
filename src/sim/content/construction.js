@@ -133,7 +133,7 @@ export function carryLimitKg(tools = [], gesture = 3) {
 
 // ---- how construction feels: every number the hands-on work is tuned by. Saved with the world; the Build panel edits them.
 // nails: nails driven per strike (0 = all of the piece's nails). Multipliers: 1 is the default strength.
-export const FEEL = Object.freeze({ setCount: 2, nails: 1, strikesPerSec: 3, dropDelayMs: 140, armful: 3, takeM: 4, climbMps: 3.8, learnNeeded: 2, sweepSpeed: 2, hitStop: 1, shake: 1 });
+export const FEEL = Object.freeze({ setCount: 2, nails: 1, strikesPerSec: 3, dropDelayMs: 140, armful: 3, takeM: 4, climbMps: 3.8, learnNeeded: 2, sweepSpeed: 2, hitStop: 1, shake: 1, showLater: 0 });
 export const FEEL_SPEC = Object.freeze([
   { key: 'setCount', label: 'Pieces set per click', min: 1, max: 6, step: 1, tip: 'How many pieces one click sets in place, loose, ready to nail' },
   { key: 'nails', label: 'Nails per strike', min: 0, max: 2, step: 1, words: ['all', '1', '2'], tip: 'How many nails one strike of the hammer drives' },
@@ -146,6 +146,7 @@ export const FEEL_SPEC = Object.freeze([
   { key: 'sweepSpeed', label: 'Sweep speed (x)', min: 0.5, max: 5, step: 0.5, tip: 'How fast a learned kind goes in as you sweep' },
   { key: 'hitStop', label: 'Hit-stop (x)', min: 0, max: 3, step: 0.25, tip: 'The tiny freeze on each hit' },
   { key: 'shake', label: 'Shake (x)', min: 0, max: 3, step: 0.25, tip: 'Screen shake on each hit' },
+  { key: 'showLater', label: 'Show later stages', min: 0, max: 1, step: 1, words: ['off', 'on'], tip: 'While building, also show the pale blueprint of stages still to come (Plan mode always shows it all)' },
 ]);
 export const FEEL_PRESETS = Object.freeze({
   relaxed: { setCount: 1, nails: 1, strikesPerSec: 2.5, dropDelayMs: 240, armful: 2, takeM: 3, climbMps: 3, learnNeeded: 3, sweepSpeed: 1.5, hitStop: 1.25, shake: 1.25 },

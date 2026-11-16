@@ -1341,6 +1341,7 @@
     const s = S();
     if (B.constructionMode !== !s.options.sandbox) B.setConstructionMode(!s.options.sandbox);
     if (sounds.muted !== s.options.mute) sounds.muted = s.options.mute;
+    if (B.setShowLater) B.setShowLater(feel().showLater >= 0.5);
     if (B.version !== V.bv) { V.bv = B.version; if (!s.options.sandbox) syncPlans(); }
   }
   function update(dt) {

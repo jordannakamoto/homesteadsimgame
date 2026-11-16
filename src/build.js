@@ -6092,6 +6092,7 @@
   }
   function enter() {
     B.on = true;
+    for (const S of B.structs) B.dirty.add(S);
     // building wants a free cursor and a higher, steadier view
     try {
       document.pointerLockElement && document.exitPointerLock();
@@ -6111,6 +6112,7 @@
   }
   function exit() {
     B.on = false;
+    for (const S of B.structs) B.dirty.add(S);
     if (B.camSaved) {
       G.cam.pitch = B.camSaved.pitch;
       G.cam.dist = B.camSaved.dist;
@@ -7202,6 +7204,8 @@
       gs = B.gstage || st.cur,
       gi = STAGES.indexOf(gs),
       sk = B.supportKinds || {},
+      // while building (not in Plan mode) only the current stage shows: each stage appears when it starts
+      hideLater = B.cmode && !B.on && !B.showLater && !st.all,
       open = new Map(); // stage -> kinds still planned in it, for "needs the piers first"
     for (const m of mem.list) if (P(m.id)) (open.get(m.stage) || open.set(m.stage, new Set()).get(m.stage)).add(m.kind);
     const sets = [[], []], // solid, solid under the roof
@@ -7209,6 +7213,7 @@
       ghostAdd = (m, top) => {
         const idx = STAGES.indexOf(m.stage);
         if (m.kind === "site" || idx < gi || (idx > gi && GHOST_LATER.has(m.kind))) return;
+        if (idx > gi && hideLater) return;
         const need = sk[m.kind],
           waits = idx === gi && need && need.some((k) => k !== m.kind && open.get(m.stage) && open.get(m.stage).has(k)),
           level = idx === gi ? (waits ? "dim" : "cur") : "later",
@@ -7230,6 +7235,23 @@
       else (st.all || st.finRun.has(m.parent)) || sets[0].push(m);
     }
     for (const m of mem.opens) P(m.id) && ghostAdd(m, 0);
+    // a thin line where the walls will stand, so the site stays readable
+    if (hideLater) {
+      const pos = [],
+        y = 0.04,
+        seg = (x0, z0, x1, z1) => pos.push(x0, y, z0, x1, y, z1);
+      for (const g of S.runs) for (const e of g.m) e.d === 0 ? seg(e.i, e.j, e.i + 1, e.j) : seg(e.i, e.j, e.i, e.j + 1);
+      for (const sg of S.segs) seg(sg[0], sg[1], sg[2], sg[3]);
+      if (pos.length) {
+        const geo = new T.BufferGeometry();
+        geo.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+        const ln = new T.LineSegments(geo, new T.LineBasicMaterial({ color: 0xaedcff, transparent: true, opacity: 0.45, depthWrite: false }));
+        ln.userData.own = true;
+        ln.renderOrder = 3;
+        S.group.add(ln);
+        S.memMeshes.push(ln);
+      }
+    }
     const place = (mesh, list, k, solid) =>
       list.forEach((m, n) => {
         const ax = m.b[0] - m.a[0],
@@ -8509,6 +8531,13 @@
     // construction (docs/CONSTRUCTION.md): stages, built state, the shopping list and ready-made plans
     STAGES,
     FOUNDATIONS,
+    // building shows only the current stage unless the player asks for the later ones too (Feel: Show later stages)
+    setShowLater(on) {
+      on = !!on;
+      if (B.showLater === on) return;
+      B.showLater = on;
+      for (const S of B.structs) B.dirty.add(S);
+    },
     setConstructionMode(on) {
       B.cmode = !!on;
       touchUi();
