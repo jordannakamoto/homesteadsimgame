@@ -301,7 +301,13 @@
     if (nm.has(mid)) return nm.get(mid);
     const m = g.byId.get(mid);
     let out = null;
-    if (m && m.draw !== 0 && m.section && (STICKS.has(m.kind) || SHEETS.has(m.kind))) {
+    if (m && (m.kind === 'door' || m.kind === 'window')) {      // a unit in its opening: nails down both jambs (a door) or all round the flange (a window)
+      const u = m.n, wx = -u[2], wz = u[0], mx = (m.a[0] + m.b[0]) / 2, mz = (m.a[2] + m.b[2]) / 2, sg = wx * (mx - g.cx) + wz * (mz - g.cz) >= 0 ? 1 : -1, off = sg * 0.06;
+      const W = m.section.d, y0 = m.a[1], y1 = m.b[1], hx = W / 2 - 0.03, at = (v, y) => [mx + u[0] * v + wx * off, y, mz + u[2] * v + wz * off];
+      out = [];
+      if (m.kind === 'door') for (const side of [-1, 1]) for (const f of [0.12, 0.5, 0.88]) out.push(at(side * hx, y0 + (y1 - y0) * f));
+      else { for (const side of [-1, 1]) for (const f of [0.1, 0.5, 0.9]) out.push(at(side * hx, y0 + (y1 - y0) * f)); out.push(at(0, y0 + 0.03), at(0, y1 - 0.03)); }
+    } else if (m && m.draw !== 0 && m.section && (STICKS.has(m.kind) || SHEETS.has(m.kind))) {
       const ax = m.b[0] - m.a[0], ay = m.b[1] - m.a[1], az = m.b[2] - m.a[2], L = Math.hypot(ax, ay, az);
       if (L > 0.05) {
         const u = [ax / L, ay / L, az / L], n = m.n, cr = [(ay * n[2] - az * n[1]) / L, (az * n[0] - ax * n[2]) / L, (ax * n[1] - ay * n[0]) / L];
@@ -508,7 +514,7 @@
   // set one piece in place with its small moment; returns the install result, or null when it did not work
   function setPiece(id, mid, pm, layer, m, at, swp, quiet) {
     const pr = S().progress[id], r = cmd('install', { structId: id, memberIds: [mid], hold: true });
-    if (!r.ok) { if (!quiet) flash(reason(r)); return null; }
+    if (!r.ok) { if (!quiet) flash(reason(r, pm.kind)); return null; }
     if (r.cuts && r.cuts.length && !quiet) flash(r.cuts[0].how === 'offcut' ? 'Cut from an offcut' : 'Cut to fit; offcut kept');
     if (r.set.length) { if (swp) V.stick = { id, mid }; if (!quiet) V.swingIn = { mid, id, layer, t: 0 }; sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
     else if (!quiet) { const q = r.partial[0]; sounds.play('rustle'); flash(plain(lineOf(pr, mid).label) + ': ' + Math.round((100 * q.got) / q.need) + '% there. Fetch more.'); }
@@ -633,7 +639,7 @@
       if (c.itemId === stack.itemId) { const it = CAT[c.itemId], a = api.armful(s, c.itemId, Math.max(it.unit === 'each' ? 1 : 0, C.carryLimitKg(G.sim.state.sys.stock.tools, gesture()) / it.massKgPerUnit)); return a !== Infinity && a > c.qty + 1e-4 ? { kind: 'pick', stack, more: true } : { kind: 'back', stack }; }
       return { kind: 'swap', stack };
     }
-    if (c) return pr ? { kind: 'hint', text: 'Nothing here needs ' + stackName(c.itemId) + ' yet', drop: true } : { kind: 'drop' };
+    if (c) return pr ? { kind: 'hint', text: (c.itemId === 'door_prehung' || c.itemId === 'window_shed') && !api.stageOpen(pr, 'openings') ? (c.itemId === 'door_prehung' ? 'Wrap the wall before the door goes in' : 'Wrap the wall before the window goes in') : (c.itemId === 'door_prehung' || c.itemId === 'window_shed') ? 'Walk to the opening: it glows' : 'Nothing here needs ' + stackName(c.itemId) + ' yet', drop: true } : { kind: 'drop' };
     return null;
   }
   function homeStack(itemId) { const P = G.player; let best = null, bd = 14; for (const k of S().stacks) if (k.itemId === itemId) { const d = Math.hypot(k.x - P.x, k.z - P.z); if (d < bd) { bd = d; best = k; } } return best; }
@@ -704,7 +710,7 @@
     onCancel(j) { V.working = null; redraw(j.id); },
   });
   const vTmp = new T.Vector3();
-  const reason = (r) => ({ 'no material': 'You need ' + (r.itemId ? stackName(r.itemId) : 'material') + ' for that', 'wrong material': 'That needs ' + (r.itemId ? stackName(r.itemId) : 'something else'), 'no fasteners': 'Out of ' + (r.itemId ? low(CAT[r.itemId].name) : 'fasteners') + ': order this stage', 'stage not open': 'Not yet: an earlier stage comes first' })[r.reason] || 'That cannot go in yet';
+  const reason = (r, kind) => (kind === 'door' || kind === 'window') && (r.reason === 'stage not open' || r.reason === 'frame not finished') ? (r.reason === 'frame not finished' ? 'Frame the opening first' : 'Wrap the wall before the ' + kind + ' goes in') : ({ 'no material': 'You need ' + (r.itemId ? stackName(r.itemId) : 'material') + ' for that', 'wrong material': 'That needs ' + (r.itemId ? stackName(r.itemId) : 'something else'), 'no fasteners': 'Out of ' + (r.itemId ? low(CAT[r.itemId].name) : 'fasteners') + ': order this stage', 'stage not open': 'Not yet: an earlier stage comes first' })[r.reason] || 'That cannot go in yet';
   function beginMember(id, memberId, from) {
     const pr = S().progress[id], g = geom(id), m = g.byId.get(memberId) || { id: memberId, kind: 'site', a: [g.cx, 0, g.cz], b: [g.cx, 0, g.cz], n: [0, 1, 0], section: { b: 0, d: 0 }, draw: 0 }, pm = pr.members[memberId], ln = lineOf(pr, memberId);
     const need = pm.need - pm.got, c = S().carried;
@@ -719,7 +725,7 @@
     if (done('subfloor')) celebrate('deck');
     if (j.kind === 'rafter' && Object.values(pr.members).filter((m) => m.kind === 'rafter' && m.built).length === 1) celebrate('firstRafter');
     if (done('roofing')) { celebrate('driedIn'); const w = G.sim.state.sys.weather; if (w && w.rainMmH > 0.05) setTimeout(() => note('It is raining', 'And it is dry inside your ' + low(pr.name) + '.'), 4200); }
-    if (j.kind === 'door') celebrate('doorHung');
+    if (j.kind === 'door') { celebrate('doorHung'); sounds.play('creak'); setTimeout(() => sounds.play('creak'), 450); }     // it swings once on its hinges
     for (const st of r.stagesDone) { flush(pr.id); if (!['subfloor', 'roofing'].includes(st) && !r.done) note(C.STAGE[st].name + ' done', nextLine(pr)); }
     if (r.done) { flush(pr.id); celebrate('finished', pr.planId === 'shed' ? 'You built this. New in the plan book: the small cabin, and drawing your own plans.' : null); }
   }
