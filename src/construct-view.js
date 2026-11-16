@@ -439,6 +439,7 @@
     if (pm.kind === 'rafter' && !Object.values(pr.members).some((q) => q.kind === 'rafter' && q.built)) return false;
     return true;
   }
+  const gesture = () => C.gestureOf(S().options);
   // within about 4 m of the stack for the stage, pieces come off it without a trip
   const TAKE_M = 4;
   function stackWithin(itemId, r) {
@@ -528,7 +529,7 @@
       const r = setPiece(ctx.id, ctx.mid, pm, layer, m, wM, swp);
       if (!r) return;
       if (r.set.length) {
-        const more = nextPlaces(pr, g, ctx, 2);
+        const more = nextPlaces(pr, g, ctx, gesture() - 1);
         more.forEach((mid, i) => setTimeout(() => {
           const p2 = S().progress[ctx.id], pm2 = p2 && p2.members[mid];
           if (!pm2 || pm2.built || pm2.need - pm2.got < 1e-6) return;
@@ -556,7 +557,7 @@
     }
     if (ni >= 0 && ctx.repeat && !swp && nbest > 150) { V.cool = 0.03; return; }     // holding only drives the nails the pointer passes over
     if (ni >= 0) { worldPt(g, hw, pts[ni], wM); b.d[ni] = 1; }
-    if (pm.kind !== 'site') {                         // one strike drives every nail of the piece
+    if (pm.kind !== 'site' && gesture() > 1) {        // one strike drives every nail of the piece (1x: one nail a click)
       if (pts) for (let i = 0; i < pts.length; i++) if (!b.d[i]) { b.d[i] = 1; worldPt(g, hw, pts[i], wA); G.burst(wA.x, wA.y, wA.z, 1, 0xe8d9b0, 0.6, 0.7, 0.05, 0.3); }
       b.n = of - 1;
     }
@@ -576,6 +577,23 @@
     if (!r.ok) { flash(reason(r)); redraw(ctx.id); return; }
     if (r.learned && r.learned.length) showBanner('Learned', 'You know how to ' + C.LEARN.says[r.learned[0]] + ' now', true, 5);
     finishInstall(ctx.id, ctx.mid, layer, pm.kind, r);
+    if (gesture() > 2 && m && pts) {                 // 3x and 4x: the strike also fastens the next set piece or two in the run
+      const mx = (m.a[0] + m.b[0]) / 2, mz = (m.a[2] + m.b[2]) / 2;
+      (ctx.q || []).filter((mid) => { const q2 = pr.members[mid]; return mid !== ctx.mid && q2 && !q2.built && q2.kind === pm.kind && q2.need > 0 && q2.got >= q2.need - 1e-6 && g.byId.get(mid); })
+        .map((mid) => { const m2 = g.byId.get(mid); return { mid, d: Math.hypot((m2.a[0] + m2.b[0]) / 2 - mx, (m2.a[2] + m2.b[2]) / 2 - mz) }; }).sort((x, y) => x.d - y.d).slice(0, gesture() - 2)
+        .forEach((o, i) => setTimeout(() => {
+          const p2 = S().progress[ctx.id], q2 = p2 && p2.members[o.mid];
+          if (!q2 || q2.built || !(q2.got >= q2.need - 1e-6)) return;
+          const m2 = g.byId.get(o.mid), hw2 = C.STAGE[q2.stage].flat ? g.walls.get(q2.parent) : null, l2 = hw2 ? q2.parent : 'main';
+          delete V.blows[o.mid];
+          const r2 = cmd('install', { structId: ctx.id, memberIds: [o.mid], hand: !swp });
+          if (!r2.ok) return;
+          worldPt(g, hw2, m2.a, wA); worldPt(g, hw2, m2.b, wB); wM.lerpVectors(wA, wB, 0.5);
+          sounds.play('knock', 0.94 + 0.12 * Math.random()); G.burst(wM.x, wM.y, wM.z, 3, 0xe8d9b0, 0.6, 0.7, 0.05, 0.3);
+          if (r2.learned && r2.learned.length) showBanner('Learned', 'You know how to ' + C.LEARN.says[r2.learned[0]] + ' now', true, 5);
+          finishInstall(ctx.id, o.mid, l2, q2.kind, r2);
+        }, 80 * (i + 1)));
+    }
   }
 
   // ------------------------------------------------------------------ what F does here and now
@@ -611,7 +629,7 @@
     if (stack) {
       if (C.SITE_SUPPLY.includes(stack.itemId)) return { kind: 'hint', text: plain(CAT[stack.itemId].name) + ': used up as you build' };
       if (!c) return { kind: 'pick', stack };
-      if (c.itemId === stack.itemId) { const it = CAT[c.itemId], a = api.armful(s, c.itemId, Math.max(it.unit === 'each' ? 1 : 0, C.carryLimitKg(G.sim.state.sys.stock.tools) / it.massKgPerUnit)); return a !== Infinity && a > c.qty + 1e-4 ? { kind: 'pick', stack, more: true } : { kind: 'back', stack }; }
+      if (c.itemId === stack.itemId) { const it = CAT[c.itemId], a = api.armful(s, c.itemId, Math.max(it.unit === 'each' ? 1 : 0, C.carryLimitKg(G.sim.state.sys.stock.tools, gesture()) / it.massKgPerUnit)); return a !== Infinity && a > c.qty + 1e-4 ? { kind: 'pick', stack, more: true } : { kind: 'back', stack }; }
       return { kind: 'swap', stack };
     }
     if (c) return pr ? { kind: 'hint', text: 'Nothing here needs ' + stackName(c.itemId) + ' yet', drop: true } : { kind: 'drop' };
@@ -960,6 +978,7 @@
       if (!Object.values(pr.lines).every((l) => l.ordered <= 1e-9) && v.toOrderUsd > (nx.status === 'not-ordered' ? nx.toOrderUsd : 0) + 1) h += `<button type="button" data-act="order:all">Order everything, ${money(v.toOrderUsd)}</button>`;
     }
     h += '</div>';
+    h += `<div class="cvopts"><span title="How many pieces one click sets, one strike fastens, and one armful holds">Pieces per gesture:</span><div class="cvseg">${C.GESTURES.map((n) => `<button type="button" data-act="gest:${n}" aria-pressed="${C.gestureOf(s.options) === n}">${n}x</button>`).join('')}</div></div>`;
     h += `<div class="cvopts"><span>How hands-on:</span><div class="cvseg">${[['guided', 'Guided', 'One press builds a stage while you watch'], ['hands-on', 'Hands-on', 'Carry each piece, set it in place and nail it yourself']].map((q) => `<button type="button" data-act="level:${q[0]}" aria-pressed="${pr.level === q[0] || (q[0] === 'hands-on' && pr.level === 'piece')}" title="${q[2]}">${q[1]}</button>`).join('')}</div>${pr.level === 'hands-on' ? `<label title="Press F by the building once and it keeps going, fetching from the stacks"><input type="checkbox" data-opt="auto"${s.options.auto ? ' checked' : ''}>Work until done</label>` : ''}</div>`;
     h += '<ol>';
     v.stages.forEach((q, i) => {
@@ -1021,6 +1040,7 @@
     } else if (k === 'auto' && pr) { startAuto(pr.id, arg, pr.level === 'guided'); closePanel(); }
     else if (k === 'stop') stopAuto();
     else if (k === 'level' && pr) { cmd('setLevel', { structId: pr.id, level: arg }); cmd('setLevel', { level: arg }); stopAuto(); }
+    else if (k === 'gest') cmd('setGesture', { n: Number(arg) });
     else if (k === 'seen') cmd('seeCard', { stage: arg });
     else if (k === 'cardsoff') cmd('setOption', { key: 'cards', value: false });
     else if (k === 'apart' && pr) {

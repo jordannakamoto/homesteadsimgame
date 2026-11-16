@@ -112,8 +112,8 @@ test('picking up respects the carry limit and takes what the open stage wants', 
   const s = cs(sim), stack = (id) => s.stacks.find((k) => k.itemId === id);
   // 2x4s: far more in the stack than 30 kg
   const r = sim.commandNow('construction.pickUp', { stackId: stack('lumber_2x4').id });
-  assert.ok(r.ok); assert.ok(K.carriedMassKg(s) <= C.CARRY.byHandKg + 1e-6, K.carriedMassKg(s) + ' kg');
-  assert.ok(K.carriedMassKg(s) > C.CARRY.byHandKg - 0.01);                 // nothing wants 2x4s yet, so a full armful
+  assert.ok(r.ok); assert.ok(K.carriedMassKg(s) <= C.CARRY.byHandKg * 3 + 1e-6, K.carriedMassKg(s) + ' kg');
+  assert.ok(K.carriedMassKg(s) > C.CARRY.byHandKg * 3 - 0.01);                 // nothing wants 2x4s yet, so a full armful
   assert.equal(sim.commandNow('construction.pickUp', { stackId: stack('lumber_2x4').id }).reason, 'hands full');
   assert.equal(sim.commandNow('construction.pickUp', { stackId: stack('pier_block').id }).reason, 'hands full');
   assert.ok(sim.commandNow('construction.putDown', { stackId: stack('lumber_2x4').id }).ok); assert.equal(s.carried, null);

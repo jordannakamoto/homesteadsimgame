@@ -112,11 +112,13 @@ export const DELIVERY = Object.freeze({
 });
 
 // ---- carrying: by hand about what a person lifts comfortably; a tool that carries more raises it
-export const CARRY = Object.freeze({ byHandKg: 90, tools: Object.freeze([{ tool: 'wheelbarrow', kg: 180 }]), slow: 0.85 });
-export function carryLimitKg(tools = []) {
+export const GESTURES = Object.freeze([1, 2, 3, 4]);       // pieces per gesture: one place to read it (setting `gesture`, saved with the world)
+export const gestureOf = (options) => (options && GESTURES.includes(options.gesture) ? options.gesture : 3);
+export const CARRY = Object.freeze({ byHandKg: 30, tools: Object.freeze([{ tool: 'wheelbarrow', kg: 60 }]), slow: 0.85 });
+export function carryLimitKg(tools = [], gesture = 3) {
   let kg = CARRY.byHandKg;
   for (const t of CARRY.tools) if (tools.includes(t.tool)) kg = Math.max(kg, t.kg);
-  return kg;
+  return kg * gesture;
 }
 
 // ---- work: blows to put in one member of each kind, and how fast the blows come by the best tool owned
