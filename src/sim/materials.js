@@ -170,7 +170,7 @@ export const volumetricHeatCapacity = (id) => MATERIALS[id].densityKgM3 * MATERI
 // table (dark, tile, cobble, stone); every such pair is deliberately mapped to the same material.
 export const APPEARANCE_BY_KIND = frozen({
   wall: frozen({
-    timber: 'spf_seasoned', stone: 'granite', plaster: 'lime_plaster', dark: 'oak_seasoned', brick: 'brick_clay',
+    timber: 'spf_seasoned', batten: 'spf_seasoned', stone: 'granite', plaster: 'lime_plaster', dark: 'oak_seasoned', brick: 'brick_clay',
     halftimber: 'lime_plaster', sandstone: 'sandstone', whitestone: 'limestone', mossy: 'granite', log: 'pine_seasoned',
   }),
   floor: frozen({

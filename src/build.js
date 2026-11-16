@@ -183,6 +183,7 @@
     whitestone: { name: "White stone", plank: col(0xd8d6cf), beam: col(0xa9a69c), stone: col(0xb9b6ad), courses: true },
     mossy: { name: "Mossy stone", plank: col(0x6f7a66), beam: col(0x545c4d), stone: col(0x5d6656), courses: true },
     log: { name: "Log", plank: col(0x7a5a3a), beam: col(0x4b3724), stone: C.stone, courses: true },
+    batten: { name: "Board and batten", plank: col(0xc7b79b), beam: col(0x6f5a47), stone: C.stone },
   };
   const PATHS = { cobble: { name: "Cobbles", c: col(0x8e8a80) }, dirt: { name: "Packed earth", c: col(0x8a6b47) }, gravel: { name: "Gravel", c: col(0xb5ad9c) }, boards: { name: "Boardwalk", c: col(0x9b7b4f) } };
   const FLOORS = { planks: { name: "Planks", c: C.floor }, flags: { name: "Flagstone", c: col(0x9a968c) }, dark: { name: "Dark boards", c: col(0x6b5238) }, tile: { name: "Clay tiles", c: col(0xb4654a), c2: col(0xc98a62) }, marble: { name: "Marble", c: col(0xd9d6cf), c2: col(0x4c4f55) }, cobble: { name: "Cobbles", c: col(0x86837b), c2: col(0x77746c) }, carpet: { name: "Red carpet", c: col(0x8c2f2c) }, moss: { name: "Lawn", c: col(0x5f8a3c) } };
@@ -199,7 +200,7 @@
   const solid = (m, t) => Object.freeze([LY(m, t, "structure")]);
   const MASONRY = { stone: "fieldstone", mossy: "fieldstone", sandstone: "sandstone", whitestone: "limestone", brick: "brick" };
   const ASSEMBLIES = {
-    wall: { timber: FRAME_WALL, dark: FRAME_WALL, plaster: DAUB_WALL, halftimber: DAUB_WALL, stone: solid("fieldstone", 0.2), mossy: solid("fieldstone", 0.2), sandstone: solid("sandstone", 0.2), whitestone: solid("limestone", 0.2), brick: solid("brick", 0.215), log: solid("softwood-log", 0.2) },
+    wall: { timber: FRAME_WALL, dark: FRAME_WALL, batten: FRAME_WALL, plaster: DAUB_WALL, halftimber: DAUB_WALL, stone: solid("fieldstone", 0.2), mossy: solid("fieldstone", 0.2), sandstone: solid("sandstone", 0.2), whitestone: solid("limestone", 0.2), brick: solid("brick", 0.215), log: solid("softwood-log", 0.2) },
     floor: {
       planks: Object.freeze([LY("air", 0.095, "joist-bay"), LY("softwood-boards", 0.025, "deck")]),
       dark: Object.freeze([LY("air", 0.095, "joist-bay"), LY("softwood-boards", 0.025, "deck")]),
@@ -7382,7 +7383,7 @@
     return p;
   }
   const dropOf = (S) => (S.level || S.po ? 0.05 : FOUNDATIONS[S.found].drop);
-  const stickWall = (cls, mat) => cls === "wall" && (mat === "timber" || mat === "dark");
+  const stickWall = (cls, mat) => cls === "wall" && (mat === "timber" || mat === "dark" || mat === "batten");
   // every member of a structure, in its own metres above its base; kept until the structure changes
   function membersOf(S) {
     if (S.mem && S.mem.ver === S.ver) return S.mem;
@@ -7664,6 +7665,7 @@
     tex.colorSpace = T.SRGBColorSpace;
     return new T.MeshLambertMaterial({ map: tex, color: 0xffffff });
   })();
+  const tapeMat = new T.MeshLambertMaterial({ color: 0x8e9692 });
   const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), siding: col(0xc7b79b), sidingDark: col(0x6f5a47), concrete: CONCRETE, gravel: col(0x8f8b82) };
   const _m4 = new T.Matrix4(),
     _c = new T.Color();
@@ -7771,6 +7773,32 @@
         add(mesh, k === 1, true);
       }
     });
+    // seam tape: a thin darker strip round every opening, on the wrap edges that meet it
+    {
+      const mats = [],
+        W = 0.05;
+      for (const list of sets)
+        for (const m of list) {
+          if (!m.tape) continue;
+          const U = new T.Vector3(m.b[0] - m.a[0], m.b[1] - m.a[1], m.b[2] - m.a[2]),
+            Uh = U.clone().normalize(),
+            N = new T.Vector3(m.n[0], m.n[1], m.n[2]),
+            O = new T.Vector3(m.out[0], m.out[1], m.out[2]).normalize().multiplyScalar(m.section.b + 0.0012),
+            mid = new T.Vector3((m.a[0] + m.b[0]) / 2, (m.a[1] + m.b[1]) / 2, (m.a[2] + m.b[2]) / 2),
+            d = m.section.d;
+          for (const e of m.tape) {
+            const side = e === "l" || e === "r",
+              c = e === "l" ? mid.clone().addScaledVector(N, -(d / 2 - W / 2)) : e === "r" ? mid.clone().addScaledVector(N, d / 2 - W / 2) : e === "b" ? new T.Vector3(m.a[0], m.a[1], m.a[2]).addScaledVector(Uh, W / 2) : new T.Vector3(m.b[0], m.b[1], m.b[2]).addScaledVector(Uh, -W / 2);
+            mats.push(new T.Matrix4().makeBasis(side ? U : N.clone().multiplyScalar(d), side ? N.clone().multiplyScalar(W) : Uh.clone().multiplyScalar(W), O).setPosition(c));
+          }
+        }
+      if (mats.length) {
+        const mesh = new T.InstancedMesh(boxGeo, tapeMat, mats.length);
+        mats.forEach((mm, n) => mesh.setMatrixAt(n, mm));
+        mesh.instanceMatrix.needsUpdate = true;
+        add(mesh, false, true);
+      }
+    }
     for (const key in ghosts) {
       const [level, top, poly] = key.split("|"),
         list = ghosts[key];

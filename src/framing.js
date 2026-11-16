@@ -198,8 +198,31 @@
       col = c.mat === "dark" ? "sidingDark" : "siding",
       upV = [-c.out[0] * Math.sin(LEAN), Math.cos(LEAN), -c.out[2] * Math.sin(LEAN)],
       common = { thickness: T.clad, col, out: c.out, u: [ux, uz] };
+    // trim round every door and window: two jambs and a head (and a sill under a window), 90 x 20 mm, flat to the wall; the siding butts into it
+    const tw0 = c.trim === false ? 0 : TRIM_W, W = TRIM_W, tmid = c.off + 0.006;
+    for (const q of c.openings || []) {
+      const y0 = q.door ? q.y0 : q.y0 - W, y1 = q.y1 + W,
+        bits = [[Math.max(tw0, q.s0 - W), q.s0, y0, y1], [q.s1, Math.min(c.L - tw0, q.s1 + W), y0, y1], [Math.max(tw0, q.s0 - W), Math.min(c.L - tw0, q.s1 + W), q.y1, y1]];
+      if (!q.door) bits.push([Math.max(tw0, q.s0 - W), Math.min(c.L - tw0, q.s1 + W), q.y0 - W, q.y0]);
+      for (const [xa, xb, ya, yb] of bits) if (xb - xa > 0.02 && yb - ya > 0.02) M(out, id("ot"), "cladding", "trim", "cladding", c.parent, c.mat || "timber", 0.02, xb - xa, c.at((xa + xb) / 2, ya, tmid), c.at((xa + xb) / 2, yb, tmid), [ux, 0, uz], { ...common, area: r3((xb - xa) * (yb - ya)), row: -1 });
+    }
     // corner trim: a vertical board at each end of the wall
     if (c.trim !== false) for (const [s0, s1] of [[0, TRIM_W], [c.L - TRIM_W, c.L]]) M(out, id("tr"), "cladding", "trim", "cladding", c.parent, c.mat || "timber", 0.02, TRIM_W, c.at((s0 + s1) / 2, c.y0, c.off + 0.006), c.at((s0 + s1) / 2, c.y1, c.off + 0.006), [ux, 0, uz], { ...common, area: r3(TRIM_W * (c.y1 - c.y0)), row: -1 });
+    // board and batten: boards about 0.25 m wide running bottom to top, a 50 mm batten over each joint; built board by board, left to right
+    if (c.vfree && c.mat === "batten") {
+      const BW = 0.25, BT = 0.016, BAT = 0.05, BATT = 0.01, tw = c.trim === false ? 0 : TRIM_W,
+        nb = Math.max(1, Math.round((c.L - 2 * tw) / BW)), wd = (c.L - 2 * tw) / nb;
+      for (let k = 0; k < nb; k++) {
+        const ka = tw + k * wd, kb = ka + wd, cuts = [ka, ...(c.vbreaks || []).filter((x) => x > ka + 0.03 && x < kb - 0.03), kb].sort((p, q) => p - q);
+        for (let i = 0; i + 1 < cuts.length; i++) {
+          const xa = cuts[i], xb = cuts[i + 1];
+          if (xb - xa < 0.04) continue;
+          for (const [ya, yb] of c.vfree(xa, xb)) if (yb - ya > 0.1) M(out, id("vb"), "cladding", "vboards", "cladding", c.parent, c.mat, BT, xb - xa, c.at((xa + xb) / 2, ya, c.off + 0.004), c.at((xa + xb) / 2, yb, c.off + 0.004), [ux, 0, uz], { ...common, thickness: BT, area: r3((xb - xa) * (yb - ya)), row: k });
+        }
+        if (k) for (const [ya, yb] of c.vfree(ka - BAT / 2, ka + BAT / 2)) if (yb - ya > 0.1) M(out, id("bt"), "cladding", "batten", "cladding", c.parent, c.mat, BATT, BAT, c.at(ka, ya, c.off + 0.018), c.at(ka, yb, c.off + 0.018), [ux, 0, uz], { ...common, thickness: BATT, area: r3(BAT * (yb - ya)), row: k });
+      }
+      return;
+    }
     let row = 0;
     for (let y = c.y0; y < c.y1 - 0.05; y += CH, row++) {
       const ya = y,
@@ -284,8 +307,8 @@
       // sheets stood on end across the studs, from the floor frame up; then wrap, then boards. Every layer leaves the
       // rough openings open: a sheet or a roll that crosses one is cut into the pieces round it.
       const lo = w.foot === undefined ? w.y0 + J_BOT : yb,
-        free = (x0, x1, y0, y1) => {
-          const cov = opens.filter((q) => q.y0 < y1 - 1e-4 && q.y1 > y0 + 1e-4 && q.s1 > x0 && q.s0 < x1).sort((p, q) => p.s0 - q.s0),
+        free = (x0, x1, y0, y1, list = opens) => {
+          const cov = list.filter((q) => q.y0 < y1 - 1e-4 && q.y1 > y0 + 1e-4 && q.s1 > x0 && q.s0 < x1).sort((p, q) => p.s0 - q.s0),
             r = [];
           let s = x0;
           for (const q of cov) {
@@ -311,14 +334,39 @@
             a > 0.02 && M(out, id("sh"), "sheathing", "wall", "sheathing", w.id, "osb", T.osb, xb - xa, at((xa + xb) / 2, ya, o * (face + T.osb / 2)), at((xa + xb) / 2, yb2, o * (face + T.osb / 2)), [ux, 0, uz], { area: r3(a), thickness: T.osb, col: "osb" });
           }
       // house wrap goes on in horizontal courses 2.7 m wide, from the bottom up; each course laps over the one below by 0.1 m
+      // each course sits a hair off true (a little lean and offset, fixed here so nothing moves per frame) and is taped round every opening it meets
       for (let c = 0, ya0 = lo; ya0 < yt - 0.01; c++) {
         const top = Math.min(yt, ya0 + 2.7),
           y0c = c ? ya0 - 0.1 : ya0,
-          lift = 0.0015 * c;
-        for (const [xa, xb, ya, yb2] of holes(0, L, y0c, top)) M(out, id("wr"), "membrane", "housewrap", "wrap", w.id, "housewrap", T.wrap + 0.004, xb - xa, at((xa + xb) / 2, ya, o * (face + T.osb + 0.004 + lift)), at((xa + xb) / 2, yb2, o * (face + T.osb + 0.004 + lift)), [ux, 0, uz], { area: r3((xb - xa) * (yb2 - ya)), thickness: T.wrap, col: "wrap" });
+          lift = 0.003 * c,
+          j0 = (((c * 7 + 3) % 5) - 2) * 0.0004,
+          j1 = (((c * 11 + 1) % 5) - 2) * 0.0004;
+        for (const [xa, xb, ya, yb2] of holes(0, L, y0c, top)) {
+          let tape = "";
+          for (const q of opens) {
+            const ox = Math.min(xb, q.s1) - Math.max(xa, q.s0) > 0.01, oy = Math.min(yb2, q.y1) - Math.max(ya, q.y0) > 0.01;
+            if (oy && Math.abs(q.s1 - xa) < 0.011) tape += "l";
+            if (oy && Math.abs(q.s0 - xb) < 0.011) tape += "r";
+            if (ox && Math.abs(q.y1 - ya) < 0.011) tape += "b";
+            if (ox && Math.abs(q.y0 - yb2) < 0.011) tape += "t";
+          }
+          M(out, id("wr"), "membrane", "housewrap", "wrap", w.id, "housewrap", T.wrap + 0.004, xb - xa, at((xa + xb) / 2, ya, o * (face + T.osb + 0.004 + lift + j0)), at((xa + xb) / 2, yb2, o * (face + T.osb + 0.004 + lift + j1)), [ux, 0, uz], { area: r3((xb - xa) * (yb2 - ya)), thickness: T.wrap, col: "wrap", row: c, out: outV, tape });
+        }
         ya0 = top;
       }
-      sidingCourses(out, id, { u: [ux, uz], out: outV, mat: w.mat, parent: w.id, y0: lo, y1: yt, off: o * (face + T.osb + 0.012), at, spans: (ya, yb2) => free(0, L, ya, yb2), L });
+      // the siding stops at the trim round each opening
+      const padded = opens.map((q) => ({ ...q, s0: q.s0 - TRIM_W, s1: q.s1 + TRIM_W, y0: q.door ? q.y0 : q.y0 - TRIM_W, y1: q.y1 + TRIM_W }));
+      sidingCourses(out, id, {
+        u: [ux, uz], out: outV, mat: w.mat, parent: w.id, y0: lo, y1: yt, off: o * (face + T.osb + 0.012), at, spans: (ya, yb2) => free(0, L, ya, yb2, padded), L, openings: opens,
+        vbreaks: padded.flatMap((q) => [q.s0, q.s1]),
+        vfree: (xa, xb) => {
+          const cov = padded.filter((q) => q.s0 < xb - 1e-4 && q.s1 > xa + 1e-4).sort((p, q) => p.y0 - q.y0), r = [];
+          let y = lo;
+          for (const q of cov) (q.y0 - y > 0.02 && r.push([y, Math.min(q.y0, yt)]), (y = Math.max(y, q.y1)));
+          yt - y > 0.02 && r.push([y, yt]);
+          return r;
+        },
+      });
       if (spec.ins) {
         ups.sort((p, q) => p - q);
         for (let k = 0; k + 1 < ups.length; k++) {
@@ -483,6 +531,7 @@
     if (k === "footing") return ["gravel", "gravel", "m3", m.volume || 0, "Gravel", "A firm, free-draining bed under the foundation so it does not settle or sit in water."];
     if (k === "sheathing") return t === "subfloor" ? ["sub", "osb_18", "sheet", m.area, "Subfloor sheets", "Sheets across the joists. They give you a deck to stand and build on."] : t === "roof-deck" ? ["deck", "osb_11", "sheet", m.area, "Roof sheets", "Sheets on the rafters. They make the roof one stiff surface for the roofing."] : ["wallsh", "osb_11", "sheet", m.area, "Wall sheathing", "Sheets nailed to the outside of the studs. They stop the frame leaning over in wind."];
     if (k === "membrane") return t === "housewrap" ? ["wrap", "housewrap", "m2", m.area, "Housewrap", "Keeps wind and rain out of the wall while letting damp escape."] : ["felt", null, "m2", m.area, "Roof underlayment", "A waterproof layer under the roofing, the second line of defence against leaks.", "roofing underlayment by the square metre"];
+    if (k === "cladding" && t === "batten") return ["batten" + m.material, "board_pine_1x6", "m", m.area / 0.14, "Battens", "Narrow strips nailed over each joint between boards. They keep the rain out of the gaps."];
     if (k === "cladding") return ["clad" + m.material, m.material === "dark" ? "board_oak_1x6" : m.material === "log" ? "board_cedar_1x6" : "board_pine_1x6", "m", m.area / 0.14, "Siding boards", "The boards on the outside. They protect the wall from weather and sun."];
     if (k === "roofing") return ["roof" + m.material, ROOF_ITEM[m.material] || null, "m2", m.area, "Roofing", "The outer skin of the roof. It keeps the water out.", ROOF_ITEM[m.material] ? undefined : "roofing: " + m.material];
     if (k === "insulation") return ["ins" + m.material, INS_ITEM[m.material] || null, "m2", m.area, "Insulation batts", "Fills the spaces between studs, joists and rafters. It slows heat leaving in winter.", INS_ITEM[m.material] ? undefined : "insulation: " + m.material];

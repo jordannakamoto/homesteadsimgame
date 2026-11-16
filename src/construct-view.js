@@ -48,7 +48,7 @@
     const mw = B.membersOf(id);
     if (!mw) return null;
     g = { ver: st.ver, byId: new Map(), matrix: mw.matrix.clone(), rank: new Map(), walls: new Map(), cx: 0, cz: 0 };
-    for (const m of mw.list) g.byId.set(m.id, m);
+    for (const m of mw.list) { g.byId.set(m.id, m); if (m.kind === 'membrane' && m.type === 'housewrap') (V.sheetMids || (V.sheetMids = new Set())).add(m.id); }
     // doors and windows are pieces of their own: stand a box in for each so that it can glow and be set
     const inv = g.matrix.clone().invert(), v = new T.Vector3();
     for (const p of B.pieces()) {
@@ -65,7 +65,7 @@
     // the order pieces go in: by stage, then by kind, then along the building
     for (const m of g.byId.values()) {
       const mx = (m.a[0] + m.b[0]) / 2, mz = (m.a[2] + m.b[2]) / 2, my = (m.a[1] + m.b[1]) / 2;
-      g.rank.set(m.id, C.STAGE_ORDER.indexOf(m.stage) * 1e6 + ((KR[m.kind] || 0) + (TR[m.type] || 0) + 2) * 1e4 + (m.kind === 'sheathing' || m.kind === 'cladding' || m.kind === 'stud' && m.type === 'cripple' ? my * 300 : 0) + (mx - g.cx) + 0.37 * (mz - g.cz) + 50);
+      g.rank.set(m.id, C.STAGE_ORDER.indexOf(m.stage) * 1e6 + ((KR[m.kind] || 0) + (TR[m.type] || 0) + 2) * 1e4 + (m.kind === 'sheathing' || m.kind === 'cladding' && m.type !== 'vboards' && m.type !== 'batten' || m.kind === 'stud' && m.type === 'cripple' ? my * 300 : 0) + (mx - g.cx) + 0.37 * (mz - g.cz) + 50);
     }
     // each framed wall: the line it swings up about (the inner edge of its bottom plate)
     for (const m of g.byId.values()) {
@@ -294,7 +294,7 @@
     const m = geom(id) && geom(id).byId.get(mid);
     if (m && m.kind === 'cladding' && m.out) asm.lift(id, layer, mid, h * 0.5, m.out); else asm.lift(id, layer, mid, h);
   }
-  const proud = (mid) => { const sw = V.swingIn; if (sw && sw.mid === mid) return 0.045 + 0.55 * (1 - Math.min(1, sw.t / 0.2)) ** 2; const b = V.blows[mid]; return 0.045 * (1 - (b ? b.n / b.of : 0)); };
+  const proud = (mid) => { if (V.sheetMids && V.sheetMids.has(mid)) return 0; const sw = V.swingIn; if (sw && sw.mid === mid) return 0.045 + 0.55 * (1 - Math.min(1, sw.t / 0.2)) ** 2; const b = V.blows[mid]; return 0.045 * (1 - (b ? b.n / b.of : 0)); };
   const qTmp = new T.Quaternion(), aTmp = new T.Vector3(), wA = new T.Vector3(), wB = new T.Vector3(), wM = new T.Vector3();
   // a point of a member in the world, wherever its frame lies just now
   function worldPt(g, hw, p, out) {
@@ -475,9 +475,9 @@
     if (!m0 || !ln0 || m0.type === 'ridge' || pm0.kind === 'door' || pm0.kind === 'window' || pm0.kind === 'site') return [];
     if (pm0.kind === 'rafter' && !Object.values(pr.members).some((q) => q.kind === 'rafter' && q.built)) return [];
     const mx = (m0.a[0] + m0.b[0]) / 2, mz = (m0.a[2] + m0.b[2]) / 2, out = [];
-    if (pm0.kind === 'cladding') {       // one gesture lays the whole course (the rest of it, past an opening), and as many courses above as the multiplier says
+    if (pm0.kind === 'cladding' || V.sheetMids && V.sheetMids.has(ctx.mid)) {       // one gesture lays the whole course (the rest of it, past an opening), and as many courses above as the multiplier says
       const rows = [];
-      for (const mid of ctx.q || []) { const pm = pr.members[mid], m = g.byId.get(mid); if (mid !== ctx.mid && pm && m && pm.kind === 'cladding' && pm.parent === pm0.parent && pm.type === pm0.type && pm.need - pm.got > 1e-6 && m.row >= m0.row && m.row <= m0.row + n) rows.push({ mid, k: m.row * 100 + Math.abs((m.a[0] + m.b[0]) / 2 - mx) + Math.abs((m.a[2] + m.b[2]) / 2 - mz) }); }
+      for (const mid of ctx.q || []) { const pm = pr.members[mid], m = g.byId.get(mid); if (mid !== ctx.mid && pm && m && pm.kind === pm0.kind && pm.parent === pm0.parent && pm.type === pm0.type && pm.need - pm.got > 1e-6 && m.row >= m0.row && m.row <= m0.row + n) rows.push({ mid, k: m.row * 100 + Math.abs((m.a[0] + m.b[0]) / 2 - mx) + Math.abs((m.a[2] + m.b[2]) / 2 - mz) }); }
       return rows.sort((a, b) => a.k - b.k).map((o) => o.mid);
     }
     for (const mid of ctx.q || []) {
@@ -488,15 +488,16 @@
     }
     return out.sort((a, b) => a.d - b.d).slice(0, n).map((o) => o.mid);
   }
+  const courseOf = (pm, m) => pm.kind === 'cladding' && m.type === 'boards' || pm.kind === 'membrane' && m.type === 'housewrap';
   // what the hands can do from here: every open piece within reach, and the one the pointer is on
   function aimHands(pr) {
     const pl = plan(pr.id), g = geom(pr.id), P = G.player, c = S().carried, st = V.structs.get(pr.id);
     let best = null, bs = 1e9, want = null, ws = 1e9, high = false;
     const q = [], low0 = new Map();     // siding goes on from the bottom course up: the lowest course not yet set, per wall
-    for (const mid of pl.inst) { const pm = pr.members[mid], m = g.byId.get(mid); if (m && pm.kind === 'cladding' && m.type === 'boards' && pm.need - pm.got > 1e-6) low0.set(pm.parent, Math.min(low0.has(pm.parent) ? low0.get(pm.parent) : 1e9, m.row)); }
+    for (const mid of pl.inst) { const pm = pr.members[mid], m = g.byId.get(mid); if (m && courseOf(pm, m) && pm.need - pm.got > 1e-6) low0.set(pm.parent + pm.kind, Math.min(low0.has(pm.parent + pm.kind) ? low0.get(pm.parent + pm.kind) : 1e9, m.row)); }
     for (const mid of pl.inst) {
       const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid);
-      if (m && pm.kind === 'cladding' && m.type === 'boards' && pm.need - pm.got > 1e-6 && m.row > low0.get(pm.parent)) continue;
+      if (m && courseOf(pm, m) && pm.need - pm.got > 1e-6 && m.row > low0.get(pm.parent + pm.kind)) continue;
       const set = !ln || pm.need - pm.got < 1e-6, act = pm.kind === 'site' ? 'dig' : set ? 'nail' : (c && c.itemId === ln.itemId) || !api.needsStock(S(), pr, mid) || stackWithin(ln.itemId, takeM()) ? 'set' : 'want';
       let score;
       if (!m) { if (Math.hypot(P.x - st.x, P.z - st.z) > g.reach + 0.5) continue; score = 0; }
@@ -539,7 +540,8 @@
     const m = geom(id).byId.get(mid);
     if (!m) return;
     const L = Math.hypot(m.b[0] - m.a[0], m.b[2] - m.a[2]) || 1;
-    (V.slides || (V.slides = [])).push({ id, layer, mid, t: 0, u: [(m.b[0] - m.a[0]) / L, 0, (m.b[2] - m.a[2]) / L], len: Math.min(1.2, L) });
+    const up = Math.hypot(m.b[0] - m.a[0], m.b[2] - m.a[2]) < 0.05;      // a board stood on end slides in from the left along the wall
+    (V.slides || (V.slides = [])).push({ id, layer, mid, t: 0, u: up ? [m.n[0], 0, m.n[2]] : [(m.b[0] - m.a[0]) / L, 0, (m.b[2] - m.a[2]) / L], len: up ? 0.5 : Math.min(1.2, L) });
   }
   function tickSlides(dt) {
     if (!V.slides || !V.slides.length) return;
@@ -551,12 +553,42 @@
     for (const w of V.slides) if (w.t >= SLIDE_S) { const pm = S().progress[w.id] && S().progress[w.id].members[w.mid]; liftTo(w.id, w.layer, w.mid, pm && !pm.built ? proud(w.mid) : 0); }
     V.slides = V.slides.filter((w) => w.t < SLIDE_S);
   }
+  // house wrap: a white roll runs along the course (an axis stood on end), the sheet unfurling behind it and settling flat
+  const ROLL_R = 0.075, rollMat = new T.MeshLambertMaterial({ color: 0xf6f8f7 }), rollPool = [], rv = new T.Vector3();
+  const rollGeo = new T.CylinderGeometry(ROLL_R, ROLL_R, 1, 14);
+  function wrapRoll(id, layer, mid) {
+    const m = geom(id).byId.get(mid);
+    if (!m) return;
+    let mesh = rollPool.find((q) => !q.visible);
+    if (!mesh) { mesh = new T.Mesh(rollGeo, rollMat); mesh.castShadow = true; mesh.frustumCulled = false; G.scene.add(mesh); rollPool.push(mesh); }
+    mesh.visible = true;
+    (V.rolls || (V.rolls = [])).push({ id, layer, mid, t: 0, dur: 0.16 + 0.45 * Math.min(1, m.section.d / 2.7), mesh, last: -1 });
+    asm.unfurl(id, layer, mid, 0.001, 0.03, m.out);
+  }
+  const smooth = (x) => x * x * (3 - 2 * x);
+  function tickRolls(dt) {
+    if (!V.rolls || !V.rolls.length) return;
+    for (const w of V.rolls) {
+      const g = geom(w.id), m = g && g.byId.get(w.mid);
+      w.t += dt;
+      const p = Math.min(1, w.t / w.dur), f = smooth(Math.min(1, p / 0.85)), settle = p < 0.85 ? 1 : 1 - smooth((p - 0.85) / 0.15);
+      if (!m) { w.t = 1e9; continue; }
+      asm.unfurl(w.id, w.layer, w.mid, Math.max(0.001, f), 0.03 * settle, m.out);
+      const d = m.section.d, hgt = Math.abs(m.b[1] - m.a[1]);
+      rv.set((m.a[0] + m.b[0]) / 2 + m.n[0] * (-d / 2 + f * d) + m.out[0] * (ROLL_R + 0.004), (m.a[1] + m.b[1]) / 2, (m.a[2] + m.b[2]) / 2 + m.n[2] * (-d / 2 + f * d) + m.out[2] * (ROLL_R + 0.004)).applyMatrix4(g.matrix);
+      w.mesh.position.copy(rv); w.mesh.scale.set(1, hgt, 1); w.mesh.rotation.y += dt * 9 * (1 - p);
+      const step = Math.floor(f * d / 0.4);
+      if (p < 0.9 && step !== w.last) { w.last = step; G.burst(rv.x, rv.y - hgt * 0.5 + 0.9 * Math.min(1, hgt), rv.z, 1, 0xf0f0f0, 0.15, 0.1, 0.02, 0.15); }
+    }
+    for (const w of V.rolls) if (w.t >= w.dur) { w.mesh.visible = false; const pm = S().progress[w.id] && S().progress[w.id].members[w.mid]; liftTo(w.id, w.layer, w.mid, pm && !pm.built ? proud(w.mid) : 0); }
+    V.rolls = V.rolls.filter((w) => w.t < w.dur);
+  }
   // set one piece in place with its small moment; returns the install result, or null when it did not work
   function setPiece(id, mid, pm, layer, m, at, swp, quiet) {
     const pr = S().progress[id], r = cmd('install', { structId: id, memberIds: [mid], hold: true });
     if (!r.ok) { if (!quiet) flash(reason(r, pm.kind)); return null; }
     if (r.cuts && r.cuts.length && !quiet) flash(r.cuts[0].how === 'offcut' ? 'Cut from an offcut' : 'Cut to fit; offcut kept');
-    if (r.set.length) { if (swp) V.stick = { id, mid }; if (pm.kind === 'cladding') slideIn(id, layer, mid); else if (!quiet) V.swingIn = { mid, id, layer, t: 0 }; sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
+    if (r.set.length) { if (swp) V.stick = { id, mid }; if (pm.kind === 'cladding') slideIn(id, layer, mid); else if (V.sheetMids && V.sheetMids.has(mid)) wrapRoll(id, layer, mid); else if (!quiet) V.swingIn = { mid, id, layer, t: 0 }; sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
     else if (!quiet) { const q = r.partial[0]; sounds.play('rustle'); flash(plain(lineOf(pr, mid).label) + ': ' + Math.round((100 * q.got) / q.need) + '% there. Fetch more.'); }
     return r;
   }
@@ -656,7 +688,7 @@
       if (!r.ok && (r.reason === 'no material' || r.reason === 'wrong material')) r = cmd('install', { structId: id, memberIds: [sid], hold: true, from: 'stacks' });
       if (!r.ok) continue;
       const r2 = cmd('install', { structId: id, memberIds: [sid] });
-      if (r2.ok && r2.installed.length) { n++; finishInstall(id, sid, lay, pm.kind, r2); if (pm.kind === 'cladding') slideIn(id, lay, sid); }
+      if (r2.ok && r2.installed.length) { n++; finishInstall(id, sid, lay, pm.kind, r2); if (pm.kind === 'cladding') slideIn(id, lay, sid); else if (V.sheetMids && V.sheetMids.has(sid)) wrapRoll(id, lay, sid); }
     }
     if (n) redraw(id);
   }
@@ -697,12 +729,12 @@
   // ------------------------------------------------------------------ the wheelbarrow: a few boxes and a cylinder wheel
   const barrow = new T.Group(), bWood = new T.MeshLambertMaterial({ color: 0x9a7448 }), bTray = new T.MeshLambertMaterial({ color: 0x4d7f68 }), bIron = new T.MeshLambertMaterial({ color: 0x45484d }),
     bPart = (geo, mat, x, y, z, rx = 0) => { const m = new T.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.x = rx; m.castShadow = true; barrow.add(m); return m; },
-    bLoad = new T.Mesh(new T.BoxGeometry(0.5, 1, 0.7), new T.MeshLambertMaterial({ color: 0xdcbc8c }));
+    bBox = new T.BoxGeometry(1, 1, 1), bBits = [];
   bPart(new T.BoxGeometry(0.66, 0.06, 0.9), bTray, 0, 0.5, 0.1); bPart(new T.BoxGeometry(0.06, 0.26, 0.9), bTray, -0.33, 0.62, 0.1); bPart(new T.BoxGeometry(0.06, 0.26, 0.9), bTray, 0.33, 0.62, 0.1);
   bPart(new T.BoxGeometry(0.66, 0.26, 0.06), bTray, 0, 0.62, 0.55); bPart(new T.BoxGeometry(0.66, 0.2, 0.06), bTray, 0, 0.6, -0.35);
   bPart(new T.CylinderGeometry(0.22, 0.22, 0.09, 18).rotateZ(Math.PI / 2), bIron, 0, 0.22, 0.62);
   for (const x of [-0.3, 0.3]) { bPart(new T.BoxGeometry(0.05, 0.05, 1.5), bWood, x, 0.45, -0.55); bPart(new T.BoxGeometry(0.05, 0.4, 0.05), bWood, x, 0.2, -0.95); }
-  bLoad.position.set(0, 0.55, 0.1); bLoad.visible = false; barrow.add(bLoad);
+  for (let i = 0; i < 8; i++) { const m = new T.Mesh(bBox, new T.MeshLambertMaterial({ color: 0xdcbc8c })); m.castShadow = true; m.visible = false; barrow.add(m); bBits.push(m); }
   barrow.visible = false; G.scene.add(barrow);
   V.bYaw = 0; V.bSend = 0;
   function drawBarrow(dt) {
@@ -718,9 +750,20 @@
       P.carryK = Math.max(P.carryK || 0, 0.7);
     }
     barrow.position.set(b.x, G.heightAt(b.x, b.z), b.z); barrow.rotation.y = b.yaw;
-    const k = s.stacks.find((q) => q.barrow);
-    bLoad.visible = !!k;
-    if (k) { const f = Math.min(1, k.qty * CAT[k.itemId].massKgPerUnit / (C.BARROW.capKg * feel().armful)); bLoad.scale.y = 0.06 + 0.24 * f; bLoad.position.y = 0.53 + bLoad.scale.y / 2; bLoad.material.color.setHex(describe(k.itemId, k.qty).color); }
+    const k = s.stacks.find((q) => q.barrow), sig = k ? k.itemId + ':' + Math.round(k.qty * 20) + ':' + feel().armful : '';
+    if (sig === V.bLoadSig) return;
+    V.bLoadSig = sig;
+    for (const m of bBits) m.visible = false;
+    if (!k) return;
+    // the load, drawn as a few sticks, sheets or boxes lying in the tray: more of them the fuller it is
+    const d = describe(k.itemId, k.qty), f = Math.min(1, k.qty * CAT[k.itemId].massKgPerUnit / (C.BARROW.capKg * feel().armful)), cnt = Math.max(1, Math.min(8, d.n, Math.ceil(f * 8)));
+    const sh = d.form === 'lumber' ? { s: [0.09, 0.06, 0.85], cols: 4, rows: 1, dx: 0.13, dz: 0 } : d.form === 'sheet' || d.form === 'lean' ? { s: [0.55, 0.035, 0.85], cols: 1, rows: 1, dx: 0, dz: 0 } : { s: [0.22, 0.17, 0.26], cols: 2, rows: 3, dx: 0.26, dz: 0.3 };
+    for (let i = 0; i < cnt; i++) {
+      const m = bBits[i], col = i % sh.cols, rest = Math.floor(i / sh.cols), row = rest % sh.rows, layer = Math.floor(rest / sh.rows);
+      m.visible = true; m.scale.set(sh.s[0], sh.s[1], sh.s[2]);
+      m.position.set((col - (sh.cols - 1) / 2) * sh.dx, 0.53 + sh.s[1] / 2 + layer * sh.s[1], 0.1 + (row - (sh.rows - 1) / 2) * sh.dz);
+      m.material.color.setHex(d.color);
+    }
   }
   function drawBeacons(dt) {
     const pr = current(), P = G.player;
@@ -790,7 +833,7 @@
     {
       const b = s.barrow;
       if (b && b.held) { const st = carry.nearest(reach.x, reach.z, 1.2, pickable) || carry.nearest(P.x, P.z, 2.0, pickable); return st ? { kind: 'bload', stack: st } : { kind: 'bdown' }; }
-      if (b && !c && Math.hypot(b.x - P.x, b.z - P.z) < C.BARROW.reachM && Math.hypot(b.x - reach.x, b.z - reach.z) < 2.2) return { kind: 'bgrab' };
+      const lk = s.stacks.find((q) => q.barrow && q.qty > 1e-6); if (b && (!c || (lk && lk.itemId === c.itemId)) && Math.hypot(b.x - P.x, b.z - P.z) < C.BARROW.reachM && Math.hypot(b.x - reach.x, b.z - reach.z) < 2.2) return lk ? { kind: 'bgrab', load: lk.id } : { kind: 'bgrab' };
     }
     const pr = nearBuilding(P.x, P.z), stack = carry.nearest(reach.x, reach.z, 1.0, pickable) || (V.wantItem && carry.nearest(P.x, P.z, 2.1, wantedStack)) || carry.nearest(P.x, P.z, 2.1, pickable) || carry.nearest(P.x, P.z, 1.3);
     if (c && c.itemId === LAD.itemId && !s.ladder) {
@@ -831,11 +874,29 @@
   function nameIt(itemId) {
     for (const pr of inProgress()) for (const k in pr.lines) { const ln = pr.lines[k]; if (ln.itemId === itemId && api.stageOpen(pr, ln.stage) && !api.stageComplete(pr, ln.stage)) { if (V.named[k]) return; V.named[k] = 1; note(plain(ln.label).replace(/s$/, ''), ln.why); return; } }
   }
+  function grabHandles() {
+    const r = cmd('barrowGrab', { px: G.player.x, pz: G.player.z });
+    if (r.ok) { V.bYaw = G.player.face; sounds.play('lift'); flash('Wheelbarrow: click a stack to load it, click again to set it down'); } else flash(r.reason === 'hands full' ? 'Put down what you are carrying first' : 'Too far from the wheelbarrow');
+  }
+  function tickBHold(dt) {
+    const h = V.bHold;
+    if (!h) return;
+    const c = V.ctx;
+    if (!c || c.kind !== 'bgrab' || !c.load) { V.bHold = null; return; }
+    if (V.mDown) { h.t += dt; if (h.t >= 0.4) { V.bHold = null; V.mDown = false; grabHandles(); } return; }
+    V.bHold = null;
+    const lk = S().stacks.find((q) => q.id === c.load);
+    if (lk) pickUp(lk);
+  }
   function press(ctx) {
     if (!ctx) return;
     sounds.wake();
     if (ctx.kind === 'hands') { if (!(V.cool > 0.08)) handAct(ctx); }
-    else if (ctx.kind === 'bgrab') { const r = cmd('barrowGrab', { px: G.player.x, pz: G.player.z }); if (r.ok) { V.bYaw = G.player.face; sounds.play('lift'); flash('Wheelbarrow: click a stack to load it, click again to set it down'); } else flash(r.reason === 'hands full' ? 'Put down what you are carrying first' : 'Too far from the wheelbarrow'); }
+    else if (ctx.kind === 'bgrab') {
+      const lk = ctx.load && S().stacks.find((q) => q.id === ctx.load);
+      if (lk && V.fSrc === 'click') { V.bHold = { t: 0 }; return; }       // a click takes an armful once the button is up; held, it takes the handles
+      grabHandles();
+    }
     else if (ctx.kind === 'bload') { const r = cmd('barrowLoad', { stackId: ctx.stack.id }); if (r.ok) { sounds.play('thunk'); nameIt(r.itemId); flash('Loaded ' + stackName(r.itemId)); } else flash(r.reason === 'full' ? 'The wheelbarrow is full' : r.reason === 'holds something else' ? 'It already holds something else' : 'Cannot load that'); }
     else if (ctx.kind === 'bdown') { const b = S().barrow; cmd('barrowSet', { x: b.x, z: b.z, yaw: b.yaw }); sounds.play('thunk'); }
     else if (ctx.kind === 'pick') pickUp(ctx.stack);
@@ -944,7 +1005,7 @@
     const ctx = V.ctx, held = !!G.keys.KeyE || V.mDown, s = S();
     V.cool -= dt * (C.workSpeed(G.sim.state.sys.stock.tools, G.powerAvailable && G.powerAvailable()));
     if (V.jolt) { const j = V.jolt; j.t += dt; liftTo(j.id, j.layer, j.mid, Math.max(-0.02, (j.built ? 0 : proud(j.mid)) - 0.03 * Math.exp(-j.t * 16) * Math.cos(j.t * 46))); if (j.t > 0.28) { asm.lift(j.id, j.layer, j.mid, j.built ? 0 : proud(j.mid)); V.jolt = null; } }
-    tickSlides(dt);
+    tickSlides(dt); tickRolls(dt);
     if (V.swingIn) { V.swingIn.t += dt; const w = V.swingIn; asm.lift(w.id, w.layer, w.mid, proud(w.mid)); if (w.t > 0.2) V.swingIn = null; }
     const speed = C.workSpeed(G.sim.state.sys.stock.tools, G.powerAvailable && G.powerAvailable());
     if (V.auto) {
@@ -1037,7 +1098,7 @@
     else if (ctx.kind === 'work') { const w = workLabel(pr, V.working ? V.working.memberId : ctx.q[0]); setPrompt('E', 'Hold to build: ' + low(w.text), w.count, W.job ? W.progress() : 0); }
     else if (ctx.kind === 'piece') setPrompt('', 'Click a glowing piece to set it', ctx.q.length + ' ready', W.job ? W.progress() : null);
     else if (ctx.kind === 'auto') setPrompt('E', (ctx.guided ? 'Build: ' : 'Work until done: ') + low(C.STAGE[ctx.stage].name), '', null);
-    else if (ctx.kind === 'bgrab') { const k = s.stacks.find((q) => q.barrow); setPrompt('E', 'Take the wheelbarrow handles', k ? 'holds ' + stackName(k.itemId) + ' (' + describe(k.itemId, k.qty).n + ' left)' : 'empty', null); }
+    else if (ctx.kind === 'bgrab') { const k = ctx.load && s.stacks.find((q) => q.id === ctx.load); if (k) setPrompt('', 'Click: take ' + low(stackName(k.itemId)) + ', ' + describe(k.itemId, k.qty).n + ' left · Hold: take the handles', 'E also takes the handles', V.bHold ? Math.min(1, V.bHold.t / 0.4) : null); else setPrompt('E', 'Take the wheelbarrow handles', 'empty', null); }
     else if (ctx.kind === 'bload') setPrompt('E', 'Load the wheelbarrow with ' + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'bdown') setPrompt('E', 'Set the wheelbarrow down', '', null);
     else if (ctx.kind === 'pick') setPrompt('E', (ctx.more ? 'Take more ' : 'Pick up ') + stackName(ctx.stack.itemId), '', null);
@@ -1361,7 +1422,7 @@
       }
     }
     if (V.fTap) { V.fTap = false; if (!OFF[G.player.tool]) { press(V.ctx); V.ctx = context(); V.ctxSig = -1; } }   // what the press changed is read at once: a stale 'put down' with empty arms threw
-    tickLadder(dt); drawLadder(); tickMark(dt); drawBeacons(dt); drawBarrow(dt);
+    tickBHold(dt); tickLadder(dt); drawLadder(); tickMark(dt); drawBeacons(dt); drawBarrow(dt);
     if (!s.options.sandbox) tickWork(dt);
     glow(V.ctx);
     {
@@ -1414,7 +1475,7 @@
     if (e.code === 'Escape') { if (V.placing) { endPlacing(); e.stopImmediatePropagation(); } else if (!panel.hidden) closePanel(); return; }
     if (G.player.tool === 'build') return;
     if (e.code === 'KeyL') panel.hidden ? openPanel() : closePanel();
-    else if (e.code === 'KeyE') V.fTap = true;
+    else if (e.code === 'KeyE') { V.fTap = true; V.fSrc = 'key'; }
   }, true);
   canvas.addEventListener('pointermove', (e) => { ptr.x = e.clientX; ptr.y = e.clientY; ptr.has = true; }, true);
   canvas.addEventListener('pointerdown', (e) => {
@@ -1422,7 +1483,7 @@
     if (V.placing) { e.stopImmediatePropagation(); e.preventDefault(); if (e.button === 2) endPlacing(); else { tickPlacing(); commitPlacing(); } return; }
     if (e.button === 0 && V.beacons.length && !OFF[G.player.tool] && !V.auto) { const rc = canvas.getBoundingClientRect(), lk = !!document.pointerLockElement, hit = beaconAt(lk ? rc.left + rc.width / 2 : e.clientX, lk ? rc.top + rc.height / 2 : e.clientY); if (hit) { e.stopImmediatePropagation(); finishPlace(hit); return; } }
     // the left button is the hands: whatever F would do here
-    if (e.button === 0 && !OFF[G.player.tool] && V.ctx && V.ctx.kind !== 'hint' && V.ctx.kind !== 'drop') { e.stopImmediatePropagation(); V.mDown = true; V.fTap = true; return; }
+    if (e.button === 0 && !OFF[G.player.tool] && V.ctx && V.ctx.kind !== 'hint' && V.ctx.kind !== 'drop') { e.stopImmediatePropagation(); V.mDown = true; V.fTap = true; V.fSrc = 'click'; return; }
     const ctx = V.ctx;
     if (ctx && ctx.kind === 'piece' && !W.job && e.button === 0) {
       const r = canvas.getBoundingClientRect(), g = geom(ctx.id), pr = S().progress[ctx.id];
@@ -1444,7 +1505,7 @@
   canvas.addEventListener('pointermove', (e) => { if (V.raise && V.mDown && !V.raise.landed) V.raise.push = (V.raise.push || 0) + Math.max(0, -e.movementY) / 300; }, true);
   canvas.addEventListener('wheel', (e) => { if (!V.placing) return; e.stopImmediatePropagation(); e.preventDefault(); V.placing.yaw += (e.deltaY > 0 ? 1 : -1) * Math.PI / 12; }, { capture: true, passive: false });
   canvas.addEventListener('contextmenu', (e) => { if (V.placing) e.preventDefault(); }, true);
-  { const b = $('cvact'); const down = (e) => { e.preventDefault(); G.keys.KeyE = true; V.fTap = true; sounds.wake(); }, up = () => { G.keys.KeyE = false; };
+  { const b = $('cvact'); const down = (e) => { e.preventDefault(); G.keys.KeyE = true; V.fTap = true; V.fSrc = 'key'; sounds.wake(); }, up = () => { G.keys.KeyE = false; };
     b.addEventListener('pointerdown', down); b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('pointerleave', up); }
 
   // for tests and the console

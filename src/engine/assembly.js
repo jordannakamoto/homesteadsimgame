@@ -93,6 +93,16 @@
         L.solid.setMatrixAt(n, local(L, L.list[n], m4, 0, h, dir));
         L.solid.instanceMatrix.needsUpdate = true;
       },
+      // a sheet laid out along its width: only the first fraction f of it (from its low end along n) is there; it is held h clear along dir
+      unfurl(key, id, memberId, f, h, dir) {
+        const L = layer(key, id), n = L.at.get(memberId);
+        if (n === undefined) return;
+        const mm = L.list[n], e = local(L, mm, m4, 0, h, dir).elements, sh = -(1 - f) * mm.section.d / 2;
+        e[4] *= f; e[5] *= f; e[6] *= f;
+        e[12] += mm.n[0] * sh; e[13] += mm.n[1] * sh; e[14] += mm.n[2] * sh;
+        L.solid.setMatrixAt(n, m4);
+        L.solid.instanceMatrix.needsUpdate = true;
+      },
       // nail points: small boxes that ride with the layer. list: [{ p: [x, y, z], k: 0 (bright, waiting) | 1 (driven, dark) }]
       setDots(key, id, list) {
         const L = layer(key, id, 16);
