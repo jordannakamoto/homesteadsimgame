@@ -29,6 +29,7 @@ export function initConstruction() {
     ...SUP.initSupply(),
     level: 'hands-on',
     progress: {},
+    open: {},                         // doors and windows the hands have opened, by piece id
     learn: { counts: {}, known: {} },   // pieces nailed by hand, by kind of work; a kind with enough of them is known
     ladder: null,                     // { x, z, yaw, topY, structId } when one is leaned on a wall
     offcuts: {},                      // { [itemId]: [area m2, ...] } pieces of sheet goods kept from cutting
@@ -641,6 +642,14 @@ export const constructionSystem = () => ({
     'construction.setPlan': setPlan,
     'construction.forget': (c, p) => { if (!c.s.progress[p.structId]) return { ok: false, reason: 'unknown building' }; delete c.s.progress[p.structId]; if (c.s.tutorial.shed === p.structId) c.s.tutorial.shed = null; return { ok: true }; },
     'construction.setDropPoint': (c, p) => { if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.z)) return { ok: false, reason: 'bad place' }; c.s.dropPoint = { x: round6(p.x), z: round6(p.z) }; for (const d of c.s.deliveries) { d.x = c.s.dropPoint.x; d.z = c.s.dropPoint.z; } return { ok: true }; },
+    // the hands open or close a door or window that is built (docs/FRAMING.md): id, open? (omitted: toggle)
+    'construction.operate': (c, p) => {
+      if (!p || typeof p.id !== 'string' || !p.id) return { ok: false, reason: 'bad piece' };
+      if (!c.s.open) c.s.open = {};
+      const on = p.open === undefined ? !c.s.open[p.id] : !!p.open;
+      if (on) c.s.open[p.id] = 1; else delete c.s.open[p.id];
+      return { ok: true, open: on };
+    },
     'construction.order': order,
     'construction.deliverNow': (c, p) => { const ids = c.s.deliveries.filter((d) => !p || !p.deliveryId || d.id === p.deliveryId).map((d) => d.id); for (const id of ids) land(c, c.s, id); return { ok: ids.length > 0, delivered: ids }; },
     'construction.pickUp': pickUp,

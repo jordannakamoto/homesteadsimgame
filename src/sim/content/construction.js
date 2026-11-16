@@ -79,8 +79,8 @@ export function itemForm(itemId) {
   if (itemId === 'housewrap' || itemId === 'roof_underlayment' || itemId === 'vapour_barrier' || itemId === 'roof_epdm') return 'roll';
   if (/^roof_/.test(itemId)) return 'bundle';
   if (/^ins_|^straw/.test(itemId)) return 'bale';
-  if (itemId === 'door_prehung') return 'door';
-  if (itemId === 'window_shed' || /^glass_/.test(itemId)) return 'pane';
+  if (itemId === 'door_prehung' || /^op_door_/.test(itemId)) return 'door';
+  if (itemId === 'window_shed' || /^op_/.test(itemId) || /^glass_/.test(itemId)) return 'pane';
   if (itemId === 'concrete_mix' || itemId === 'mortar_mix') return 'bag';
   if (itemId === 'gravel') return 'pile';
   return 'box';

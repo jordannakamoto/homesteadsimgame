@@ -37,7 +37,7 @@ async function open(opts) {
   const { ctx, page, G, step, draw } = await open({ viewport: { width: 1280, height: 720 } });
   await page.keyboard.press('KeyB'); await step(70);
   check('build mode opens on Select, the home tool', await G(() => __game.player.tool === 'build' && !document.getElementById('buildbar').hidden && __build.view().tool === 'select'));
-  check('fourteen tools, each with a letter', await G(() => { const b = [...document.querySelectorAll('#bpieces button')]; return b.length === 14 && b.every((x) => x.querySelector('.key').textContent.length === 1 && x.querySelector('svg')); }));
+  check('fifteen tools, each with a letter', await G(() => { const b = [...document.querySelectorAll('#bpieces button')]; return b.length === 15 && b.every((x) => x.querySelector('.key').textContent.length === 1 && x.querySelector('svg')); }));
 
   // screen position of a point given in a frame's own metres (the building's grid), at a height above its base
   const at = (lx, lz, up = 0.12) => G(([lx, lz, up]) => {

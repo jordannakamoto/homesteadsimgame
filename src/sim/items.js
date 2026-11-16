@@ -13,6 +13,7 @@
 import { MATERIALS } from './materials.js';
 import { INGREDIENTS, foodId } from './food-catalog.js';
 import { ITEMS_GARDEN, GARDEN_CATEGORIES } from './content/garden-items.js';
+import { openingItems } from './content/openings.js';
 
 export const ITEM_UNITS = Object.freeze(['each', 'm', 'm2', 'm3', 'kg', 'L']);
 
@@ -24,7 +25,9 @@ export const ITEM_CATEGORIES = Object.freeze([
   { id: 'sheet', name: 'Sheets and membranes', blurb: 'Plywood, OSB, board, wraps' },
   { id: 'insulation', name: 'Insulation', blurb: 'Keeps the warm in and the cold out' },
   { id: 'roofing', name: 'Roofing', blurb: 'What keeps the rain off' },
-  { id: 'glass', name: 'Glass', blurb: 'Windows and glazing' },
+  { id: 'glass', name: 'Glass', blurb: 'Glazing by the square metre' },
+  { id: 'windows', name: 'Windows', blurb: 'Ready-made units in their frames, by type and size' },
+  { id: 'doors', name: 'Doors', blurb: 'Pre-hung, sliding, pocket, barn and garage doors' },
   { id: 'stone', name: 'Stone and concrete', blurb: 'Rock, gravel and mixes' },
   { id: 'fasteners', name: 'Fasteners', blurb: 'Nails and screws, sold by weight' },
   { id: 'tools_hand', name: 'Hand tools', blurb: 'Work anywhere, no power needed' },
@@ -152,6 +155,9 @@ for (const [id, ingredient] of Object.entries(INGREDIENTS)) {
 }
 add({ id: 'kitchen_chopper', name: 'Mechanical vegetable chopper', category: 'tools_hand',
   unit: 'each', massKg: 1.5, priceUsd: 35, blurb: 'Fast chopping and batch preparation for recipes you have cooked' });
+
+// ---- doors and windows from the catalog: one item per type and size (src/sim/content/openings.js)
+for (const { dims, massKgPerUnit, ...o } of Object.values(openingItems())) add({ ...o, massKg: massKgPerUnit });   // sold by the unit: no dims, the size is in the name
 
 // ---- the garden: seeds, garden tools, amendments and produce (src/sim/content/garden-items.js)
 for (const g of ITEMS_GARDEN) add(g);
