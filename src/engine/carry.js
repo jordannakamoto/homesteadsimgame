@@ -25,7 +25,10 @@
     function place(d, k, held) {
       e.set(0, 0, 0);
       const f = d.form;
-      if (f === 'lumber') {
+      if (f === 'ladder') {                          // two rails and rungs, lying flat
+        if (k < 2) { s.set(0.07, 0.06, d.l); p.set(k ? d.w / 2 : -d.w / 2, (held ? 0 : 0.03) + 0.03, 0); }
+        else { s.set(d.w, 0.035, 0.05); p.set(0, (held ? 0 : 0.03) + 0.05, d.l * (((k - 2 + 0.6) / 7.2) - 0.5)); }
+      } else if (f === 'lumber') {
         const per = Math.max(1, Math.floor((held ? 0.3 : 1.0) / (d.w + 0.012))), row = Math.floor(k / per), i = k % per;
         s.set(d.w, d.h, d.l * (0.94 + 0.06 * hashf(k, 3)));
         p.set((i - (per - 1) / 2) * (d.w + 0.012), (held ? 0 : 0.09) + d.h / 2 + row * (d.h + 0.004), (hashf(k, 7) - 0.5) * 0.08);
@@ -84,7 +87,7 @@
         load.count = n; load.instanceMatrix.needsUpdate = true; if (load.instanceColor) load.instanceColor.needsUpdate = true;
         // how it is held: long things on the shoulder, sheets flat overhead, tall things at the side, the rest in front
         const f = d.form;
-        if (f === 'lumber') { load.position.set(0.27, 1.34, 0.1); load.rotation.set(-0.1, 0, 0); }
+        if (f === 'lumber' || f === 'ladder') { load.position.set(0.27, 1.34, 0.1); load.rotation.set(-0.1, 0, 0); }
         else if (f === 'sheet') { load.position.set(0, 1.62, 0.05); load.rotation.set(-0.06, 0, 0); }
         else if (f === 'lean') { load.position.set(0.42, 0.25, 0.1); load.rotation.set(0, Math.PI / 2, 0); }
         else if (f === 'roll') { load.position.set(0.3, 1.3, 0); load.rotation.set(0, 0, 0); }
