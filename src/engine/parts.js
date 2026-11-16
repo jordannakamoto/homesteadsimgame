@@ -54,11 +54,12 @@
   }
 
   function attach(opts) {
-    const sim = G.sim, sysDef = sim.systems.find((s) => s.name === opts.system);
+    // G.sim is replaced when a new world starts: never keep it, always ask for it
+    const sysDef = G.sim.systems.find((s) => s.name === opts.system);
     if (!sysDef) return null;
     const A = sysDef.api, N = opts.system, STEP = A.stepM, shapes = opts.shapes;
-    const S = () => sim.state.sys[N];
-    const cmd = (name, p) => { const r = sim.commandNow(N + '.' + name, p); opts.onChange && opts.onChange(name, p.id); return r; };
+    const S = () => G.sim.state.sys[N];
+    const cmd = (name, p) => { const r = G.sim.commandNow(N + '.' + name, p); opts.onChange && opts.onChange(name, p.id); return r; };
     const mat = opts.material || new T.MeshLambertMaterial({ vertexColors: true });
     const ghostMat = new T.MeshBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0.6, depthWrite: false, fog: false });
     const hiMat = new T.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.28, depthWrite: false, fog: false });
@@ -342,6 +343,7 @@
       hint() { return held && S().parts[held] ? 'Holding the ' + nameOf(S().parts[held]) + '.  Bring it to a glowing end to fit it' : null; },
       leave(R) { hi.visible = ghost.visible = false; if (held) tossTo(R, R.player.x + 0.4, R.player.z + 0.4, false); wig = lenDrag = null; drawnV = -1; },
       frame(dt, R) {
+        watchSim();
         if (flyers.length) stepFlyers(dt);
         if (held) {
           const part = S().parts[held];
@@ -365,7 +367,9 @@
       },
     };
     RCH.use(user);
-    sim.listen((type) => { if (type === 'loaded') { held = null; hidden.clear(); drawnV = -1; } });
+    let simSeen = null;
+    const reset = () => { for (const f of flyers) G.scene.remove(f.mesh); flyers.length = 0; hidden.clear(); wig = lenDrag = null; if (held) letGo(); hi.visible = ghost.visible = false; drawnV = -1; };
+    const watchSim = () => { if (G.sim === simSeen) return; simSeen = G.sim; reset(); G.sim.listen((type) => { if (type === 'loaded') reset(); }); };
     return {
       held: () => held, give, endWorld, refresh: () => { drawnV = -1; }, fly, looseMatrix, fittedMatrix, restPose, api: A, state: S,
       // parts tumbling out of something: from a world point to the given resting spots
@@ -373,7 +377,7 @@
         ids.forEach((id, i) => {
           const part = S().parts[id]; if (!part) return;
           const sp = spots[i % spots.length], pose = restPose(sp.x, sp.z, sp.yaw ?? Math.random() * 6.28);
-          sim.commandNow(N + '.move', { id, pose });
+          G.sim.commandNow(N + '.move', { id, pose });
           const m0 = new T.Matrix4().compose(new T.Vector3(from.x, from.y, from.z), new T.Quaternion(), new T.Vector3(isStretch(part.kind) ? lenM(part) * 0.3 : 0.3, 0.3, 0.3));
           hidden.add(id);
           setTimeout(() => fly(id, m0, looseMatrix(new T.Matrix4(), part, pose), { dur: 0.45 + Math.random() * 0.2, arc: 0.5, spin: 1.2, bounce: 0.08, done: () => G.burst(pose.x, pose.y + 0.04, pose.z, 3, 0xb9a783, 0.9, 0.7, 0.045, 0.3) }), 60 * i);
