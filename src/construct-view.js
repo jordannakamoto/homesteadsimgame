@@ -22,16 +22,19 @@
   const low = (t) => t.charAt(0).toLowerCase() + t.slice(1);
 
   const look = B.memberLook();
-  const asm = window.__assembly.create(G, { geo: look.geo, mat: look.mat, colorOf: (m) => look.colors[m.col || 'timber'] || look.colors.timber });
+  const MARK = [0.09, 0.08, 0.09];       // pencil
+  const asm = window.__assembly.create(G, { geo: look.geo, mat: look.mat, colorOf: (m) => (m.col === 'mark' ? MARK : look.colors[m.col || 'timber'] || look.colors.timber) });
   const sounds = window.__assembly.createSounds();
   const carry = window.__carry.create(G);
   const reach = window.__carry.createReach(G, { reach: C.WORK.reachM });
+  const CS = window.__cutStation ? window.__cutStation.create(G) : null;     // the sawhorses, and the saw going through each stick
+  const SC = window.__scaffold ? window.__scaffold.create(G) : null;         // a rented scaffold bay along a wall
   const REACH = C.WORK.reachM;
   const OFF = { build: 1, garden: 1, hands: 1 };       // other tools own the pointer while they are out
   const V = {
     sim: null, rev: 1, bv: -1, sel: null, structs: new Map(), geom: new Map(), plans: new Map(), planVer: new Map(), fresh: new Map(), flushing: [],
     working: null, auto: null, raise: null, ctx: null, fWas: false, idleT: 0, placing: null, pendingPlan: null, book: false, expand: null, quotes: {},
-    blows: {}, named: {}, cool: 0, swingIn: null, mDown: false, poseT: 0, poseKind: '',
+    blows: {}, named: {}, cool: 0, sawing: new Set(), swingIn: null, mDown: false, poseT: 0, poseKind: '',
     uiSig: '', nextSig: '', promptSig: '', glowSig: '', stackSig: '', loadSig: '', braceSig: '', cardStage: null, sayT: 0, bannerT: 0, target: null, lastLand: 0, hint: null, hintT: 0, pct: -1,
   };
   const cmd = (name, payload) => { const r = G.sim.commandNow('construction.' + name, payload || {}); V.rev++; G.markStockDirty && G.markStockDirty(); return r; };
@@ -112,6 +115,7 @@
     V.sim = G.sim; V.rev++; V.bv = -1; V.sel = null;
     for (const k of asm.keys()) asm.remove(k);
     V.structs.clear(); V.geom.clear(); V.plans.clear(); V.planVer.clear(); V.fresh.clear(); V.flushing = []; V.working = null; V.auto = null; V.raise = null; V.placing && endPlacing();
+    SC && SC.release(); V.scafHeld = false; V.horsesHeld = false; V.sawing.clear();
     carry.forget(); V.stackSig = V.loadSig = V.uiSig = V.nextSig = V.glowSig = V.braceSig = '';
     G.sim.listen((type, data) => {
       if (!type.startsWith('construction.')) return;
@@ -186,7 +190,7 @@
     // something too big for one load (siding, roofing) grows as the loads arrive
     for (const mid in pr.members) {
       const pm = pr.members[mid];
-      if (pm.built || !(pm.got > 1e-6) || !(pm.need > 0)) continue;
+      if (pm.built || !(pm.got > 1e-6) || !(pm.need > 0) || V.sawing.has(mid)) continue;
       const m = g.byId.get(mid);
       if (!m || m.draw === 0) continue;
       const f = Math.min(1, pm.got / pm.need), sg = m.n[1] < -0.3 ? -1 : 1, sh = (-sg * m.section.d * (1 - f)) / 2;
@@ -199,7 +203,8 @@
       const cur = api.flatCurrent(pr, st.id), hw = cur && g.walls.get(cur);
       if (!hw || !api.stageOpen(pr, st.id)) continue;
       const list = [];
-      for (const mid in pr.members) { const m = pr.members[mid]; if (m.stage === st.id && m.parent === cur && g.byId.has(mid)) { if (m.built) list.push(g.byId.get(mid)); else if (m.need > 0 && m.got >= m.need - 1e-6) { list.push(g.byId.get(mid)); loose.push([cur, mid]); } } }
+      for (const mid in pr.members) { const m = pr.members[mid]; if (m.stage === st.id && m.parent === cur && g.byId.has(mid)) { if (m.built) list.push(g.byId.get(mid)); else if (m.need > 0 && m.got >= m.need - 1e-6 && !V.sawing.has(mid)) { list.push(g.byId.get(mid)); loose.push([cur, mid]); } } }
+      marks(pr, g, cur, list);
       if (w && w.layer === cur) list.push(w.m);
       asm.hinge(id, cur, hw.pivot, hw.axis, V.raise && V.raise.parent === cur ? V.raise.angle : hw.flat, 48);
       asm.setSolid(id, cur, list, 48);
@@ -250,7 +255,7 @@
     const it = CAT[itemId], f = C.itemForm(itemId), d = (it && it.dims) || {};
     const n = (per) => Math.max(1, Math.min(140, Math.ceil(qty / per - 0.02)));
     if (itemId === 'ladder') return { form: 'ladder', w: 0.46, h: 0.06, l: 3.6, n: 9, color: 0xe3912f };
-    if (f === 'lumber') { const l = itemId === 'lumber_2x4' ? 2.6 : 3; return { form: 'lumber', w: Math.max(d.depthM, d.widthM), h: Math.min(d.depthM, d.widthM), l, n: n(l), color: COLORS.lumber }; }
+    if (f === 'lumber') { const l = itemId === 'lumber_2x4' ? 3.0 : 3.6; return { form: 'lumber', w: Math.max(d.depthM, d.widthM), h: Math.min(d.depthM, d.widthM), l, n: n(l), color: COLORS.lumber }; }
     if (f === 'boards') return { form: 'lumber', w: 0.14, h: 0.019, l: 3, n: n(3 * 4), color: COLORS.boards, scaleH: 4 };
     if (f === 'sheet') return { form: 'sheet', w: 1.22, l: 2.44, h: Math.max(0.011, d.thicknessM || 0.011), n: n(1), color: /gypsum/.test(itemId) ? 0xd8d6cf : COLORS.osb };
     if (f === 'block') return { form: 'block', w: 0.3, l: 0.3, h: 0.2, n: n(1), color: COLORS.block };
@@ -405,6 +410,44 @@
     const foot = new T.Vector3(qx - ix * ladD, 0, qz - iz * ladD).applyMatrix4(g.matrix), top = new T.Vector3(qx - ix * 0.1, hw.top, qz - iz * 0.1).applyMatrix4(g.matrix);
     return { x: foot.x, z: foot.z, yaw: Math.atan2(top.x - foot.x, top.z - foot.z), topY: top.y, structId: pr.id };
   }
+  // ---- scaffolding: where a bay would stand if set up along the raised wall nearest the pointer, a step out from it
+  const SCF = C.SCAFFOLD;
+  function scaffoldSpot(pr, px = reach.x, pz = reach.z) {
+    const g = geom(pr.id);
+    if (!g) return null;
+    const inv = g.matrix.clone().invert(), lp = new T.Vector3(px, 0, pz).applyMatrix4(inv);
+    let best = null, bd = 3.2;
+    for (const [par, hw] of g.walls) {
+      if (!pr.raised[par]) continue;
+      const t = (lp.x - hw.mid[0]) * hw.u[0] + (lp.z - hw.mid[1]) * hw.u[1], tt = Math.max(-hw.len / 2, Math.min(hw.len / 2, t)), d = Math.hypot(lp.x - hw.mid[0] - hw.u[0] * tt, lp.z - hw.mid[1] - hw.u[1] * tt);
+      if (d < bd) { bd = d; best = { hw, t }; }
+    }
+    if (!best) return null;
+    const { hw } = best, len = Math.min(SCF.bayM, hw.len + 0.3), t = Math.max(-(hw.len - len) / 2 - 0.15, Math.min((hw.len - len) / 2 + 0.15, best.t)), out = 0.12 + SCF.standOffM + SCF.widthM / 2;
+    const c = new T.Vector3(hw.mid[0] + hw.u[0] * t - hw.inward[0] * out, 0, hw.mid[1] + hw.u[1] * t - hw.inward[1] * out).applyMatrix4(g.matrix);
+    const o = new T.Vector3(0, 0, 0).applyMatrix4(g.matrix), w = new T.Vector3(hw.inward[0], 0, hw.inward[1]).applyMatrix4(g.matrix).sub(o).normalize(), top = new T.Vector3(0, hw.top, 0).applyMatrix4(g.matrix).y;
+    return { x: c.x, z: c.z, yaw: Math.atan2(-w.z, w.x), len, deckY: Math.max(G.heightAt(c.x, c.z) + SCF.minDeckM, top - SCF.belowTopM), structId: pr.id };
+  }
+  function scaffoldCtx(pr) {
+    const s = S(), sc = s.scaffold, P = G.player;
+    if (!SC || !sc || s.carried || (s.barrow && s.barrow.held)) return null;
+    if (V.scafHeld) { const spot = pr && scaffoldSpot(pr); return spot ? { kind: 'sset', spot } : { kind: 'sdrop' }; }
+    if (!sc.set) return Math.hypot(sc.x - P.x, sc.z - P.z) < 2.4 && Math.hypot(sc.x - reach.x, sc.z - reach.z) < 1.2 ? { kind: 'sgrab' } : null;
+    const f = SC.foot();
+    return f && !SC.on() && Math.hypot(reach.x - f.x, reach.z - f.z) < 0.8 && Math.hypot(P.x - f.x, P.z - f.z) > 1.0 && Math.hypot(P.x - f.x, P.z - f.z) < 3.5 ? { kind: 'sstrike' } : null;
+  }
+  function tickScaffold(dt) {
+    if (!SC) return;
+    const s = S(), sc = s.scaffold, P = G.player, hide = s.options.sandbox;
+    if (V.scafHeld && (!sc || sc.set || s.carried || OFF[P.tool])) V.scafHeld = false;
+    SC.set(sc && sc.set && !hide ? { ...sc.set, w: SCF.widthM } : null);
+    SC.setBundle(!sc || sc.set || hide ? null : V.scafHeld ? { x: P.x + Math.sin(P.face) * 1.1, z: P.z + Math.cos(P.face) * 1.1 } : { x: sc.x, z: sc.z });
+    if (V.scafHeld) P.carryK = Math.max(P.carryK || 0, 0.75);
+    if (V.climb) return;
+    const r = SC.update(dt, { climbMps: feel().climbMps * 1.25 });
+    if (r === 'up') { sounds.play('thunk'); V.rev++; if (!V.named.scaf) { V.named.scaf = 1; flash('On the scaffold: walk the plank; walk back off the ladder end to climb down'); } }
+    else if (r === 'down') V.rev++;
+  }
   function ladderCtx(strong) {
     const L = S().ladder, P = G.player;
     if (!L || V.climb) return null;
@@ -497,6 +540,7 @@
     const q = [], low0 = new Map();     // siding goes on from the bottom course up: the lowest course not yet set, per wall
     for (const mid of pl.inst) { const pm = pr.members[mid], m = g.byId.get(mid); if (m && courseOf(pm, m) && pm.need - pm.got > 1e-6) low0.set(pm.parent + pm.kind, Math.min(low0.has(pm.parent + pm.kind) ? low0.get(pm.parent + pm.kind) : 1e9, m.row)); }
     for (const mid of pl.inst) {
+      if (V.sawing.has(mid)) continue;
       const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid);
       if (m && courseOf(pm, m) && pm.need - pm.got > 1e-6 && m.row > low0.get(pm.parent + pm.kind)) continue;
       const set = !ln || pm.need - pm.got < 1e-6, act = pm.kind === 'site' ? 'dig' : set ? 'nail' : (c && c.itemId === ln.itemId) || !api.needsStock(S(), pr, mid) || stackWithin(ln.itemId, takeM()) ? 'set' : 'want';
@@ -522,7 +566,7 @@
     if (sk && sk.id === pr.id) { const pm = pr.members[sk.mid]; if (pm && !pm.built && pm.need > 0 && pm.got >= pm.need - 1e-6 && q.includes(sk.mid)) best = { mid: sk.mid, act: 'nail' }; else V.stick = null; }
     if (best) return { kind: 'hands', id: pr.id, act: best.act, mid: best.mid, q };
     if (want) return { kind: 'hint', text: 'Needs ' + low(plain(lineOf(pr, want).label)), id: pr.id };
-    if (high) { V.needLadder = 0.5; return { kind: 'hint', text: S().ladder || (S().carried && S().carried.itemId === LAD.itemId) ? 'Too high: lean the ladder on a wall, then walk onto it' : S().stacks.some((k) => k.itemId === LAD.itemId) ? 'Too high: the ladder is in the yard by the stacks (glowing marker)' : 'Too high: bring the ladder', id: pr.id }; }
+    if (high) { V.needLadder = 0.5; return { kind: 'hint', text: S().scaffold && S().scaffold.set ? 'Too high: walk into the scaffold ladder, or lean the ladder here' : S().ladder || (S().carried && S().carried.itemId === LAD.itemId) ? 'Too high: lean the ladder on a wall, then walk onto it' : S().stacks.some((k) => k.itemId === LAD.itemId) ? 'Too high: the ladder is in the yard by the stacks (glowing marker)' : 'Too high: bring the ladder', id: pr.id }; }
     return null;
   }
   function finishInstall(id, mid, layer, kind, r) {
@@ -588,10 +632,55 @@
   function setPiece(id, mid, pm, layer, m, at, swp, quiet) {
     const pr = S().progress[id], r = cmd('install', { structId: id, memberIds: [mid], hold: true });
     if (!r.ok) { if (!quiet) flash(reason(r, pm.kind)); return null; }
-    if (r.cuts && r.cuts.length && !quiet) flash(r.cuts[0].how === 'offcut' ? 'Cut from an offcut' : 'Cut to fit; offcut kept');
-    if (r.set.length) { if (swp) V.stick = { id, mid }; if (pm.kind === 'cladding') slideIn(id, layer, mid); else if (V.sheetMids && V.sheetMids.has(mid)) wrapRoll(id, layer, mid); else if (!quiet) V.swingIn = { mid, id, layer, t: 0 }; sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
+    const sawn = r.cuts && r.cuts.find((q) => q.stick);
+    if (sawn) { sawPiece(id, mid, layer, sawn, at, quiet); if (!quiet) flash(cutWords(sawn)); }
+    else if (r.cuts && r.cuts.length && !quiet) flash(r.cuts[0].how === 'offcut' ? 'Cut from an offcut' : 'Cut to fit; offcut kept');
+    if (r.set.length) { if (swp) V.stick = { id, mid }; if (sawn) { /* it swings in when the saw is through */ } else if (pm.kind === 'cladding') slideIn(id, layer, mid); else if (V.sheetMids && V.sheetMids.has(mid)) wrapRoll(id, layer, mid); else if (!quiet) V.swingIn = { mid, id, layer, t: 0 }; sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
     else if (!quiet) { const q = r.partial[0]; sounds.play('rustle'); flash(plain(lineOf(pr, mid).label) + ': ' + Math.round((100 * q.got) / q.need) + '% there. Fetch more.'); }
     return r;
+  }
+  // ---- the saw: every stick piece is sawn to length from stock or an offcut before it goes in. At the sawhorses (within
+  // 4.5 m) the cut is quick; anywhere else it is done kneeling on the deck, slower. The piece stays out of sight until the
+  // saw is through, then arcs from the cut to its place and swings in.
+  const ftOf = (L) => (C.STICK.ft[L] ? C.STICK.ft[L] + ' ft' : (Math.round(L / 0.3048)) + ' ft');
+  const mm = (L) => (L >= 1 ? L.toFixed(2) + ' m' : Math.round(L * 1000) + ' mm');
+  function cutWords(c) {
+    const p = c.pieces[0], n = c.pieces.length, more = n > 1 ? ' (x' + n + ')' : '';
+    if (!c.sawn) return 'A whole ' + ftOf(p.stockM) + ' stick, no cut' + more;
+    return 'Sawn ' + mm(p.lenM) + more + ' from ' + (p.how === 'offcut' ? 'an offcut' : 'a ' + ftOf(p.stockM) + ' stick') + (p.keptM > 0 ? '; ' + mm(p.keptM) + ' offcut kept' : p.stockM - p.lenM > 0.01 ? '; the end is scrap' : '');
+  }
+  function sawPiece(id, mid, layer, c, at, quiet) {
+    if (!CS) return;
+    const P = G.player, onH = CS.near(P.x, P.z, 4.5), tools = G.sim.state.sys.stock.tools, power = tools.includes('circular_saw') && !!(G.powerAvailable && G.powerAvailable());
+    if (!V.named['saw:' + onH]) { V.named['saw:' + onH] = 1; note(onH ? 'The cut station' : 'Cutting on the deck', onH ? 'Every piece is sawn to length from a stock stick. Short pieces come out of the offcuts by the sawhorses.' : 'Kneeling cuts are slow. Work near the sawhorses, or carry them over (point at them and press E).'); }
+    V.sawing.add(mid);
+    const fx = P.x + Math.sin(P.face) * 0.75, fz = P.z + Math.cos(P.face) * 0.75;
+    c.pieces.forEach((pc, i) => CS.cut({ stockM: pc.stockM, lenM: pc.lenM, sawn: pc.sawn, keptM: pc.keptM, onHorses: onH, x: fx, z: fz, y: P.y, yaw: P.face + Math.PI / 2, to: { x: at.x, y: at.y, z: at.z }, power, slow: quiet ? 0.7 : 1 },
+      i === c.pieces.length - 1 ? () => { V.sawing.delete(mid); V.rev++; if (S().progress[id]) { redraw(id); if (!quiet) V.swingIn = { mid, id, layer, t: 0 }; } } : null));
+  }
+  // layout: before the studs go in, the plates of a frame lying on the deck are marked where each stud, king and jack will
+  // stand: a pencil line each side of it and a cross, on the edge that faces up
+  function marks(pr, g, par, list) {
+    const pls = [];
+    for (const mid in pr.members) { const pm = pr.members[mid]; if (pm.parent === par && pm.kind === 'plate' && pm.stage === 'wall-frame' && (pm.type === 'bottom' || pm.type === 'top') && pm.built) pls.push(g.byId.get(mid)); }
+    const hw = g.walls.get(par);
+    if (!pls.length || !hw) return;
+    const ox = -hw.inward[0], oz = -hw.inward[1];
+    for (const mid in pr.members) {
+      const pm = pr.members[mid], m = g.byId.get(mid);
+      if (pm.parent !== par || pm.kind !== 'stud' || pm.stage !== 'wall-frame' || !m) continue;
+      const sx = m.a[0], sz = m.a[2];
+      for (const pl of pls) {
+        const L = Math.hypot(pl.b[0] - pl.a[0], pl.b[2] - pl.a[2]) || 1, ux = (pl.b[0] - pl.a[0]) / L, uz = (pl.b[2] - pl.a[2]) / L, t = (sx - pl.a[0]) * ux + (sz - pl.a[2]) * uz;
+        if (t < -0.01 || t > L + 0.01) continue;
+        if ((pm.type === 'cripple' || pm.type === 'jack') && pl.type === 'top' && Math.max(m.a[1], m.b[1]) < pl.a[1] - 0.3) continue;   // jacks and cripples under a sill stand on the bottom plate only
+        if (pm.type === 'cripple' && pl.type === 'bottom' && Math.min(m.a[1], m.b[1]) > pl.a[1] + 0.3) continue;   // cripples over a header hang from the top plate
+        const half = pl.section.d / 2 + 0.0015, cx = pl.a[0] + ux * t + ox * half, cz = pl.a[2] + uz * t + oz * half, y = pl.a[1], hb = pl.section.b / 2 - 0.003;
+        for (const e of [-0.019, 0.019]) list.push({ id: 'mk:' + mid + pl.id + e, col: 'mark', a: [cx + ux * e, y - hb, cz + uz * e], b: [cx + ux * e, y + hb, cz + uz * e], n: [ux, 0, uz], section: { b: 0.002, d: 0.004 } });
+        list.push({ id: 'mx:' + mid + pl.id, col: 'mark', a: [cx - ux * 0.012, y - hb * 0.7, cz - uz * 0.012], b: [cx + ux * 0.012, y + hb * 0.7, cz + uz * 0.012], n: [ox, 0, oz], section: { b: 0.003, d: 0.002 } });
+        list.push({ id: 'my:' + mid + pl.id, col: 'mark', a: [cx + ux * 0.012, y - hb * 0.7, cz + uz * 0.012], b: [cx - ux * 0.012, y + hb * 0.7, cz - uz * 0.012], n: [ox, 0, oz], section: { b: 0.003, d: 0.002 } });
+      }
+    }
   }
   // one press with the hands: set the piece aimed at, or strike it once
   function handAct(ctx) {
@@ -601,10 +690,10 @@
     const swp = ctx.act !== 'dig' && sweepable(pr, ctx.mid, g);
     V.cool = 1 / (feel().strikesPerSec * (swp ? Math.max(0.25, feel().sweepSpeed) : 1));
     if (ctx.act === 'set') {
-      const ln0 = lineOf(pr, ctx.mid), c0 = S().carried;
-      if (ln0 && !(c0 && c0.itemId === ln0.itemId) && api.needsStock(S(), pr, ctx.mid)) {   // close to the stack: take from it, no trip
+      const ln0 = lineOf(pr, ctx.mid), c0 = S().carried, need0 = api.stockNeed(S(), pr, ctx.mid);
+      if (ln0 && need0 > 1e-6 && !(c0 && c0.itemId === ln0.itemId && c0.qty + 1e-6 >= need0)) {   // close to the stack: take from it, no trip
         const st = stackWithin(ln0.itemId, takeM());
-        if (st) { if (c0) putDown(); if (pickUp(st).ok) flash('Taking from the stack'); }
+        if (st) { if (c0 && c0.itemId !== ln0.itemId) putDown(); if (pickUp(st).ok) flash('Taking from the stack'); }
       }
       const r = setPiece(ctx.id, ctx.mid, pm, layer, m, wM, swp);
       if (!r) return;
@@ -614,8 +703,8 @@
         more.forEach((mid, i) => setTimeout(() => {
           const p2 = S().progress[ctx.id], pm2 = p2 && p2.members[mid];
           if (!pm2 || pm2.built || pm2.need - pm2.got < 1e-6) return;
-          const l2 = lineOf(p2, mid), c2 = S().carried;
-          if (l2 && !(c2 && c2.itemId === l2.itemId) && api.needsStock(S(), p2, mid)) { const st = stackWithin(l2.itemId, takeM()); if (!st || !pickUp(st).ok) return; }
+          const l2 = lineOf(p2, mid), c2 = S().carried, n2 = api.stockNeed(S(), p2, mid);
+          if (l2 && n2 > 1e-6 && !(c2 && c2.itemId === l2.itemId && c2.qty + 1e-6 >= n2)) { const st = stackWithin(l2.itemId, takeM()); if (!st || (c2 && c2.itemId !== l2.itemId) || !pickUp(st).ok) return; }
           const m2 = g.byId.get(mid), hw2 = m2 && C.STAGE[pm2.stage].flat ? g.walls.get(pm2.parent) : null;
           worldPt(g, hw2, m2.a, wA); worldPt(g, hw2, m2.b, wB); const pt = new T.Vector3().lerpVectors(wA, wB, 0.5);
           setPiece(ctx.id, mid, pm2, hw2 ? pm2.parent : 'main', m2, pt, false, true);
@@ -766,6 +855,21 @@
       m.material.color.setHex(d.color);
     }
   }
+  // the sawhorses: where the sim says, or in front of you while you carry them; the offcuts kept lie in a heap beside them
+  function tickStation(dt) {
+    if (!CS) return;
+    const s = S(), P = G.player;
+    if (V.horsesHeld && (s.carried || OFF[P.tool] || s.options.sandbox)) V.horsesHeld = false;
+    if (V.horsesHeld) { CS.setHorses({ x: P.x + Math.sin(P.face) * 1.3, z: P.z + Math.cos(P.face) * 1.3, yaw: P.face + Math.PI / 2 }); P.carryK = Math.max(P.carryK || 0, 0.85); }
+    else CS.setHorses(s.options.sandbox || !V.anyOpen ? null : s.horses);
+    if (V.pileRev !== V.rev) {
+      V.pileRev = V.rev;
+      let n = 0;
+      for (const pr of Object.values(s.progress)) if (!pr.done) for (const k in pr.lines) { const ln = pr.lines[k]; if (ln.stick && ln.cut) for (const st of ln.cut.sticks) if (st.open && st.left > 0) n++; }
+      CS.setPile(n);
+    }
+    V.cutNow = CS.update(dt);
+  }
   function drawBeacons(dt) {
     const pr = current(), P = G.player;
     V.beaconT -= dt;
@@ -829,8 +933,12 @@
     if (OFF[P.tool] || V.placing || s.options.sandbox) return null;
     if (V.auto) return { kind: 'stop', id: V.auto.id };
     if (V.climb) { const pc = nearBuilding(P.x, P.z), h = pc && !pc.done && plan(pc.id) && !plan(pc.id).raise ? aimHands(pc) : null; return h && h.kind === 'hands' ? h : { kind: 'ladder', act: 'down' }; }
+    if (SC && SC.on()) { const pc = nearBuilding(P.x, P.z), h = pc && !pc.done && plan(pc.id) && !plan(pc.id).raise ? aimHands(pc) : null; return h || { kind: 'hint', text: 'On the scaffold: walk back off the ladder end to climb down' }; }
+    { const sx = scaffoldCtx(nearBuilding(P.x, P.z) || nearBuilding(reach.x, reach.z)); if (sx) return sx; }
     const strong = ladderCtx(true);
     if (strong) return strong;
+    if (V.horsesHeld) return { kind: 'hset' };
+    if (CS && s.horses && !c && !(s.barrow && s.barrow.held) && Math.hypot(s.horses.x - P.x, s.horses.z - P.z) < 2.4 && Math.hypot(s.horses.x - reach.x, s.horses.z - reach.z) < 1.1) return { kind: 'hgrab' };
     {
       const b = s.barrow;
       if (b && b.held) { const st = carry.nearest(reach.x, reach.z, 1.2, pickable) || carry.nearest(P.x, P.z, 2.0, pickable); return st ? { kind: 'bload', stack: st } : { kind: 'bdown' }; }
@@ -900,6 +1008,12 @@
     }
     else if (ctx.kind === 'bload') { const r = cmd('barrowLoad', { stackId: ctx.stack.id }); if (r.ok) { sounds.play('thunk'); nameIt(r.itemId); flash('Loaded ' + stackName(r.itemId)); } else flash(r.reason === 'full' ? 'The wheelbarrow is full' : r.reason === 'holds something else' ? 'It already holds something else' : 'Cannot load that'); }
     else if (ctx.kind === 'bdown') { const b = S().barrow; cmd('barrowSet', { x: b.x, z: b.z, yaw: b.yaw }); sounds.play('thunk'); }
+    else if (ctx.kind === 'sgrab') { V.scafHeld = true; V.rev++; sounds.play('lift'); flash('Point at a wall and press again to set the scaffold up there'); }
+    else if (ctx.kind === 'sset') { const r = cmd('setScaffold', ctx.spot); V.scafHeld = false; if (r.ok) { sounds.play('thud'); G.cam.shake = Math.min(G.cam.shake + 0.05, 0.3); note('Scaffold up', 'Walk into the ladder at its end to climb. Up there the top of the wall and the roof edge are in reach.'); } else flash(r.reason); }
+    else if (ctx.kind === 'sdrop') { const P = G.player; V.scafHeld = false; cmd('moveScaffold', { x: P.x + Math.sin(P.face) * 1.1, z: P.z + Math.cos(P.face) * 1.1 }); sounds.play('thunk'); }
+    else if (ctx.kind === 'sstrike') { const P = G.player; const r = cmd('strikeScaffold', { x: P.x + Math.sin(P.face) * 1.1, z: P.z + Math.cos(P.face) * 1.1 }); if (r.ok) { sounds.play('thud'); flash('Scaffold down. Pick the bundle up to set it up along another wall'); } }
+    else if (ctx.kind === 'hgrab') { V.horsesHeld = true; V.rev++; sounds.play('lift'); flash('Carry the sawhorses to the work; press again to set them down'); }
+    else if (ctx.kind === 'hset') { const h = CS.horses; V.horsesHeld = false; if (h) cmd('moveHorses', { x: h.x, z: h.z, yaw: h.yaw }); sounds.play('thunk'); }
     else if (ctx.kind === 'pick') pickUp(ctx.stack);
     else if (ctx.kind === 'back' || ctx.kind === 'drop' || (ctx.kind === 'hint' && ctx.drop)) putDown();
     else if (ctx.kind === 'swap') { putDown(); pickUp(ctx.stack); }
@@ -936,6 +1050,8 @@
       V.working = null;
       const r = cmd('install', { structId: j.id, memberIds: [j.memberId], from: j.from });
       if (!r.ok) { redraw(j.id); stopAuto(); flash(reason(r)); return; }
+      const sawn = CS && r.cuts && r.cuts.find((q) => q.stick && q.sawn);
+      if (sawn) { const P = G.player, onH = CS.near(P.x, P.z, 4.5); for (const pc of sawn.pieces) CS.cut({ stockM: pc.stockM, lenM: pc.lenM, sawn: pc.sawn, keptM: pc.keptM, onHorses: onH, x: P.x + Math.sin(P.face) * 0.75, z: P.z + Math.cos(P.face) * 0.75, y: P.y, yaw: P.face + Math.PI / 2, slow: 0.5 }, null); }
       V.idleT = 0;
       const pr = S().progress[j.id];
       if (r.installed.length) {
@@ -952,7 +1068,7 @@
   function beginMember(id, memberId, from) {
     const pr = S().progress[id], g = geom(id), m = g.byId.get(memberId) || { id: memberId, kind: 'site', a: [g.cx, 0, g.cz], b: [g.cx, 0, g.cz], n: [0, 1, 0], section: { b: 0, d: 0 }, draw: 0 }, pm = pr.members[memberId], ln = lineOf(pr, memberId);
     const need = pm.need - pm.got, c = S().carried;
-    const partial = from !== 'stacks' && ln && need > 1e-6 && !(ln.sheet && !api.needsStock(S(), pr, memberId)) && (!c || c.qty + 1e-6 < (ln.sheet ? 1 : need));
+    const want = api.stockNeed(S(), pr, memberId), partial = from !== 'stacks' && ln && need > 1e-6 && want > 1e-6 && (!c || c.itemId !== ln.itemId || c.qty + 1e-6 < want);
     const layer = C.STAGE[pm.stage].flat && g.walls.has(pm.parent) ? pm.parent : 'main';
     V.working = { id, memberId, layer, m, partial };
     W.begin({ id, memberId, layer, m, from, kind: pm.kind, beats: partial ? 2 : C.memberBeats(pm.kind) });
@@ -1019,13 +1135,13 @@
         if (!q.length) { const was = A.stage; stopAuto(); if (!api.stageComplete(pr, was)) flash('Stopped: ' + C.STAGE[was].name + ' is waiting on something else'); return; }
         const ln = lineOf(pr, q[0]), pm = pr.members[q[0]], c = s.carried;
         if (A.guided || !ln || pm.need - pm.got < 1e-6) beginMember(A.id, q[0], A.guided ? 'stacks' : 'carried');
-        else if ((c && c.itemId === ln.itemId) || !api.needsStock(s, pr, q[0])) beginMember(A.id, q[0], 'carried');
+        else if ((c && c.itemId === ln.itemId && (ln.stick ? c.qty + 1e-6 >= api.stockNeed(s, pr, q[0]) : true)) || !api.needsStock(s, pr, q[0])) beginMember(A.id, q[0], 'carried');
         else {                                        // fetch the next armful: a short pause for the walk
           A.wait += dt;
           if (A.wait > 0.8) {
             A.wait = 0;
-            if (c) putDown();
-            const st = homeStack(ln.itemId) || s.stacks.find((k) => k.itemId === ln.itemId);
+            if (c && c.itemId !== ln.itemId) putDown();       // the same thing in the arms: take more on top of it (a stick needs a whole stick's length)
+            const st = s.stacks.filter((k) => k.itemId === ln.itemId && !k.barrow).sort((a, b) => b.qty - a.qty)[0];
             if (!st || !pickUp(st).ok) stopAuto('Out of ' + stackName(ln.itemId) + ': order the stage in the Build panel');
           }
         }
@@ -1043,7 +1159,8 @@
     if (V.working && !V.working.partial && V.working.m.draw !== 0) liftTo(V.working.id, V.working.layer, V.working.memberId, 0.24 * (1 - W.progress()));
     // the character's arms: a blow for each beat, both up under a wall, one up under a load
     const P = G.player, pose = V.pose || (V.pose = { kind: '', k: 0 });
-    if (V.raise && !V.raise.landed) pose.kind = 'lift';
+    if (V.cutNow) { pose.kind = 'saw'; pose.k = V.cutNow.k; P.faceTarget = Math.atan2(V.cutNow.x - P.x, V.cutNow.z - P.z); }
+    else if (V.raise && !V.raise.landed) pose.kind = 'lift';
     else if (W.job) { pose.kind = 'hammer'; const ph = Math.min(1, W.t / C.WORK.beatS); pose.k = ph < 0.75 ? 0 : (ph - 0.75) * 4; }
     else if (V.poseT > 0) { V.poseT -= dt; pose.kind = V.poseKind; pose.k = Math.min(1, 1 - V.poseT / 0.24 + 0.35); }
     else pose.kind = s.carried ? 'carry' : '';
@@ -1102,6 +1219,12 @@
     else if (ctx.kind === 'bgrab') { const k = ctx.load && s.stacks.find((q) => q.id === ctx.load); if (k) setPrompt('', 'Click: take ' + low(stackName(k.itemId)) + ', ' + describe(k.itemId, k.qty).n + ' left · Hold: take the handles', 'E also takes the handles', V.bHold ? Math.min(1, V.bHold.t / 0.4) : null); else setPrompt('E', 'Take the wheelbarrow handles', 'empty', null); }
     else if (ctx.kind === 'bload') setPrompt('E', 'Load the wheelbarrow with ' + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'bdown') setPrompt('E', 'Set the wheelbarrow down', '', null);
+    else if (ctx.kind === 'hgrab') setPrompt('E', 'Pick up the sawhorses', 'the cut station', null);
+    else if (ctx.kind === 'sgrab') setPrompt('E', 'Take the scaffold bundle', '', null);
+    else if (ctx.kind === 'sset') setPrompt('E', 'Set up the scaffold along this wall', '', null);
+    else if (ctx.kind === 'sdrop') setPrompt('E', 'Put the scaffold down (point at a wall to set it up)', '', null);
+    else if (ctx.kind === 'sstrike') setPrompt('E', 'Take the scaffold down', '', null);
+    else if (ctx.kind === 'hset') setPrompt('E', 'Set the sawhorses down here', '', null);
     else if (ctx.kind === 'pick') setPrompt('E', (ctx.more ? 'Take more ' : 'Pick up ') + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'back') setPrompt('E', 'Put back the ' + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'swap') setPrompt('E', 'Swap for ' + stackName(ctx.stack.itemId), '', null);
@@ -1242,7 +1365,7 @@
       if (q.status === 'progress') h += `<span class="bar"><b style="width:${Math.round((100 * q.built) / q.total)}%"></b></span>`;
       if (show) {
         h += `<span class="why">Why${isNext ? ' it comes next' : ''}: ${esc(low(q.why))}</span>`;
-        if (q.lines.length) h += '<span class="mats">' + q.lines.map((l) => `<span>${esc(plain(l.label))}${l.count > 1 ? ' × ' + l.count : ''}</span><i>${num(l.qty)}${UNIT[l.unit] || ''}</i><i>${money(l.costUsd)}</i><em>${esc(l.why)}</em>`).join('') + '</span>';
+        if (q.lines.length) h += '<span class="mats">' + q.lines.map((l) => `<span>${esc(plain(l.label))}${l.count > 1 ? ' × ' + l.count : ''}</span><i title="${l.sticks ? esc(num(l.qty) + ' m of lumber in stock lengths') : ''}">${l.sticks && l.sticks.length ? l.sticks.map((c) => c.n + ' × ' + c.ft + ' ft').join(', ') : num(l.qty) + (UNIT[l.unit] || '')}</i><i>${money(l.costUsd)}</i><em>${esc(l.why)}</em>`).join('') + '</span>';
         let act = '';
         if (!q.complete && q.toOrderUsd > 0 && !isNext) act += `<button type="button" data-act="order:${q.id}">Order this stage, ${money(q.toOrderUsd)}</button>`;
         if ((q.built > 0 || q.complete) && !V.auto) act += `<button type="button" data-act="apart:${q.id}" title="The material goes back on the stacks">Take this stage apart</button>`;
@@ -1252,6 +1375,9 @@
     });
     h += '</ol>';
     h += roomLine(pr) && !pr.done ? `<div class="cvopts">${roomLine(pr)}</div>` : '';
+    { const sc = s.scaffold, high = C.LADDER.with.some((st) => st !== 'wall-frame' && pr.tally[st] && pr.tally[st][1] && !api.stageComplete(pr, st));
+      if (sc) { const days = Math.max(0, (sc.until - G.sim.state.t) / 86400); h += `<div class="cvopts"><span>Scaffold: ${days < 1 ? Math.max(1, Math.round(days * 24)) + ' h' : days.toFixed(1) + ' days'} left${sc.set ? ', set up' : ', in its bundle'}</span><button type="button" data-act="rent:1" title="${esc(SCF.why)}">One more day, ${money(SCF.usdPerDay)}</button><button type="button" data-act="unrent">Send it back</button></div>`; }
+      else if (high && !pr.done) h += `<div class="cvopts"><span title="${esc(SCF.why)}">Working up high?</span><button type="button" data-act="rent:${SCF.days}" title="${esc(SCF.why)}">Rent scaffolding, ${money(SCF.usdPerDay)} a day (${SCF.days} days)</button></div>`; }
     h += '<div class="cvtop"><button type="button" data-act="drop" title="Then click the ground near the building">Choose the delivery spot</button><button type="button" data-act="book">Start a new building</button></div>';
     return h + opts;
   }
@@ -1292,6 +1418,8 @@
       if (r.ok) { say('Ordered for ' + money(r.costUsd) + '. ' + (s.options.instant ? 'It is at the delivery spot.' : 'It arrives in about an hour of game time.'), 'good'); sounds.play('seat'); }
       else say(r.reason === 'not enough money' ? 'Not enough money: that costs ' + money(r.costUsd) + '. Order one stage at a time, or sell something.' : 'Nothing to order there.', 'bad');
     } else if (k === 'auto' && pr) { startAuto(pr.id, arg, pr.level === 'guided'); closePanel(); }
+    else if (k === 'rent' && pr) { const r = cmd('rentScaffold', { structId: pr.id, days: +arg }); if (r.ok) { say('Scaffolding rented for ' + money(r.costUsd) + '. The bundle is by your stacks: take it and point at a wall.', 'good'); sounds.play('seat'); } else say(r.reason === 'not enough money' ? 'Not enough money: that costs ' + money(r.costUsd) + '.' : 'Cannot rent that now.', 'bad'); }
+    else if (k === 'unrent') { if (SC && SC.on()) SC.release(); cmd('returnScaffold'); say('The scaffolding goes back to the yard.', 'good'); }
     else if (k === 'stop') stopAuto();
     else if (k === 'level' && pr) { cmd('setLevel', { structId: pr.id, level: arg }); cmd('setLevel', { level: arg }); stopAuto(); }
     else if (k === 'feelp') { cmd('setFeel', { preset: arg }); }
@@ -1423,7 +1551,7 @@
       }
     }
     if (V.fTap) { V.fTap = false; if (!OFF[G.player.tool]) { press(V.ctx); V.ctx = context(); V.ctxSig = -1; } }   // what the press changed is read at once: a stale 'put down' with empty arms threw
-    tickBHold(dt); tickLadder(dt); drawLadder(); tickMark(dt); drawBeacons(dt); drawBarrow(dt);
+    tickBHold(dt); tickLadder(dt); tickScaffold(dt); drawLadder(); tickMark(dt); drawBeacons(dt); drawBarrow(dt); tickStation(dt);
     if (!s.options.sandbox) tickWork(dt);
     glow(V.ctx);
     {
@@ -1517,5 +1645,5 @@
     for (const mid of pl.inst) { const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid), set = !ln || pm.need - pm.got < 1e-6; if (!set && !(c && c.itemId === ln.itemId)) continue; if (!m) return { mid, x: V.structs.get(pr.id).x, z: V.structs.get(pr.id).z, site: true }; const hw = C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null; worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); wM.lerpVectors(wA, wB, 0.5); const w = { x: wM.x, y: wM.y, z: wM.z }; wM.project(G.camera); return { mid, ...w, sx: (wM.x * 0.5 + 0.5) * reach.w, sy: (-wM.y * 0.5 + 0.5) * reach.h, set }; }
     return null;
   }
-  window.__construct = { beaconAt, finishPlace, nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };
+  window.__construct = { scaffoldSpot, scaffold: SC, station: CS, press: (c) => press(c || V.ctx), beaconAt, finishPlace, nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };
 })();

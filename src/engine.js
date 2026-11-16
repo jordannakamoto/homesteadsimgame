@@ -2681,7 +2681,8 @@ function updatePlayer(dt) {
   P.kvx *= Math.exp(-7 * dt); P.kvz *= Math.exp(-7 * dt);
   pushOut(P, 0.28);
   const gh = window.__build ? window.__build.ground(P.x, P.z, P.y, heightAt(P.x, P.z)) : heightAt(P.x, P.z);   // built floors count as ground
-  const ty = P.climbY != null ? P.climbY : Math.max(gh, waveHeight(P.x, P.z) - 0.95);
+  // climbY: on a ladder, placed by an add-on. standY: on a platform an add-on keeps you on (scaffold planks): you walk, it holds the height
+  const ty = P.climbY != null ? P.climbY : P.standY != null ? P.standY : Math.max(gh, waveHeight(P.x, P.z) - 0.95);
   if (P.air) {
     P.vy -= 21 * dt; P.y += P.vy * dt;
     if (P.y <= ty) { P.y = ty; P.air = false; P.vy = 0; P.jumps = 0; }
@@ -2806,6 +2807,7 @@ function updatePlayer(dt) {
     if (P.work.kind === 'hammer') { armR = -2.3 + 1.7 * P.work.k; lean = 0.1 + 0.12 * P.work.k; }
     else if (P.work.kind === 'lift') { armL = armR = -2.5; lean = -0.12; }
     else if (P.work.kind === 'carry') armR = -2.0 + armR * 0.2;
+    else if (P.work.kind === 'saw') { armR = -1.25 + 0.5 * Math.sin(P.work.k * Math.PI * 2); armL = -0.85; lean = 0.38; }
   }
   if (P.handPose) { armL = P.handPose.l; armR = P.handPose.r; lean += P.handPose.lean || 0; }   // hands-on work poses the arms (set by add-ons)
   pm.legL.rotation.x = legL; pm.legR.rotation.x = legR;

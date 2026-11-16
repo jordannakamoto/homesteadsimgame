@@ -61,6 +61,14 @@ export const ITEMS_CONSTRUCTION = Object.freeze({
 // ---- the ladder: it comes with the shed order (a line of the top-plates stage), is leaned by hand and climbed
 export const LADDER = Object.freeze({ itemId: 'ladder', stage: 'site', with: Object.freeze(['wall-frame', 'top-plates', 'roof-frame', 'roof-deck', 'roofing', 'sheathing', 'wrap', 'cladding']), lenM: 3.9, footOutM: 0.95, reachUpM: 2.2, climbMps: 4.5, topBelowM: 0.9, why: 'Anything higher than you can reach from the ground is worked from a ladder: the top plates, the roof.' });
 
+// ---- scaffolding: rented by the day from the Build panel, it arrives as a bundle of frames and planks by the stacks. Set up
+// along a wall it is a platform a bay long with a guard rail and a ladder at one end; walk into the ladder to climb, walk the
+// plank, and the top plates, rafter tails, roof edge and the top of the siding are all in reach. Collected when the days run out.
+export const SCAFFOLD = Object.freeze({ itemId: 'scaffold_bay', usdPerDay: 35, days: 3, bayM: 2.6, widthM: 0.75, belowTopM: 1.35, minDeckM: 0.9, standOffM: 0.3, why: 'A platform along the wall: safer and quicker than a ladder for work up high, and you can walk along it.' });
+export const ITEMS_SCAFFOLD = Object.freeze({
+  scaffold_bay: { id: 'scaffold_bay', name: 'Scaffold bay (rented, per day)', category: 'rental', unit: 'day', massKgPerUnit: 0, priceUsd: SCAFFOLD.usdPerDay, blurb: 'Two frames, braces, planks, a guard rail and a ladder, set up along one wall' },
+});
+
 // ---- learn once, then sweep: after nailing a few of a kind by hand, that kind is learned and is set and nailed as you sweep along its run
 export const LEARN = Object.freeze({
   needed: 2,

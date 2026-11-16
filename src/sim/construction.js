@@ -35,6 +35,7 @@ export function initConstruction() {
     offcuts: {},                      // { [itemId]: [area m2, ...] } pieces of sheet goods kept from cutting
     waste: {},                        // { [itemId]: area m2 } offcuts too small to keep
     horses: null,                     // { x, z, yaw }: the sawhorses, the cut station, set by the work once lumber has come
+    scaffold: null,                   // a rented scaffold bay: { until, x, z, set: { x, z, yaw, len, deckY, structId } | null }
     unlocked: [...C.UNLOCKS[0].opens],
     tutorial: { card: false, shed: null, seen: {}, done: false },
     options: { sandbox: false, instant: false, cards: true, auto: false, mute: true, gesture: 3 },   // sound is off until it has been tuned
@@ -529,9 +530,49 @@ function order(ctx, p) {
   if (s.options.instant) land(ctx, s, r.delivery.id);
   return out;
 }
+// ---- scaffolding, rented by the day: it comes as a bundle by the stacks, is set up along a wall and taken down again
+function rentScaffold(ctx, p) {
+  const s = ctx.s, pr = s.progress[p && p.structId], days = Math.max(1, Math.min(14, Math.round((p && p.days) || C.SCAFFOLD.days))), usd = cents(C.SCAFFOLD.usdPerDay * days);
+  if (s.scaffold) {                     // more days on the one you have
+    if (!pay(ctx, usd)) return { ok: false, reason: 'not enough money', costUsd: usd };
+    s.scaffold.until = round6(Math.max(s.scaffold.until, ctx.state.t) + days * 86400);
+    ctx.emit('construction.scaffold', { rented: true, days });
+    return { ok: true, costUsd: usd, until: s.scaffold.until };
+  }
+  if (!pr) return { ok: false, reason: 'unknown building' };
+  if (!pay(ctx, usd)) return { ok: false, reason: 'not enough money', costUsd: usd };
+  const at = s.stacks.find((k) => !k.barrow) || dropOf(s, pr);
+  s.scaffold = { until: round6(ctx.state.t + days * 86400), x: round6(at.x + 1.8), z: round6(at.z - 1.6), set: null };
+  ctx.emit('construction.scaffold', { rented: true, days });
+  return { ok: true, costUsd: usd, until: s.scaffold.until };
+}
+function setScaffold(ctx, p) {
+  const s = ctx.s, sc = s.scaffold;
+  if (!sc) return { ok: false, reason: 'no scaffold' };
+  if (sc.set) return { ok: false, reason: 'already up' };
+  if (!p || ![p.x, p.z, p.yaw, p.len, p.deckY].every(Number.isFinite) || p.len < 0.8 || p.len > 4) return { ok: false, reason: 'bad place' };
+  sc.set = { x: round6(p.x), z: round6(p.z), yaw: round6(p.yaw), len: round6(p.len), deckY: round6(p.deckY), structId: p.structId === undefined ? null : p.structId };
+  sc.x = sc.set.x; sc.z = sc.set.z;
+  ctx.emit('construction.scaffold', { up: true });
+  return { ok: true, set: sc.set };
+}
+function strikeScaffold(ctx, p) {
+  const sc = ctx.s.scaffold;
+  if (!sc || !sc.set) return { ok: false, reason: 'not up' };
+  if (p && Number.isFinite(p.x) && Number.isFinite(p.z)) { sc.x = round6(p.x); sc.z = round6(p.z); }
+  sc.set = null;
+  ctx.emit('construction.scaffold', { up: false });
+  return { ok: true };
+}
+// the sawhorses: set up at the edge of the work, on the side the lumber comes from, a stick's length clear of the building
+function setUpHorses(s, pr, dx, dz) {
+  const L = Math.hypot(dx - pr.x, dz - pr.z) || 1, ux = (dx - pr.x) / L, uz = (dz - pr.z) / L, d = Math.min(L * 0.6, pr.r + 0.4);
+  s.horses = { x: round6(pr.x + ux * d), z: round6(pr.z + uz * d), yaw: round6(Math.atan2(-uz, ux)) };
+}
 function land(ctx, s, id) {
   const r = SUP.deliver(s, id, C.DELIVERY.layout);
   if (r.ok && !s.barrow) s.barrow = { x: round6(r.delivery.x - 2.4), z: round6(r.delivery.z + 1.2), yaw: 0.6, held: false };
+  if (r.ok && !s.horses && r.delivery.lines.some((l) => C.isStickItem(l.itemId))) { const pr = r.delivery.tag && s.progress[r.delivery.tag.structId]; if (pr) setUpHorses(s, pr, r.delivery.x, r.delivery.z); }
   if (r.ok) ctx.emit('construction.delivered', { deliveryId: id, stacks: r.stacks, x: r.delivery.x, z: r.delivery.z, tag: r.delivery.tag });
   return r;
 }
@@ -758,7 +799,12 @@ export const constructionSystem = () => ({
   step: (ctx) => {
     const s = ctx.s;
     if (!s.tutorial.card) ensureCard(ctx, s);
-    if (!s.deliveries.length) { ensureLadder(ctx); return; }
+    if (s.scaffold && ctx.state.t >= s.scaffold.until) { s.scaffold = null; ctx.emit('construction.scaffold', { returned: true }); }   // the rental is over: it is collected
+    if (!s.deliveries.length) {
+      ensureLadder(ctx);
+      if (!s.horses) for (const id in s.progress) { const pr = s.progress[id]; if (!pr.done && s.stacks.some((k) => C.isStickItem(k.itemId))) { const k = s.stacks.find((q) => C.isStickItem(q.itemId)); setUpHorses(s, pr, k.x, k.z); break; } }
+      return;
+    }
     for (const d of SUP.dueDeliveries(s, ctx.state.t)) land(ctx, s, d.id);
   },
   commands: {
@@ -781,6 +827,13 @@ export const constructionSystem = () => ({
     'construction.leanLadder': leanLadder,
     'construction.takeLadder': takeLadder,
     'construction.raise': raise,
+    'construction.rentScaffold': rentScaffold,
+    'construction.setScaffold': setScaffold,
+    'construction.strikeScaffold': strikeScaffold,
+    'construction.returnScaffold': (c) => { if (!c.s.scaffold) return { ok: false, reason: 'no scaffold' }; c.s.scaffold = null; c.emit('construction.scaffold', { returned: true }); return { ok: true }; },
+    'construction.moveScaffold': (c, p) => { const sc = c.s.scaffold; if (!sc || sc.set) return { ok: false, reason: 'not a bundle' }; if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.z)) return { ok: false, reason: 'bad place' }; sc.x = round6(p.x); sc.z = round6(p.z); return { ok: true }; },
+    // the sawhorses are picked up and set down where the work is
+    'construction.moveHorses': (c, p) => { if (!p || ![p.x, p.z, p.yaw].every(Number.isFinite)) return { ok: false, reason: 'bad place' }; c.s.horses = { x: round6(p.x), z: round6(p.z), yaw: round6(p.yaw) }; return { ok: true }; },
     'construction.barrowGrab': barrowGrab,
     'construction.barrowLoad': barrowLoad,
     'construction.barrowMove': (c, p) => { if (!c.s.barrow || !c.s.barrow.held) return { ok: false, reason: 'not held' }; barrowPlace(c.s, p.x, p.z, p.yaw); return { ok: true }; },
