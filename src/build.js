@@ -6468,7 +6468,7 @@
     try {
       document.pointerLockElement && document.exitPointerLock();
     } catch {}
-    shellMat.opacity = 0.5;
+    shellMat.uniforms.uOp.value = 0.5;
     B.camSaved = { pitch: G.cam.pitch, dist: G.cam.dist };
     B.camT = 0.6;
     G.refreshLock && G.refreshLock();
@@ -6490,7 +6490,7 @@
       B.camSaved = null;
     }
     G.refreshLock && G.refreshLock();
-    shellMat.opacity = 0.3;
+    shellMat.uniforms.uOp.value = 0.3;
     B.drag = null;
     B.tapMode = "";
     B.press = B.marq = B.ov.marq = null;
@@ -7643,13 +7643,22 @@
       new T.ShaderMaterial({
         transparent: true,
         depthWrite: false,
-        uniforms: { uFill: { value: fill }, uRim: { value: rim }, uCol: { value: new T.Color(0xaedcff) } },
+        uniforms: { uFill: { value: fill }, uRim: { value: rim }, uCol: { value: new T.Color(0x4cbcff) } },
         vertexShader: "varying vec2 vUv;\nvoid main(){\n vUv = uv;\n vec4 p = vec4(position, 1.0);\n#ifdef USE_INSTANCING\n p = instanceMatrix * p;\n#endif\n gl_Position = projectionMatrix * modelViewMatrix * p;\n}",
         fragmentShader: "uniform float uFill; uniform float uRim; uniform vec3 uCol; varying vec2 vUv;\nvoid main(){\n vec2 d = abs(vUv - 0.5) * 2.0;\n float e = smoothstep(0.82, 1.0, max(d.x, d.y));\n gl_FragColor = vec4(mix(uCol, vec3(1.0), 0.5 * e), uFill + uRim * e);\n}",
       }),
-    GHOST = { cur: ghostMat(0.2, 0.55), later: ghostMat(0.1, 0.28), dim: ghostMat(0.05, 0.14) },
+    GHOST = { cur: ghostMat(0.22, 0.7), later: ghostMat(0.1, 0.28), dim: ghostMat(0.05, 0.14) },
     GHOSTP = Object.fromEntries(Object.entries(GHOST).map(([k, m]) => [k, Object.assign(m.clone(), { side: T.DoubleSide })])),
-    shellMat = new T.MeshLambertMaterial({ vertexColors: true, color: 0xd4e8f8, transparent: true, opacity: 0.3, depthWrite: false, side: T.DoubleSide });
+    // the shell of a plan nobody has started: a blueprint, not a pale copy of the finished colours. Cyan-blue fill, a line every
+    // 0.4 m across (the stud spacing) and 0.6 m up, drawn in the building's own metres, and a brighter rim where a face turns away
+    shellMat = new T.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: T.DoubleSide,
+      uniforms: { uOp: { value: 0.3 }, uCol: { value: new T.Color(0x3fb4ff) } },
+      vertexShader: "varying vec3 vP; varying vec3 vN; varying vec3 vV;\nvoid main(){\n vP = position; vN = normal;\n vec4 w = modelMatrix * vec4(position, 1.0);\n vV = (inverse(modelMatrix) * vec4(cameraPosition, 1.0)).xyz - position;\n gl_Position = projectionMatrix * viewMatrix * w;\n}",
+      fragmentShader: "uniform float uOp; uniform vec3 uCol; varying vec3 vP; varying vec3 vN; varying vec3 vV;\nvoid main(){\n vec3 n = normalize(vN);\n vec2 uv = abs(n.y) > 0.7 ? vP.xz / 0.4 : vec2((abs(n.x) > abs(n.z) ? vP.z : vP.x) / 0.4, vP.y / 0.6);\n vec2 g = abs(fract(uv - 0.5) - 0.5) / max(fwidth(uv), vec2(1e-4));\n float line = 1.0 - min(min(g.x, g.y), 1.0);\n float rim = pow(1.0 - abs(dot(n, normalize(vV))), 3.0);\n gl_FragColor = vec4(mix(uCol, vec3(0.85, 0.97, 1.0), 0.6 * line + 0.4 * rim), uOp * (0.55 + 1.4 * line + 0.9 * rim));\n}",
+    });
   // house wrap: a thin white sheet with a faint printed band, made once
   const wrapMat = (() => {
     const cv = document.createElement("canvas");
@@ -7726,7 +7735,7 @@
       if (pos.length) {
         const geo = new T.BufferGeometry();
         geo.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
-        const ln = new T.LineSegments(geo, new T.LineBasicMaterial({ color: 0xaedcff, transparent: true, opacity: 0.45, depthWrite: false }));
+        const ln = new T.LineSegments(geo, new T.LineBasicMaterial({ color: 0x4cbcff, transparent: true, opacity: 0.6, depthWrite: false }));
         ln.userData.own = true;
         ln.renderOrder = 3;
         S.group.add(ln);

@@ -7,7 +7,7 @@
 (() => {
   function create(G, look) {
     const T = G.THREE,
-      glowMat = new T.MeshBasicMaterial({ color: 0xffcf70, transparent: true, opacity: 0.45, depthWrite: false, fog: false }),
+      glowMat = new T.MeshBasicMaterial({ color: 0x9fecff, transparent: true, opacity: 0.45, depthWrite: false, fog: false }),
       things = new Map(),
       dotGeo = new T.BoxGeometry(1, 1, 1), dotMat = new T.MeshBasicMaterial({ color: 0xffffff, fog: false }),
       m4 = new T.Matrix4(), m4b = new T.Matrix4(), v = new T.Vector3(), c = new T.Color(), up = new T.Vector3(0, 1, 0);
