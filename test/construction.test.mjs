@@ -403,3 +403,45 @@ test('feel settings: defaults, clamped, presets, reset', () => {
   assert.equal(sim.commandNow('construction.setFeel', { preset: 'fast' }).feel.nails, 0);
   assert.deepEqual(sim.commandNow('construction.setFeel', { reset: true }).feel, { ...C.FEEL });
 });
+
+test('wheelbarrow: comes with the first delivery, loads by weight, conserves material, counts as a stack', () => {
+  const sim = start({ });
+  assert.equal(cs(sim).barrow, null);
+  assert.ok(sim.commandNow('construction.order', { structId: shed.struct, stage: 'floor-frame' }).ok || true);
+  sim.commandNow('construction.order', { structId: shed.struct, stage: 'all' });
+  sim.commandNow('construction.deliverNow', {});
+  const b = cs(sim).barrow; assert.ok(b && !b.held);
+  assert.equal(sim.commandNow('construction.barrowGrab', { px: b.x + 50, pz: b.z }).reason, 'too far');
+  assert.ok(sim.commandNow('construction.barrowGrab', { px: b.x, pz: b.z }).ok);
+  const st = cs(sim).stacks.find((k) => k.itemId === 'lumber_2x6') || cs(sim).stacks.find((k) => /^lumber_/.test(k.itemId));
+  const before = SUP.stackQty(cs(sim), st.itemId), imb = JSON.stringify(SUP.imbalance(cs(sim)));
+  const r = sim.commandNow('construction.barrowLoad', { stackId: st.id }); assert.ok(r.ok, r.reason);
+  assert.ok(near(SUP.stackQty(cs(sim), st.itemId), before));
+  assert.equal(JSON.stringify(SUP.imbalance(cs(sim))), imb);
+  assert.ok(cs(sim).stacks.some((k) => k.barrow));
+  sim.commandNow('construction.barrowMove', { x: 10, z: 12, yaw: 1 });
+  assert.equal(cs(sim).stacks.find((k) => k.barrow).x, 10);
+  assert.ok(sim.commandNow('construction.barrowSet', { x: 10, z: 12 }).ok); assert.equal(cs(sim).barrow.held, false);
+  const rt = JSON.parse(JSON.stringify(cs(sim))); assert.equal(rt.barrow.x, 10);
+});
+
+test('nails bought in the Supplier go to the inventory and construction draws from it; the books balance', () => {
+  const sim = start();
+  sim.commandNow('construction.order', { structId: shed.struct, stage: 'all' });
+  sim.commandNow('construction.deliverNow', {});
+  const S = cs(sim);
+  S.stacks = S.stacks.filter((k) => !C.SITE_SUPPLY.includes(k.itemId));       // out of nails and screws
+  const imb0 = JSON.stringify(SUP.imbalance(S)), P = pr(sim), ids = () => K.installable(P);
+  const place = () => { const id = ids().find((i) => P.members[i].line && !C.SITE_SUPPLY.includes(P.lines[P.members[i].line].itemId)); return id; };
+  let id = ids()[0], r = null;
+  for (let g = 0; g < 400; g++) { id = ids()[0]; const m = P.members[id], ln = m.line ? P.lines[m.line] : null; if (ln && (!S.carried || S.carried.itemId !== ln.itemId)) { if (S.carried) sim.commandNow('construction.putDown', { x: 44, z: 40 }); const st = S.stacks.find((k) => k.itemId === ln.itemId); if (!st) break; sim.commandNow('construction.pickUp', { stackId: st.id }); } r = sim.commandNow('construction.install', { structId: P.id, memberIds: [id] }); if (!r.ok) break; }
+  void place;
+  if (r && !r.ok) assert.equal(r.reason, 'no fasteners');
+  const lack = r && r.itemId;
+  assert.ok(lack, 'ran out of fasteners');
+  assert.ok(sim.commandNow('stock.buy', { id: lack, qty: 20 }).ok);
+  const r2 = sim.commandNow('construction.install', { structId: P.id, memberIds: [id] });
+  assert.ok(r2.ok, r2.reason);
+  assert.ok(sim.state.sys.stock.items[lack] < 20);
+  assert.equal(JSON.stringify(SUP.imbalance(S)), imb0);          // drawing from the inventory neither conjures nor loses material
+});

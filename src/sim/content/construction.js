@@ -122,6 +122,8 @@ export const DELIVERY = Object.freeze({
 // ---- carrying: by hand about what a person lifts comfortably; a tool that carries more raises it
 export const GESTURES = Object.freeze([1, 2, 3, 4]);       // pieces per gesture: one place to read it (setting `gesture`, saved with the world)
 export const gestureOf = (options) => (options && Number.isFinite(options.gesture) && options.gesture > 0 ? options.gesture : 3);
+// the wheelbarrow: comes with the first delivery; its capacity is this many kg times the armful setting
+export const BARROW = Object.freeze({ capKg: 60, reachM: 3, offsetM: 1.5 });
 export const CARRY = Object.freeze({ byHandKg: 30, tools: Object.freeze([{ tool: 'wheelbarrow', kg: 60 }]), slow: 0.85 });
 export function carryLimitKg(tools = [], gesture = 3) {
   let kg = CARRY.byHandKg;

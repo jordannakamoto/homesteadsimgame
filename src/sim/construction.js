@@ -37,6 +37,7 @@ export function initConstruction() {
     tutorial: { card: false, shed: null, seen: {}, done: false },
     options: { sandbox: false, instant: false, cards: true, auto: false, mute: true, gesture: 3 },   // sound is off until it has been tuned
     feel: { ...C.FEEL },
+    barrow: null,                     // { x, z, yaw, held } once the first delivery has landed; its load is the stack flagged `barrow`
     finished: 0,
   };
 }
@@ -282,15 +283,30 @@ function refresh(ctx, s, pr) {
   }
 }
 // fasteners and the like: used up from the stacks in step with the stage's progress. check: only say whether there is enough.
-function supplies(s, pr, stage, builtAfter, check) {
+// Nails and screws bought through the Supplier sit in the player's inventory (stock.items): they count as on you, and are drawn
+// after the site stacks. What is drawn from the inventory is entered as bought here, so bought = stacks + inventory + carried + used.
+const haveSupply = (s, stock, itemId) => SUP.stackQty(s, itemId) + (stock && stock.items ? stock.items[itemId] || 0 : 0);
+function drawSupply(s, stock, itemId, d, x, z) {
+  let used = SUP.useFromStacks(s, itemId, d, x, z, { partial: true });
+  const more = round6(d - used), inv = stock && stock.items ? stock.items[itemId] || 0 : 0, take = Math.min(more, inv);
+  if (take > 1e-9) {
+    const left = round6(inv - take);
+    if (left > 0) stock.items[itemId] = left; else delete stock.items[itemId];
+    const L = s.ledger[itemId] || (s.ledger[itemId] = { bought: 0, used: 0, spent: 0 });
+    L.bought = round6(L.bought + take); L.used = round6(L.used + take);
+    used += take;
+  }
+  return used;
+}
+function supplies(s, pr, stage, builtAfter, check, stock) {
   const t = pr.tally[stage];
   for (const key in pr.lines) {
     const ln = pr.lines[key];
     if (!ln.supply || ln.stage !== stage || !t || !t[1]) continue;
     const target = round6((ln.qty * builtAfter) / t[1]), d = round6(target - ln.used);
     if (d > 1e-6) {
-      if (SUP.stackQty(s, ln.itemId) + 1e-6 < d) return ln.itemId;
-      if (!check) { SUP.useFromStacks(s, ln.itemId, d, pr.x, pr.z, { partial: true }); ln.used = target; }
+      if (haveSupply(s, stock, ln.itemId) + 1e-6 < d) return ln.itemId;
+      if (!check) { drawSupply(s, stock, ln.itemId, d, pr.x, pr.z); ln.used = target; }
     } else if (d < -1e-6 && !check) {       // taken apart: bent nails are spent, they do not come back
       const L = s.ledger[ln.itemId];
       L.used = round6(L.used + d); L.spent = round6(L.spent - d); ln.used = target;
@@ -420,8 +436,49 @@ function order(ctx, p) {
 }
 function land(ctx, s, id) {
   const r = SUP.deliver(s, id, C.DELIVERY.layout);
+  if (r.ok && !s.barrow) s.barrow = { x: round6(r.delivery.x - 2.4), z: round6(r.delivery.z + 1.2), yaw: 0.6, held: false };
   if (r.ok) ctx.emit('construction.delivered', { deliveryId: id, stacks: r.stacks, x: r.delivery.x, z: r.delivery.z, tag: r.delivery.tag });
   return r;
+}
+
+// ---- the wheelbarrow: take the handles, push it, load it from a stack; its load is a stack that moves with it
+const barrowStack = (s) => s.stacks.find((k) => k.barrow);
+const barrowKg = (s) => { const k = barrowStack(s); return k ? k.qty * item(k.itemId).massKgPerUnit : 0; };
+function barrowPlace(s, x, z, yaw) {
+  if (Number.isFinite(x) && Number.isFinite(z)) { s.barrow.x = round6(x); s.barrow.z = round6(z); }
+  if (Number.isFinite(yaw)) s.barrow.yaw = round6(yaw);
+  const k = barrowStack(s); if (k) { k.x = s.barrow.x; k.z = s.barrow.z; }
+}
+function barrowGrab(ctx, p) {
+  const s = ctx.s, b = s.barrow;
+  if (!b) return { ok: false, reason: 'no wheelbarrow' };
+  if (b.held) return { ok: false, reason: 'already held' };
+  if (s.carried) return { ok: false, reason: 'hands full' };
+  if (p && Number.isFinite(p.px) && Math.hypot(p.px - b.x, p.pz - b.z) > C.BARROW.reachM + 0.5) return { ok: false, reason: 'too far' };
+  b.held = true;
+  return { ok: true };
+}
+function barrowLoad(ctx, p) {
+  const s = ctx.s, b = s.barrow;
+  if (!b || !b.held) return { ok: false, reason: 'not holding the wheelbarrow' };
+  const from = p && p.hands ? null : s.stacks.find((k) => k.id === (p && p.stackId));
+  if (!p.hands && (!from || from.barrow)) return { ok: false, reason: 'no such stack' };
+  const itemId = p.hands ? (s.carried && s.carried.itemId) : from.itemId;
+  if (!itemId) return { ok: false, reason: 'nothing to load' };
+  if (isSupply(itemId)) return { ok: false, reason: 'stays by the stacks' };
+  const load = barrowStack(s), it = item(itemId);
+  if (load && load.itemId !== itemId) return { ok: false, reason: 'holds something else' };
+  const capKg = C.BARROW.capKg * C.feelOf(s).armful, room = capKg - barrowKg(s), minQty = it.unit === 'each' ? 1 : 0;
+  const avail = p.hands ? s.carried.qty : from.qty;
+  let n = Math.min(avail, Math.max(room / it.massKgPerUnit, load ? 0 : minQty));
+  if (it.unit === 'each') n = Math.floor(n + 1e-9);
+  n = round6(n);
+  if (!(n > 1e-6)) return { ok: false, reason: 'full' };
+  if (p.hands) { s.carried.qty = round6(s.carried.qty - n); if (s.carried.qty <= 1e-6) s.carried = null; }
+  else { from.qty = round6(from.qty - n); if (from.qty <= 1e-6) s.stacks = s.stacks.filter((k) => k !== from); }
+  if (load) load.qty = round6(load.qty + n);
+  else s.stacks.push({ id: 's' + s.nextId++, itemId, qty: n, x: b.x, z: b.z, barrow: true });
+  return { ok: true, itemId, qty: n };
 }
 
 function pickUp(ctx, p) {
@@ -489,7 +546,7 @@ function install(ctx, p) {
       if (completes) { m.got = m.need; out.set.push(id); } else { out.partial.push({ id, got: m.got, need: m.need }); break; }
       continue;
     }
-    if (completes) { const lack = supplies(s, pr, m.stage, pr.tally[m.stage][0] + 1, true); if (lack) { out.refused.push({ id, reason: 'no fasteners', itemId: lack }); break; } }
+    if (completes) { const lack = supplies(s, pr, m.stage, pr.tally[m.stage][0] + 1, true, ctx.get('stock')); if (lack) { out.refused.push({ id, reason: 'no fasteners', itemId: lack }); break; } }
     doCut();
     if (give > 0) {
       const used = fromStacks ? SUP.useFromStacks(s, ln.itemId, give, pr.x, pr.z) : SUP.useCarried(s, ln.itemId, give);
@@ -497,7 +554,7 @@ function install(ctx, p) {
     }
     if (completes) {
       m.got = m.need; m.built = 1; pr.tally[m.stage][0]++;
-      supplies(s, pr, m.stage, pr.tally[m.stage][0], false);
+      supplies(s, pr, m.stage, pr.tally[m.stage][0], false, ctx.get('stock'));
       out.installed.push(id);
     } else { out.partial.push({ id, got: m.got, need: m.need }); break; }
   }
@@ -557,7 +614,7 @@ function dismantle(ctx, p) {
       ln.used = round6(ln.used - m.got);
       out.returned[ln.itemId] = round6((out.returned[ln.itemId] || 0) + m.got);
     }
-    if (m.built) { m.built = 0; pr.tally[m.stage][0]--; supplies(s, pr, m.stage, pr.tally[m.stage][0], false); }
+    if (m.built) { m.built = 0; pr.tally[m.stage][0]--; supplies(s, pr, m.stage, pr.tally[m.stage][0], false, ctx.get('stock')); }
     m.got = 0;
     if (C.STAGE[m.stage].flat && m.parent) delete pr.raised[m.parent];
     out.removed.push(id);
@@ -592,6 +649,10 @@ export const constructionSystem = () => ({
     'construction.leanLadder': leanLadder,
     'construction.takeLadder': takeLadder,
     'construction.raise': raise,
+    'construction.barrowGrab': barrowGrab,
+    'construction.barrowLoad': barrowLoad,
+    'construction.barrowMove': (c, p) => { if (!c.s.barrow || !c.s.barrow.held) return { ok: false, reason: 'not held' }; barrowPlace(c.s, p.x, p.z, p.yaw); return { ok: true }; },
+    'construction.barrowSet': (c, p) => { if (!c.s.barrow || !c.s.barrow.held) return { ok: false, reason: 'not held' }; barrowPlace(c.s, p && p.x, p && p.z, p && p.yaw); c.s.barrow.held = false; return { ok: true }; },
     // places that can never be reached or seen (no geometry, no size) are finished with their stage, never left as stray markers
     'construction.settle': (c, p) => {
       const pr = c.s.progress[p && p.structId];

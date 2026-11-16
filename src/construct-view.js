@@ -270,11 +270,11 @@
   function drawStacks() {
     const s = S();
     let sig = '';
-    for (const k of s.stacks) sig += k.id + ':' + describe(k.itemId, k.qty).n + ',';
+    for (const k of s.stacks) if (!k.barrow) sig += k.id + ':' + describe(k.itemId, k.qty).n + ',';
     sig += V.terrainV || 0;
     if (sig !== V.stackSig) {
       V.stackSig = sig;
-      carry.setStacks(s.stacks.map((k) => { const d = describe(k.itemId, k.qty); if (d.scaleH) d.h *= d.scaleH; return { id: k.id, x: k.x, z: k.z, itemId: k.itemId, ...d }; }), (d) => {
+      carry.setStacks(s.stacks.filter((k) => !k.barrow).map((k) => { const d = describe(k.itemId, k.qty); if (d.scaleH) d.h *= d.scaleH; return { id: k.id, x: k.x, z: k.z, itemId: k.itemId, ...d }; }), (d) => {
         if (performance.now() - V.lastLand > 140) { sounds.play('thud'); V.lastLand = performance.now(); G.cam.shake = Math.min(G.cam.shake + 0.03, 0.3); }
         G.burst(d.x, G.heightAt(d.x, d.z) + 0.1, d.z, 5, 0xb9a88a, 1.4, 0.8, 0.09, 0.5);
       });
@@ -694,6 +694,34 @@
     }
     return { stage: pl.view.next, list, high, text: list.length + ' left: ' + seen.slice(0, 3).join(' and ') + (high ? ' · bring the ladder' : '') };
   }
+  // ------------------------------------------------------------------ the wheelbarrow: a few boxes and a cylinder wheel
+  const barrow = new T.Group(), bWood = new T.MeshLambertMaterial({ color: 0x9a7448 }), bTray = new T.MeshLambertMaterial({ color: 0x4d7f68 }), bIron = new T.MeshLambertMaterial({ color: 0x45484d }),
+    bPart = (geo, mat, x, y, z, rx = 0) => { const m = new T.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.x = rx; m.castShadow = true; barrow.add(m); return m; },
+    bLoad = new T.Mesh(new T.BoxGeometry(0.5, 1, 0.7), new T.MeshLambertMaterial({ color: 0xdcbc8c }));
+  bPart(new T.BoxGeometry(0.66, 0.06, 0.9), bTray, 0, 0.5, 0.1); bPart(new T.BoxGeometry(0.06, 0.26, 0.9), bTray, -0.33, 0.62, 0.1); bPart(new T.BoxGeometry(0.06, 0.26, 0.9), bTray, 0.33, 0.62, 0.1);
+  bPart(new T.BoxGeometry(0.66, 0.26, 0.06), bTray, 0, 0.62, 0.55); bPart(new T.BoxGeometry(0.66, 0.2, 0.06), bTray, 0, 0.6, -0.35);
+  bPart(new T.CylinderGeometry(0.22, 0.22, 0.09, 18).rotateZ(Math.PI / 2), bIron, 0, 0.22, 0.62);
+  for (const x of [-0.3, 0.3]) { bPart(new T.BoxGeometry(0.05, 0.05, 1.5), bWood, x, 0.45, -0.55); bPart(new T.BoxGeometry(0.05, 0.4, 0.05), bWood, x, 0.2, -0.95); }
+  bLoad.position.set(0, 0.55, 0.1); bLoad.visible = false; barrow.add(bLoad);
+  barrow.visible = false; G.scene.add(barrow);
+  V.bYaw = 0; V.bSend = 0;
+  function drawBarrow(dt) {
+    const s = S(), b = s.barrow, P = G.player;
+    barrow.visible = !!b && !s.options.sandbox;
+    if (!barrow.visible) return;
+    if (b.held) {
+      let d = P.face - V.bYaw; d = Math.atan2(Math.sin(d), Math.cos(d));
+      V.bYaw += Math.max(-1, Math.min(1, d)) * Math.min(1, dt * 2.2) * (Math.abs(d) > 0.02 ? 1 : 0);   // it turns slower than you do
+      b.x = P.x + Math.sin(V.bYaw) * C.BARROW.offsetM; b.z = P.z + Math.cos(V.bYaw) * C.BARROW.offsetM; b.yaw = V.bYaw;
+      V.bSend -= dt;
+      if (V.bSend <= 0) { V.bSend = 0.2; G.sim.commandNow('construction.barrowMove', { x: b.x, z: b.z, yaw: b.yaw }); }
+      P.carryK = Math.max(P.carryK || 0, 0.7);
+    }
+    barrow.position.set(b.x, G.heightAt(b.x, b.z), b.z); barrow.rotation.y = b.yaw;
+    const k = s.stacks.find((q) => q.barrow);
+    bLoad.visible = !!k;
+    if (k) { const f = Math.min(1, k.qty * CAT[k.itemId].massKgPerUnit / (C.BARROW.capKg * feel().armful)); bLoad.scale.y = 0.06 + 0.24 * f; bLoad.position.y = 0.53 + bLoad.scale.y / 2; bLoad.material.color.setHex(describe(k.itemId, k.qty).color); }
+  }
   function drawBeacons(dt) {
     const pr = current(), P = G.player;
     V.beaconT -= dt;
@@ -759,6 +787,11 @@
     if (V.climb) { const pc = nearBuilding(P.x, P.z), h = pc && !pc.done && plan(pc.id) && !plan(pc.id).raise ? aimHands(pc) : null; return h && h.kind === 'hands' ? h : { kind: 'ladder', act: 'down' }; }
     const strong = ladderCtx(true);
     if (strong) return strong;
+    {
+      const b = s.barrow;
+      if (b && b.held) { const st = carry.nearest(reach.x, reach.z, 1.2, pickable) || carry.nearest(P.x, P.z, 2.0, pickable); return st ? { kind: 'bload', stack: st } : { kind: 'bdown' }; }
+      if (b && !c && Math.hypot(b.x - P.x, b.z - P.z) < C.BARROW.reachM && Math.hypot(b.x - reach.x, b.z - reach.z) < 2.2) return { kind: 'bgrab' };
+    }
     const pr = nearBuilding(P.x, P.z), stack = carry.nearest(reach.x, reach.z, 1.0, pickable) || (V.wantItem && carry.nearest(P.x, P.z, 2.1, wantedStack)) || carry.nearest(P.x, P.z, 2.1, pickable) || carry.nearest(P.x, P.z, 1.3);
     if (c && c.itemId === LAD.itemId && !s.ladder) {
       if (pr) { const spot = ladderSpot(pr); if (spot) return { kind: 'lean', id: pr.id, spot }; return { kind: 'hint', text: 'Point at a wall: the ladder leans there', id: pr.id, drop: true }; }
@@ -802,6 +835,9 @@
     if (!ctx) return;
     sounds.wake();
     if (ctx.kind === 'hands') { if (!(V.cool > 0.08)) handAct(ctx); }
+    else if (ctx.kind === 'bgrab') { const r = cmd('barrowGrab', { px: G.player.x, pz: G.player.z }); if (r.ok) { V.bYaw = G.player.face; sounds.play('lift'); flash('Wheelbarrow: click a stack to load it, click again to set it down'); } else flash(r.reason === 'hands full' ? 'Put down what you are carrying first' : 'Too far from the wheelbarrow'); }
+    else if (ctx.kind === 'bload') { const r = cmd('barrowLoad', { stackId: ctx.stack.id }); if (r.ok) { sounds.play('thunk'); nameIt(r.itemId); flash('Loaded ' + stackName(r.itemId)); } else flash(r.reason === 'full' ? 'The wheelbarrow is full' : r.reason === 'holds something else' ? 'It already holds something else' : 'Cannot load that'); }
+    else if (ctx.kind === 'bdown') { const b = S().barrow; cmd('barrowSet', { x: b.x, z: b.z, yaw: b.yaw }); sounds.play('thunk'); }
     else if (ctx.kind === 'pick') pickUp(ctx.stack);
     else if (ctx.kind === 'back' || ctx.kind === 'drop' || (ctx.kind === 'hint' && ctx.drop)) putDown();
     else if (ctx.kind === 'swap') { putDown(); pickUp(ctx.stack); }
@@ -850,7 +886,7 @@
     onCancel(j) { V.working = null; redraw(j.id); },
   });
   const vTmp = new T.Vector3();
-  const reason = (r, kind, mid) => r.reason === 'support missing' ? ((C.SUPPORT_SAYS[r.missing] || 'Set the supports') + ' first') : (kind === 'door' || kind === 'window') && (r.reason === 'stage not open' || r.reason === 'frame not finished') ? (r.reason === 'frame not finished' ? 'Frame the opening first' : 'Wrap the wall before the ' + kind + ' goes in') : ({ 'no material': 'You need ' + (r.itemId ? stackName(r.itemId) : 'material') + ' for that', 'wrong material': 'That needs ' + (r.itemId ? stackName(r.itemId) : 'something else'), 'no fasteners': 'Out of ' + (r.itemId ? low(CAT[r.itemId].name) : 'fasteners') + ': order this stage', 'stage not open': 'Not yet: an earlier stage comes first' })[r.reason] || 'That cannot go in yet';
+  const reason = (r, kind, mid) => r.reason === 'support missing' ? ((C.SUPPORT_SAYS[r.missing] || 'Set the supports') + ' first') : (kind === 'door' || kind === 'window') && (r.reason === 'stage not open' || r.reason === 'frame not finished') ? (r.reason === 'frame not finished' ? 'Frame the opening first' : 'Wrap the wall before the ' + kind + ' goes in') : ({ 'no material': 'You need ' + (r.itemId ? stackName(r.itemId) : 'material') + ' for that', 'wrong material': 'That needs ' + (r.itemId ? stackName(r.itemId) : 'something else'), 'no fasteners': 'Out of ' + (r.itemId ? low(CAT[r.itemId].name) : 'fasteners') + ': buy more in the Supplier (U)', 'stage not open': 'Not yet: an earlier stage comes first' })[r.reason] || 'That cannot go in yet';
   function beginMember(id, memberId, from) {
     const pr = S().progress[id], g = geom(id), m = g.byId.get(memberId) || { id: memberId, kind: 'site', a: [g.cx, 0, g.cz], b: [g.cx, 0, g.cz], n: [0, 1, 0], section: { b: 0, d: 0 }, draw: 0 }, pm = pr.members[memberId], ln = lineOf(pr, memberId);
     const need = pm.need - pm.got, c = S().carried;
@@ -1001,6 +1037,9 @@
     else if (ctx.kind === 'work') { const w = workLabel(pr, V.working ? V.working.memberId : ctx.q[0]); setPrompt('E', 'Hold to build: ' + low(w.text), w.count, W.job ? W.progress() : 0); }
     else if (ctx.kind === 'piece') setPrompt('', 'Click a glowing piece to set it', ctx.q.length + ' ready', W.job ? W.progress() : null);
     else if (ctx.kind === 'auto') setPrompt('E', (ctx.guided ? 'Build: ' : 'Work until done: ') + low(C.STAGE[ctx.stage].name), '', null);
+    else if (ctx.kind === 'bgrab') setPrompt('E', 'Take the wheelbarrow handles', '', null);
+    else if (ctx.kind === 'bload') setPrompt('E', 'Load the wheelbarrow with ' + stackName(ctx.stack.itemId), '', null);
+    else if (ctx.kind === 'bdown') setPrompt('E', 'Set the wheelbarrow down', '', null);
     else if (ctx.kind === 'pick') setPrompt('E', (ctx.more ? 'Take more ' : 'Pick up ') + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'back') setPrompt('E', 'Put back the ' + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'swap') setPrompt('E', 'Swap for ' + stackName(ctx.stack.itemId), '', null);
@@ -1151,7 +1190,7 @@
     });
     h += '</ol>';
     h += roomLine(pr) && !pr.done ? `<div class="cvopts">${roomLine(pr)}</div>` : '';
-    h += '<div class="cvtop"><button type="button" data-act="drop">Move the delivery spot</button><button type="button" data-act="book">Start a new building</button></div>';
+    h += '<div class="cvtop"><button type="button" data-act="drop" title="Then click the ground near the building">Choose the delivery spot</button><button type="button" data-act="book">Start a new building</button></div>';
     return h + opts;
   }
   // once it is insulated, the room's temperature against outside (if the thermal system is there)
@@ -1321,7 +1360,7 @@
       }
     }
     if (V.fTap) { V.fTap = false; if (!OFF[G.player.tool]) { press(V.ctx); V.ctx = context(); V.ctxSig = -1; } }   // what the press changed is read at once: a stale 'put down' with empty arms threw
-    tickLadder(dt); drawLadder(); tickMark(dt); drawBeacons(dt);
+    tickLadder(dt); drawLadder(); tickMark(dt); drawBeacons(dt); drawBarrow(dt);
     if (!s.options.sandbox) tickWork(dt);
     glow(V.ctx);
     {
