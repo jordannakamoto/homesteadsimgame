@@ -51,7 +51,7 @@ export const dueDeliveries = (s, t) => s.deliveries.filter((d) => d.dueT <= t);
 // Add to the stack of the same item near (x, z), or start a new one in the first free slot of a grid there.
 export function addToStacks(s, itemId, qty, x, z, { cols = 4, dx = 1.5, dz = 3.4, mergeR = 9, slot = null } = {}) {
   if (!(qty > 0)) return null;
-  let st = s.stacks.find((k) => k.itemId === itemId && Math.hypot(k.x - x, k.z - z) <= mergeR);
+  let st = s.stacks.find((k) => !k.barrow && k.itemId === itemId && Math.hypot(k.x - x, k.z - z) <= mergeR);
   if (st) { st.qty = round6(st.qty + qty); return st; }
   let px = x, pz = z;
   for (let i = 0; i < 400; i++) {

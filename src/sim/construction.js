@@ -36,6 +36,8 @@ export function initConstruction() {
     unlocked: [...C.UNLOCKS[0].opens],
     tutorial: { card: false, shed: null, seen: {}, done: false },
     options: { sandbox: false, instant: false, cards: true, auto: false, mute: true, gesture: 3 },   // sound is off until it has been tuned
+    feel: { ...C.FEEL },
+    barrow: null,                     // { x, z, yaw, held } once the first delivery has landed; its load is the stack flagged `barrow`
     finished: 0,
   };
 }
@@ -117,6 +119,13 @@ export function frameReady(pr, stage, parent) {
   for (const id in pr.members) { const m = pr.members[id]; if (m.stage === stage && m.parent === parent) { if (!m.built) return false; n++; } }
   return n > 0;
 }
+// the kind of piece this one bears on that is not built yet (same stage), or null
+export function supportMissing(pr, id) {
+  const m = pr.members[id], need = m && C.SUPPORT[m.kind];
+  if (!need) return null;
+  for (const o in pr.members) { const q = pr.members[o]; if (!q.built && q.stage === m.stage && q.kind !== m.kind && need.includes(q.kind)) return q.kind; }
+  return null;
+}
 // why a member cannot go in yet, or null if it can
 export function blocked(pr, id) {
   const m = pr.members[id];
@@ -127,7 +136,7 @@ export function blocked(pr, id) {
   if (!stageOpen(pr, m.stage)) return 'stage not open';
   if (def.parentFirst) for (const o in pr.members) { const q = pr.members[o]; if (!q.built && q.parent === m.parent && def.parentFirst.includes(q.stage)) return 'frame not finished'; }
   if (def.flat && flatCurrent(pr, m.stage) !== m.parent) return 'one frame at a time';
-  return null;
+  return supportMissing(pr, id) ? 'support missing' : null;
 }
 export const installable = (pr) => Object.keys(pr.members).filter((id) => !pr.members[id].built && !blocked(pr, id));
 // the stages that can be worked on now (open, not complete), in order
@@ -231,7 +240,7 @@ export const carriedMassKg = (s) => (s.carried ? s.carried.qty * item(s.carried.
 // Build mode's pieces and shopping lines for one building, as the payload of construction.setPlan.
 export function planFromPieces(structId, pieces, lines, extra = {}) {
   const members = [];
-  for (const p of pieces) if (p.struct === structId && p.stage && p.parent && C.STAGE[p.stage]) members.push({ id: p.id, stage: p.stage, kind: p.kind, parent: p.parent, built: p.built !== false });
+  for (const p of pieces) if (p.struct === structId && p.stage && p.parent && C.STAGE[p.stage]) members.push({ id: p.id, stage: p.stage, kind: p.kind, parent: p.parent, built: p.built !== false || p.area === 0 || (p.length === 0 && p.area === undefined && !p.volume) });
   return { structId, members, lines: lines.map((l) => ({ key: l.key, stage: l.stage, itemId: l.itemId, qty: l.qty, unit: l.unit, label: l.label, why: l.why, count: l.count, members: l.members })), ...extra };
 }
 
@@ -274,15 +283,30 @@ function refresh(ctx, s, pr) {
   }
 }
 // fasteners and the like: used up from the stacks in step with the stage's progress. check: only say whether there is enough.
-function supplies(s, pr, stage, builtAfter, check) {
+// Nails and screws bought through the Supplier sit in the player's inventory (stock.items): they count as on you, and are drawn
+// after the site stacks. What is drawn from the inventory is entered as bought here, so bought = stacks + inventory + carried + used.
+const haveSupply = (s, stock, itemId) => SUP.stackQty(s, itemId) + (stock && stock.items ? stock.items[itemId] || 0 : 0);
+function drawSupply(s, stock, itemId, d, x, z) {
+  let used = SUP.useFromStacks(s, itemId, d, x, z, { partial: true });
+  const more = round6(d - used), inv = stock && stock.items ? stock.items[itemId] || 0 : 0, take = Math.min(more, inv);
+  if (take > 1e-9) {
+    const left = round6(inv - take);
+    if (left > 0) stock.items[itemId] = left; else delete stock.items[itemId];
+    const L = s.ledger[itemId] || (s.ledger[itemId] = { bought: 0, used: 0, spent: 0 });
+    L.bought = round6(L.bought + take); L.used = round6(L.used + take);
+    used += take;
+  }
+  return used;
+}
+function supplies(s, pr, stage, builtAfter, check, stock) {
   const t = pr.tally[stage];
   for (const key in pr.lines) {
     const ln = pr.lines[key];
     if (!ln.supply || ln.stage !== stage || !t || !t[1]) continue;
     const target = round6((ln.qty * builtAfter) / t[1]), d = round6(target - ln.used);
     if (d > 1e-6) {
-      if (SUP.stackQty(s, ln.itemId) + 1e-6 < d) return ln.itemId;
-      if (!check) { SUP.useFromStacks(s, ln.itemId, d, pr.x, pr.z, { partial: true }); ln.used = target; }
+      if (haveSupply(s, stock, ln.itemId) + 1e-6 < d) return ln.itemId;
+      if (!check) { drawSupply(s, stock, ln.itemId, d, pr.x, pr.z); ln.used = target; }
     } else if (d < -1e-6 && !check) {       // taken apart: bent nails are spent, they do not come back
       const L = s.ledger[ln.itemId];
       L.used = round6(L.used + d); L.spent = round6(L.spent - d); ln.used = target;
@@ -412,8 +436,49 @@ function order(ctx, p) {
 }
 function land(ctx, s, id) {
   const r = SUP.deliver(s, id, C.DELIVERY.layout);
+  if (r.ok && !s.barrow) s.barrow = { x: round6(r.delivery.x - 2.4), z: round6(r.delivery.z + 1.2), yaw: 0.6, held: false };
   if (r.ok) ctx.emit('construction.delivered', { deliveryId: id, stacks: r.stacks, x: r.delivery.x, z: r.delivery.z, tag: r.delivery.tag });
   return r;
+}
+
+// ---- the wheelbarrow: take the handles, push it, load it from a stack; its load is a stack that moves with it
+const barrowStack = (s) => s.stacks.find((k) => k.barrow);
+const barrowKg = (s) => { const k = barrowStack(s); return k ? k.qty * item(k.itemId).massKgPerUnit : 0; };
+function barrowPlace(s, x, z, yaw) {
+  if (Number.isFinite(x) && Number.isFinite(z)) { s.barrow.x = round6(x); s.barrow.z = round6(z); }
+  if (Number.isFinite(yaw)) s.barrow.yaw = round6(yaw);
+  const k = barrowStack(s); if (k) { k.x = s.barrow.x; k.z = s.barrow.z; }
+}
+function barrowGrab(ctx, p) {
+  const s = ctx.s, b = s.barrow;
+  if (!b) return { ok: false, reason: 'no wheelbarrow' };
+  if (b.held) return { ok: false, reason: 'already held' };
+  if (s.carried) return { ok: false, reason: 'hands full' };
+  if (p && Number.isFinite(p.px) && Math.hypot(p.px - b.x, p.pz - b.z) > C.BARROW.reachM + 0.5) return { ok: false, reason: 'too far' };
+  b.held = true;
+  return { ok: true };
+}
+function barrowLoad(ctx, p) {
+  const s = ctx.s, b = s.barrow;
+  if (!b || !b.held) return { ok: false, reason: 'not holding the wheelbarrow' };
+  const from = p && p.hands ? null : s.stacks.find((k) => k.id === (p && p.stackId));
+  if (!p.hands && (!from || from.barrow)) return { ok: false, reason: 'no such stack' };
+  const itemId = p.hands ? (s.carried && s.carried.itemId) : from.itemId;
+  if (!itemId) return { ok: false, reason: 'nothing to load' };
+  if (isSupply(itemId)) return { ok: false, reason: 'stays by the stacks' };
+  const load = barrowStack(s), it = item(itemId);
+  if (load && load.itemId !== itemId) return { ok: false, reason: 'holds something else' };
+  const capKg = C.BARROW.capKg * C.feelOf(s).armful, room = capKg - barrowKg(s), minQty = it.unit === 'each' ? 1 : 0;
+  const avail = p.hands ? s.carried.qty : from.qty;
+  let n = Math.min(avail, Math.max(room / it.massKgPerUnit, load ? 0 : minQty));
+  if (it.unit === 'each') n = Math.floor(n + 1e-9);
+  n = round6(n);
+  if (!(n > 1e-6)) return { ok: false, reason: 'full' };
+  if (p.hands) { s.carried.qty = round6(s.carried.qty - n); if (s.carried.qty <= 1e-6) s.carried = null; }
+  else { from.qty = round6(from.qty - n); if (from.qty <= 1e-6) s.stacks = s.stacks.filter((k) => k !== from); }
+  if (load) load.qty = round6(load.qty + n);
+  else s.stacks.push({ id: 's' + s.nextId++, itemId, qty: n, x: b.x, z: b.z, barrow: true });
+  return { ok: true, itemId, qty: n };
 }
 
 function pickUp(ctx, p) {
@@ -422,7 +487,7 @@ function pickUp(ctx, p) {
   if (isSupply(st.itemId)) return { ok: false, reason: 'stays by the stacks' };
   const it = item(st.itemId), tools = (ctx.get('stock') || {}).tools || [];
   const have = s.carried && s.carried.itemId === st.itemId ? s.carried.qty : 0;
-  const limitKg = C.carryLimitKg(tools, C.gestureOf(s.options)), minQty = it.unit === 'each' ? 1 : 0, cap = Math.max(minQty, limitKg / it.massKgPerUnit);
+  const limitKg = C.carryLimitKg(tools, C.feelOf(s).armful), minQty = it.unit === 'each' ? 1 : 0, cap = Math.max(minQty, limitKg / it.massKgPerUnit);
   const want = p.qty > 0 ? have + p.qty : armful(s, st.itemId, cap);
   const r = SUP.takeFromStack(s, st.id, { massKgPerUnit: it.massKgPerUnit, limitKg, want, minQty });
   if (r.ok) ctx.emit('construction.carry', { itemId: r.itemId, qty: r.carried.qty });
@@ -445,7 +510,7 @@ function install(ctx, p) {
   for (const id of p.memberIds || []) {
     const m = pr.members[id];
     const why = blocked(pr, id);
-    if (why) { out.refused.push({ id, reason: why }); break; }
+    if (why) { out.refused.push({ id, reason: why, missing: why === 'support missing' ? supportMissing(pr, id) : undefined }); break; }
     const ln = m.line ? pr.lines[m.line] : null;
     let need = round6(m.need - m.got), give = 0, cut = null;
     if (ln && ln.sheet && need > 1e-6) {       // a sheet piece: from an offcut if one will do, else a whole sheet is cut
@@ -481,7 +546,7 @@ function install(ctx, p) {
       if (completes) { m.got = m.need; out.set.push(id); } else { out.partial.push({ id, got: m.got, need: m.need }); break; }
       continue;
     }
-    if (completes) { const lack = supplies(s, pr, m.stage, pr.tally[m.stage][0] + 1, true); if (lack) { out.refused.push({ id, reason: 'no fasteners', itemId: lack }); break; } }
+    if (completes) { const lack = supplies(s, pr, m.stage, pr.tally[m.stage][0] + 1, true, ctx.get('stock')); if (lack) { out.refused.push({ id, reason: 'no fasteners', itemId: lack }); break; } }
     doCut();
     if (give > 0) {
       const used = fromStacks ? SUP.useFromStacks(s, ln.itemId, give, pr.x, pr.z) : SUP.useCarried(s, ln.itemId, give);
@@ -489,7 +554,7 @@ function install(ctx, p) {
     }
     if (completes) {
       m.got = m.need; m.built = 1; pr.tally[m.stage][0]++;
-      supplies(s, pr, m.stage, pr.tally[m.stage][0], false);
+      supplies(s, pr, m.stage, pr.tally[m.stage][0], false, ctx.get('stock'));
       out.installed.push(id);
     } else { out.partial.push({ id, got: m.got, need: m.need }); break; }
   }
@@ -499,12 +564,12 @@ function install(ctx, p) {
       const g = C.learnGroup(pr.members[id].kind);
       if (!g || s.learn.known[g]) continue;
       s.learn.counts[g] = (s.learn.counts[g] || 0) + 1;
-      if (s.learn.counts[g] >= C.LEARN.needed) { s.learn.known[g] = true; out.learned.push(g); }
+      if (s.learn.counts[g] >= C.feelOf(s).learnNeeded) { s.learn.known[g] = true; out.learned.push(g); }
     }
   }
   out.ok = out.installed.length > 0 || out.partial.length > 0 || out.set.length > 0;
   requote(s, pr);
-  if (!out.ok) { out.reason = out.refused[0] ? out.refused[0].reason : 'nothing to do'; if (out.refused[0] && out.refused[0].itemId) out.itemId = out.refused[0].itemId; return out; }
+  if (!out.ok) { out.reason = out.refused[0] ? out.refused[0].reason : 'nothing to do'; if (out.refused[0] && out.refused[0].itemId) out.itemId = out.refused[0].itemId; if (out.refused[0] && out.refused[0].missing) out.missing = out.refused[0].missing; return out; }
   refresh(ctx, s, pr);
   out.stagesDone = C.STAGE_ORDER.filter((st) => !before.has(st) && stageComplete(pr, st));
   out.done = pr.done; out.stage = pr.stage; out.carried = s.carried;
@@ -549,7 +614,7 @@ function dismantle(ctx, p) {
       ln.used = round6(ln.used - m.got);
       out.returned[ln.itemId] = round6((out.returned[ln.itemId] || 0) + m.got);
     }
-    if (m.built) { m.built = 0; pr.tally[m.stage][0]--; supplies(s, pr, m.stage, pr.tally[m.stage][0], false); }
+    if (m.built) { m.built = 0; pr.tally[m.stage][0]--; supplies(s, pr, m.stage, pr.tally[m.stage][0], false, ctx.get('stock')); }
     m.got = 0;
     if (C.STAGE[m.stage].flat && m.parent) delete pr.raised[m.parent];
     out.removed.push(id);
@@ -584,11 +649,31 @@ export const constructionSystem = () => ({
     'construction.leanLadder': leanLadder,
     'construction.takeLadder': takeLadder,
     'construction.raise': raise,
+    'construction.barrowGrab': barrowGrab,
+    'construction.barrowLoad': barrowLoad,
+    'construction.barrowMove': (c, p) => { if (!c.s.barrow || !c.s.barrow.held) return { ok: false, reason: 'not held' }; barrowPlace(c.s, p.x, p.z, p.yaw); return { ok: true }; },
+    'construction.barrowSet': (c, p) => { if (!c.s.barrow || !c.s.barrow.held) return { ok: false, reason: 'not held' }; barrowPlace(c.s, p && p.x, p && p.z, p && p.yaw); c.s.barrow.held = false; return { ok: true }; },
+    // places that can never be reached or seen (no geometry, no size) are finished with their stage, never left as stray markers
+    'construction.settle': (c, p) => {
+      const pr = c.s.progress[p && p.structId];
+      if (!pr) return { ok: false, reason: 'unknown building' };
+      const done = [];
+      for (const id of p.memberIds || []) { const m = pr.members[id]; if (!m || m.built || m.kind === 'site') continue; m.got = m.need; m.built = 1; pr.tally[m.stage][0]++; done.push(id); }
+      if (done.length) refresh(c, c.s, pr);
+      return { ok: done.length > 0, settled: done };
+    },
     'construction.dismantle': dismantle,
     'construction.setLevel': (c, p) => { if (!LEVELS.includes(p.level)) return { ok: false, reason: 'unknown level' }; const pr = c.s.progress[p.structId]; if (pr) pr.level = p.level; else c.s.level = p.level; return { ok: true }; },
     'construction.setOption': (c, p) => { if (!p || !(p.key in c.s.options)) return { ok: false, reason: 'unknown option' }; c.s.options[p.key] = !!p.value; if (p.key === 'sandbox') c.emit('construction.sandbox', { on: !!p.value }); return { ok: true }; },
     'construction.setGesture': (c, p) => { if (!p || !C.GESTURES.includes(p.n)) return { ok: false, reason: 'unknown amount' }; c.s.options.gesture = p.n; return { ok: true }; },
+    'construction.setFeel': (c, p) => {
+      if (!p) return { ok: false, reason: 'nothing' };
+      if (p.reset) c.s.feel = { ...C.FEEL };
+      else if (p.preset) { if (!C.FEEL_PRESETS[p.preset]) return { ok: false, reason: 'unknown preset' }; c.s.feel = { ...C.FEEL_PRESETS[p.preset] }; }
+      else { const sp = C.FEEL_SPEC.find((q) => q.key === p.key); if (!sp || !Number.isFinite(p.value)) return { ok: false, reason: 'unknown setting' }; c.s.feel = { ...C.feelOf(c.s), [sp.key]: Math.max(sp.min, Math.min(sp.max, p.value)) }; }
+      return { ok: true, feel: C.feelOf(c.s) };
+    },
     'construction.seeCard': (c, p) => { c.s.tutorial.seen[p.stage] = true; return { ok: true }; },
   },
-  api: { content: C, knows: (s, kind) => !!(s.learn && s.learn.known[C.learnGroup(kind)]), sheetSource, needsStock, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance },
+  api: { content: C, feelOf: (s) => C.feelOf(s), knows: (s, kind) => !!(s.learn && s.learn.known[C.learnGroup(kind)]), sheetSource, needsStock, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance },
 });

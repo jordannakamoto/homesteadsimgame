@@ -107,6 +107,7 @@
 
   // ------------------------------------------------------------------ keeping build mode and the simulation in step
   function attach() {
+    B.setSupportKinds && B.setSupportKinds(C.SUPPORT);
     V.sim = G.sim; V.rev++; V.bv = -1; V.sel = null;
     for (const k of asm.keys()) asm.remove(k);
     V.structs.clear(); V.geom.clear(); V.plans.clear(); V.planVer.clear(); V.fresh.clear(); V.flushing = []; V.working = null; V.auto = null; V.raise = null; V.placing && endPlacing();
@@ -131,11 +132,19 @@
       cmd('setPlan', api.planFromPieces(st.id, pieces, B.materialsList(st.id), extra));
       if (pend) V.pendingPlan = null;
       V.planVer.set(st.id, st.ver);
+      settleStrays(st.id);
       reconcile(st.id);
     }
     for (const id of Object.keys(s.progress)) if (!V.structs.has(+id)) { cmd('forget', { structId: +id }); asm.remove(+id); V.fresh.delete(+id); }
   }
   // the simulation says what is built; build mode draws it (all but a frame still lying on the deck, and pieces just put in)
+  // an unbuilt place with no geometry to aim at can never be set by hand: finish it with its stage
+  function settleStrays(id) {
+    const pr = S().progress[id], g = geom(id);
+    if (!pr || !g) return;
+    const lost = Object.keys(pr.members).filter((k) => { const m = pr.members[k]; return !m.built && m.kind !== 'site' && !g.byId.has(k); });
+    if (lost.length) cmd('settle', { structId: id, memberIds: lost });
+  }
   function reconcile(id) {
     const pr = S().progress[id], mw = B.membersOf(id);
     if (!pr || !mw) return;
@@ -261,11 +270,11 @@
   function drawStacks() {
     const s = S();
     let sig = '';
-    for (const k of s.stacks) sig += k.id + ':' + describe(k.itemId, k.qty).n + ',';
+    for (const k of s.stacks) if (!k.barrow) sig += k.id + ':' + describe(k.itemId, k.qty).n + ',';
     sig += V.terrainV || 0;
     if (sig !== V.stackSig) {
       V.stackSig = sig;
-      carry.setStacks(s.stacks.map((k) => { const d = describe(k.itemId, k.qty); if (d.scaleH) d.h *= d.scaleH; return { id: k.id, x: k.x, z: k.z, itemId: k.itemId, ...d }; }), (d) => {
+      carry.setStacks(s.stacks.filter((k) => !k.barrow).map((k) => { const d = describe(k.itemId, k.qty); if (d.scaleH) d.h *= d.scaleH; return { id: k.id, x: k.x, z: k.z, itemId: k.itemId, ...d }; }), (d) => {
         if (performance.now() - V.lastLand > 140) { sounds.play('thud'); V.lastLand = performance.now(); G.cam.shake = Math.min(G.cam.shake + 0.03, 0.3); }
         G.burst(d.x, G.heightAt(d.x, d.z) + 0.1, d.z, 5, 0xb9a88a, 1.4, 0.8, 0.09, 0.5);
       });
@@ -434,7 +443,7 @@
       if (side && !fwd && cl2.t < 0.2 && cl2.age > 0.15) { cl2.dir = -1; cl2.t = 0; }       // stepping off the bottom
     }
     const ease = 0.4 + 0.6 * Math.min(1, Math.min(cl2.t, 1 - cl2.t) / 0.15);      // slight ease at both ends
-    cl2.t = Math.max(0, Math.min(1, cl2.t + (cl2.dir * dt * LAD.climbMps * ease) / Math.max(1, q.len)));
+    cl2.t = Math.max(0, Math.min(1, cl2.t + (cl2.dir * dt * feel().climbMps * ease) / Math.max(1, q.len)));
     if (cl2.t >= 1 && !cl2.top) { cl2.top = true; V.rev++; } else if (cl2.t < 1) cl2.top = false;
     if (cl2.t <= 0 && cl2.dir < 0 && cl2.age > 0.15) { V.climb = null; P.climbY = null; V.ladCool = 0.9; V.rev++; return; }
     const reachOut = Math.max(0, ladD - 0.38) * cl2.t;
@@ -451,9 +460,9 @@
     if (pm.kind === 'rafter' && !Object.values(pr.members).some((q) => q.kind === 'rafter' && q.built)) return false;
     return true;
   }
-  const gesture = () => C.gestureOf(S().options);
+  const feel = () => C.feelOf(S()), gesture = () => feel().armful;
   // within about 4 m of the stack for the stage, pieces come off it without a trip
-  const TAKE_M = 4;
+  const takeM = () => feel().takeM;
   function stackWithin(itemId, r) {
     if (C.SITE_SUPPLY.includes(itemId)) return null;
     const P = G.player; let best = null, bd = r;
@@ -488,7 +497,7 @@
     for (const mid of pl.inst) {
       const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid);
       if (m && pm.kind === 'cladding' && m.type === 'boards' && pm.need - pm.got > 1e-6 && m.row > low0.get(pm.parent)) continue;
-      const set = !ln || pm.need - pm.got < 1e-6, act = pm.kind === 'site' ? 'dig' : set ? 'nail' : (c && c.itemId === ln.itemId) || !api.needsStock(S(), pr, mid) || stackWithin(ln.itemId, TAKE_M) ? 'set' : 'want';
+      const set = !ln || pm.need - pm.got < 1e-6, act = pm.kind === 'site' ? 'dig' : set ? 'nail' : (c && c.itemId === ln.itemId) || !api.needsStock(S(), pr, mid) || stackWithin(ln.itemId, takeM()) ? 'set' : 'want';
       let score;
       if (!m) { if (Math.hypot(P.x - st.x, P.z - st.z) > g.reach + 0.5) continue; score = 0; }
       else {
@@ -557,28 +566,28 @@
     const hw = m && C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null, layer = hw ? pm.parent : 'main';
     if (m) { worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); wM.lerpVectors(wA, wB, 0.5); P.faceTarget = Math.atan2(wM.x - P.x, wM.z - P.z); } else wM.set(reach.x, P.y, reach.z);
     const swp = ctx.act !== 'dig' && sweepable(pr, ctx.mid, g);
-    V.cool = swp ? C.WORK.swingS * 0.5 : C.WORK.swingS;
+    V.cool = 1 / (feel().strikesPerSec * (swp ? Math.max(0.25, feel().sweepSpeed) : 1));
     if (ctx.act === 'set') {
       const ln0 = lineOf(pr, ctx.mid), c0 = S().carried;
       if (ln0 && !(c0 && c0.itemId === ln0.itemId) && api.needsStock(S(), pr, ctx.mid)) {   // close to the stack: take from it, no trip
-        const st = stackWithin(ln0.itemId, TAKE_M);
+        const st = stackWithin(ln0.itemId, takeM());
         if (st) { if (c0) putDown(); if (pickUp(st).ok) flash('Taking from the stack'); }
       }
       const r = setPiece(ctx.id, ctx.mid, pm, layer, m, wM, swp);
       if (!r) return;
       if (r.set.length) {
         joinSmall(ctx.id, ctx.mid);
-        const more = nextPlaces(pr, g, ctx, gesture() - 1);
+        const more = nextPlaces(pr, g, ctx, feel().setCount - 1);
         more.forEach((mid, i) => setTimeout(() => {
           const p2 = S().progress[ctx.id], pm2 = p2 && p2.members[mid];
           if (!pm2 || pm2.built || pm2.need - pm2.got < 1e-6) return;
           const l2 = lineOf(p2, mid), c2 = S().carried;
-          if (l2 && !(c2 && c2.itemId === l2.itemId) && api.needsStock(S(), p2, mid)) { const st = stackWithin(l2.itemId, TAKE_M); if (!st || !pickUp(st).ok) return; }
+          if (l2 && !(c2 && c2.itemId === l2.itemId) && api.needsStock(S(), p2, mid)) { const st = stackWithin(l2.itemId, takeM()); if (!st || !pickUp(st).ok) return; }
           const m2 = g.byId.get(mid), hw2 = m2 && C.STAGE[pm2.stage].flat ? g.walls.get(pm2.parent) : null;
           worldPt(g, hw2, m2.a, wA); worldPt(g, hw2, m2.b, wB); const pt = new T.Vector3().lerpVectors(wA, wB, 0.5);
           setPiece(ctx.id, mid, pm2, hw2 ? pm2.parent : 'main', m2, pt, false, true);
           redraw(ctx.id);
-        }, 80 * (i + 1)));
+        }, feel().dropDelayMs * (i + 1)));
       }
       redraw(ctx.id);
       return;
@@ -596,9 +605,11 @@
     }
     if (ni >= 0 && ctx.repeat && !swp && nbest > 150) { V.cool = 0.03; return; }     // holding only drives the nails the pointer passes over
     if (ni >= 0) { worldPt(g, hw, pts[ni], wM); b.d[ni] = 1; }
-    if (pm.kind !== 'site' && gesture() > 1) {        // one strike drives every nail of the piece (1x: one nail a click)
-      if (pts) for (let i = 0; i < pts.length; i++) if (!b.d[i]) { b.d[i] = 1; worldPt(g, hw, pts[i], wA); G.burst(wA.x, wA.y, wA.z, 1, 0xe8d9b0, 0.6, 0.7, 0.05, 0.3); }
-      b.n = of - 1;
+    if (pm.kind !== 'site' && feel().nails !== 1) {   // nails per strike: 2 drives the next one too, 0 drives them all
+      let extra = feel().nails === 0 ? 1e9 : feel().nails - 1;
+      if (pts) { for (let i = 0; i < pts.length && extra > 0; i++) if (!b.d[i]) { b.d[i] = 1; extra--; b.n++; worldPt(g, hw, pts[i], wA); G.burst(wA.x, wA.y, wA.z, 1, 0xe8d9b0, 0.6, 0.7, 0.05, 0.3); } }
+      else b.n = Math.min(of - 1, b.n + extra);
+      b.n = Math.min(of - 1, b.n);
     }
     b.n++;
     V.poseT = 0.24; V.poseKind = 'hammer';
@@ -606,8 +617,8 @@
     sounds.play(last && snd === 'knock' ? 'seat' : snd, 0.94 + 0.12 * Math.random());
     if (pm.kind === 'site') G.burst(reach.x, G.heightAt(reach.x, reach.z) + 0.15, reach.z, 5, 0x6b4f35, 1.4, 2.2, 0.11, 0.6);
     else G.burst(wM.x, wM.y, wM.z, last ? 4 : 2, 0xe8d9b0, 0.6, 0.7, 0.05, 0.3);
-    G.cam.shake = Math.min(G.cam.shake + (last ? 0.07 : 0.035), 0.3);
-    if (G.juice) G.juice.hitStop = last ? 0.07 : 0.035;
+    G.cam.shake = Math.min(G.cam.shake + (last ? 0.07 : 0.035) * feel().shake, 0.3);
+    if (G.juice) G.juice.hitStop = (last ? 0.07 : 0.035) * feel().hitStop;
     V.jolt = m ? { id: ctx.id, layer, mid: ctx.mid, t: 0, built: last } : null;
     if (!last) { if (m) liftTo(ctx.id, layer, ctx.mid, proud(ctx.mid)); if (pts) dotsFor(ctx.id); return; }
     delete V.blows[ctx.mid];
@@ -616,23 +627,6 @@
     if (!r.ok) { flash(reason(r)); redraw(ctx.id); return; }
     if (r.learned && r.learned.length) showBanner('Learned', 'You know how to ' + C.LEARN.says[r.learned[0]] + ' now', true, 5);
     finishInstall(ctx.id, ctx.mid, layer, pm.kind, r);
-    if (gesture() > 2 && m && pts) {                 // 3x and 4x: the strike also fastens the next set piece or two in the run
-      const mx = (m.a[0] + m.b[0]) / 2, mz = (m.a[2] + m.b[2]) / 2;
-      (ctx.q || []).filter((mid) => { const q2 = pr.members[mid]; return mid !== ctx.mid && q2 && !q2.built && q2.kind === pm.kind && q2.need > 0 && q2.got >= q2.need - 1e-6 && g.byId.get(mid); })
-        .map((mid) => { const m2 = g.byId.get(mid); return { mid, d: Math.hypot((m2.a[0] + m2.b[0]) / 2 - mx, (m2.a[2] + m2.b[2]) / 2 - mz) }; }).sort((x, y) => x.d - y.d).slice(0, gesture() - 2)
-        .forEach((o, i) => setTimeout(() => {
-          const p2 = S().progress[ctx.id], q2 = p2 && p2.members[o.mid];
-          if (!q2 || q2.built || !(q2.got >= q2.need - 1e-6)) return;
-          const m2 = g.byId.get(o.mid), hw2 = C.STAGE[q2.stage].flat ? g.walls.get(q2.parent) : null, l2 = hw2 ? q2.parent : 'main';
-          delete V.blows[o.mid];
-          const r2 = cmd('install', { structId: ctx.id, memberIds: [o.mid], hand: !swp });
-          if (!r2.ok) return;
-          worldPt(g, hw2, m2.a, wA); worldPt(g, hw2, m2.b, wB); wM.lerpVectors(wA, wB, 0.5);
-          sounds.play('knock', 0.94 + 0.12 * Math.random()); G.burst(wM.x, wM.y, wM.z, 3, 0xe8d9b0, 0.6, 0.7, 0.05, 0.3);
-          if (r2.learned && r2.learned.length) showBanner('Learned', 'You know how to ' + C.LEARN.says[r2.learned[0]] + ' now', true, 5);
-          finishInstall(ctx.id, o.mid, l2, q2.kind, r2);
-        }, 80 * (i + 1)));
-    }
   }
 
 
@@ -667,8 +661,10 @@
     if (n) redraw(id);
   }
   // Beacons: with 5 or fewer places left in a stage, each gets a tall thin pulsing marker, and the hint line says where.
-  const beaconMat = new T.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.55, depthWrite: false, fog: false }),
-    beaconMesh = new T.InstancedMesh(new T.BoxGeometry(1, 1, 1), beaconMat, 6);
+  // one small calm arrow, bobbing 0.5 m above each open place of the current stage (at most five), gone the moment the place is built
+  const beaconMat = new T.MeshBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0.85, depthWrite: false, fog: false }),
+    beaconMesh = new T.InstancedMesh(new T.ConeGeometry(0.11, 0.26, 10).rotateX(Math.PI), beaconMat, 6),
+    bm4 = new T.Matrix4(), bq = new T.Quaternion(), bs = new T.Vector3(1, 1, 1), bp = new T.Vector3();
   beaconMesh.frustumCulled = false; beaconMesh.visible = false; beaconMesh.renderOrder = 6; beaconMesh.count = 0;
   G.scene.add(beaconMesh);
   V.aimed = new Set(); V.beacons = []; V.beaconT = 0;
@@ -698,6 +694,34 @@
     }
     return { stage: pl.view.next, list, high, text: list.length + ' left: ' + seen.slice(0, 3).join(' and ') + (high ? ' · bring the ladder' : '') };
   }
+  // ------------------------------------------------------------------ the wheelbarrow: a few boxes and a cylinder wheel
+  const barrow = new T.Group(), bWood = new T.MeshLambertMaterial({ color: 0x9a7448 }), bTray = new T.MeshLambertMaterial({ color: 0x4d7f68 }), bIron = new T.MeshLambertMaterial({ color: 0x45484d }),
+    bPart = (geo, mat, x, y, z, rx = 0) => { const m = new T.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.x = rx; m.castShadow = true; barrow.add(m); return m; },
+    bLoad = new T.Mesh(new T.BoxGeometry(0.5, 1, 0.7), new T.MeshLambertMaterial({ color: 0xdcbc8c }));
+  bPart(new T.BoxGeometry(0.66, 0.06, 0.9), bTray, 0, 0.5, 0.1); bPart(new T.BoxGeometry(0.06, 0.26, 0.9), bTray, -0.33, 0.62, 0.1); bPart(new T.BoxGeometry(0.06, 0.26, 0.9), bTray, 0.33, 0.62, 0.1);
+  bPart(new T.BoxGeometry(0.66, 0.26, 0.06), bTray, 0, 0.62, 0.55); bPart(new T.BoxGeometry(0.66, 0.2, 0.06), bTray, 0, 0.6, -0.35);
+  bPart(new T.CylinderGeometry(0.22, 0.22, 0.09, 18).rotateZ(Math.PI / 2), bIron, 0, 0.22, 0.62);
+  for (const x of [-0.3, 0.3]) { bPart(new T.BoxGeometry(0.05, 0.05, 1.5), bWood, x, 0.45, -0.55); bPart(new T.BoxGeometry(0.05, 0.4, 0.05), bWood, x, 0.2, -0.95); }
+  bLoad.position.set(0, 0.55, 0.1); bLoad.visible = false; barrow.add(bLoad);
+  barrow.visible = false; G.scene.add(barrow);
+  V.bYaw = 0; V.bSend = 0;
+  function drawBarrow(dt) {
+    const s = S(), b = s.barrow, P = G.player;
+    barrow.visible = !!b && !s.options.sandbox;
+    if (!barrow.visible) return;
+    if (b.held) {
+      let d = P.face - V.bYaw; d = Math.atan2(Math.sin(d), Math.cos(d));
+      V.bYaw += Math.max(-1, Math.min(1, d)) * Math.min(1, dt * 2.2) * (Math.abs(d) > 0.02 ? 1 : 0);   // it turns slower than you do
+      b.x = P.x + Math.sin(V.bYaw) * C.BARROW.offsetM; b.z = P.z + Math.cos(V.bYaw) * C.BARROW.offsetM; b.yaw = V.bYaw;
+      V.bSend -= dt;
+      if (V.bSend <= 0) { V.bSend = 0.2; G.sim.commandNow('construction.barrowMove', { x: b.x, z: b.z, yaw: b.yaw }); }
+      P.carryK = Math.max(P.carryK || 0, 0.7);
+    }
+    barrow.position.set(b.x, G.heightAt(b.x, b.z), b.z); barrow.rotation.y = b.yaw;
+    const k = s.stacks.find((q) => q.barrow);
+    bLoad.visible = !!k;
+    if (k) { const f = Math.min(1, k.qty * CAT[k.itemId].massKgPerUnit / (C.BARROW.capKg * feel().armful)); bLoad.scale.y = 0.06 + 0.24 * f; bLoad.position.y = 0.53 + bLoad.scale.y / 2; bLoad.material.color.setHex(describe(k.itemId, k.qty).color); }
+  }
   function drawBeacons(dt) {
     const pr = current(), P = G.player;
     V.beaconT -= dt;
@@ -706,12 +730,18 @@
       const L = pr && !pr.done && !S().options.sandbox && !OFF[P.tool] && !V.placing ? leftInStage(pr) : null;
       V.beacons = L ? L.list.map((b) => ({ ...b, id: pr.id })) : [];
       V.left = L;
-      beaconMesh.count = V.beacons.length;
-      V.beacons.forEach((b, i) => { const top = b.top + 4, y0 = Math.max(G.heightAt(b.x, b.z), b.y - 0.3); beaconMesh.setMatrixAt(i, new T.Matrix4().makeScale(0.07, top - y0, 0.07).setPosition(b.x, (top + y0) / 2, b.z)); });
-      beaconMesh.instanceMatrix.needsUpdate = true;
     }
-    beaconMesh.visible = V.beacons.length > 0;
-    if (beaconMesh.visible) beaconMat.opacity = 0.4 + 0.25 * Math.sin(performance.now() / 260);
+    // a place that is done loses its arrow at once, not at the next refresh
+    let n = 0;
+    const t = performance.now() / 1000;
+    for (const b of V.beacons) {
+      const pm = S().progress[b.id] && S().progress[b.id].members[b.mid];
+      if (!pm || pm.built) continue;
+      bp.set(b.x, b.y + 0.5 + 0.07 * Math.sin(t * 3 + n), b.z);
+      beaconMesh.setMatrixAt(n++, bm4.compose(bp, bq, bs));
+    }
+    beaconMesh.count = n; beaconMesh.visible = n > 0;
+    if (n) beaconMesh.instanceMatrix.needsUpdate = true;
   }
   // clicking a beacon finishes a place that never had a valid aim: a stage never waits on what cannot be reached or seen
   function beaconAt(cx, cy) {
@@ -719,7 +749,7 @@
     let best = null, bd = 30;
     for (const b of V.beacons) {
       if (V.aimed.has(b.mid)) continue;
-      const a = wA.set(b.x, b.y, b.z).project(G.camera), t = wB.set(b.x, b.top + 4, b.z).project(G.camera);
+      const a = wA.set(b.x, b.y, b.z).project(G.camera), t = wB.set(b.x, b.y + 0.5, b.z).project(G.camera);
       if (a.z > 1 || t.z > 1) continue;
       const ax = (a.x * 0.5 + 0.5) * r.width + r.left, ay = (-a.y * 0.5 + 0.5) * r.height + r.top, tx = (t.x * 0.5 + 0.5) * r.width + r.left, ty = (-t.y * 0.5 + 0.5) * r.height + r.top;
       const dx = tx - ax, dy = ty - ay, L2 = dx * dx + dy * dy, k = L2 > 1 ? Math.max(0, Math.min(1, ((cx - ax) * dx + (cy - ay) * dy) / L2)) : 0, d = Math.hypot(cx - ax - dx * k, cy - ay - dy * k);
@@ -757,6 +787,11 @@
     if (V.climb) { const pc = nearBuilding(P.x, P.z), h = pc && !pc.done && plan(pc.id) && !plan(pc.id).raise ? aimHands(pc) : null; return h && h.kind === 'hands' ? h : { kind: 'ladder', act: 'down' }; }
     const strong = ladderCtx(true);
     if (strong) return strong;
+    {
+      const b = s.barrow;
+      if (b && b.held) { const st = carry.nearest(reach.x, reach.z, 1.2, pickable) || carry.nearest(P.x, P.z, 2.0, pickable); return st ? { kind: 'bload', stack: st } : { kind: 'bdown' }; }
+      if (b && !c && Math.hypot(b.x - P.x, b.z - P.z) < C.BARROW.reachM && Math.hypot(b.x - reach.x, b.z - reach.z) < 2.2) return { kind: 'bgrab' };
+    }
     const pr = nearBuilding(P.x, P.z), stack = carry.nearest(reach.x, reach.z, 1.0, pickable) || (V.wantItem && carry.nearest(P.x, P.z, 2.1, wantedStack)) || carry.nearest(P.x, P.z, 2.1, pickable) || carry.nearest(P.x, P.z, 1.3);
     if (c && c.itemId === LAD.itemId && !s.ladder) {
       if (pr) { const spot = ladderSpot(pr); if (spot) return { kind: 'lean', id: pr.id, spot }; return { kind: 'hint', text: 'Point at a wall: the ladder leans there', id: pr.id, drop: true }; }
@@ -800,6 +835,9 @@
     if (!ctx) return;
     sounds.wake();
     if (ctx.kind === 'hands') { if (!(V.cool > 0.08)) handAct(ctx); }
+    else if (ctx.kind === 'bgrab') { const r = cmd('barrowGrab', { px: G.player.x, pz: G.player.z }); if (r.ok) { V.bYaw = G.player.face; sounds.play('lift'); flash('Wheelbarrow: click a stack to load it, click again to set it down'); } else flash(r.reason === 'hands full' ? 'Put down what you are carrying first' : 'Too far from the wheelbarrow'); }
+    else if (ctx.kind === 'bload') { const r = cmd('barrowLoad', { stackId: ctx.stack.id }); if (r.ok) { sounds.play('thunk'); nameIt(r.itemId); flash('Loaded ' + stackName(r.itemId)); } else flash(r.reason === 'full' ? 'The wheelbarrow is full' : r.reason === 'holds something else' ? 'It already holds something else' : 'Cannot load that'); }
+    else if (ctx.kind === 'bdown') { const b = S().barrow; cmd('barrowSet', { x: b.x, z: b.z, yaw: b.yaw }); sounds.play('thunk'); }
     else if (ctx.kind === 'pick') pickUp(ctx.stack);
     else if (ctx.kind === 'back' || ctx.kind === 'drop' || (ctx.kind === 'hint' && ctx.drop)) putDown();
     else if (ctx.kind === 'swap') { putDown(); pickUp(ctx.stack); }
@@ -848,7 +886,7 @@
     onCancel(j) { V.working = null; redraw(j.id); },
   });
   const vTmp = new T.Vector3();
-  const reason = (r, kind) => (kind === 'door' || kind === 'window') && (r.reason === 'stage not open' || r.reason === 'frame not finished') ? (r.reason === 'frame not finished' ? 'Frame the opening first' : 'Wrap the wall before the ' + kind + ' goes in') : ({ 'no material': 'You need ' + (r.itemId ? stackName(r.itemId) : 'material') + ' for that', 'wrong material': 'That needs ' + (r.itemId ? stackName(r.itemId) : 'something else'), 'no fasteners': 'Out of ' + (r.itemId ? low(CAT[r.itemId].name) : 'fasteners') + ': order this stage', 'stage not open': 'Not yet: an earlier stage comes first' })[r.reason] || 'That cannot go in yet';
+  const reason = (r, kind, mid) => r.reason === 'support missing' ? ((C.SUPPORT_SAYS[r.missing] || 'Set the supports') + ' first') : (kind === 'door' || kind === 'window') && (r.reason === 'stage not open' || r.reason === 'frame not finished') ? (r.reason === 'frame not finished' ? 'Frame the opening first' : 'Wrap the wall before the ' + kind + ' goes in') : ({ 'no material': 'You need ' + (r.itemId ? stackName(r.itemId) : 'material') + ' for that', 'wrong material': 'That needs ' + (r.itemId ? stackName(r.itemId) : 'something else'), 'no fasteners': 'Out of ' + (r.itemId ? low(CAT[r.itemId].name) : 'fasteners') + ': buy more in the Supplier (U)', 'stage not open': 'Not yet: an earlier stage comes first' })[r.reason] || 'That cannot go in yet';
   function beginMember(id, memberId, from) {
     const pr = S().progress[id], g = geom(id), m = g.byId.get(memberId) || { id: memberId, kind: 'site', a: [g.cx, 0, g.cz], b: [g.cx, 0, g.cz], n: [0, 1, 0], section: { b: 0, d: 0 }, draw: 0 }, pm = pr.members[memberId], ln = lineOf(pr, memberId);
     const need = pm.need - pm.got, c = S().carried;
@@ -993,12 +1031,15 @@
       const A = V.auto, w = V.working && workLabel(pr, V.working.memberId), v = plan(A.id).view.stages.find((q) => q.id === A.stage);
       setPrompt('E', 'Stop · ' + (V.raise ? 'raising the wall' : w ? low(w.text) : A.wait > 0 ? 'fetching more' : low(C.STAGE[A.stage].name)), v ? v.built + ' of ' + v.total : '', V.raise ? Math.min(1, V.raise.p) : W.job ? W.progress() : null);
     } else if (ctx.kind === 'raise') setPrompt('E', 'Hold and push up to raise the wall', '', V.raise ? Math.min(1, V.raise.p) : 0);
-    else if (ctx.kind === 'hands') { const w = workLabel(pr, ctx.mid), pm = pr.members[ctx.mid], b = V.blows[ctx.mid], of = b ? b.of : nailCount(geom(ctx.id), pm, ctx.mid); setPrompt('E', ctx.act === 'set' ? (api.knows(S(), pm.kind) && sweepable(pr, ctx.mid, geom(ctx.id)) ? 'Hold and drag along the run: ' : 'Set it in place: ') + low(w.text).replace(/s$/, '') + (pm.line && pr.lines[pm.line].sheet && !api.needsStock(S(), pr, ctx.mid) ? ' (from an offcut)' : '') : ctx.act === 'dig' ? 'Dig and level' : pm.kind === 'pier' ? 'Stamp it level' : 'Nail the ' + low(w.text).replace(/s$/, ''), ctx.act === 'set' ? w.count : (b ? b.n : 0) + ' of ' + of, ctx.act === 'set' ? null : (b ? b.n : 0) / of); }
+    else if (ctx.kind === 'hands') { const w = workLabel(pr, ctx.mid), pm = pr.members[ctx.mid], b = V.blows[ctx.mid], of = b ? b.of : nailCount(geom(ctx.id), pm, ctx.mid); setPrompt('E', ctx.act === 'set' ? (api.knows(S(), pm.kind) && sweepable(pr, ctx.mid, geom(ctx.id)) ? 'Hold and drag along the run: ' + low(w.text).replace(/s$/, '') : 'Set the ' + low(w.text)) + (pm.line && pr.lines[pm.line].sheet && !api.needsStock(S(), pr, ctx.mid) ? ' (from an offcut)' : '') : ctx.act === 'dig' ? 'Dig and level' : pm.kind === 'pier' ? 'Stamp it level: ' + (b ? b.n : 0) + ' of ' + of : 'Nail them: ' + (b ? b.n : 0) + ' of ' + of, ctx.act === 'set' ? w.count : '', ctx.act === 'set' ? null : (b ? b.n : 0) / of); }
     else if (ctx.kind === 'lean') setPrompt('E', 'Lean the ladder here', '', null);
     else if (ctx.kind === 'ladder') setPrompt('E', ctx.act === 'climb' ? 'Climb the ladder' : ctx.act === 'take' ? 'Take the ladder down' : 'Climb down', '', null);
     else if (ctx.kind === 'work') { const w = workLabel(pr, V.working ? V.working.memberId : ctx.q[0]); setPrompt('E', 'Hold to build: ' + low(w.text), w.count, W.job ? W.progress() : 0); }
     else if (ctx.kind === 'piece') setPrompt('', 'Click a glowing piece to set it', ctx.q.length + ' ready', W.job ? W.progress() : null);
     else if (ctx.kind === 'auto') setPrompt('E', (ctx.guided ? 'Build: ' : 'Work until done: ') + low(C.STAGE[ctx.stage].name), '', null);
+    else if (ctx.kind === 'bgrab') setPrompt('E', 'Take the wheelbarrow handles', '', null);
+    else if (ctx.kind === 'bload') setPrompt('E', 'Load the wheelbarrow with ' + stackName(ctx.stack.itemId), '', null);
+    else if (ctx.kind === 'bdown') setPrompt('E', 'Set the wheelbarrow down', '', null);
     else if (ctx.kind === 'pick') setPrompt('E', (ctx.more ? 'Take more ' : 'Pick up ') + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'back') setPrompt('E', 'Put back the ' + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'swap') setPrompt('E', 'Swap for ' + stackName(ctx.stack.itemId), '', null);
@@ -1126,7 +1167,10 @@
       if (!Object.values(pr.lines).every((l) => l.ordered <= 1e-9) && v.toOrderUsd > (nx.status === 'not-ordered' ? nx.toOrderUsd : 0) + 1) h += `<button type="button" data-act="order:all">Order everything, ${money(v.toOrderUsd)}</button>`;
     }
     h += '</div>';
-    h += `<div class="cvopts"><span title="How many pieces one click sets, one strike fastens, and one armful holds">Pieces per gesture:</span><div class="cvseg">${C.GESTURES.map((n) => `<button type="button" data-act="gest:${n}" aria-pressed="${C.gestureOf(s.options) === n}">${n}x</button>`).join('')}</div></div>`;
+    { const F = feel(), cur = C.FEEL_SPEC.map((q) => F[q.key]).join();
+      h += `<details class="cvfeel"${V.feelOpen ? ' open' : ''}><summary title="Every number the hands-on work is tuned by">Feel</summary><div class="cvseg">${Object.keys(C.FEEL_PRESETS).map((k) => `<button type="button" data-act="feelp:${k}" aria-pressed="${C.FEEL_SPEC.map((q) => C.FEEL_PRESETS[k][q.key]).join() === cur}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}<button type="button" data-act="feelr">Reset</button></div>`;
+      for (const q of C.FEEL_SPEC) h += `<label class="cvopts" title="${esc(q.tip)}"><span>${esc(q.label)}</span><input type="range" data-feel="${q.key}" min="${q.min}" max="${q.max}" step="${q.step}" value="${F[q.key]}"><b data-fv="${q.key}">${q.words ? q.words[F[q.key]] : F[q.key]}</b></label>`;
+      h += '</details>'; }
     h += `<div class="cvopts"><span>How hands-on:</span><div class="cvseg">${[['guided', 'Guided', 'One press builds a stage while you watch'], ['hands-on', 'Hands-on', 'Carry each piece, set it in place and nail it yourself']].map((q) => `<button type="button" data-act="level:${q[0]}" aria-pressed="${pr.level === q[0] || (q[0] === 'hands-on' && pr.level === 'piece')}" title="${q[2]}">${q[1]}</button>`).join('')}</div>${pr.level === 'hands-on' ? `<label title="Press F by the building once and it keeps going, fetching from the stacks"><input type="checkbox" data-opt="auto"${s.options.auto ? ' checked' : ''}>Work until done</label>` : ''}</div>`;
     h += '<ol>';
     v.stages.forEach((q, i) => {
@@ -1146,7 +1190,7 @@
     });
     h += '</ol>';
     h += roomLine(pr) && !pr.done ? `<div class="cvopts">${roomLine(pr)}</div>` : '';
-    h += '<div class="cvtop"><button type="button" data-act="drop">Move the delivery spot</button><button type="button" data-act="book">Start a new building</button></div>';
+    h += '<div class="cvtop"><button type="button" data-act="drop" title="Then click the ground near the building">Choose the delivery spot</button><button type="button" data-act="book">Start a new building</button></div>';
     return h + opts;
   }
   // once it is insulated, the room's temperature against outside (if the thermal system is there)
@@ -1188,7 +1232,8 @@
     } else if (k === 'auto' && pr) { startAuto(pr.id, arg, pr.level === 'guided'); closePanel(); }
     else if (k === 'stop') stopAuto();
     else if (k === 'level' && pr) { cmd('setLevel', { structId: pr.id, level: arg }); cmd('setLevel', { level: arg }); stopAuto(); }
-    else if (k === 'gest') cmd('setGesture', { n: Number(arg) });
+    else if (k === 'feelp') { cmd('setFeel', { preset: arg }); }
+    else if (k === 'feelr') { cmd('setFeel', { reset: true }); }
     else if (k === 'seen') cmd('seeCard', { stage: arg });
     else if (k === 'cardsoff') cmd('setOption', { key: 'cards', value: false });
     else if (k === 'apart' && pr) {
@@ -1315,7 +1360,7 @@
       }
     }
     if (V.fTap) { V.fTap = false; if (!OFF[G.player.tool]) { press(V.ctx); V.ctx = context(); V.ctxSig = -1; } }   // what the press changed is read at once: a stale 'put down' with empty arms threw
-    tickLadder(dt); drawLadder(); tickMark(dt); drawBeacons(dt);
+    tickLadder(dt); drawLadder(); tickMark(dt); drawBeacons(dt); drawBarrow(dt);
     if (!s.options.sandbox) tickWork(dt);
     glow(V.ctx);
     {
@@ -1359,6 +1404,8 @@
   $('cvsand').addEventListener('click', () => setOpt('sandbox', !S().options.sandbox));
   const onAct = (e) => { const b = e.target.closest('button[data-act]'); if (b) { act(b.dataset.act); return; } const li = e.target.closest('li.st'); if (li) { V.expand = V.expand === li.dataset.stage ? null : li.dataset.stage; V.uiSig = ''; } };
   body.addEventListener('click', onAct); nextEl.addEventListener('click', onAct);
+  body.addEventListener('toggle', (e) => { if (e.target.classList && e.target.classList.contains('cvfeel')) V.feelOpen = e.target.open; }, true);
+  body.addEventListener('input', (e) => { const i = e.target.closest('input[data-feel]'); if (!i) return; const r = G.sim.commandNow('construction.setFeel', { key: i.dataset.feel, value: Number(i.value) }), q = C.FEEL_SPEC.find((z) => z.key === i.dataset.feel), o = body.querySelector('[data-fv="' + i.dataset.feel + '"]'); if (o && r.ok) o.textContent = q.words ? q.words[r.feel[q.key]] : r.feel[q.key]; });
   body.addEventListener('change', (e) => { const i = e.target.closest('input[data-opt]'); if (i) setOpt(i.dataset.opt, i.checked); });
   window.addEventListener('keydown', (e) => {
     const t = e.target && e.target.tagName;
