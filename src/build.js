@@ -7045,7 +7045,7 @@
     if (st.all) return st;
     const P = (id) => S.plan.has(id),
       kids = (id) => mem.byParent.get(id),
-      fin = (id, tail) => (kids(id) ? !P(id + tail) : !P(id)),
+      fin = (id, tail) => (kids(id) ? (tail === ".cl" ? !kids(id).some((m) => m.kind === "cladding" && P(m.id)) : !P(id + tail)) : !P(id)),
       bare = (id) => (kids(id) ? kids(id).every((m) => P(m.id)) : true),
       Db = { ...S, floors: new Set(), walls: new Map(), segs: [], polys: [], roofs: [], rings: [], portals: [], stairs: [], pillars: [] },
       Ds = { ...Db, floors: new Set(), walls: new Map(), segs: [], polys: [], roofs: [], rings: [], portals: [], stairs: [], pillars: [], decor: [], paths: [], polyRoofs: [] };
@@ -7113,7 +7113,7 @@
     memMat = new T.MeshLambertMaterial({ color: 0xffffff }),
     memGhost = new T.MeshBasicMaterial({ color: 0xbfe6ff, transparent: true, opacity: 0.3, depthWrite: false, fog: false }),
     shellMat = new T.MeshLambertMaterial({ vertexColors: true, color: 0xd4e8f8, transparent: true, opacity: 0.3, depthWrite: false, side: T.DoubleSide });
-  const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), concrete: CONCRETE, gravel: col(0x8f8b82) };
+  const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), siding: col(0xc7b79b), sidingDark: col(0x6f5a47), concrete: CONCRETE, gravel: col(0x8f8b82) };
   const _m4 = new T.Matrix4(),
     _c = new T.Color();
   function dropMembers(S) {
@@ -7141,6 +7141,7 @@
       if (m.stage === "foundation" || m.stage === "floor-frame") sets[0].push(m);
       else if (roofId) (st.all || st.finRoof.has(roofId)) || sets[1].push(m);
       else if (m.stage === "subfloor" || m.type === "floor-batt") (st.all || st.finFloor.has(m.parent)) || sets[0].push(m);
+      else if (m.kind === "cladding") sets[0].push(m); // siding stays drawn as boards, even once the wall is finished
       else (st.all || st.finRun.has(m.parent)) || sets[0].push(m);
     }
     sets.forEach((list, k) => {
@@ -7161,7 +7162,7 @@
         mesh.setMatrixAt(n, _m4);
         if (k < 2) {
           const c = MCOL[m.col || "timber"],
-            v = 0.9 + 0.2 * hash(n, list.length, 7);
+            v = /^siding/.test(m.col || "") ? 0.975 + 0.05 * hash(n, list.length, 7) : 0.9 + 0.2 * hash(n, list.length, 7);
           mesh.setColorAt(n, _c.setRGB(c[0] * v, c[1] * v, c[2] * v));
         }
       });

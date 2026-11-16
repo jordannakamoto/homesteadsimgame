@@ -27,7 +27,13 @@ test('a 5 m stick-framed wall with a window: plates, studs at 0.4 m, kings, jack
   // sheets, wrap and boards outside; batts in every bay; boards inside
   const sh = of('sheathing');
   assert.ok(sh.length >= 5 && sh.every((m) => m.stage === 'sheathing' && near(m.section.b, 0.011)));
-  assert.equal(of('membrane').length, 1); assert.equal(of('cladding').length, 1); assert.equal(of('lining').length, 1);
+  const wr = of('membrane'), cl = of('cladding');
+  assert.ok(wr.length >= 1 && cl.length > 10 && of('lining').length === 1);
+  // every layer leaves the window open: no wrap or board piece crosses the opening (checked by its area against the wall's net area)
+  const box = (m) => (m.type === 'boards' ? [m.a[0], m.b[0], m.a[1] - m.section.d / 2, m.a[1] + m.section.d / 2] : [m.a[0] - m.section.d / 2, m.a[0] + m.section.d / 2, m.a[1], m.b[1]]);
+  for (const m of [...sh, ...wr, ...cl]) { const [x0, x1, y0, y1] = box(m); assert.ok(x1 <= 2.1 + 1e-6 || x0 >= 2.9 - 1e-6 || y1 <= 1.11 + 1e-6 || y0 >= 1.89 - 1e-6, m.id + ' covers the window opening'); }
+  const wallNet = 5 * 2.84;
+  assert.ok(wr.reduce((a, m) => a + m.area, 0) < wallNet + 0.5 && cl.filter((m) => m.type === 'boards').every((m) => m.row >= 0 && near(m.section.d, 0.18, 0.011)));
   const batts = of('insulation');
   assert.ok(batts.length >= 10 && batts.every((m) => m.material === 'fibreglass_batt' && near(m.thickness, 0.089) && m.area > 0));
   assert.ok(batts.every((m) => m.section.d <= 0.45));

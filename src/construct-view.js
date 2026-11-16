@@ -65,7 +65,7 @@
     // the order pieces go in: by stage, then by kind, then along the building
     for (const m of g.byId.values()) {
       const mx = (m.a[0] + m.b[0]) / 2, mz = (m.a[2] + m.b[2]) / 2, my = (m.a[1] + m.b[1]) / 2;
-      g.rank.set(m.id, C.STAGE_ORDER.indexOf(m.stage) * 1e6 + ((KR[m.kind] || 0) + (TR[m.type] || 0) + 2) * 1e4 + (m.kind === 'sheathing' || m.kind === 'stud' && m.type === 'cripple' ? my * 300 : 0) + (mx - g.cx) + 0.37 * (mz - g.cz) + 50);
+      g.rank.set(m.id, C.STAGE_ORDER.indexOf(m.stage) * 1e6 + ((KR[m.kind] || 0) + (TR[m.type] || 0) + 2) * 1e4 + (m.kind === 'sheathing' || m.kind === 'cladding' || m.kind === 'stud' && m.type === 'cripple' ? my * 300 : 0) + (mx - g.cx) + 0.37 * (mz - g.cz) + 50);
     }
     // each framed wall: the line it swings up about (the inner edge of its bottom plate)
     for (const m of g.byId.values()) {
@@ -194,7 +194,7 @@
       asm.hinge(id, cur, hw.pivot, hw.axis, V.raise && V.raise.parent === cur ? V.raise.angle : hw.flat, 48);
       asm.setSolid(id, cur, list, 48);
     }
-    for (const [layer, mid] of loose) asm.lift(id, layer, mid, proud(mid));
+    for (const [layer, mid] of loose) liftTo(id, layer, mid, proud(mid));
     dotsFor(id);
     V.glowSig = '';
     B.setShell(id, !Object.values(pr.tally).some((t) => t[0] > 0));
@@ -280,6 +280,11 @@
 
   // ------------------------------------------------------------------ by hand: aim within reach, set a piece, fasten it
   // how far a set piece still stands proud of its seat: it goes in a little with every blow
+  // hold a piece clear of its seat: up for most things, out from the wall for siding
+  function liftTo(id, layer, mid, h) {
+    const m = geom(id) && geom(id).byId.get(mid);
+    if (m && m.kind === 'cladding' && m.out) asm.lift(id, layer, mid, h * 0.5, m.out); else asm.lift(id, layer, mid, h);
+  }
   const proud = (mid) => { const sw = V.swingIn; if (sw && sw.mid === mid) return 0.045 + 0.55 * (1 - Math.min(1, sw.t / 0.2)) ** 2; const b = V.blows[mid]; return 0.045 * (1 - (b ? b.n / b.of : 0)); };
   const qTmp = new T.Quaternion(), aTmp = new T.Vector3(), wA = new T.Vector3(), wB = new T.Vector3(), wM = new T.Vector3();
   // a point of a member in the world, wherever its frame lies just now
@@ -461,6 +466,11 @@
     if (!m0 || !ln0 || m0.type === 'ridge' || pm0.kind === 'door' || pm0.kind === 'window' || pm0.kind === 'site') return [];
     if (pm0.kind === 'rafter' && !Object.values(pr.members).some((q) => q.kind === 'rafter' && q.built)) return [];
     const mx = (m0.a[0] + m0.b[0]) / 2, mz = (m0.a[2] + m0.b[2]) / 2, out = [];
+    if (pm0.kind === 'cladding') {       // one gesture lays the whole course (the rest of it, past an opening), and as many courses above as the multiplier says
+      const rows = [];
+      for (const mid of ctx.q || []) { const pm = pr.members[mid], m = g.byId.get(mid); if (mid !== ctx.mid && pm && m && pm.kind === 'cladding' && pm.parent === pm0.parent && pm.type === pm0.type && pm.need - pm.got > 1e-6 && m.row >= m0.row && m.row <= m0.row + n) rows.push({ mid, k: m.row * 100 + Math.abs((m.a[0] + m.b[0]) / 2 - mx) + Math.abs((m.a[2] + m.b[2]) / 2 - mz) }); }
+      return rows.sort((a, b) => a.k - b.k).map((o) => o.mid);
+    }
     for (const mid of ctx.q || []) {
       if (mid === ctx.mid) continue;
       const pm = pr.members[mid], m = g.byId.get(mid);
@@ -473,9 +483,11 @@
   function aimHands(pr) {
     const pl = plan(pr.id), g = geom(pr.id), P = G.player, c = S().carried, st = V.structs.get(pr.id);
     let best = null, bs = 1e9, want = null, ws = 1e9, high = false;
-    const q = [];
+    const q = [], low0 = new Map();     // siding goes on from the bottom course up: the lowest course not yet set, per wall
+    for (const mid of pl.inst) { const pm = pr.members[mid], m = g.byId.get(mid); if (m && pm.kind === 'cladding' && m.type === 'boards' && pm.need - pm.got > 1e-6) low0.set(pm.parent, Math.min(low0.has(pm.parent) ? low0.get(pm.parent) : 1e9, m.row)); }
     for (const mid of pl.inst) {
       const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid);
+      if (m && pm.kind === 'cladding' && m.type === 'boards' && pm.need - pm.got > 1e-6 && m.row > low0.get(pm.parent)) continue;
       const set = !ln || pm.need - pm.got < 1e-6, act = pm.kind === 'site' ? 'dig' : set ? 'nail' : (c && c.itemId === ln.itemId) || !api.needsStock(S(), pr, mid) || stackWithin(ln.itemId, TAKE_M) ? 'set' : 'want';
       let score;
       if (!m) { if (Math.hypot(P.x - st.x, P.z - st.z) > g.reach + 0.5) continue; score = 0; }
@@ -511,12 +523,30 @@
     }
     redraw(id);
   }
+  // siding: a board slides in along its wall and drops the last few centimetres (0.15 s)
+  const SLIDE_S = 0.15;
+  function slideIn(id, layer, mid) {
+    const m = geom(id).byId.get(mid);
+    if (!m) return;
+    const L = Math.hypot(m.b[0] - m.a[0], m.b[2] - m.a[2]) || 1;
+    (V.slides || (V.slides = [])).push({ id, layer, mid, t: 0, u: [(m.b[0] - m.a[0]) / L, 0, (m.b[2] - m.a[2]) / L], len: Math.min(1.2, L) });
+  }
+  function tickSlides(dt) {
+    if (!V.slides || !V.slides.length) return;
+    for (const w of V.slides) {
+      w.t += dt;
+      const p = Math.min(1, w.t / SLIDE_S), along = p < 0.7 ? (1 - p / 0.7) ** 2 * w.len : 0, up = p < 0.7 ? 0.04 : 0.04 * (1 - (p - 0.7) / 0.3);
+      asm.lift(w.id, w.layer, w.mid, 1, [-w.u[0] * along, up, -w.u[2] * along]);
+    }
+    for (const w of V.slides) if (w.t >= SLIDE_S) { const pm = S().progress[w.id] && S().progress[w.id].members[w.mid]; liftTo(w.id, w.layer, w.mid, pm && !pm.built ? proud(w.mid) : 0); }
+    V.slides = V.slides.filter((w) => w.t < SLIDE_S);
+  }
   // set one piece in place with its small moment; returns the install result, or null when it did not work
   function setPiece(id, mid, pm, layer, m, at, swp, quiet) {
     const pr = S().progress[id], r = cmd('install', { structId: id, memberIds: [mid], hold: true });
     if (!r.ok) { if (!quiet) flash(reason(r, pm.kind)); return null; }
     if (r.cuts && r.cuts.length && !quiet) flash(r.cuts[0].how === 'offcut' ? 'Cut from an offcut' : 'Cut to fit; offcut kept');
-    if (r.set.length) { if (swp) V.stick = { id, mid }; if (!quiet) V.swingIn = { mid, id, layer, t: 0 }; sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
+    if (r.set.length) { if (swp) V.stick = { id, mid }; if (pm.kind === 'cladding') slideIn(id, layer, mid); else if (!quiet) V.swingIn = { mid, id, layer, t: 0 }; sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
     else if (!quiet) { const q = r.partial[0]; sounds.play('rustle'); flash(plain(lineOf(pr, mid).label) + ': ' + Math.round((100 * q.got) / q.need) + '% there. Fetch more.'); }
     return r;
   }
@@ -577,7 +607,7 @@
     G.cam.shake = Math.min(G.cam.shake + (last ? 0.07 : 0.035), 0.3);
     if (G.juice) G.juice.hitStop = last ? 0.07 : 0.035;
     V.jolt = m ? { id: ctx.id, layer, mid: ctx.mid, t: 0, built: last } : null;
-    if (!last) { if (m) asm.lift(ctx.id, layer, ctx.mid, proud(ctx.mid)); if (pts) dotsFor(ctx.id); return; }
+    if (!last) { if (m) liftTo(ctx.id, layer, ctx.mid, proud(ctx.mid)); if (pts) dotsFor(ctx.id); return; }
     delete V.blows[ctx.mid];
     if (V.stick && V.stick.mid === ctx.mid) V.stick = null;
     const r = cmd('install', { structId: ctx.id, memberIds: [ctx.mid], hand: !swp });
@@ -769,7 +799,8 @@
   function tickWork(dt) {
     const ctx = V.ctx, held = !!G.keys.KeyE || V.mDown, s = S();
     V.cool -= dt * (C.workSpeed(G.sim.state.sys.stock.tools, G.powerAvailable && G.powerAvailable()));
-    if (V.jolt) { const j = V.jolt; j.t += dt; asm.lift(j.id, j.layer, j.mid, Math.max(-0.02, (j.built ? 0 : proud(j.mid)) - 0.03 * Math.exp(-j.t * 16) * Math.cos(j.t * 46))); if (j.t > 0.28) { asm.lift(j.id, j.layer, j.mid, j.built ? 0 : proud(j.mid)); V.jolt = null; } }
+    if (V.jolt) { const j = V.jolt; j.t += dt; liftTo(j.id, j.layer, j.mid, Math.max(-0.02, (j.built ? 0 : proud(j.mid)) - 0.03 * Math.exp(-j.t * 16) * Math.cos(j.t * 46))); if (j.t > 0.28) { asm.lift(j.id, j.layer, j.mid, j.built ? 0 : proud(j.mid)); V.jolt = null; } }
+    tickSlides(dt);
     if (V.swingIn) { V.swingIn.t += dt; const w = V.swingIn; asm.lift(w.id, w.layer, w.mid, proud(w.mid)); if (w.t > 0.2) V.swingIn = null; }
     const speed = C.workSpeed(G.sim.state.sys.stock.tools, G.powerAvailable && G.powerAvailable());
     if (V.auto) {
@@ -803,7 +834,7 @@
       if (held && ctx && ctx.kind === 'hands' && !V.raise && V.cool <= 0) handAct({ ...ctx, repeat: true });
       if (W.job) W.cancel();
     }
-    if (V.working && !V.working.partial && V.working.m.draw !== 0) asm.lift(V.working.id, V.working.layer, V.working.memberId, 0.24 * (1 - W.progress()));
+    if (V.working && !V.working.partial && V.working.m.draw !== 0) liftTo(V.working.id, V.working.layer, V.working.memberId, 0.24 * (1 - W.progress()));
     // the character's arms: a blow for each beat, both up under a wall, one up under a load
     const P = G.player, pose = V.pose || (V.pose = { kind: '', k: 0 });
     if (V.raise && !V.raise.landed) pose.kind = 'lift';
