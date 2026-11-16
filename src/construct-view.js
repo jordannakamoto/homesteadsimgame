@@ -195,6 +195,7 @@
       asm.setSolid(id, cur, list, 48);
     }
     for (const [layer, mid] of loose) asm.lift(id, layer, mid, proud(mid));
+    dotsFor(id);
     V.glowSig = '';
     B.setShell(id, !Object.values(pr.tally).some((t) => t[0] > 0));
     braces(id);
@@ -287,6 +288,67 @@
     return out.applyMatrix4(g.matrix);
   }
   const segDist = (px, pz, a, b) => { const dx = b.x - a.x, dz = b.z - a.z, L = dx * dx + dz * dz, t = L > 1e-9 ? Math.max(0, Math.min(1, ((px - a.x) * dx + (pz - a.z) * dz) / L)) : 0; return Math.hypot(px - a.x - dx * t, pz - a.z - dz * t); };
+
+  // ---- nail points: where a builder really nails. A stick takes a nail at each end; a sheet takes a few along its edges.
+  const STICKS = new Set(['post', 'beam', 'skid', 'joist', 'plate', 'stud', 'header', 'rafter']);
+  const SHEETS = new Set(['sheathing', 'membrane', 'roofing', 'lining', 'insulation', 'cladding']);
+  // the layer that hides a stage's nail heads once it is complete
+  const COVER = { 'floor-frame': 'subfloor', subfloor: 'lining', 'wall-frame': 'lining', 'top-plates': 'lining', 'roof-frame': 'roof-deck', 'roof-deck': 'roofing', sheathing: 'wrap', wrap: 'cladding' };
+  // a member's nail points in its own frame, or null when it is fastened with plain blows (piers, the site, doors)
+  function nailLocal(g, mid) {
+    const nm = g.nails || (g.nails = new Map());
+    if (nm.has(mid)) return nm.get(mid);
+    const m = g.byId.get(mid);
+    let out = null;
+    if (m && m.draw !== 0 && m.section && (STICKS.has(m.kind) || SHEETS.has(m.kind))) {
+      const ax = m.b[0] - m.a[0], ay = m.b[1] - m.a[1], az = m.b[2] - m.a[2], L = Math.hypot(ax, ay, az);
+      if (L > 0.05) {
+        const u = [ax / L, ay / L, az / L], n = m.n, cr = [(ay * n[2] - az * n[1]) / L, (az * n[0] - ax * n[2]) / L, (ax * n[1] - ay * n[0]) / L];
+        const d = m.section.d, b = m.section.b, thinN = d <= b, t = thinN ? n : cr, w = thinN ? cr : n, thick = Math.min(d, b), wide = Math.max(d, b);
+        const mx = (m.a[0] + m.b[0]) / 2, my = (m.a[1] + m.b[1]) / 2, mz = (m.a[2] + m.b[2]) / 2;
+        // the face that shows: up, else away from the middle of the building (the inside for a lining)
+        let sg = Math.abs(t[1]) > 0.3 ? Math.sign(t[1]) : (t[0] * (mx - g.cx) + t[2] * (mz - g.cz) >= 0 ? 1 : -1);
+        if (m.kind === 'lining') sg = -sg;
+        const off = sg * (thick / 2 + 0.012);
+        const at = (ut, v) => [mx + u[0] * ut + w[0] * v + t[0] * off, my + u[1] * ut + w[1] * v + t[1] * off, mz + u[2] * ut + w[2] * v + t[2] * off];
+        out = [];
+        if (STICKS.has(m.kind) || m.kind === 'insulation' || L < 0.4) { out.push(at(-L / 2 + 0.035, 0), at(L / 2 - 0.035, 0)); }
+        else {
+          const per = L > 1.8 && wide > 0.5 ? 3 : 2, rows = wide > 0.25 ? [-1, 1] : [0];
+          for (const r of rows) for (let k = 0; k < per; k++) out.push(at(-L / 2 + 0.12 + ((L - 0.24) * k) / (per - 1), r * Math.max(0, wide / 2 - 0.07)));
+        }
+      }
+    }
+    nm.set(mid, out);
+    return out;
+  }
+  const nailCount = (g, pm, mid) => { const p = nailLocal(g, mid); return p ? p.length : C.memberNails(pm.kind); };
+  const blowsOf = (g, pm, mid) => V.blows[mid] || (V.blows[mid] = { n: 0, of: nailCount(g, pm, mid), d: [] });
+  // the dots on every set piece, and the dark heads of the nails in, until a later layer covers them
+  const dotLayers = new Map();
+  function dotsFor(id) {
+    const pr = S().progress[id], g = geom(id);
+    if (!pr || !g) return;
+    const by = new Map();
+    for (const mid in pr.members) {
+      const pm = pr.members[mid];
+      if (!pm.built && !(pm.need > 0 && pm.got >= pm.need - 1e-6)) continue;
+      const pts = nailLocal(g, mid);
+      if (!pts) continue;
+      const cv = COVER[pm.stage];
+      if (pm.built && cv && pr.tally[cv] && api.stageComplete(pr, cv)) continue;
+      const b = V.blows[mid], flat = C.STAGE[pm.stage].flat && g.walls.has(pm.parent) && !pr.raised[pm.parent], layer = flat ? pm.parent : 'main', h = pm.built ? 0 : 0.045 * (1 - (b ? b.n / b.of : 0));
+      let list = by.get(layer);
+      if (!list) by.set(layer, (list = []));
+      pts.forEach((p, i) => list.push({ p, h, k: pm.built || (b && b.d[i]) ? 1 : 0 }));
+    }
+    const old = dotLayers.get(id) || new Set();
+    for (const layer of new Set([...old, ...by.keys()])) {
+      if (layer !== 'main') { const hw = g.walls.get(layer); if (!hw) continue; asm.hinge(id, layer, hw.pivot, hw.axis, V.raise && V.raise.parent === layer ? V.raise.angle : hw.flat, 48); }
+      asm.setDots(id, layer, by.get(layer) || []);
+    }
+    dotLayers.set(id, new Set(by.keys()));
+  }
   // what the hands can do from here: every open piece within reach, and the one the pointer is on
   function aimHands(pr) {
     const pl = plan(pr.id), g = geom(pr.id), P = G.player, c = S().carried, st = V.structs.get(pr.id);
@@ -337,8 +399,18 @@
       redraw(ctx.id);
       return;
     }
-    // a blow (a stamp on a pier block, a stroke of the shovel on the site)
-    const of = C.memberNails(pm.kind), b = V.blows[ctx.mid] || (V.blows[ctx.mid] = { n: 0, of });
+    // a blow: one nail at the dot nearest the pointer (a stamp on a pier block, a stroke of the shovel on the site)
+    const pts = m ? nailLocal(g, ctx.mid) : null, b = blowsOf(g, pm, ctx.mid), of = b.of;
+    let ni = -1, nbest = 1e18;
+    if (pts) for (let i = 0; i < pts.length; i++) {
+      if (b.d[i]) continue;
+      worldPt(g, hw, pts[i], wA);
+      let sc;
+      if (reach.free) { wB.copy(wA).project(G.camera); sc = Math.hypot((wB.x * 0.5 + 0.5) * reach.w - reach.px, (-wB.y * 0.5 + 0.5) * reach.h - reach.py); }
+      else sc = Math.hypot(wA.x - reach.x, wA.z - reach.z) * 100;
+      if (sc < nbest) { nbest = sc; ni = i; }
+    }
+    if (ni >= 0) { worldPt(g, hw, pts[ni], wM); b.d[ni] = 1; }
     b.n++;
     V.poseT = 0.24; V.poseKind = 'hammer';
     const snd = pm.kind === 'pier' ? 'thud' : C.WORK.sound[pm.kind] === 'dig' ? 'dig' : 'knock', last = b.n >= of;
@@ -348,7 +420,7 @@
     G.cam.shake = Math.min(G.cam.shake + (last ? 0.07 : 0.035), 0.3);
     if (G.juice) G.juice.hitStop = last ? 0.07 : 0.035;
     V.jolt = m ? { id: ctx.id, layer, mid: ctx.mid, t: 0, built: last } : null;
-    if (!last) { if (m) asm.lift(ctx.id, layer, ctx.mid, proud(ctx.mid)); return; }
+    if (!last) { if (m) asm.lift(ctx.id, layer, ctx.mid, proud(ctx.mid)); if (pts) dotsFor(ctx.id); return; }
     delete V.blows[ctx.mid];
     const r = cmd('install', { structId: ctx.id, memberIds: [ctx.mid] });
     if (!r.ok) { flash(reason(r)); redraw(ctx.id); return; }
@@ -594,7 +666,7 @@
       const A = V.auto, w = V.working && workLabel(pr, V.working.memberId), v = plan(A.id).view.stages.find((q) => q.id === A.stage);
       setPrompt('E', 'Stop · ' + (V.raise ? 'raising the wall' : w ? low(w.text) : A.wait > 0 ? 'fetching more' : low(C.STAGE[A.stage].name)), v ? v.built + ' of ' + v.total : '', V.raise ? Math.min(1, V.raise.p) : W.job ? W.progress() : null);
     } else if (ctx.kind === 'raise') setPrompt('E', 'Hold and push up to raise the wall', '', V.raise ? Math.min(1, V.raise.p) : 0);
-    else if (ctx.kind === 'hands') { const w = workLabel(pr, ctx.mid), b = V.blows[ctx.mid], pm = pr.members[ctx.mid], of = C.memberNails(pm.kind); setPrompt('E', ctx.act === 'set' ? 'Set it in place: ' + low(w.text).replace(/s$/, '') : ctx.act === 'dig' ? 'Dig and level' : pm.kind === 'pier' ? 'Stamp it level' : 'Nail it: ' + low(w.text).replace(/s$/, ''), ctx.act === 'set' ? w.count : (b ? b.n : 0) + ' of ' + of, ctx.act === 'set' ? null : (b ? b.n : 0) / of); }
+    else if (ctx.kind === 'hands') { const w = workLabel(pr, ctx.mid), pm = pr.members[ctx.mid], b = V.blows[ctx.mid], of = b ? b.of : nailCount(geom(ctx.id), pm, ctx.mid); setPrompt('E', ctx.act === 'set' ? 'Set it in place: ' + low(w.text).replace(/s$/, '') : ctx.act === 'dig' ? 'Dig and level' : pm.kind === 'pier' ? 'Stamp it level' : 'Nail the ' + low(w.text).replace(/s$/, ''), ctx.act === 'set' ? w.count : (b ? b.n : 0) + ' of ' + of, ctx.act === 'set' ? null : (b ? b.n : 0) / of); }
     else if (ctx.kind === 'work') { const w = workLabel(pr, V.working ? V.working.memberId : ctx.q[0]); setPrompt('E', 'Hold to build: ' + low(w.text), w.count, W.job ? W.progress() : 0); }
     else if (ctx.kind === 'piece') setPrompt('', 'Click a glowing piece to set it', ctx.q.length + ' ready', W.job ? W.progress() : null);
     else if (ctx.kind === 'auto') setPrompt('E', (ctx.guided ? 'Build: ' : 'Work until done: ') + low(C.STAGE[ctx.stage].name), '', null);
@@ -633,9 +705,9 @@
     if (pr.level === 'guided') return { ...out, line: 'Stand by the ' + low(pr.name) + ' and press <kbd>E</kbd>, or use the button.', btn: ['auto:' + v.id, v.verb], target: at };
     if (!ln) return { ...out, line: 'Stand on the plan and hold <kbd>E</kbd> (or the mouse button) to dig it level.', target: at };
     const looseOne = pl.inst.find((id) => pr.members[id].need > 0 && pr.members[id].got >= pr.members[id].need - 1e-6);
-    if (looseOne) return { ...out, line: 'A piece is set but loose. Point at it and press <kbd>E</kbd> or click to ' + (pr.members[looseOne].kind === 'pier' ? 'stamp it level' : 'nail it') + '.', target: at };
+    if (looseOne) return { ...out, line: 'A piece is set but loose. ' + (pr.members[looseOne].kind === 'pier' ? 'Point at it and click to stamp it level.' : 'Click each bright dot to drive a nail, or hold and drag across them.'), target: at };
     const c = s.carried;
-    if (c && c.itemId === ln.itemId) return { ...out, line: 'Carry the ' + stackName(c.itemId) + ' to the ' + low(pr.name) + '. Point at a glowing place: click sets a piece, click again nails it. Hold to keep going.', target: at };
+    if (c && c.itemId === ln.itemId) return { ...out, line: 'Carry the ' + stackName(c.itemId) + ' to the ' + low(pr.name) + '. Point at a glowing place: click sets a piece, then click its bright dots to nail it. Hold to keep going.', target: at };
     const stack = homeStack(ln.itemId) || s.stacks.find((k) => k.itemId === ln.itemId);
     return { ...out, line: (s.options.auto ? 'Press <kbd>E</kbd> by the ' + low(pr.name) + ' to work until done, or pick' : 'Pick') + ' up ' + stackName(ln.itemId) + ' at the stacks: point at them and click, or <kbd>E</kbd>.', target: s.options.auto ? at : stack ? { x: stack.x, z: stack.z, y: 1.9 } : null, item: ln.itemId };
   }
