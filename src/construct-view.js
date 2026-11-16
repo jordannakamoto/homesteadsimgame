@@ -501,6 +501,7 @@
         if (reach.free) { score = 1e9; for (const t of [0.5, 0.15, 0.85]) { wM.lerpVectors(wA, wB, t).project(G.camera); score = Math.min(score, Math.hypot((wM.x * 0.5 + 0.5) * reach.w - reach.px, (-wM.y * 0.5 + 0.5) * reach.h - reach.py)); } }
         else score = segDist(reach.x, reach.z, wA, wB) * 100;
       }
+      V.aimed.add(mid);
       if (act === 'want') { if (score < ws) { ws = score; want = mid; } continue; }
       q.push(mid);
       // a piece already set comes first when the pointer is about as near to both: finish what is started
@@ -566,6 +567,7 @@
       const r = setPiece(ctx.id, ctx.mid, pm, layer, m, wM, swp);
       if (!r) return;
       if (r.set.length) {
+        joinSmall(ctx.id, ctx.mid);
         const more = nextPlaces(pr, g, ctx, gesture() - 1);
         more.forEach((mid, i) => setTimeout(() => {
           const p2 = S().progress[ctx.id], pm2 = p2 && p2.members[mid];
@@ -631,6 +633,110 @@
           finishInstall(ctx.id, o.mid, l2, q2.kind, r2);
         }, 80 * (i + 1)));
     }
+  }
+
+
+  // ------------------------------------------------------------------ small places and beacons: nothing is left to hunt for
+  // A place under about 0.35 m2 (sheets, siding) or 0.6 m (sticks) is set and fastened with the larger piece beside it.
+  const SMALL_M2 = 0.35, SMALL_M = 0.6;
+  function isSmall(pr, g, mid) {
+    const pm = pr.members[mid], m = g.byId.get(mid);
+    if (!pm || !m || pm.kind === 'site' || pm.kind === 'door' || pm.kind === 'window' || pm.kind === 'pier') return false;
+    if (SHEETS.has(pm.kind)) return (pm.area || m.area || 1e9) < SMALL_M2;
+    if (STICKS.has(pm.kind)) return Math.hypot(m.b[0] - m.a[0], m.b[1] - m.a[1], m.b[2] - m.a[2]) < SMALL_M;
+    return false;
+  }
+  function joinSmall(id, mid) {
+    const pr = S().progress[id], g = geom(id);
+    if (!pr || !g || isSmall(pr, g, mid)) return;
+    const pm0 = pr.members[mid], m0 = g.byId.get(mid), pl = plan(id);
+    if (!pm0 || !m0 || !pl) return;
+    const mx = (m0.a[0] + m0.b[0]) / 2, my = (m0.a[1] + m0.b[1]) / 2, mz = (m0.a[2] + m0.b[2]) / 2;
+    let n = 0;
+    for (const sid of pl.inst) {
+      const pm = pr.members[sid], m = g.byId.get(sid);
+      if (sid === mid || !pm || !m || pm.built || pm.stage !== pm0.stage || pm.parent !== pm0.parent || pm.need - pm.got < 1e-6 || !isSmall(pr, g, sid)) continue;
+      if (Math.hypot((m.a[0] + m.b[0]) / 2 - mx, (m.a[1] + m.b[1]) / 2 - my, (m.a[2] + m.b[2]) / 2 - mz) > 1.6 || n >= 6) continue;
+      const lay = C.STAGE[pm.stage].flat && g.walls.has(pm.parent) ? pm.parent : 'main';
+      let r = cmd('install', { structId: id, memberIds: [sid], hold: true });
+      if (!r.ok && (r.reason === 'no material' || r.reason === 'wrong material')) r = cmd('install', { structId: id, memberIds: [sid], hold: true, from: 'stacks' });
+      if (!r.ok) continue;
+      const r2 = cmd('install', { structId: id, memberIds: [sid] });
+      if (r2.ok && r2.installed.length) { n++; finishInstall(id, sid, lay, pm.kind, r2); if (pm.kind === 'cladding') slideIn(id, lay, sid); }
+    }
+    if (n) redraw(id);
+  }
+  // Beacons: with 5 or fewer places left in a stage, each gets a tall thin pulsing marker, and the hint line says where.
+  const beaconMat = new T.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.55, depthWrite: false, fog: false }),
+    beaconMesh = new T.InstancedMesh(new T.BoxGeometry(1, 1, 1), beaconMat, 6);
+  beaconMesh.frustumCulled = false; beaconMesh.visible = false; beaconMesh.renderOrder = 6; beaconMesh.count = 0;
+  G.scene.add(beaconMesh);
+  V.aimed = new Set(); V.beacons = []; V.beaconT = 0;
+  const STAGE_PART = { 'roof-frame': 'roof', 'roof-deck': 'roof', roofing: 'roof', foundation: 'floor', 'floor-frame': 'floor', subfloor: 'floor' };
+  function yRange(g) {
+    if (g.yr) return g.yr;
+    let lo = 1e9, hi = -1e9;
+    for (const m of g.byId.values()) { lo = Math.min(lo, m.a[1], m.b[1]); hi = Math.max(hi, m.a[1], m.b[1]); }
+    return (g.yr = [lo + g.matrix.elements[13], hi + g.matrix.elements[13]]);
+  }
+  // the places left in the next stage when there are few: { stage, list: [{ mid, x, y, z, where, high }], text } or null
+  function leftInStage(pr) {
+    const g = geom(pr.id), pl = plan(pr.id);
+    if (!g || !pl || !pl.view.next) return null;
+    const ids = Object.keys(pr.members).filter((k) => { const pm = pr.members[k]; return pm.stage === pl.view.next && !pm.built && pm.kind !== 'site' && g.byId.has(k); });
+    if (!ids.length || ids.length > 5) return null;
+    const [ylo, yhi] = yRange(g), P = G.player, c = wB.set(g.cx, 0, g.cz).applyMatrix4(g.matrix), cx = c.x, cz = c.z, list = [], seen = [];
+    let high = false;
+    for (const mid of ids) {
+      const pm = pr.members[mid], m = g.byId.get(mid), hw = C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null;
+      worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wM); wM.add(wA).multiplyScalar(0.5);
+      const dx = wM.x - cx, dz = wM.z - cz, dir = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 'east' : 'west') : (dz > 0 ? 'south' : 'north'), f = (wM.y - ylo) / Math.max(0.5, yhi - ylo), part = STAGE_PART[pm.stage];
+      const where = pm.kind === 'door' || pm.kind === 'window' ? 'the ' + pm.kind + ' in the ' + dir + ' wall' : part === 'roof' ? 'the ' + dir + ' side of the roof' : part === 'floor' ? 'the ' + dir + ' side of the floor' : (f > 0.66 ? 'top' : f < 0.33 ? 'bottom' : 'middle') + ' of the ' + dir + ' wall';
+      if (wM.y - P.y > LAD.reachUpM && !V.climb) high = true;
+      list.push({ mid, x: wM.x, y: wM.y, z: wM.z, where, top: yhi });
+      seen.includes(where) || seen.push(where);
+    }
+    return { stage: pl.view.next, list, high, text: list.length + ' left: ' + seen.slice(0, 3).join(' and ') + (high ? ' · bring the ladder' : '') };
+  }
+  function drawBeacons(dt) {
+    const pr = current(), P = G.player;
+    V.beaconT -= dt;
+    if (V.beaconT <= 0) {
+      V.beaconT = 0.3;
+      const L = pr && !pr.done && !S().options.sandbox && !OFF[P.tool] && !V.placing ? leftInStage(pr) : null;
+      V.beacons = L ? L.list.map((b) => ({ ...b, id: pr.id })) : [];
+      V.left = L;
+      beaconMesh.count = V.beacons.length;
+      V.beacons.forEach((b, i) => { const top = b.top + 4, y0 = Math.max(G.heightAt(b.x, b.z), b.y - 0.3); beaconMesh.setMatrixAt(i, new T.Matrix4().makeScale(0.07, top - y0, 0.07).setPosition(b.x, (top + y0) / 2, b.z)); });
+      beaconMesh.instanceMatrix.needsUpdate = true;
+    }
+    beaconMesh.visible = V.beacons.length > 0;
+    if (beaconMesh.visible) beaconMat.opacity = 0.4 + 0.25 * Math.sin(performance.now() / 260);
+  }
+  // clicking a beacon finishes a place that never had a valid aim: a stage never waits on what cannot be reached or seen
+  function beaconAt(cx, cy) {
+    const r = canvas.getBoundingClientRect();
+    let best = null, bd = 30;
+    for (const b of V.beacons) {
+      if (V.aimed.has(b.mid)) continue;
+      const a = wA.set(b.x, b.y, b.z).project(G.camera), t = wB.set(b.x, b.top + 4, b.z).project(G.camera);
+      if (a.z > 1 || t.z > 1) continue;
+      const ax = (a.x * 0.5 + 0.5) * r.width + r.left, ay = (-a.y * 0.5 + 0.5) * r.height + r.top, tx = (t.x * 0.5 + 0.5) * r.width + r.left, ty = (-t.y * 0.5 + 0.5) * r.height + r.top;
+      const dx = tx - ax, dy = ty - ay, L2 = dx * dx + dy * dy, k = L2 > 1 ? Math.max(0, Math.min(1, ((cx - ax) * dx + (cy - ay) * dy) / L2)) : 0, d = Math.hypot(cx - ax - dx * k, cy - ay - dy * k);
+      if (d < bd) { bd = d; best = b; }
+    }
+    return best;
+  }
+  function finishPlace(b) {
+    const pr = S().progress[b.id], pm = pr && pr.members[b.mid], g = geom(b.id);
+    if (!pm || pm.built || !g) return;
+    const lay = C.STAGE[pm.stage].flat && g.walls.has(pm.parent) ? pm.parent : 'main';
+    if (pm.need - pm.got > 1e-6) { const r = cmd('install', { structId: b.id, memberIds: [b.mid], hold: true, from: 'stacks' }); if (!r.ok) { flash(reason(r, pm.kind)); return; } }
+    const r2 = cmd('install', { structId: b.id, memberIds: [b.mid], from: 'stacks' });
+    if (!r2.ok) { flash(reason(r2, pm.kind)); redraw(b.id); return; }
+    sounds.play('seat'); flash('Finished: ' + b.where);
+    finishInstall(b.id, b.mid, lay, pm.kind, r2);
+    V.beaconT = 0;
   }
 
   // ------------------------------------------------------------------ what F does here and now
@@ -925,6 +1031,8 @@
       if (v.pending || s.deliveries.some((d) => d.lines.some((l) => l.itemId === ln.itemId))) { const d = s.deliveries[0], mins = Math.max(1, Math.ceil((d.dueT - G.sim.state.t) / 60)); return { ...out, line: 'Your delivery arrives in about ' + mins + ' min of game time.' + (G.speed === 0 ? ' Time is paused.' : ''), wait: true }; }
       return { ...out, line: 'Order the materials for this stage.', btn: ['order:' + v.id, 'Order this stage, ' + money(v.toOrderUsd || v.costUsd)], btn2: pl.view.toOrderUsd > (v.toOrderUsd || 0) + 1 ? ['order:all', 'Order everything, ' + money(pl.view.toOrderUsd)] : null };
     }
+    const lf = pr.level !== 'guided' && !V.auto ? leftInStage(pr) : null;
+    if (lf) return { ...out, line: lf.text, target: { x: lf.list[0].x, z: lf.list[0].z, y: lf.list[0].y + 1.5 } };
     if (pr.level === 'guided') return { ...out, line: 'Stand by the ' + low(pr.name) + ' and press <kbd>E</kbd>, or use the button.', btn: ['auto:' + v.id, v.verb], target: at };
     if (!ln) return { ...out, line: 'Stand on the plan and hold <kbd>E</kbd> (or the mouse button) to dig it level.', target: at };
     const looseOne = pl.inst.find((id) => pr.members[id].need > 0 && pr.members[id].got >= pr.members[id].need - 1e-6);
@@ -1207,7 +1315,7 @@
       }
     }
     if (V.fTap) { V.fTap = false; if (!OFF[G.player.tool]) { press(V.ctx); V.ctx = context(); V.ctxSig = -1; } }   // what the press changed is read at once: a stale 'put down' with empty arms threw
-    tickLadder(dt); drawLadder(); tickMark(dt);
+    tickLadder(dt); drawLadder(); tickMark(dt); drawBeacons(dt);
     if (!s.options.sandbox) tickWork(dt);
     glow(V.ctx);
     {
@@ -1264,6 +1372,7 @@
   canvas.addEventListener('pointerdown', (e) => {
     ptr.x = e.clientX; ptr.y = e.clientY; ptr.has = true; sounds.wake();
     if (V.placing) { e.stopImmediatePropagation(); e.preventDefault(); if (e.button === 2) endPlacing(); else { tickPlacing(); commitPlacing(); } return; }
+    if (e.button === 0 && V.beacons.length && !OFF[G.player.tool] && !V.auto) { const rc = canvas.getBoundingClientRect(), lk = !!document.pointerLockElement, hit = beaconAt(lk ? rc.left + rc.width / 2 : e.clientX, lk ? rc.top + rc.height / 2 : e.clientY); if (hit) { e.stopImmediatePropagation(); finishPlace(hit); return; } }
     // the left button is the hands: whatever F would do here
     if (e.button === 0 && !OFF[G.player.tool] && V.ctx && V.ctx.kind !== 'hint' && V.ctx.kind !== 'drop') { e.stopImmediatePropagation(); V.mDown = true; V.fTap = true; return; }
     const ctx = V.ctx;
@@ -1298,5 +1407,5 @@
     for (const mid of pl.inst) { const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid), set = !ln || pm.need - pm.got < 1e-6; if (!set && !(c && c.itemId === ln.itemId)) continue; if (!m) return { mid, x: V.structs.get(pr.id).x, z: V.structs.get(pr.id).z, site: true }; const hw = C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null; worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); wM.lerpVectors(wA, wB, 0.5); const w = { x: wM.x, y: wM.y, z: wM.z }; wM.project(G.camera); return { mid, ...w, sx: (wM.x * 0.5 + 0.5) * reach.w, sy: (-wM.y * 0.5 + 0.5) * reach.h, set }; }
     return null;
   }
-  window.__construct = { nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };
+  window.__construct = { beaconAt, finishPlace, nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };
 })();
