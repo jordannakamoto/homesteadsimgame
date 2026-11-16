@@ -118,6 +118,36 @@ body.building #view { cursor: default; }
 .binfo { justify-content: center; gap: 1px; padding-right: 5px; max-width: 300px; align-self: stretch; }
 .bwinprev .bwp { display: block; background: rgba(0, 0, 0, 0.22); border-radius: 6px; color: var(--ink); }
 .bwinprev .bwp path { stroke-linecap: square; }
+/* the window and door designer: boxed sections, sizes with steppers you can also type into, feedback badges */
+#bdecor { align-items: stretch; }
+.bsec { display: flex; flex-direction: column; gap: 3px; padding: 4px 8px 6px; border: 1px solid var(--panel-edge); border-radius: 8px; background: rgba(255, 255, 255, 0.025); }
+.bsech { font: 700 10px var(--font-body); letter-spacing: 0.09em; text-transform: uppercase; color: var(--accent); opacity: 0.85; }
+.bsecb { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 4px 10px; }
+.bnumi { background: rgba(0, 0, 0, 0.3); border: 1px solid var(--panel-edge); border-radius: 7px; padding: 1px; gap: 0; }
+.bnumi:focus-within { border-color: var(--blue); }
+.bnumi .bchip { border: 0; background: none; padding: 2px 6px; display: flex; align-items: center; min-height: 26px; }
+.bnumi .bchip:hover { background: rgba(255, 255, 255, 0.08); }
+.bnumi input { width: 44px; background: none; border: 0; color: var(--ink); font: 700 14px var(--font-body); font-variant-numeric: tabular-nums; text-align: right; outline: none; padding: 0 2px; }
+.bnumi .bu { color: var(--ink-dim); font-size: 11.5px; padding-right: 3px; }
+.bnote { font-size: 10px; color: var(--ink-dim); line-height: 1.1; text-align: center; }
+.bnote.bad { color: #ffb4a3; }
+.bbadges { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 3px; max-width: 330px; align-self: center; }
+.bbadge { font-size: 11px; line-height: 1; padding: 4px 7px; border-radius: 999px; background: rgba(255, 255, 255, 0.07); border: 1px solid var(--panel-edge); color: var(--ink); white-space: nowrap; }
+.bbadge.k-price { font-weight: 700; color: var(--accent); border-color: rgba(226, 182, 90, 0.45); }
+.bbadge.k-mto { color: #9fe3ff; border-color: rgba(159, 227, 255, 0.45); }
+.bbadge.k-std { color: #b9e3a6; border-color: rgba(185, 227, 166, 0.4); }
+.bbadge.k-bad { color: #ffc9bd; border-color: rgba(224, 118, 95, 0.6); background: rgba(224, 118, 95, 0.12); white-space: normal; }
+#bdesign { right: 12px; bottom: 120px; width: 318px; max-height: calc(100vh - 230px); overflow-y: auto; padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 7px; z-index: 6; scrollbar-width: thin; }
+#bdesign[hidden] { display: none; }
+#bdesign .bdtitle { font-family: var(--font-display); font-size: 15px; color: var(--accent); }
+#bdesign .bwinprev { align-self: center; }
+#bdesign .bwinprev .bwp { width: 296px; height: auto; }
+#bdesign .bsec { padding: 5px 8px 7px; }
+#bdesign .bitems { flex-wrap: wrap; }
+body.touch #bdesign { right: 6px; left: 6px; width: auto; max-height: 38vh; }
+/* edge handles on a selected door or window: a bar you drag */
+.bhandle.oh-ew { width: 10px; height: 30px; margin: -15px 0 0 -5px; border-radius: 5px; border-width: 2px; border-color: #9fe3ff; background: #e9f9ff; }
+.bhandle.oh-ns { width: 30px; height: 10px; margin: -5px 0 0 -15px; border-radius: 5px; border-width: 2px; border-color: #9fe3ff; background: #e9f9ff; }
 .binfo .btitle { font-family: var(--font-display); font-size: 14.5px; line-height: 1.15; color: var(--accent); white-space: nowrap; }
 .binfo .bnum { color: var(--ink); font-size: 12px; line-height: 1.2; white-space: normal; }
 #bmain { display: flex; gap: 8px; align-items: stretch; justify-content: center; border-top: 1px solid var(--panel-edge); padding-top: 3px; }

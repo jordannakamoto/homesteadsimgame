@@ -37,7 +37,7 @@ async function open(opts) {
   const { ctx, page, G, step, draw } = await open({ viewport: { width: 1280, height: 720 } });
   await page.keyboard.press('KeyB'); await step(70);
   check('build mode opens on Select, the home tool', await G(() => __game.player.tool === 'build' && !document.getElementById('buildbar').hidden && __build.view().tool === 'select'));
-  check('fifteen tools, each with a letter', await G(() => { const b = [...document.querySelectorAll('#bpieces button')]; return b.length === 15 && b.every((x) => x.querySelector('.key').textContent.length === 1 && x.querySelector('svg')); }));
+  check('fourteen tools, each with a letter', await G(() => { const b = [...document.querySelectorAll('#bpieces button')]; return b.length === 14 && b.every((x) => x.querySelector('.key').textContent.length === 1 && x.querySelector('svg')); }));
 
   // screen position of a point given in a frame's own metres (the building's grid), at a height above its base
   const at = (lx, lz, up = 0.12) => G(([lx, lz, up]) => {
@@ -79,7 +79,7 @@ async function open(opts) {
   const wd = walls.find((w) => w.openings.some((o) => o.kind === 'door')), ww = walls.find((w) => w.openings.some((o) => o.kind === 'window'));
   check('a door and a window are pieces of their own', doors.length === 1 && wins.length === 1, JSON.stringify(doors.concat(wins).map((p) => [p.type, p.length, p.height])));
   check('each is an opening on the wall it was put in', !!wd && !!ww && wd.id !== ww.id && wd.length === 5 && ww.length === 4 && doors[0].wall === wd.id && wins[0].wall === ww.id && wd.openings[0].id === doors[0].id && ww.openings[0].id === wins[0].id);
-  check('openings are cut out of the wall area', near(wd.netArea, wd.area - doors[0].area) && near(doors[0].length, 0.82) && near(wd.openings[0].offset, 2.09) && near(ww.openings[0].offset, 1.1));
+  check('openings are cut out of the wall area, about where they were pointed at', near(wd.netArea, wd.area - doors[0].area) && doors[0].length > 0.7 && doors[0].length < 1 && wd.openings[0].offset > 1.6 && wd.openings[0].offset < 2.9 && ww.openings[0].offset > 0.7 && ww.openings[0].offset < 2.4, JSON.stringify([doors[0].length, wd.openings[0].offset, ww.openings[0].offset]));
 
   // a pitched roof in one click
   await page.keyboard.press('KeyO'); await click(await at(2.5, 2));

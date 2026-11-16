@@ -64,6 +64,19 @@
     "o-transom": '<rect x="4" y="9" width="16" height="5" rx=".5"/><path d="M9.300 9v5M14.700 9v5M4 19h16"/>',
     "o-arched": '<path d="M7 20V10a5 5 0 0 1 10 0v10zM12 5v15M7 13h10"/>',
     "o-clerestory": '<rect x="5" y="9.500" width="14" height="5" rx=".5"/><path d="M5 9.500l3-3h8l3 3"/>',
+    "gr-none": '<rect x="5" y="4" width="14" height="16" rx=".5"/>',
+    "gr-colonial": '<rect x="5" y="4" width="14" height="16" rx=".5"/><path d="M9.700 4v16M14.300 4v16M5 9.300h14M5 14.700h14"/>',
+    "gr-cottage": '<rect x="5" y="4" width="14" height="16" rx=".5"/><path d="M5 10h14M9.700 4v6M14.300 4v6"/>',
+    "gr-farmhouse": '<rect x="5" y="4" width="14" height="16" rx=".5"/><path d="M12 4v16M5 12h14"/>',
+    "gr-craftsman": '<rect x="5" y="4" width="14" height="16" rx=".5"/><path d="M5 9.500h14M9.700 4v5.500M14.300 4v5.500"/>',
+    "gr-prairie": '<rect x="5" y="4" width="14" height="16" rx=".5"/><path d="M7.500 4v16M16.500 4v16M5 6.500h14M5 17.500h14"/>',
+    "gr-diamond": '<rect x="5" y="4" width="14" height="16" rx=".5"/><path d="M5 9l5-5M5 15l11-11M5 20l14-14M10 20l9-9M16 20l3-3M5 9l11 11M5 15l5 5M10 4l9 9M16 4l3 3"/>',
+    "gr-sunburst": '<path d="M3 17a9 9 0 0 1 18 0z"/><path d="M12 17V8M12 17l-6.400-6.400M12 17l6.400-6.400M12 17H3.500M12 17h8.500"/>',
+    "sh-rect": '<rect x="6" y="4" width="12" height="16" rx=".5"/>',
+    "sh-arch": '<path d="M6 20V10a6 6 0 0 1 12 0v10z"/>',
+    "sh-gothic": '<path d="M6 20v-9c0-3.500 3-6 6-8 3 2 6 4.500 6 8v9z"/>',
+    "sh-half": '<path d="M3 17a9 9 0 0 1 18 0z"/>',
+    "sh-round": '<circle cx="12" cy="12" r="8"/>',
     "o-full_panel": '<rect x="7" y="2.5" width="10" height="18.5" rx=".3"/><path d="M3 21h18M9.5 5l3 3"/>',
     "o-window_wall": '<rect x="2.5" y="3" width="19" height="18" rx=".3"/><path d="M8.8 3v18M15.2 3v18M9.5 6l2 2"/>',
     "o-slot": '<rect x="5" y="3" width="3.5" height="13" rx=".3"/><rect x="10.3" y="7" width="3.5" height="13" rx=".3"/><rect x="15.6" y="4.5" width="3.5" height="11" rx=".3"/>',
@@ -199,9 +212,9 @@
 
   /* ---------- the window designer's drawing: the window to scale on its wall, floor to eave ---------- */
   function winPreview(g) {
-    const H = 92,
-      W = 132,
-      k = (H - 14) / g.wallH,
+    const H = 128,
+      W = 176,
+      k = Math.min((H - 22) / Math.max(g.wallH, g.h + g.sill + 0.2), (W - 48) / Math.max(g.w, 0.5)),
       L = g.look,
       ww = g.w * k,
       wh = g.h * k,
@@ -265,37 +278,44 @@
           for (let u = 1; u < n; u++) ln((a + b) / 2, q, (a + b) / 2 + Math.cos((Math.PI * u) / n) * (b - a), q - Math.sin((Math.PI * u) / n) * (b - a), 0.8);
         }
       }
-    let shut = "";
-    if (g.shutter && (shape === "rect" || shape === "arch") && g.w < 2.2) {
-      const sw = Math.min(0.75, g.w / 2) * k,
-        gp = 0.04 * k;
-      shut = '<g fill="' + g.shutter + '" stroke="rgba(0,0,0,.35)" stroke-width=".6"><rect x="' + f(x0 - gp - sw) + '" y="' + f(y0) + '" width="' + f(sw) + '" height="' + f(wh) + '"/><rect x="' + f(x0 + ww + gp) + '" y="' + f(y0) + '" width="' + f(sw) + '" height="' + f(wh) + '"/></g>';
-    }
+    // dimension lines: the width over it, the height beside it, the sill from the floor
+    const dl = (x1, y1, x2, y2, tx, ty, t, anchor) => '<path d="M' + f(x1) + " " + f(y1) + "L" + f(x2) + " " + f(y2) + '" stroke="#9fe3ff" stroke-width=".8" marker-start="url(#' + "IDa" + ')" marker-end="url(#' + "IDa" + ')"/><text x="' + f(tx) + '" y="' + f(ty) + '" font-size="8" fill="#9fe3ff" text-anchor="' + (anchor || "middle") + '">' + t + "</text>";
+    const m2 = (v) => (Math.round(v * 100) / 100).toFixed(2);
+    let dims = dl(x0, y0 - 5, x0 + ww, y0 - 5, x0 + ww / 2, y0 - 8, m2(g.w)) + dl(x0 + ww + 5, y0, x0 + ww + 5, y1, x0 + ww + 8, (y0 + y1) / 2 + 3, m2(g.h), "start");
+    if (g.sill > 0.04) dims += dl(x0 - 5, y1, x0 - 5, yF, x0 - 8, (y1 + yF) / 2 + 3, m2(g.sill), "end");
     const id = "wpc" + ((Math.random() * 1e6) | 0);
+    dims = dims.split("IDa").join(id + "a");
     return (
       '<svg class="bwp" viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '" aria-label="Window preview">' +
-      '<defs><clipPath id="' + id + '">' + glass + '</clipPath><linearGradient id="' + id + 'g" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#cfe3ef"/><stop offset=".55" stop-color="#7d9fb4"/><stop offset=".56" stop-color="#4c5f58"/><stop offset="1" stop-color="#3a4741"/></linearGradient></defs>' +
+      '<defs><marker id="' + id + 'a" viewBox="0 0 6 6" refX="3" refY="3" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L6 3L0 6z" fill="#9fe3ff"/></marker><clipPath id="' + id + '">' + glass + '</clipPath><linearGradient id="' + id + 'g" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#cfe3ef"/><stop offset=".55" stop-color="#7d9fb4"/><stop offset=".56" stop-color="#4c5f58"/><stop offset="1" stop-color="#3a4741"/></linearGradient></defs>' +
       '<rect x="0" y="' + f(yF - g.wallH * k) + '" width="' + W + '" height="' + f(g.wallH * k) + '" fill="rgba(255,255,255,.06)"/>' +
       '<path d="M0 ' + f(yF) + "H" + W + '" stroke="currentColor" stroke-width="1.2" opacity=".6"/>' +
       '<path d="M0 ' + f(yF - g.wallH * k) + "H" + W + '" stroke="currentColor" stroke-width=".8" stroke-dasharray="3 3" opacity=".4"/>' +
-      shut +
       '<rect x="' + f(x0) + '" y="' + f(y0) + '" width="' + f(ww) + '" height="' + f(wh) + '" fill="' + g.finish + '" stroke="rgba(0,0,0,.4)" stroke-width=".6"/>' +
       '<g fill="url(#' + id + 'g)">' + glass + "</g>" +
       '<g clip-path="url(#' + id + ')" stroke="' + g.finish + '" fill="none">' + lines + "</g>" +
-      '<text x="' + f(W / 2) + '" y="9" text-anchor="middle" font-size="8.5" fill="currentColor">' + (Math.round(g.w * 100) / 100).toFixed(2) + " × " + (Math.round(g.h * 100) / 100).toFixed(2) + " m</text>" +
-      '<text x="' + f(x0 + ww + 3) + '" y="' + f(Math.min(yF - 2, y1 + 3)) + '" font-size="7.5" fill="currentColor" opacity=".75">sill ' + (Math.round(g.sill * 100) / 100).toFixed(2) + "</text>" +
+      dims +
       "</svg>"
     );
   }
 
   /* ---------- the options strip and inspector ---------- */
   const opts = $("bopts"),
-    row2 = $("bdecor");
+    row2 = $("bdecor"),
+    // the window and door designer: a panel docked at the right, above the bar, clear of the wall being worked on
+    dpanel = document.createElement("div");
+  dpanel.id = "bdesign";
+  dpanel.className = "panel";
+  dpanel.hidden = true;
+  document.body.appendChild(dpanel);
   let groups = [];
   const keyHint = (k) => (k ? "<kbd>" + esc(k) + "</kbd>" : "");
   function groupHtml(g, n) {
     const lab = (extra) => '<span class="blab">' + esc(g.label || "") + (extra !== undefined ? ' <b class="bval">' + esc(extra) + "</b>" : "") + keyHint(g.key) + "</span>";
     const cur = g.items ? g.items.find((x) => x.v === g.value) : null;
+    if (g.type === "num")
+      return '<div class="bgroup bnumg">' + lab() + '<div class="bitems bnumi"><button type="button" class="bchip" data-g="' + n + '" data-i="-1" aria-label="Less">' + svg(I.minus, 13) + '</button><input type="text" inputmode="decimal" autocomplete="off" data-g="' + n + '" value="' + esc(g.value) + '" aria-label="' + esc(g.label) + '"><span class="bu">' + esc(g.unit || "") + '</span><button type="button" class="bchip" data-g="' + n + '" data-i="1" aria-label="More">' + svg(I.plus, 13) + "</button></div>" + (g.note ? '<span class="bnote' + (g.bad ? " bad" : "") + '">' + esc(g.note) + "</span>" : "") + "</div>";
+    if (g.type === "badges") return '<div class="bgroup bbadges">' + g.items.map((x) => '<span class="bbadge' + (x.k ? " k-" + x.k : "") + '"' + (x.title ? ' title="' + esc(x.title) + '"' : "") + ">" + esc(x.text) + "</span>").join("") + "</div>";
     if (g.type === "winprev") return '<div class="bgroup bwinprev">' + lab() + winPreview(g) + "</div>";
     if (g.type === "info") return '<div class="bgroup binfo"><span class="btitle">' + esc(g.title) + '</span><span class="bnum">' + esc(g.text) + "</span></div>";
     if (g.type === "swatches") return '<div class="bgroup">' + lab(cur ? cur.name : g.value === null ? "mixed" : "") + '<div class="bitems">' + g.items.map((x, m) => '<button type="button" class="bsw" data-g="' + n + '" data-i="' + m + '" title="' + esc(x.name) + '" aria-label="' + esc(x.name) + '" aria-pressed="' + (x.v === g.value) + '">' + swatch(x.sw) + "</button>").join("") + "</div></div>";
@@ -312,24 +332,41 @@
   function renderOpts(v) {
     groups = v.groups;
     const first = [],
-      second = [];
+      second = [],
+      third = [];
     // what can be done with the selection sits in the top row
     const acts = [];
+    // groups with a section name are boxed together under it
+    let sec = null;
+    const put = (arr, html, g) => {
+      if (g.sec) {
+        if (!sec || sec.name !== g.sec || sec.arr !== arr) ((sec = { name: g.sec, arr, html: [] }), arr.push(sec));
+        sec.html.push(html);
+      } else ((sec = null), arr.push(html));
+    };
     groups.forEach((g, n) => {
       if (g.type === "action" && g.id.startsWith("s:")) acts.push('<button type="button" class="bchip' + (g.danger ? " danger" : "") + '" data-g="' + n + '" title="' + esc(g.title || g.name) + (g.key ? " (" + esc(g.key) + ")" : "") + '">' + svg(I[g.icon], 15) + "<span>" + esc(g.name) + "</span></button>");
-      else (g.row === 2 ? second : first).push(groupHtml(g, n));
+      else put(g.row === "d" ? third : g.row === 2 ? second : first, groupHtml(g, n), g);
     });
+    const flat = (arr) => arr.map((x) => (typeof x === "string" ? x : '<div class="bsec"><div class="bsech">' + esc(x.name) + '</div><div class="bsecb">' + x.html.join("") + "</div></div>")).join("");
     $("bacts").innerHTML = acts.join("");
-    opts.innerHTML = first.join("");
+    opts.innerHTML = flat(first);
     opts.hidden = !first.length;
-    row2.innerHTML = second.join("");
+    row2.innerHTML = flat(second);
+    const was = dpanel.querySelector("input:focus");
+    dpanel.innerHTML = third.length ? '<div class="bdtitle">' + esc(v.designTitle || "Designer") + "</div>" + flat(third) : "";
+    dpanel.hidden = !third.length;
+    if (was) {
+      const again = dpanel.querySelector('input[data-g="' + was.dataset.g + '"]');
+      again && again.focus();
+    }
     row2.hidden = !second.length;
   }
   const onPick = (e) => {
     const b = e.target.closest("button[data-g]");
     if (!b) return;
     const g = groups[+b.dataset.g];
-    BL.choose(g.id, g.type === "stepper" ? +b.dataset.i : g.items ? g.items[+b.dataset.i].v : undefined);
+    BL.choose(g.id, g.type === "stepper" ? +b.dataset.i : g.type === "num" ? { step: +b.dataset.i } : g.items ? g.items[+b.dataset.i].v : undefined);
     back();
   };
   opts.addEventListener("click", onPick);
@@ -352,6 +389,22 @@
     if (val) val.textContent = cur ? cur.name : g.value === null ? "mixed" : "";
   });
   // typed properties of the selection
+  dpanel.addEventListener("click", onPick);
+  for (const el of [row2, dpanel]) {
+    el.addEventListener("keydown", (e) => {
+      if (e.target.tagName !== "INPUT") return;
+      e.stopPropagation();
+      if (e.key === "Enter") e.target.blur();
+      else if (e.key === "Escape") ((e.target.value = e.target.defaultValue), e.target.blur(), back());
+    });
+    el.addEventListener("change", (e) => {
+      if (e.target.tagName !== "INPUT") return;
+      const g = groups[+e.target.dataset.g],
+        v = parseFloat(e.target.value.replace(",", "."));
+      isFinite(v) ? BL.choose(g.id, v) : (e.target.value = e.target.defaultValue);
+      back();
+    });
+  }
   opts.addEventListener("keydown", (e) => {
     if (e.target.tagName !== "INPUT") return;
     e.stopPropagation();
@@ -385,8 +438,8 @@
       over.appendChild(d);
       return d;
     });
-  const dimEls = pool("bdim", 4, '<input type="text" inputmode="decimal" autocomplete="off" size="4" aria-label="Exact size"><span class="u"></span><span class="t"></span><em></em>'),
-    handleEls = pool("bhandle", 2),
+  const dimEls = pool("bdim", 8, '<input type="text" inputmode="decimal" autocomplete="off" size="4" aria-label="Exact size"><span class="u"></span><span class="t"></span><em></em>'),
+    handleEls = pool("bhandle", 6),
     measEls = pool("bmeas", 9, '<span></span><button type="button" aria-label="Clear this measurement">' + svg('<path d="M7 7l10 10M17 7L7 17"/>', 12) + "</button>");
   // port dots on equipment (drag or click from one to another to run a wire or pipe) and a tag on each run
   const portEls = pool("bport", 48, "<span></span>");
@@ -471,7 +524,7 @@
     py = -1,
     cursor = "";
   function frame() {
-    if (!B.on) return void (sched.hidden || (sched.hidden = true), (uiV = -1));
+    if (!B.on) return void (sched.hidden || (sched.hidden = true), dpanel.hidden || (dpanel.hidden = true), (uiV = -1));
     if (uiV !== B.uiVer) {
       uiV = B.uiVer;
       const v = BL.view();
@@ -535,7 +588,10 @@
       handleEls.forEach((d, n) => {
         const q = ov.handles[n];
         show(d, !!q);
-        q && place(d, q[0], q[1], q[2]);
+        if (!q) return;
+        const cls = "bhandle" + (q[4] ? " oh-" + q[4] : "");
+        if (d._c !== cls) ((d._c = cls), (d.className = cls));
+        place(d, q[0], q[1], q[2]);
       });
       measEls.forEach((d, n) => {
         const q = ov.meas[n];
@@ -574,7 +630,16 @@
         y = Math.min(B.ptr.touch ? py - 46 : py + 20, top - 34);
       lb.style.transform = "translate(" + Math.round(x) + "px," + Math.round(y) + "px)";
     }
-    const want = B.tool === "select" ? (B.move ? "grabbing" : B.hoverId ? "pointer" : "default") : B.tapMode ? "copy" : "crosshair";
+    if (!dpanel.hidden) {
+      const top = Math.round(window.innerHeight - bar.getBoundingClientRect().top + 8);
+      if (dpanel._b !== top) ((dpanel._b = top), (dpanel.style.bottom = top + "px"));
+    }
+    if (B.on === false && !dpanel.hidden) dpanel.hidden = true;
+    // over a door or window's edge handle: the resize arrows
+    let edge = B.ores ? (B.ores.k === "l" || B.ores.k === "r" ? "ew-resize" : "ns-resize") : "";
+    if (!edge && B.ov.handles && B.ov.handles.length && B.ov.handles[0][4] && !B.ptr.touch)
+      for (const d of handleEls) if (!d.hidden && Math.hypot(d._x - B.ptr.x, d._y - B.ptr.y) < 13) edge = d.className.includes("oh-ew") ? "ew-resize" : "ns-resize";
+    const want = edge || (B.tool === "select" ? (B.move ? "grabbing" : B.hoverId ? "pointer" : "default") : B.tapMode ? "copy" : B.fover ? "grab" : "crosshair");
     if (want !== cursor) canvas.style.cursor = cursor = want;
   }
   B.frameHook = frame;
