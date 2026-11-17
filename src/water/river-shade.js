@@ -19,7 +19,8 @@ export const RIVER_SHADE = /* glsl */ `
   uniform float uTime, uTurbid, uSkyK, uTPM, uSnap; uniform sampler2D uTex, uSkyMap, uFoamTex;
   uniform vec3 uSunDir, uSunCol, uAmb, uSky, uZenith;
   uniform vec4 uWin;                       // the live simulation's window (x0, z0, x1, z1); x1 < x0 when there is none
-  uniform vec4 uRip[12];                   // ripples: x, z, start time, strength
+  uniform samplerCube uEnv; uniform vec4 uEnvPos;          // the reflection probe (reflect-probe.js): where, and w on/off
+  uniform vec4 uRip[24];                   // ripples: x, z, start time, strength
   const mat4 BAYER = mat4(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
   float bayer4(vec2 c) { ivec2 i = ivec2(mod(c, 4.0)); return (BAYER[i.y][i.x] + 0.5) / 16.0; }
   // how far the live water has taken over at p: 0 outside its window, 1 more than 4 m inside, dithered between
@@ -83,15 +84,15 @@ export const RIVER_SHADE = /* glsl */ `
     // and the earlier look's flowed ripple texture, at a lighter hand, each layer turned so its tiling never lines up
     mat2 r1 = mat2(0.799, 0.602, -0.602, 0.799), r2 = mat2(0.326, -0.946, 0.946, 0.326);
     vec2 uvA = r1 * q * 0.37 - v * t0 * 0.6, uvB = r2 * q * 0.37 - v * t1 * 0.6 + 0.37;
-    g += (mix(texture2D(uTex, uvA).rg, texture2D(uTex, uvB).rg, wb) - 0.5) * 0.35 * (0.25 + rough);
+    g += (mix(texture2D(uTex, uvA).rg, texture2D(uTex, uvB).rg, wb) - 0.5) * 0.2 * (0.25 + rough);
     // the finest ruffle, too small to take differences of: tilts each spot a little at random
     vec3 rq = vec3(q * 9.0 - v * uTime * 9.0, uTime * 1.7);
-    g += vec2(snoise(rq), snoise(rq + 31.7)) * 0.025 * rough;
+    g += vec2(snoise(rq), snoise(rq + 31.7)) * 0.012 * rough;
     // ripples spreading where the water was touched: a travelling ring in the slope
-    for (int i = 0; i < 12; i++) {
+    for (int i = 0; i < 24; i++) {
       vec4 r = uRip[i];
       float age = uTime - r.z;
-      if (age < 0.0 || age > 3.0 || r.w <= 0.0) continue;
+      if (age < 0.0 || age > 2.4 || r.w <= 0.0) continue;
       vec2 dp = q - r.xy; float dd = length(dp) + 1e-4;
       float R = 0.12 + age * 0.75, wv = 0.05 + age * 0.05;
       float x = (dd - R) / wv;
@@ -114,13 +115,16 @@ export const RIVER_SHADE = /* glsl */ `
     vec3 trees = uAmb * vec3(0.17, 0.24, 0.14) + uSunCol * vec3(0.06, 0.09, 0.04) * (0.6 + 0.4 * snoise(vec3(az * 9.0, R.y * 14.0, 0.0)));
     vec3 skyC = mix(uSky, uZenith, pow(clamp(R.y, 0.0, 1.0), 0.7));
     vec3 sky = mix(mix(bank, trees, smoothstep(0.0, 0.06, R.y)), skyC, smoothstep(line - 0.04, line + 0.04, R.y));
+    // near the player, the real surroundings from the probe, blurred where the water is rough
+    float envK = uEnvPos.w * (1.0 - smoothstep(25.0, 50.0, distance(q, uEnvPos.xz)));
+    if (envK > 0.0) sky = mix(sky, textureLod(uEnv, R, 2.0 + 2.5 * rough).rgb, envK);
     float sd = max(dot(R, uSunDir), 0.0);
     // the sun on the water: a soft sheen over the rippled surface (a mirror-sharp glint on smooth noise would draw
     // rings like a fingerprint), broken into sparkles by the smallest wavelets, more where the water is rough
     vec3 H = normalize(V + uSunDir);
     float nh = max(dot(N, H), 0.0);
     float sparkle = step(0.9, snoise(vec3(q * 9.0 - v * uTime * 9.0, uTime * 2.0)) * 0.5 + 0.5) * smoothstep(0.4, 1.0, rough);   // only on broken water
-    vec3 glint = uSunCol * (pow(nh, 160.0) * (0.25 + 1.2 * sparkle) + pow(sd, 400.0) * 1.2 * sparkle) * skyVis * step(line, R.y);   // no sun where the reflection is trees
+    vec3 glint = uSunCol * (pow(nh, 160.0) * 0.4 + pow(sd, 400.0) * 0.5) * sparkle * skyVis * step(line, R.y);   // only glints on broken water, no wide sheen; none where the reflection is trees
     float path = d * (1.0 + 1.0 / max(V.y, 0.25));
     // loss a metre: stream water carries fine sediment and dissolved organic matter even on a fair day (red lost
     // first, then blue: the olive-green to tea-brown of a real brook), much more when it runs muddy. Shallows show
@@ -149,7 +153,7 @@ export const RIVER_SHADE = /* glsl */ `
     vec3 F = mix(texture2D(uFoamTex, fa).rgb, texture2D(uFoamTex, fb).rgb, wb);
     vec3 F2 = mix(texture2D(uFoamTex, fa * 0.37 + 0.2).rgb, texture2D(uFoamTex, fb * 0.37 + 0.7).rgb, wb);
     float lacework = F.r * 0.55 + F.g * 0.45;
-    float amount = clamp(foamIn * (0.55 + 0.9 * F2.b) + (1.0 - smoothstep(0.0, 0.05, d)) * 0.35 * F2.b, 0.0, 1.0);
+    float amount = clamp(foamIn * (0.55 + 0.9 * F2.b) + (1.0 - smoothstep(0.0, 0.05, d)) * 0.12 * F2.b, 0.0, 1.0);
     float th = 1.0 - amount;
     float fm = smoothstep(th - 0.06, th + 0.14, lacework * 0.8 + F2.b * 0.35) * smoothstep(0.02, 0.12, amount);
     // dense white water is a sheet of foam, only softly mottled; the lace shows where it thins

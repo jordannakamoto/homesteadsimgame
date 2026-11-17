@@ -7709,6 +7709,7 @@
   }
   function exit() {
     B.on = false;
+    { const dp = document.getElementById("bdesign"); if (dp) dp.hidden = true; }   // the designer panel goes with build mode
     for (const S of B.structs) B.dirty.add(S);
     if (B.camSaved) {
       G.cam.pitch = B.camSaved.pitch;

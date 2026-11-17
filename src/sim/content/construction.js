@@ -80,7 +80,7 @@ export const ROOFWALK = Object.freeze({ slideK: 0.5, slideMps: 0.55, ropeM: 14, 
 // ---- scaffolding: rented by the day from the Build panel, it arrives as a bundle of frames and planks by the stacks. Set up
 // along a wall it is a platform a bay long with a guard rail and a ladder at one end; walk into the ladder to climb, walk the
 // plank, and the top plates, rafter tails, roof edge and the top of the siding are all in reach. Collected when the days run out.
-export const SCAFFOLD = Object.freeze({ itemId: 'scaffold_bay', usdPerDay: 35, days: 3, bayM: 2.6, widthM: 0.75, belowTopM: 1.35, minDeckM: 0.9, standOffM: 0.3, why: 'A platform along the wall: safer and quicker than a ladder for work up high, and you can walk along it.' });
+export const SCAFFOLD = Object.freeze({ itemId: 'scaffold_bay', usdPerDay: 35, days: 3, bayM: 2.6, widthM: 0.75, belowTopM: 1.35, minDeckM: 0.9, standOffM: 0.3, towerM: 1.9, towerBelowTopM: 0.6, why: 'Steel scaffolding: a platform along a wall, or a tower on the floor inside the frame for the ridge and rafters. Safer and quicker than a ladder, and you can walk along it.' });
 export const ITEMS_SCAFFOLD = Object.freeze({
   scaffold_bay: { id: 'scaffold_bay', name: 'Scaffold bay (rented, per day)', category: 'rental', unit: 'day', massKgPerUnit: 0, priceUsd: SCAFFOLD.usdPerDay, blurb: 'Two frames, braces, planks, a guard rail and a ladder, set up along one wall' },
 });
