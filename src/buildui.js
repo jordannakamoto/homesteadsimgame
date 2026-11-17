@@ -127,6 +127,8 @@
     "r-hip": '<path d="M2.500 17.500l6-8.500h7l6 8.500zM8.500 9l2.500 8.500M15.500 9L13 17.500"/>',
     "r-shed": '<path d="M3.500 18.500V8l17 6.500v4z"/>',
     "r-flat": '<path d="M3 12.500h18V17H3zM5 12.500v-2.500h14v2.500"/>',
+    "r-gambrel": '<path d="M2.500 18V13.500L6 8.500 12 5.500 18 8.500 21.500 13.500V18M6 8.500h12"/>',
+    "r-saltbox": '<path d="M3 18v-6L9 5.500 21 15v3zM9 5.500V18"/>',
     "r-steep": '<path d="M6.500 19.500L12 4l5.500 15.500z"/>',
     "t-none": '<circle cx="12" cy="12" r="7" stroke-dasharray="2.500 3"/>',
     "t-cone": '<path d="M5 19.500L12 4.500l7 15z"/>',
@@ -147,6 +149,10 @@
     else if (kind === "boards") d += "<path" + st + ' stroke-width="1.300" d="M0 6h24M0 12h24M0 18h24M9 0v6M16 6v6M6 12v6M14 18v6"/>';
     else if (kind === "check") d += '<path fill="' + b + '" d="M0 0h8v8H0zM16 0h8v8h-8zM8 8h8v8H8zM0 16h8v8H0zM16 16h8v8h-8z"/>';
     else if (kind === "roof") d += "<path" + st + ' stroke-width="1.400" d="M0 6q3 3 6 0t6 0 6 0 6 0M0 12q3 3 6 0t6 0 6 0 6 0M0 18q3 3 6 0t6 0 6 0 6 0"/>';
+    else if (kind === "asph") d += "<path" + st + ' stroke-width="1.100" d="M0 5h24M0 10h24M0 15h24M0 20h24M6 0v5M14 0v5M22 0v5M2 5v5M10 5v5M18 5v5M6 10v5M14 10v5M22 10v5M2 15v5M10 15v5M18 15v5M6 20v4M14 20v4"/>';
+    else if (kind === "seam") d += "<path" + st + ' stroke-width="1.500" d="M4 0v24M12 0v24M20 0v24"/>';
+    else if (kind === "corr") d += "<path" + st + ' stroke-width="1" d="M2 0v24M5 0v24M8 0v24M11 0v24M14 0v24M17 0v24M20 0v24M23 0v24"/>';
+    else if (kind === "green") d += '<g fill="' + b + '"><circle cx="5" cy="5" r="2.500"/><circle cx="14" cy="4" r="2"/><circle cx="20" cy="9" r="2.600"/><circle cx="9" cy="12" r="2.400"/><circle cx="4" cy="19" r="2.200"/><circle cx="15" cy="17" r="2.700"/><circle cx="21" cy="21" r="1.800"/></g><circle cx="11" cy="20" r="1.600" fill="#9a5a46"/><circle cx="17" cy="11" r="1.400" fill="#b5b04e"/>';
     else if (kind === "path") d += '<g fill="' + b + '"><circle cx="5" cy="6" r="2.200"/><circle cx="14" cy="4.500" r="1.800"/><circle cx="19" cy="11" r="2.300"/><circle cx="9" cy="13" r="2"/><circle cx="4.500" cy="19" r="1.800"/><circle cx="15" cy="19" r="2.300"/></g>';
     return '<svg viewBox="0 0 24 24" aria-hidden="true">' + d + "</svg>";
   }
