@@ -13,6 +13,7 @@
 import { MATERIALS } from './materials.js';
 import { INGREDIENTS, foodId } from './food-catalog.js';
 import { ITEMS_GARDEN, GARDEN_CATEGORIES } from './content/garden-items.js';
+import { ITEMS_LANDSCAPE, LANDSCAPE_CATEGORIES } from './content/landscape.js';
 import { openingItems, openingItemFromId } from './content/openings.js';
 
 export const ITEM_UNITS = Object.freeze(['each', 'm', 'm2', 'm3', 'kg', 'L']);
@@ -33,6 +34,7 @@ export const ITEM_CATEGORIES = Object.freeze([
   { id: 'tools_hand', name: 'Hand tools', blurb: 'Work anywhere, no power needed' },
   { id: 'tools_power', name: 'Power tools', blurb: 'Need electricity' },
   ...GARDEN_CATEGORIES,
+  ...LANDSCAPE_CATEGORIES,
 ]);
 export const isToolCategory = (c) => c === 'tools_hand' || c === 'tools_power';
 
@@ -161,6 +163,9 @@ for (const { dims, massKgPerUnit, ...o } of Object.values(openingItems())) add({
 
 // ---- the garden: seeds, garden tools, amendments and produce (src/sim/content/garden-items.js)
 for (const g of ITEMS_GARDEN) add(g);
+
+// ---- landscaping: trowel and rake, bark, sand, grass seed, pavers, boulders and nursery plants (src/sim/content/landscape.js)
+for (const g of ITEMS_LANDSCAPE) add(g);
 
 // Read-only. A made-to-order door or window (any size off the store's list) is not listed but is made from its id the
 // first time it is asked for, the same every time, so saves and orders that name one keep working.

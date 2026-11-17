@@ -125,7 +125,7 @@
     const min = 0.3;
     if (d < 1e-4) { dx = Math.sin(P.face); dz = Math.cos(P.face); d = 1; aim.dist = min; }
     else aim.dist = clamp(d, min, R);
-    aim.x = P.x + (dx / d) * aim.dist; aim.z = P.z + (dz / d) * aim.dist; aim.y = G.heightAt(aim.x, aim.z);
+    aim.x = P.x + (dx / d) * aim.dist; aim.z = P.z + (dz / d) * aim.dist; aim.y = (G.surfaceAt || G.heightAt)(aim.x, aim.z);
   }
   function endPress(e) {
     if (!aim.down) return;

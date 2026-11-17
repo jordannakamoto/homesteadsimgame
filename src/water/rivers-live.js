@@ -77,8 +77,17 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
       #define HN(dd) (inside(c + dd) ? bed(c + dd) + texelFetch(S, c + dd, 0).r : h)
       vec4 dh = h - vec4(HN(ivec2(-1, 0)), HN(ivec2(1, 0)), HN(ivec2(0, -1)), HN(ivec2(0, 1)));
       float sp = length(s.gb), d = max(s.r, 0.004);
-      float keep = 1.0 / (1.0 + dt * (0.6 + 0.045 * 9.81 * sp / pow(d, 1.333)));   // bed friction, Manning-like
+      float keep = 1.0 / (1.0 + dt * (0.12 + 0.03 * 9.81 * sp / pow(d, 1.333)));  // bed friction, Manning-like
       f = max(vec4(0.0), f * keep + dt * 9.81 * l * dh);
+      // the channel's own current: the terrain carries a stream's fall in steps, so flat pools between them would sit
+      // still; the baked flow (what the whole channel's slope drives) tops each pipe's flow up toward it, downhill or
+      // level only, never pushing water up onto anything higher (a dam still holds)
+      vec3 cur = feed(c);
+      if (s.r > 0.01 && cur.x > 0.0) {
+        vec4 tgt = max(vec4(0.0), vec4(-cur.y, cur.y, -cur.z, cur.z)) * l * s.r;
+        vec4 down = step(-0.005, dh);
+        f = max(f, mix(f, tgt, min(1.0, dt * 1.5)) * down);
+      }
       float out_ = (f.x + f.y + f.z + f.w) * dt;
       f *= out_ > 0.0 ? min(1.0, s.r * l * l / out_) : 0.0;
       gl_FragColor = f;

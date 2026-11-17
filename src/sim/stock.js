@@ -13,7 +13,7 @@
 import { ITEMS, isToolCategory } from './items.js';
 
 export const START_MONEY_USD = 4000;   // enough for the first shed (about $2,700 of materials) with some left over
-export const STARTER_TOOLS = Object.freeze(['axe', 'hand_saw', 'hammer', 'shovel', 'tape']);
+export const STARTER_TOOLS = Object.freeze(['axe', 'hand_saw', 'hammer', 'shovel', 'trowel', 'tape']);
 export const STARTER_PROJECTS = Object.freeze([
   { id: 'roof', title: 'Put a roof over your head', blurb: 'Press B and raise four walls and a roof, so there is somewhere dry to sleep.' },
   { id: 'tree', title: 'Fell a tree and turn it into something', blurb: 'Swing the axe at a tree, split the trunk, and use the wood you gather.' },

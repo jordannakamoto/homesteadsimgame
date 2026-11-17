@@ -72,7 +72,7 @@ export function createRiverWater({ U, sea, CS, P, SEA }) {
       const s = info.bedLip + info.D * (0.62 - 0.4 * rif);
       if (s <= SEA + 0.02) continue;                                   // the sea takes over here
       const k = j * N + i, gr = ch.h[(j + 1) * P + i + 1];
-      const speed = Math.min(2.5, info.Q / Math.max(0.2, info.w * Math.max(0.12, 0.6 * info.D)) * (1 + 1.6 * rif));
+      const speed = Math.min(3, 1.6 * info.Q / Math.max(0.2, info.w * Math.max(0.12, 0.6 * info.D)) * (1 + 1.6 * rif));
       surf[k] = s; bed[k] = Math.min(info.bedLip, s); ground[k] = gr;
       vel[k * 2] = info.dir[0] * speed; vel[k * 2 + 1] = info.dir[1] * speed;
       foam[k] = Math.min(1, rif * (0.35 + 0.5 * speed) + (info.fall ? 0.6 : 0) + smooth(0.6, 0.9, info.phase) * 0.3 * (1 - smooth(0.92, 1, info.phase)));

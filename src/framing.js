@@ -549,7 +549,7 @@
       });
       // drying in: drip edge along the eave; underlayment strips from the eave up, each lapping the one below (the first, at
       // the eave, is ice-and-water shield); then drip edge up the rakes, over the underlayment
-      for (const [a, b] of lengths(EL, TRIM_LEN)) M(out, id(pl.id, "de"), "drip", "eave", "dry-in", pl.id, "metal", 0.012, 0.08, on(a, 0.03 * cs, 0.006), on(b, 0.03 * cs, 0.006), inPlane, { col: "metal" });
+      if (pl.drip !== false) for (const [a, b] of lengths(EL, TRIM_LEN)) M(out, id(pl.id, "de"), "drip", "eave", "dry-in", pl.id, "metal", 0.012, 0.08, on(a, 0.03 * cs, 0.006), on(b, 0.03 * cs, 0.006), inPlane, { col: "metal" });
       rows(ROLL_W, ULAP, (v, vb, s0, s1, row) => {
         const ice = row === 0,
           lift = 0.003 + row * 0.0006;
@@ -595,7 +595,7 @@
       // last, the caps: a single slope's top edge, or a hip
       if (capped && pl.run && rect && !(r.ridges || []).length)
         for (const [a, b] of lengths(EL, TRIM_LEN)) M(out, id(pl.id, "cp"), "ridgecap", "top", "roofing", pl.id, r.mat || "thatch", 0.03, 0.2, on(a, F.top - 0.1 * cs, base + 0.03), on(b, F.top - 0.1 * cs, base + 0.03), inPlane, { col: cv.col });
-      if (capped && pl.run && !rect && pts.length >= 3) {
+      if (capped && pl.run && !rect && pts.length >= 3 && !r.hips) {
         const h0 = on(F.st[1][0], F.st[1][1], base + 0.03),
           h1 = on(F.st[2][0], F.st[2][1], base + 0.03),
           HL = hyp(h1[0] - h0[0], h1[1] - h0[1], h1[2] - h0[2]),
@@ -622,6 +622,16 @@
           pt = (t) => [rd.a[0] + ux * t, rd.y + 0.035 + coveringOf(r.mat).t, rd.a[1] + uz * t];
         for (const [a, b] of lengths(RL, TRIM_LEN)) M(out, id(r.id, "cap"), "ridgecap", "ridge", "roofing", r.planes[0].id, r.mat || "thatch", 0.04, 0.34, pt(a), pt(b), [-uz, 0, ux], { col: cv.col });
       }
+    // hip caps, along each hip from the eave corner up to the ridge
+    if (capped)
+      (r.hips || []).forEach((hp) => {
+        const h0 = [hp.a[0], hp.y0 + 0.035 + cv.t, hp.a[1]],
+          h1 = [hp.b[0], hp.y1 + 0.035 + cv.t, hp.b[1]],
+          HL = hyp(h1[0] - h0[0], h1[1] - h0[1], h1[2] - h0[2]),
+          hz = hyp(h1[0] - h0[0], h1[2] - h0[2]) || 1,
+          hn = [-(h1[2] - h0[2]) / hz, 0, (h1[0] - h0[0]) / hz];
+        if (HL > 0.2) for (const [a, b] of lengths(HL, TRIM_LEN)) M(out, id(r.id, "hc"), "ridgecap", "hip", "roofing", r.planes[0].id, r.mat || "thatch", 0.035, 0.28, h0.map((v, i) => v + ((h1[i] - v) * a) / HL), h0.map((v, i) => v + ((h1[i] - v) * b) / HL), hn, { col: cv.col });
+      });
     // gutters along the eaves, falling about 5 mm a metre toward a downspout that runs down to the ground
     (r.gutters || []).forEach((gt, gi) => {
       const L = hyp(gt.b[0] - gt.a[0], gt.b[1] - gt.a[1]);
@@ -631,9 +641,13 @@
         toB = hyp(d[0] - gt.b[0], d[1] - gt.b[1]) <= hyp(d[0] - gt.a[0], d[1] - gt.a[1]),
         P = (u) => [gt.a[0] + ((gt.b[0] - gt.a[0]) * u) / L, gt.y - 0.005 * (toB ? u : L - u), gt.a[1] + ((gt.b[1] - gt.a[1]) * u) / L];
       for (const [a, b] of lengths(L, TRIM_LEN)) M(out, id(gid, "g"), "gutter", "gutter", "gutters", gid, "aluminium", 0.11, 0.1, P(a), P(b), UP, { col: "gutter" });
-      const gy = r.groundY ? r.groundY(d[0], d[1]) : -0.45,
-        ylo = gt.y - 0.005 * L - 0.06;
-      if (ylo - gy > 0.3) M(out, gid + ".ds", "downspout", "downspout", "gutters", gid, "aluminium", 0.07, 0.07, [d[0], ylo, d[1]], [d[0], gy + 0.08, d[1]], [1, 0, 0], { col: "gutter" });
+      // a downspout from each outlet, down the wall to the ground (src/build.js roofParts gives the outlets and the wall behind them)
+      (gt.downs || [d]).forEach((dn, k) => {
+        const w = (gt.wall && gt.wall[k]) || dn,
+          gy = r.groundY ? r.groundY(w[0], w[1]) : -0.45,
+          ylo = gt.y - 0.005 * L - 0.12;
+        if (ylo - gy > 0.3) M(out, gid + ".ds" + (k || ""), "downspout", "downspout", "gutters", gid, "aluminium", 0.07, 0.07, [w[0], ylo, w[1]], [w[0], gy + 0.08, w[1]], [1, 0, 0], { col: "gutter" });
+      });
     });
     // ties across the building at the top of the walls stop the rafters pushing the walls apart
     for (const t of r.ties || []) M(out, id(r.id, "cj"), "joist", "ceiling", "roof-frame", r.planes[0].id, "timber", 0.038, 0.14, [t.a[0], t.y + 0.07, t.a[1]], [t.b[0], t.y + 0.07, t.b[1]], UP, { roof: r.id });

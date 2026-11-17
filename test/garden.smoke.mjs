@@ -1,5 +1,5 @@
 // Browser test of the garden through real input: node test/garden.smoke.mjs  (needs dist/index.html and Playwright)
-// Works a strip of ground with pulls of the hoe, takes a radish packet and sows by dragging along the row, tips the
+// Works a strip of ground with pulls of the hoe, draws a drill with the trowel, takes a radish packet and sows by dragging along it, tips the
 // can to water, fills it at the pump if the world has one, runs time at 1000x until the radishes are ready, pulls one
 // up by hand, and checks the garden survives a save and reload.
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
@@ -60,13 +60,21 @@ check('a radish packet bought from the seed box and held', await G(() => __garde
 // one row of the bed along the camera's forward direction: the cells nearest the middle strip
 const rowOf = (r) => fineCells.map((i) => ({ i, ...cellXZ(i) })).filter((c) => Math.abs((c.x - P.x) * P.rx + (c.z - P.z) * P.rz - r) < 0.16).sort((a, b) => ((a.x - P.x) * P.fx + (a.z - P.z) * P.fz) - ((b.x - P.x) * P.fx + (b.z - P.z) * P.fz));
 let row = rowOf(0); if (row.length < 2) row = fineCells.map((i) => ({ i, ...cellXZ(i) }));
+// the trowel first: its tip drawn along the row opens a drill for the seed
+await G(() => __gardenView.hold('trowel')); await wait(200);
+await drag(row[0], row[row.length - 1], 12); await page.mouse.up(); await wait(300);
+const drilled = await G((ids) => { const b = Object.values(__game.sim.state.sys.garden.field.groups)[0]; return ids.filter((i) => b.cells[i].open).length; }, row.map((c) => c.i));
+check('the trowel draws a drill along the row', drilled >= 2, drilled + ' squares open');
+await G(() => __gardenView.hold('seed:radish')); await wait(200);
 await drag(row[0], row[row.length - 1], 12); await page.mouse.up(); await wait(300);
 const sown = await G(() => Object.values(__game.sim.state.sys.garden.plants).filter((p) => p.crop === 'radish').length);
 check('radish sown along the row by dragging', sown >= 2, sown + ' squares');
 // water: buy a can from the hint, lift it over the row and tip it by dragging down
 await page.keyboard.press('Digit3'); await wait(300);
 check('number keys change what is held', await G(() => __gardenView.held === 'can'));
-await page.click('#gbar .ghint button[data-buy="watering_can"]'); await wait(300);
+// the starter yard now comes with a can (src/engine.js): buy one only if there is none, and start full either way
+if (await G(() => !__game.sim.state.sys.stock.tools.includes('watering_can'))) { await page.click('#gbar .ghint button[data-buy="watering_can"]'); await wait(300); }
+else await G(() => __game.sim.commandNow('garden.refill', {}));
 check('a watering can bought, and it comes full', await G(() => __game.sim.state.sys.stock.tools.includes('watering_can') && __game.sim.state.sys.garden.can.litres === 9));
 const wetOf = () => G((id) => { const b = __game.sim.state.sys.garden.field.groups[id]; let w = 0, n = 0; b.cells.forEach((c, i) => { if (c.pl) { w += __game.garden.cellInfo(__game.sim.state, id, i).water; n++; } }); return w / Math.max(1, n); }, bed.id);
 const before = await wetOf();

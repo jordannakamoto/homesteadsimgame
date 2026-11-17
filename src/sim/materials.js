@@ -179,6 +179,7 @@ export const APPEARANCE_BY_KIND = frozen({
   }),
   roof: frozen({
     thatch: 'thatch', slate: 'slate', tile: 'clay_tile', shingle: 'cedar_shake', copper: 'copper', redslate: 'slate',
+    asphalt: 'asphalt_shingle', seam: 'steel_roofing', corrugated: 'steel_roofing', membrane: 'epdm', green: 'soil_moist',
   }),
   path: frozen({ cobble: 'granite', dirt: 'soil_dry', gravel: 'gravel', boards: 'western_redcedar' }),
 });

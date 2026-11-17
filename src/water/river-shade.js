@@ -31,6 +31,36 @@ export const RIVER_SHADE = /* glsl */ `
   }
   vec2 waterCell(vec2 p) { return floor(p * uTPM); }
   vec2 waterTexel(vec2 p) { return uSnap > 0.5 ? (floor(p * uTPM) + 0.5) / uTPM : p; }
+  // 3D simplex noise (Gustavson / Ashima Arts, MIT)
+  vec4 sxPerm(vec4 x) { return mod(((x * 34.0) + 1.0) * x, 289.0); }
+  float snoise(vec3 v) {
+    const vec2 C = vec2(1.0 / 6.0, 1.0 / 3.0);
+    vec3 i = floor(v + dot(v, C.yyy)), x0 = v - i + dot(i, C.xxx);
+    vec3 g = step(x0.yzx, x0.xyz), l = 1.0 - g, i1 = min(g.xyz, l.zxy), i2 = max(g.xyz, l.zxy);
+    vec3 x1 = x0 - i1 + C.xxx, x2 = x0 - i2 + C.yyy, x3 = x0 - 0.5;
+    i = mod(i, 289.0);
+    vec4 p = sxPerm(sxPerm(sxPerm(i.z + vec4(0.0, i1.z, i2.z, 1.0)) + i.y + vec4(0.0, i1.y, i2.y, 1.0)) + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+    vec4 j = p - 49.0 * floor(p / 49.0), x_ = floor(j / 7.0), y_ = floor(j - 7.0 * x_);
+    vec4 x = (x_ * 2.0 + 0.5) / 7.0 - 1.0, y = (y_ * 2.0 + 0.5) / 7.0 - 1.0, h = 1.0 - abs(x) - abs(y);
+    vec4 b0 = vec4(x.xy, y.xy), b1 = vec4(x.zw, y.zw), s0 = floor(b0) * 2.0 + 1.0, s1 = floor(b1) * 2.0 + 1.0, sh = -step(h, vec4(0.0));
+    vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy, a1 = b1.xzyw + s1.xzyw * sh.zzww;
+    vec3 p0 = vec3(a0.xy, h.x), p1 = vec3(a0.zw, h.y), p2 = vec3(a1.xy, h.z), p3 = vec3(a1.zw, h.w);
+    vec4 nr = inversesqrt(vec4(dot(p0, p0), dot(p1, p1), dot(p2, p2), dot(p3, p3)));
+    p0 *= nr.x; p1 *= nr.y; p2 *= nr.z; p3 *= nr.w;
+    vec4 m = max(0.6 - vec4(dot(x0, x0), dot(x1, x1), dot(x2, x2), dot(x3, x3)), 0.0); m = m * m;
+    return 42.0 * dot(m * m, vec4(dot(p0, x0), dot(p1, x1), dot(p2, x2), dot(p3, x3)));
+  }
+  // the stream's surface height (m) at a: (along the current, across it), carried downstream at speed sp
+  float flowH(vec2 a, float sp, float rough) {
+    float t = uTime;
+    vec2 ad = vec2(a.x - t * (0.15 + sp), a.y);
+    float patchy = smoothstep(-0.25, 0.65, snoise(vec3(ad * vec2(0.3, 0.45), t * 0.06)));
+    float h = snoise(vec3(ad * vec2(0.8, 1.1), t * 0.3)) * 0.5;                             // boils
+    h += snoise(vec3(ad * vec2(1.1, 4.2), t * 0.5)) * 0.4 * rough;                          // streaks along the current
+    h += snoise(vec3(ad * vec2(4.5, 3.6), t * 1.3)) * 0.2 * (0.25 + patchy);                // wavelets
+    h += snoise(vec3(ad * vec2(10.0, 8.5), t * 2.1)) * 0.09 * (0.15 + patchy) * (0.4 + rough); // capillaries
+    return h * (0.012 + 0.035 * rough);
+  }
   // q: where to shade (the texel centre when pixel-snapped); v: velocity (m/s); d: depth (m); foamIn: white water (0-1)
   vec4 shadeRiver(vec2 q, vec2 cell, vec3 world, vec2 v, float d, float foamIn) {
     float sp = length(v);
@@ -39,16 +69,21 @@ export const RIVER_SHADE = /* glsl */ `
     // flow maps (Vlachos): two layers half a phase apart, the phase offset in patches to hide the pulse
     float ph = uTime * 0.32 + texture2D(uTex, floor(q / 4.0) * 0.173).b;
     float t0 = fract(ph), t1 = fract(ph + 0.5), wb = abs(1.0 - 2.0 * t0);
-    vec2 uvA = q * 0.31 - v * t0 * 0.55, uvB = q * 0.31 - v * t1 * 0.55 + 0.37;
-    vec3 det = mix(texture2D(uTex, uvA).rgb, texture2D(uTex, uvB).rgb, wb);
-    float rough = 0.3 + 0.7 * smoothstep(0.05, 1.1, sp);
-    vec2 g = (det.rg - 0.5) * rough * 1.2;
-    // fine capillary ripples everywhere (wind and the current's turbulence), so even a pool catches the sky
-    g += (texture2D(uTex, q * 1.7 - v * t0 * 0.9 + uTime * vec2(0.05, 0.03)).rg - 0.5) * 0.35;
-    // fast water draws itself out in lines along the current (the long ridges on a riffle's glide)
-    vec2 lq = vec2(dot(q, fd) * 0.12, dot(q, fn) * 1.1);
-    float ln = texture2D(uTex, lq - vec2(uTime * sp * 0.12, 0.0)).g - 0.5;
-    g += fn * ln * 0.55 * smoothstep(0.2, 1.2, sp);
+    // The surface: no repeating texture (that is what read as a diamond pattern), but noise built in the current's
+    // own frame, so its shapes lie along the flow and move with it, and change as they go:
+    //  - boils: broad swells welling up and spreading (the turbulence coming up from the bed)
+    //  - streaks: ridges long along the current, narrow across it (a glide's lines, the tongue behind a stone)
+    //  - wavelets and capillaries, in patches: some water glassy, some broken, wandering with the flow
+    // Its slope, from small differences of that height, gives the normal.
+    float rough = 0.25 + 0.75 * smoothstep(0.05, 1.2, sp);
+    vec2 a = vec2(dot(q, fd), dot(q, fn));
+    float e = 0.035;
+    float h0 = flowH(a, sp, rough), hx = flowH(a + vec2(e, 0.0), sp, rough), hy = flowH(a + vec2(0.0, e), sp, rough);
+    vec2 ga = vec2(hx - h0, hy - h0) / e;
+    vec2 g = fd * ga.x + fn * ga.y;
+    // the finest ruffle, too small to take differences of: tilts each spot a little at random
+    vec3 rq = vec3(q * 9.0 - v * uTime * 9.0, uTime * 1.7);
+    g += vec2(snoise(rq), snoise(rq + 31.7)) * 0.05 * (0.4 + rough);
     // ripples spreading where the water was touched: a travelling ring in the slope
     for (int i = 0; i < 12; i++) {
       vec4 r = uRip[i];
@@ -69,18 +104,21 @@ export const RIVER_SHADE = /* glsl */ `
     vec3 bank = uAmb * vec3(0.16, 0.2, 0.11) + uSunCol * vec3(0.04, 0.05, 0.025);
     vec3 sky = mix(bank, mix(uSky, uZenith, pow(clamp(R.y, 0.0, 1.0), 0.7)), smoothstep(0.04, 0.3, R.y)) * mix(0.35, 1.0, skyVis);
     float sd = max(dot(R, uSunDir), 0.0);
-    vec3 glint = uSunCol * (pow(sd, mix(600.0, 120.0, rough)) * mix(40.0, 6.0, rough)) * skyVis;
-    // a broad sheen of the sun on the rippled surface: what shows the water is there when you look straight down
+    // the sun on the water: a soft sheen over the rippled surface (a mirror-sharp glint on smooth noise would draw
+    // rings like a fingerprint), broken into sparkles by the smallest wavelets, more where the water is rough
     vec3 H = normalize(V + uSunDir);
-    glint += uSunCol * pow(max(dot(N, H), 0.0), 60.0) * 0.35 * skyVis;
+    float nh = max(dot(N, H), 0.0);
+    float sparkle = step(0.82, snoise(vec3(q * 22.0 - v * uTime * 22.0, uTime * 3.0)) * 0.5 + 0.5) * (0.3 + rough);
+    vec3 glint = uSunCol * (pow(nh, 90.0) * (0.35 + 1.6 * sparkle) + pow(sd, 400.0) * 1.5 * sparkle) * skyVis;
     float path = d * (1.0 + 1.0 / max(V.y, 0.25));
-    // absorption a metre: clear stream water (pure water's red loss, a little green-brown from dissolved organic
-    // matter), plus what the sediment adds as the stream runs muddy
-    vec3 sigma = vec3(0.55, 0.16, 0.24) + uTurbid * vec3(0.55, 0.5, 0.62);
+    // loss a metre: stream water carries fine sediment and dissolved organic matter even on a fair day (red lost
+    // first, then blue: the olive-green to tea-brown of a real brook), much more when it runs muddy. Shallows show
+    // their stones; a pool a metre deep is mostly the water's own colour.
+    vec3 sigma = vec3(1.0, 0.42, 0.62) + uTurbid * vec3(0.8, 0.75, 0.95);
     vec3 T = exp(-sigma * path);
     float opaque = 1.0 - dot(T, vec3(0.3, 0.45, 0.25));
     vec3 lightIn = uAmb * mix(0.55, 1.0, skyVis) + uSunCol * 0.55 * skyVis * (0.6 + 0.4 * max(uSunDir.y, 0.0));
-    vec3 scatter = mix(vec3(0.045, 0.065, 0.035), vec3(0.085, 0.068, 0.042), clamp(uTurbid * 0.35, 0.0, 1.0));
+    vec3 scatter = mix(vec3(0.055, 0.07, 0.042), vec3(0.1, 0.082, 0.05), clamp(uTurbid * 0.4, 0.0, 1.0));   // what the sediment scatters back: olive, browner when muddy
     float fwd = pow(max(dot(-V, uSunDir), 0.0), 6.0);
     // aerated water (under and round foam) scatters more light back: it pales and goes milky
     vec3 body = scatter * lightIn * (1.0 + 2.5 * fwd) + lightIn * vec3(0.16, 0.18, 0.17) * foamIn * smoothstep(0.02, 0.12, d);

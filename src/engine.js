@@ -7,7 +7,7 @@ import { createRiverWater } from './water/rivers-render.js';
 import { createRiverLive } from './water/rivers-live.js';
 import { createFalls } from './water/falls-render.js';
 import { createWaterFx } from './water/water-fx.js';
-import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook } from './sim/index.js';
+import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -41,7 +41,7 @@ THREE.ShaderChunk.opaque_fragment += '\nif ( isnan( gl_FragColor.r + gl_FragColo
 // default), 'fsr' (AMD FSR 1: made for smooth, photoreal, anti-aliased images; on pixel textures it smears texel
 // edges into brush strokes) or 'sharp' (area-weighted nearest: every render pixel stays a crisp block, only the
 // seams between blocks are blended, the usual way to scale pixel art by uneven amounts).
-const LOOK = { ao: false, hudBlur: true, lightBloom: false, compactHdr: false, grassShadows: true, tuftShadow: true, drawOrder: true, farGrass: 'normal', rootShade: 1, grassClumps: true, grassBacklight: true, skyShade: true, sunFog: true, grassSheen: true, farBlend: true, crownShade: true, camFx: false, upscaler: 'bicubic', toneMap: 'aces', taa: false, edgeBelts: true, riverWater: 'live', waterTexel: 'smooth' };
+const LOOK = { ao: false, hudBlur: true, lightBloom: false, compactHdr: false, grassShadows: true, tuftShadow: true, drawOrder: true, farGrass: 'normal', rootShade: 1, grassClumps: true, grassBacklight: true, skyShade: true, sunFog: true, grassSheen: true, farBlend: true, crownShade: true, camFx: false, upscaler: 'bicubic', toneMap: 'aces', taa: false, edgeBelts: true, riverWater: 'live', waterTexel: 'smooth', bedStyle: 'voxel' };
 const LOOK_KEY = 'homestead:look';
 try { const s = JSON.parse(localStorage.getItem(LOOK_KEY) || 'null'); if (s) for (const k in LOOK) if (typeof s[k] === typeof LOOK[k]) LOOK[k] = s[k]; } catch (e) { /* no storage */ }
 const saveLook = () => { try { localStorage.setItem(LOOK_KEY, JSON.stringify(LOOK)); } catch (e) { /* no storage */ } };
@@ -708,6 +708,7 @@ window.addEventListener('resize', resize);
 // ============================================================ shared uniforms and materials
 const U = {
   time: { value: 0 },
+  bedVox: { value: 1 },             // stream beds in the voxel style (1) or fully real (0): Graphics > Look
   playerPx: { value: new THREE.Vector2() },
   playerDepth: { value: 0 },
   fadeR: { value: 100 },
@@ -980,23 +981,26 @@ const terrainMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: pixe
 //    the bed is read by the surface slope times the depth)
 //  - caustics: the bright net of light the ripples focus onto the bed, moving with the water, dappled under trees
 const BED_PARS_F = `
-uniform highp sampler2D uLiveState; uniform sampler2D uFoamTex, uSeaTex; uniform vec2 uLiveOrg; uniform float uLiveCell, uTime; uniform int uLiveN; uniform vec4 uWin; uniform vec3 uSunDirB, uSunColB;
+uniform highp sampler2D uLiveState; uniform sampler2D uFoamTex, uSeaTex; uniform vec2 uLiveOrg; uniform float uLiveCell, uTime; uniform int uLiveN; uniform vec4 uWin; uniform vec3 uSunDirB, uSunColB; uniform float uBedVox;
 varying vec3 vWPosT;
 vec3 bedHash(vec2 p) { vec3 q = vec3(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)), dot(p, vec2(419.2, 371.9))); return fract(sin(q) * 43758.5453); }
 // stones lying on finer stuff, p in cells: x how far up the stone (0 at its edge, 1 on top; below 0 outside it,
 // down to -1 a third of its size away, for the shade round it), yzw the stone's random numbers. k scales the
 // stones' size: 0 none, 1 full.
-vec4 bedStones(vec2 p, float k) {
+// toC: from the point toward the stone's middle, over its radius (for lighting it as a dome). In the voxel style
+// (uBedVox 1) stones are squarer, like the world's blocks, and the bed is read in texels.
+vec4 bedStones(vec2 p, float k, out vec2 toC) {
   vec2 i = floor(p), f = fract(p);
-  float best = -9.0; vec3 id = vec3(0.0);
+  float best = -9.0; vec3 id = vec3(0.0); toC = vec2(0.0);
   for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
     vec2 g = vec2(float(x), float(y)); vec3 h = bedHash(i + g);
     vec2 o = g + 0.18 + 0.64 * h.xy - f;
     float an = h.z * 6.283, ca = cos(an), sa = sin(an);
     vec2 r = vec2(ca * o.x + sa * o.y, -sa * o.x + ca * o.y); r.x *= 0.7 + 0.6 * h.y;   // flattened, turned stones
     float rr = (0.24 + 0.24 * fract(h.x * 7.3 + h.y)) * k;
-    float e = rr > 0.0 ? 1.0 - length(r) / rr : -9.0;
-    if (e > best) { best = e; id = h; }
+    float dist = mix(length(r), max(abs(r.x), abs(r.y)) * 1.12, uBedVox * 0.6);
+    float e = rr > 0.0 ? 1.0 - dist / rr : -9.0;
+    if (e > best) { best = e; id = h; toC = rr > 0.0 ? o / rr : vec2(0.0); }
   }
   return vec4(max(best, -1.0), id);
 }
@@ -1023,6 +1027,7 @@ float bedCaustic = 0.0;
       vec2 g = mix(texture2D(uSeaTex, q * 0.31 - v * t0 * 0.55).rg, texture2D(uSeaTex, q * 0.31 - v * t1 * 0.55 + 0.37).rg, wb) - 0.5;
       g = g * (0.3 + 0.7 * smoothstep(0.05, 1.1, sp)) + (texture2D(uSeaTex, q * 1.7 - v * t0 * 0.9 + uTime * vec2(0.05, 0.03)).rg - 0.5) * 0.35;
       vec2 bp = q + g * min(dep, 0.6) * 0.5;
+      if (uBedVox > 0.5) bp = (floor(bp * 16.0) + 0.5) / 16.0;                      // voxel style: the bed in 6 cm texels
       // what the current leaves: cobbles in fast water, gravel in middling, sand in slow pools, each layer lying on
       // the finer one, with the finer stuff showing between
       float big = smoothstep(0.3, 0.9, sp + (texture2D(uFoamTex, bp * 0.11).b - 0.5) * 0.6);
@@ -1030,18 +1035,21 @@ float bedCaustic = 0.0;
       vec3 sandC = vec3(0.6, 0.54, 0.41) * (0.85 + 0.25 * texture2D(uFoamTex, bp * 0.9).b) * (0.94 + 0.06 * sin(dot(bp, v.yx * 6.0 + vec2(9.0, 3.0))));
       vec3 lightDir = normalize(uSunDirB + vec3(0.0, 0.6, 0.0));
       vec3 bed = sandC;
-      vec4 st = bedStones(bp * 12.0, 1.0 - sand * 0.85);
+      vec2 toC;
+      vec4 st = bedStones(bp * 12.0, 1.0 - sand * 0.85, toC);
       for (int L = 0; L < 2; L++) {
         if (st.x > -1.0) {
-          float hgt = sqrt(max(st.x, 0.0));
-          vec3 sn = normalize(vec3(-dFdx(hgt) * 2.5, 1.0, -dFdy(hgt) * 2.5));
+          // lit as a dome: the slope faces away from the stone's middle, steeper toward its edge
+          float hgt = sqrt(max(st.x, 0.02));
+          vec3 sn = normalize(vec3(-toC.x * 0.9 / hgt, 1.0, -toC.y * 0.9 / hgt));
           float lit = 0.7 + 0.45 * clamp(dot(sn, lightDir), -1.0, 1.0);
+          if (uBedVox > 0.5) lit = floor(lit * 5.0 + 0.5) / 5.0;                     // voxel style: a few tones a stone
           vec3 sc = stoneCol(st.yzw) * lit * mix(0.6, 1.0, smoothstep(0.0, 0.5, st.x));
           sc = mix(sc, sc * vec3(0.72, 0.86, 0.52), (1.0 - smoothstep(0.2, 0.7, sp)) * smoothstep(0.3, 0.9, st.x) * smoothstep(0.4, 0.7, st.w));   // algae
           bed *= mix(1.0, 0.62, smoothstep(-0.6, 0.0, st.x) * step(st.x, 0.0));                                  // shade round it
           bed = mix(bed, sc, smoothstep(0.0, 0.08, st.x));
         }
-        st = bedStones(bp * 4.0 + 17.0, big * 1.25);
+        st = bedStones(bp * 4.0 + 17.0, big * 1.25, toC);
       }
       bed *= vec3(0.78, 0.8, 0.76);                                                                                    // wet: darker
       diffuseColor.rgb = mix(diffuseColor.rgb, diffuse * bed * 1.6, uw);
@@ -1052,17 +1060,35 @@ float bedCaustic = 0.0;
     }
   }
 }`;
+// Hand-dug ground (src/landscape-view.js) is drawn by its own mesh, which can sit below the terrain's surface: a
+// hole, a trench, a sunken path. Where a 30 cm square has been worked, the terrain lets it show through. The mask is a
+// texture of squares around the player; the test is compiled in only once anything has been dug (DIG_MASK), so an
+// untouched world pays nothing for it.
+const DIG = { uDigMask: { value: null }, uDigWin: { value: new THREE.Vector4(0, 0, 0.3, 0) }, on: false };
+function enableDigMask(tex) {
+  DIG.uDigMask.value = tex;
+  if (DIG.on) return;
+  DIG.on = true; terrainMat.defines = { ...(terrainMat.defines || {}), DIG_MASK: '' }; terrainMat.needsUpdate = true;
+}
+const DIG_F = `
+#ifdef DIG_MASK
+{
+  vec2 dc = floor((vWPosT.xz - uDigWin.xy) / uDigWin.z);
+  if (uDigWin.w > 0.0 && dc.x >= 0.0 && dc.y >= 0.0 && dc.x < uDigWin.w && dc.y < uDigWin.w && texelFetch(uDigMask, ivec2(dc), 0).r > 0.5) discard;
+}
+#endif`;
 terrainMat.onBeforeCompile = (sh) => {
   sh.uniforms.uSkyMap = U.skyMap; sh.uniforms.uSkyK = U.skyK;
+  sh.uniforms.uDigMask = DIG.uDigMask; sh.uniforms.uDigWin = DIG.uDigWin;
   const lu = riverLive.uniforms, ru = riverWater.uniforms;
-  sh.uniforms.uLiveState = lu.uState; sh.uniforms.uLiveOrg = lu.uOrg; sh.uniforms.uLiveCell = lu.uCell; sh.uniforms.uLiveN = lu.uN; sh.uniforms.uWin = ru.uWin; sh.uniforms.uFoamTex = ru.uFoamTex; sh.uniforms.uSeaTex = ru.uTex; sh.uniforms.uTime = U.time; sh.uniforms.uSunDirB = ru.uSunDir; sh.uniforms.uSunColB = ru.uSunCol;
+  sh.uniforms.uLiveState = lu.uState; sh.uniforms.uLiveOrg = lu.uOrg; sh.uniforms.uLiveCell = lu.uCell; sh.uniforms.uLiveN = lu.uN; sh.uniforms.uWin = ru.uWin; sh.uniforms.uFoamTex = ru.uFoamTex; sh.uniforms.uSeaTex = ru.uTex; sh.uniforms.uTime = U.time; sh.uniforms.uSunDirB = ru.uSunDir; sh.uniforms.uSunColB = ru.uSunCol; sh.uniforms.uBedVox = U.bedVox;
   sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>' + SKY_PARS_V + '\nvarying vec3 vWPosT;')
     .replace('#include <project_vertex>', '#include <project_vertex>' + SKY_V('(modelMatrix * vec4(transformed, 1.0)).xz') + '\nvWPosT = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-  sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>' + SKY_PARS_F + BED_PARS_F).replace('#include <aomap_fragment>', SKY_F)
-    .replace('#include <map_fragment>', BED_F)
+  sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>' + SKY_PARS_F + BED_PARS_F + '\n#ifdef DIG_MASK\nuniform highp sampler2D uDigMask; uniform vec4 uDigWin;\n#endif').replace('#include <aomap_fragment>', SKY_F)
+    .replace('#include <map_fragment>', BED_F).replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>' + DIG_F)
     .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\nreflectedLight.directDiffuse += bedCaustic * uSunColB * diffuseColor.rgb;');
 };
-terrainMat.customProgramCacheKey = () => 'terrain-sky3-bed';
+terrainMat.customProgramCacheKey = () => 'terrain-sky3-bed' + (DIG.on ? '-dig' : '');
 const solidMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: pixelTex });
 
 // ============================================================ geometry library
@@ -2697,6 +2723,7 @@ const riverFalls = createFalls({ river: riverWater, CS });
 const waterFx = createWaterFx({ scene, river: riverWater });
 riverWater.uniforms.uTPM.value = LOOK.waterTexel === 'ground' ? 6.4 : 12.8;
 riverWater.uniforms.uSnap.value = LOOK.waterTexel === 'smooth' ? 0 : 1;
+U.bedVox.value = LOOK.bedStyle === 'real' ? 0 : 1;
 // The stream water at a point: the live simulation's where it runs, else the baked water of the day.
 // { depth (m), vx, vz (m/s), foam } or null where there is no stream.
 function streamWaterAt(x, z) {
@@ -2828,6 +2855,7 @@ function towardOvercast(c, target, k) {
   _ovC.copy(target).multiplyScalar(l / Math.max(lt, 1e-4));
   c.lerp(_ovC, k);
 }
+const SKYK = { day: 1, night: 0 };   // how much day and night there is now, for add-ons (path lights)
 function updateSky() {
   if (window.__game && !window.__game.calendar) window.__game.calendar = calendar;
   const wx = sim.state.sys.weather, site = (wx && wx.site) || SKY.site;
@@ -2835,6 +2863,7 @@ function updateSky() {
   const e = Math.sin(sp.elevationRad);
   const dayF = smoothstep(0.02, 0.4, e), nightF = 1 - smoothstep(-0.22, 0.06, e);
   const goldF = clamp(1 - dayF - nightF, 0, 1);
+  SKYK.day = dayF; SKYK.night = nightF;
   const mix3 = (k) => SKY.day[k] * dayF + SKY.gold[k] * goldF + SKY.night[k] * nightF;
   const mixC = (out, k) => out.setRGB(
     SKY.day[k].r * dayF + SKY.gold[k].r * goldF + SKY.night[k].r * nightF,
@@ -3029,6 +3058,7 @@ function setLook(key, value) {
   if (key === 'edgeBelts' && window.__nature) for (const c of world.chunks.values()) { c.litterItems = null; window.__nature.refresh(c); }
   if (key === 'taa') { applyGfx(); resize(); }
   if (key === 'riverWater') riverLive.setMode(value === 'baked' ? 'off' : value);
+  if (key === 'bedStyle') U.bedVox.value = value === 'real' ? 0 : 1;
   if (key === 'waterTexel') { riverWater.uniforms.uTPM.value = value === 'ground' ? 6.4 : 12.8; riverWater.uniforms.uSnap.value = value === 'smooth' ? 0 : 1; }      // MSAA off or back on, and the resolve path
   if (key === 'toneMap') {
     renderer.toneMapping = TONE_MAPS[value] || THREE.ACESFilmicToneMapping;   // the composer's output pass follows it by itself
@@ -3103,6 +3133,8 @@ const gfxPanel = (() => {
     rw.addEventListener('change', () => { setLook('riverWater', rw.value); canvas.focus(); });
     const wt = h('select', { disabled: !RIVERS_ON }, ...[['smooth', 'Smooth (realistic)'], ['fine', 'Pixels, fine'], ['ground', 'Pixels, as the ground']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.waterTexel === v })));
     wt.addEventListener('change', () => { setLook('waterTexel', wt.value); canvas.focus(); });
+    const bs = h('select', { disabled: !RIVERS_ON }, ...[['voxel', 'Voxel'], ['real', 'Realistic']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.bedStyle === v })));
+    bs.addEventListener('change', () => { setLook('bedStyle', bs.value); canvas.focus(); });
     const tm = h('select', {}, ...[['aces', 'ACES (original)'], ['agxlook', 'AgX look'], ['agx', 'AgX'], ['neutral', 'Neutral']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.toneMap === v })));
     tm.addEventListener('change', () => { setLook('toneMap', tm.value); canvas.focus(); });
     const rs = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: LOOK.rootShade });
@@ -3160,6 +3192,7 @@ const gfxPanel = (() => {
       chk('skyShade', 'Shade under trees and in hollows', 'Ground and grass beneath tree crowns and down in dips see less sky, so forest floors darken. Baked, no frame cost.'),
       chk('ao', 'Extra ambient occlusion', 'A second, stronger occlusion on top of the Lighting pass (Ultra full, High and Medium half resolution).'),
       h('div', { className: 'row' }, h('span', {}, 'Stream water', h('span', { className: 'hint', textContent: 'Live simulates the water round you on the graphics card: it flows round what you put in it, fills what you dig and stirs as you wade. Baked is the still, cheaper version everywhere. Beyond the live window the baked water shows.' })), rw),
+      h('div', { className: 'row' }, h('span', {}, 'Stream beds', h('span', { className: 'hint', textContent: 'The stones under the stream water near you. Voxel draws them in small texels with a few tones, like the rest of the world; Realistic draws them smooth.' })), bs),
       h('div', { className: 'row' }, h('span', {}, 'Water style', h('span', { className: 'hint', textContent: 'Smooth draws the foam, flow and ripples of the streams at full detail. The pixel styles cut them into texels like the ground.' })), wt),
       h('div', { className: 'row' }, h('span', {}, 'Upscaler', h('span', { className: 'hint', textContent: 'How a below-full-size render is enlarged. Sharp pixels keeps each pixel a crisp block. FSR 1 is made for photoreal images and smears pixel textures.' })), up),
       h('div', { className: 'row' }, h('span', {}, 'Tone mapping', h('span', { className: 'hint', textContent: 'How bright light is fitted to the screen. AgX rolls bright colours to white without ACES\'s hue shift; Neutral keeps colours as painted.' })), tm),
@@ -3763,7 +3796,8 @@ function updatePlayer(dt) {
   P.x += (vx + P.kvx) * dt; P.z += (vz + P.kvz) * dt;
   P.kvx *= Math.exp(-7 * dt); P.kvz *= Math.exp(-7 * dt);
   pushOut(P, 0.28);
-  const gh = window.__build ? window.__build.ground(P.x, P.z, P.y, heightAt(P.x, P.z)) : heightAt(P.x, P.z);   // built floors count as ground
+  const th = heightAt(P.x, P.z) + (reliefFn ? reliefFn(P.x, P.z) : 0);              // hand-shaped ground (src/landscape-view.js) counts
+  const gh = window.__build ? window.__build.ground(P.x, P.z, P.y, th) : th;   // built floors count as ground
   // climbY: on a ladder, placed by an add-on. standY: on a platform an add-on keeps you on (scaffold planks): you walk, it holds the height
   const ty = P.climbY != null ? P.climbY : P.standY != null ? P.standY : Math.max(gh, waveHeight(P.x, P.z) - 0.95);
   if (P.air) {
@@ -3775,7 +3809,7 @@ function updatePlayer(dt) {
 
   // terrain tools work on the spot just ahead
   ring.visible = false; P.digging = false;
-  if (!armed && P.tool !== 'build' && cursor.valid) {
+  if (!armed && TOOLS.includes(P.tool) && cursor.valid) {     // only the terrain tools: the garden and yard stances work by hand
     ring.visible = true;
     ring.position.set(cursor.x, cursor.y + 0.25, cursor.z);
     ring.material.opacity = 0.85;
@@ -3980,6 +4014,7 @@ function updateHud() {
 }
 let last = performance.now(), fpsAcc = 0, fpsN = 0, fps = 60, slowFor = 0, autoDropped = false;
 const stepHooks = [];
+let reliefFn = null;   // (x, z) -> metres of hand-shaped ground above the terrain, set by the landscape view
 function step(dt) {
   U.time.value += dt;
   if (dt > 0) { const dy = Math.atan2(Math.sin(cam.yaw - cam.prevYaw), Math.cos(cam.yaw - cam.prevYaw)); cam.yawRate = lerp(cam.yawRate, dy / dt, 0.3); cam.prevYaw = cam.yaw; }
@@ -4261,7 +4296,7 @@ resetWorld(SEED);
 setTool('axe');
 lockUi();
 window.__game = {
-  pm, get seed() { return SEED; },
+  pm, get seed() { return SEED; }, get nightF() { return SKYK.night; },
   stepHooks,
   get sim() { return sim; }, setYearDays: (d) => { sim.setYearDays(d); saveGame(); }, savedBuilds: () => simCtl.builds, powerAvailable: () => false,
   stock: {
@@ -4292,7 +4327,9 @@ window.__game = {
     },
   },
   treeGeo, pineLite: pineLiteGeo, markStockDirty: () => { hudDirty = true; },
-  garden: gardenRead,
+  garden: gardenRead, landscape: landscapeRead, earthwork,
+  // the landscape view's hooks: the ground it shapes is walked on, and shows through the terrain where dug
+  setRelief: (fn) => { reliefFn = fn; }, digMask: { win: DIG.uDigWin, enable: enableDigMask },
   handPose: null, sea: SEA,
   // the sky as reflections see it (world sun direction and colour, horizon and zenith), kept up to date each frame
   skyU: { uGSunDir: waterUniforms.uSunDir, uGSunCol: waterUniforms.uSunCol, uGSky: waterUniforms.uSky, uGZen: waterUniforms.uZenith },
