@@ -406,7 +406,7 @@ The ground is a physical thing now: a smooth surface you shape 10 cm at a time, 
 
 **The tools and how they move**
 
-- **Shovel.** Press where you want the blade to go in (it bites), then pull the mouse down to lever the earth up onto the blade; a plain click does both. With a load on the blade, click where it should go: it is thrown, flies in an arc and lands as a heap. Press, pause, then push along the grass to slide the blade under the turf and skim it off. Earth is conserved: every hole makes a heap somewhere. (Earth per scoop: 1×, 2× or 4× in the Yard store's Tools aisle; 2×, 14 L, by default.)
+- **Shovel.** Press where you want the blade to go in (it bites), then pull the mouse down to lever the earth up onto the blade; a plain click does both. Each scoop tears up a ring of turf round the hole and the loose earth caves in, so holes are bowls you can see from the camera. With a load on the blade, click where it should go: it is thrown, flies in an arc and lands as a heap. Press and push forward (or sideways) along the grass to slide the blade under the turf and skim it off. Earth is conserved: every hole makes a heap somewhere. (Earth per scoop: 1×, 2× or 4× in the Yard store's Tools aisle; 4×, 28 L, by default.) The Yard camera looks down more steeply than walking, so the spot you dig is not hidden behind your character.
 - **Wheelbarrow.** Click to shovel a scoop in (up to 100 L); walk it over and drag down to tip it out.
 - **Rake.** Drag over loose earth to level it.
 - **Hand tamper.** Click to thump, hold and walk to tamp a strip. Twice is firm.

@@ -71,7 +71,7 @@
     soil: new T.Color(0x5e4632), soilDry: new T.Color(0x86704f), firm: new T.Color(0x76604a), sod: new T.Color(0x56732f), sodDark: new T.Color(0x3f5a26),
     sprout: new T.Color(0x6f9a3a), skirt: new T.Color(0x3d2c1f), liner: new T.Color(0x232526), fabric: new T.Color(0x2e2f2c), fabricLine: new T.Color(0x45463f),
     gravel: new T.Color(0xa49d90), gravelDark: new T.Color(0x6f6a62), bark: new T.Color(0x5a3626), barkLight: new T.Color(0x8a5a3a), sand: new T.Color(0xd8c79a),
-    rock: new T.Color(0x8c8478), rockDark: new T.Color(0x5f5a52),
+    rock: new T.Color(0x8c8478), rockDark: new T.Color(0x5f5a52), subsoil: new T.Color(0x9a7348),
   };
   const BASE = {
     gravel: [0xa49d90, 0x6f6a62], riverrock: [0x8c8478, 0x5f5a52], bark: [0x8a5a3a, 0x5a3626], sand: [0xd8c79a, 0xc9b88a],
@@ -91,7 +91,9 @@
       if (f & (RD.FLAG.TAMP1 | RD.FLAG.TAMP2)) _c.lerp(COL.firm, f & RD.FLAG.TAMP2 ? 0.6 : 0.3);   // tamped earth: smoother and paler
       if (name === 'lawn_sown') { const age = clamp((lifeH - t.t[n]) / (RD.LAWN.coverDays * 24), 0, 1); if (hash(i * 3 + 1, j * 5) < 0.15 + 0.85 * age) _c.lerp(COL.sprout, 0.35 + 0.5 * age); }
     }
-    return _c.multiplyScalar(1 + clamp(h * 1.4, -0.45, 0));
+    // down a hole: the paler subsoil under the dark topsoil, a little shaded
+    if (h < -0.04 && !(BASE[name] && t.l[n] > 2) && !(f & (RD.FLAG.LINER | RD.FLAG.FABRIC))) _c.lerp(COL.subsoil, clamp((-h - 0.04) * 5, 0, 0.75));
+    return _c.multiplyScalar(1 + clamp(h * 0.8, -0.25, 0));
   }
   const ptRef = (g, i, j) => { const tx = Math.floor(i / TS), tz = Math.floor(j / TS), t = g.tiles[tx + ',' + tz]; return t ? [t, (j - tz * TS) * TS + (i - tx * TS)] : null; };
   function buildTile(tx, tz, lifeH) {
@@ -258,7 +260,9 @@
         } else if (!force) continue;
         let n = 0;
         list.forEach((gr, i) => {
-          const x = c.ox + gr.lx, z = c.oz + gr.lz, hide = drawn.has(qKey(Math.floor(x / STEP), Math.floor(z / STEP)));
+          // the grass round worked ground is trampled back too, so the work reads clearly
+          const x = c.ox + gr.lx, z = c.oz + gr.lz, qi = Math.floor(x / STEP), qj = Math.floor(z / STEP);
+          const hide = drawn.has(qKey(qi, qj)) || drawn.has(qKey(qi + 1, qj)) || drawn.has(qKey(qi - 1, qj)) || drawn.has(qKey(qi, qj + 1)) || drawn.has(qKey(qi, qj - 1));
           if (hide && !rec.hid.has(i)) { mesh.setMatrixAt(i, ZERO); rec.hid.add(i); n++; }
           else if (!hide && rec.hid.has(i)) { for (let j = 0; j < 16; j++) arr[i * 16 + j] = rec.orig[i * 16 + j]; rec.hid.delete(i); n++; }
         });
@@ -636,8 +640,8 @@
       const pushed = act.movedAt != null && act.movedAt > 0.3;
       // a quick pull down on the mouse is the handle pulled back: it levers the earth up where the blade went in
       if (!act.skim && !pushed && a.dy > 40 && a.dy > Math.abs(a.dx) * 1.2) { act.done = true; return shovel.lever(act.ox, act.oz); }
-      // pushing the blade along the ground (after a pause, or sideways) slides it under the turf
-      if (!act.skim && Math.hypot(a.x - act.ox, a.z - act.oz) > 0.22 && (pushed || Math.abs(a.dx) > Math.abs(a.dy))) act.skim = true;
+      // pushing the blade along the ground (forward, sideways, or after a pause) slides it under the turf
+      if (!act.skim && Math.hypot(a.x - act.ox, a.z - act.oz) > 0.22 && (pushed || a.dy < 20 || Math.abs(a.dx) > Math.abs(a.dy))) act.skim = true;
       if (!act.skim) return;
       // skimming: the blade slides under the turf along the drag
       const len = Math.hypot(a.x - act.lx, a.z - act.lz), n = Math.max(1, Math.ceil(len / 0.08)), pts = [];
@@ -1053,7 +1057,7 @@
   function enter() {
     on = true; document.body.classList.add('gardening', 'yarding'); bar.hidden = false; shovelSay = null;
     mySlots = slotList();
-    H.open({ bar: toolsEl, reach: 2.0, camDist: 9, pace: 0.55, tipPx: 90, liftPx: 70, slots: mySlots, held: lastHeld, onHold, press, frame, release });
+    H.open({ bar: toolsEl, reach: 2.0, camDist: 7.5, camPitch: 1.22, pace: 0.55, tipPx: 90, liftPx: 70, slots: mySlots, held: lastHeld, onHold, press, frame, release });
     onHold(held()); setHeap();
   }
   function leave() {
@@ -1099,6 +1103,7 @@
 
   window.__landscape = {
     relief, surfaceAt, tools: { shovel }, items: { shovel: ITEM.shovel }, setHeap, bindSay: (fn) => { shovelSay = fn; }, get rev() { return grid().rev; },
+    maskAt: (x, z) => { const i = Math.floor(x / STEP) - maskI, j = Math.floor(z / STEP) - maskJ; return i >= 0 && j >= 0 && i < MN && j < MN ? maskData[j * MN + i] : -1; }, drawnAt: (x, z) => drawn.has(qKey(Math.floor(x / STEP), Math.floor(z / STEP))),
     get on() { return on; }, get flying() { return flights.length > 0; }, hold: (id) => H.hold(id), refresh: () => { dirty = true; refreshGround(true); layoutStones(); layoutPlants(true); }, tiles: () => tileViews.size,
   };
 })();

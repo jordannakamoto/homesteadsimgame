@@ -34,7 +34,7 @@ const weedOf = (f) => (f >> WEED_SHIFT) & 7;
 const tampOf = (f) => (f & FLAG.TAMP2 ? 2 : f & FLAG.TAMP1 ? 1 : 0);
 
 function fresh() {
-  return { v: STATE_V, grid: EW.makeGrid(), carry: { m3: 0, s: '' }, barrow: { m3: 0, s: '' }, scale: 2, things: {}, plants: {}, ponds: {}, hose: {}, rain: null, hours: 0, nextId: 1, totals: { dugM3: 0, filledM3: 0, turfM3: 0, laidM3: 0 } };
+  return { v: STATE_V, grid: EW.makeGrid(), carry: { m3: 0, s: '' }, barrow: { m3: 0, s: '' }, scale: 4, things: {}, plants: {}, ponds: {}, hose: {}, rain: null, hours: 0, nextId: 1, totals: { dugM3: 0, filledM3: 0, turfM3: 0, laidM3: 0 } };
 }
 function ensure(ctx) { if (!ctx.s || ctx.s.v !== STATE_V) ctx.s = fresh(); return ctx.s; }
 const now = (ctx) => ctx.lifeT ?? ctx.t;
@@ -87,8 +87,11 @@ function dig(ctx, p = {}) {
   const x = +p.x, z = +p.z, pl = plantNear(s, x, z);
   if (pl) return fail('The ' + PLANTS[pl.k].name.toLowerCase() + ' is planted there. Lift it with your hands first.');
   const g = s.grid, i = pt(x), j = pt(z), wasTurf = EW.sAt(g, i, j) === 0, f0 = EW.fAt(g, i, j);
-  const res = EW.cut(g, x, z, SCOOP_M3 * (p.scale || s.scale || 1), { r: 0.16, t: hours(ctx), clearF: FLAG.TAMP1 | FLAG.TAMP2 });
+  const res = EW.cut(g, x, z, SCOOP_M3 * (p.scale || s.scale || 1), { r: 0.21, t: hours(ctx), clearF: FLAG.TAMP1 | FLAG.TAMP2 });
   if (!(res.m3 > 1e-6)) return fail('That is as deep as a shovel will go here.');
+  // digging tears up the turf round the hole too: a ring of loosened earth where the blade and boots went
+  // (loose earth caves in from it, so the hole is a bowl, not a shaft)
+  if (EW.paint(g, x, z, 0.5, { surface: 'soil', t: hours(ctx), ok: (q) => q.s === EW.UNTOUCHED })) EW.settle(g, x, z, 0.9);
   const cutLiner = unline(ctx, s, x, z, 0.2);
   if (f0 & FLAG.FABRIC) EW.paint(g, x, z, 0.16, { clearF: FLAG.FABRIC });
   reseat(s);
@@ -104,7 +107,7 @@ function dump(ctx, p = {}) {
   if (!finite(p)) return fail('Where?');
   if (!(s.carry.m3 > 1e-6)) return fail('The shovel is empty.');
   const m3 = s.carry.m3, surf = s.carry.s, layer = !!(SURFACES[surf] && SURFACES[surf].layer);
-  EW.fill(s.grid, +p.x, +p.z, m3, { r: 0.2, surface: surf, layer, t: hours(ctx) });
+  EW.fill(s.grid, +p.x, +p.z, m3, { r: 0.26, surface: surf, layer, t: hours(ctx) });
   reseat(s);
   s.carry = { m3: 0, s: '' };
   s.totals.filledM3 = r4(s.totals.filledM3 + m3);
@@ -136,7 +139,7 @@ function load(ctx, p = {}) {
   const mat = EW.lAt(g, i, j) > 0.002 ? EW.nameOf(g, EW.sAt(g, i, j)) : 'soil';
   if (s.barrow.m3 > 1e-6 && s.barrow.s !== mat) return fail('The barrow holds ' + matName(s.barrow.s) + '. Tip that first.');
   const turf = EW.sAt(g, i, j) === 0;
-  const res = EW.cut(g, x, z, Math.min(BARROW_M3 - s.barrow.m3, SCOOP_M3 * (s.scale || 1)), { r: 0.16, t: hours(ctx), clearF: FLAG.TAMP1 | FLAG.TAMP2 });
+  const res = EW.cut(g, x, z, Math.min(BARROW_M3 - s.barrow.m3, SCOOP_M3 * (s.scale || 1)), { r: 0.21, t: hours(ctx), clearF: FLAG.TAMP1 | FLAG.TAMP2 });
   if (!(res.m3 > 1e-6)) return fail('That is as deep as a shovel will go here.');
   unline(ctx, s, x, z, 0.2);
   reseat(s);

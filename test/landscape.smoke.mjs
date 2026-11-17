@@ -52,7 +52,7 @@ check('the shaped ground is drawn and the terrain lets it through', await G(() =
 { const a = await scr(at(1.0, 0.6).x, at(1.0, 0.6).z), b = await scr(at(1.0, 1.8).x, at(1.0, 1.8).z); await page.mouse.move(a.x, a.y); await page.mouse.down(); await wait(600); await page.mouse.move(b.x, b.y, { steps: 12 }); await wait(300); await page.mouse.up(); await wait(300); }
 check('dragging the shovel along the grass skims the turf', (await ground(at(1.0, 1.2)))?.s === 'soil');
 await hold('tamper'); await drag(at(1.0, 0.7), at(1.0, 1.7), 10, 900);
-check('the tamper firms it', ((await ground(at(1.0, 1.2))) || {}).tamped >= 1);
+check('the tamper firms it', ((await ground(at(1.0, 0.7))) || {}).tamped >= 1 || ((await ground(at(1.0, 1.7))) || {}).tamped >= 1);
 await hold('fabric'); await drag(at(1.0, 0.7), at(1.0, 1.7), 16, 900);
 check('fabric rolled over the dug-out path', !!(await ground(at(1.0, 1.2)))?.fabric);
 await hold('gravel'); await drag(at(1.0, 0.7), at(1.0, 1.7), 20, 1500);

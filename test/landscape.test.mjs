@@ -44,7 +44,7 @@ test('shovel: dig a scoop, throw it; skim turf, lay gravel, dig the gravel back 
   const sim = makeSim();
   const a = c(sim, 'landscape.dig', { x: 0, z: 0 });
   assert.ok(a.ok && a.turf, a.reason);
-  near(a.m3, SCOOP_M3 * 2, 2e-4);
+  near(a.m3, SCOOP_M3 * 4, 2e-4);                                   // four shovelfuls a scoop by default
   assert.equal(c(sim, 'landscape.dig', { x: 0.5, z: 0 }).ok, false, 'one load at a time');
   assert.ok(c(sim, 'landscape.dump', { x: 3, z: 3 }).ok);
   near(netVolume(L(sim).grid), 0, 2e-4);
@@ -60,7 +60,7 @@ test('wheelbarrow: filled scoop by scoop, tipped out in one heap', () => {
   const sim = makeSim();
   let n = 0;
   while (!c(sim, 'landscape.load', { x: (n % 4) * 0.4, z: 0 }).full && n < 20) n++;
-  assert.ok(n >= 5 && n <= 8, n + ' scoops');
+  assert.ok(n >= 3 && n <= 5, n + ' scoops');
   const t = c(sim, 'landscape.tip', { x: 5, z: 5 });
   assert.ok(t.ok && t.m3 > 0.09);
   near(netVolume(L(sim).grid), 0, 5e-4);

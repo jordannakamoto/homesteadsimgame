@@ -3,8 +3,8 @@
 // approximate where marked.
 //
 // A shovelful: a round-point shovel lifts about 5 to 8 L of loosened soil (approx). The game's scoop is 7 L, and a
-// setting (earth per scoop) lets the player move two or four times that per gesture to take the tedium out of big
-// jobs, the way pieces-per-gesture does for framing.
+// setting (earth per scoop) moves two or four times that per gesture to take the tedium out of big jobs, the way
+// pieces-per-gesture does for framing. The default is four (28 L), so each scoop reads clearly from the game camera.
 //
 // Planting holes (nursery and extension planting guides): dig about as deep as the root ball and two to three times
 // as wide. A 1-gallon perennial wants a hole about 15 cm deep, a 3-gallon shrub about 25 cm, a 15-gallon tree about
