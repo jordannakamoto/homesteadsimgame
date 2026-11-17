@@ -8,6 +8,8 @@
   function create(G, look) {
     const T = G.THREE,
       glowMat = new T.MeshBasicMaterial({ color: 0x9fecff, transparent: true, opacity: 0.45, depthWrite: false, fog: false }),
+      // the faint glow on everything that can go in next, seen from anywhere: slower and quieter than the glow within reach
+      farMat = new T.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.16, depthWrite: false, fog: false }),
       things = new Map(),
       dotGeo = new T.BoxGeometry(1, 1, 1), dotMat = new T.MeshBasicMaterial({ color: 0xffffff, fog: false }),
       m4 = new T.Matrix4(), m4b = new T.Matrix4(), v = new T.Vector3(), c = new T.Color(), up = new T.Vector3(0, 1, 0);
@@ -48,7 +50,7 @@
     function dropLayer(t, id) {
       const L = t.layers.get(id);
       if (!L) return;
-      t.root.remove(L.group); L.solid.dispose(); L.glow.dispose(); L.dots && L.dots.dispose(); t.layers.delete(id);
+      t.root.remove(L.group); L.solid.dispose(); L.glow.dispose(); L.dots && L.dots.dispose(); L.far && L.far.dispose(); t.layers.delete(id);
     }
     const local = (L, m, out, grow, h, dir) => { matrixOf(m, out, grow, dir ? v.set(dir[0], dir[1], dir[2]) : L.lift, h); out.elements[12] -= L.pivot.x; out.elements[13] -= L.pivot.y; out.elements[14] -= L.pivot.z; return out; };
     return {
@@ -130,6 +132,21 @@
         L.glow.count = members.length;
         L.glow.instanceMatrix.needsUpdate = true;
       },
+      // the faint glow: members with a colour each ([r, g, b]); the same boxes as the glow, a little fuller
+      setFar(key, id, members, colors) {
+        const L = layer(key, id, 16);
+        if (!L.far || L.far.instanceMatrix.count < members.length) {
+          if (L.far) { L.group.remove(L.far); L.far.dispose(); L.far = null; }
+          if (!members.length) return;
+          L.far = new T.InstancedMesh(look.geo, farMat, Math.max(64, members.length + 32));
+          L.far.frustumCulled = false; L.far.renderOrder = 3;
+          L.group.add(L.far);
+        }
+        members.forEach((m, n) => { L.far.setMatrixAt(n, local(L, m, m4b, 0.02, 0)); const k = colors[n]; L.far.setColorAt(n, c.setRGB(k[0], k[1], k[2])); });
+        L.far.count = members.length;
+        L.far.instanceMatrix.needsUpdate = true;
+        if (L.far.instanceColor) L.far.instanceColor.needsUpdate = true;
+      },
       // where a member is in the world right now (its middle), for sparks and dust
       worldOf(key, id, m, out) {
         const t = things.get(key), L = t && t.layers.get(id);
@@ -138,7 +155,7 @@
         out.sub(L.pivot).applyQuaternion(L.group.quaternion).add(L.pivot);
         return out.applyMatrix4(t.root.matrix);
       },
-      update(dt) { pulse += dt; glowMat.opacity = 0.34 + 0.2 * Math.sin(pulse * 4.2); },
+      update(dt) { pulse += dt; glowMat.opacity = 0.34 + 0.2 * Math.sin(pulse * 4.2); farMat.opacity = 0.13 + 0.07 * Math.sin(pulse * 1.7); },
     };
   }
 

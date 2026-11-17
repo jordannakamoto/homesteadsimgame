@@ -273,6 +273,48 @@
     }
   }
 
+  // the building reads from anywhere: every piece that can go in now breathes faintly, pale where you can reach it
+  // from where you stand, amber where it is above you (a ladder, scaffold or the roof first)
+  const FAR_OK = [0.78, 0.94, 1], FAR_HIGH = [1, 0.7, 0.28], farLayers = new Map();
+  function farGlow() {
+    const s = S(), P = G.player, on = !s.options.sandbox && !V.placing && !OFF[P.tool];
+    let sig = on ? V.rev + ':' + Math.round(P.y * 2) + ':' + (V.raise ? V.raise.parent + Math.round(V.raise.angle * 8) : '') : '';
+    const near = on ? inProgress().filter((pr) => { const st = V.structs.get(pr.id); return st && Math.hypot(P.x - st.x, P.z - st.z) < 45; }) : [];
+    sig += ':' + near.map((pr) => pr.id).join();
+    if (sig === V.farSig) return;
+    V.farSig = sig;
+    const want = new Map();
+    for (const pr of near) {
+      const pl = plan(pr.id), g = geom(pr.id);
+      if (!pl || !g) continue;
+      const by = new Map();
+      let n = 0;
+      for (const mid of pl.inst) {
+        const m = g.byId.get(mid), pm = pr.members[mid];
+        if (!m || m.draw === 0 || !pm || pm.kind === 'site' || (pm.need > 0 && pm.got >= pm.need - 1e-6)) continue;
+        if (++n > 320) break;
+        const flat = C.STAGE[pm.stage].flat && g.walls.has(pm.parent) && !pr.raised[pm.parent], hw = flat ? g.walls.get(pm.parent) : null, layer = flat ? pm.parent : 'main';
+        worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB);
+        const high = (wA.y + wB.y) / 2 - P.y > LAD.reachUpM;
+        let e = by.get(layer);
+        if (!e) by.set(layer, (e = { list: [], cols: [] }));
+        e.list.push(m); e.cols.push(high ? FAR_HIGH : FAR_OK);
+      }
+      want.set(pr.id, by);
+    }
+    const live = new Set(asm.keys());
+    for (const [id, old] of farLayers) { const by = want.get(id); if (live.has(id)) for (const layer of old) if (!by || !by.has(layer)) asm.setFar(id, layer, [], []); }
+    farLayers.clear();
+    for (const [id, by] of want) {
+      const g = geom(id);
+      for (const [layer, e] of by) {
+        if (layer !== 'main') { const hw = g.walls.get(layer); asm.hinge(id, layer, hw.pivot, hw.axis, V.raise && V.raise.parent === layer ? V.raise.angle : hw.flat, 48); }
+        asm.setFar(id, layer, e.list, e.cols);
+      }
+      farLayers.set(id, new Set(by.keys()));
+    }
+  }
+
   // ------------------------------------------------------------------ stacks and the load in the arms
   const COLORS = { lumber: 0xdcbc8c, boards: 0xd6b27c, osb: 0xc9a468, block: 0xb5b2aa, box: 0x8a6f4a, wrap: 0xe8ecea, felt: 0x3a3d43, shingle: 0x50555e, batt: 0xf1bcc8, door: 0x8a6240, pane: 0xa9c6d6, bag: 0xb9b4a6 };
   function describe(itemId, qty) {
@@ -1728,7 +1770,7 @@
     if (V.fTap) { V.fTap = false; if (!OFF[G.player.tool]) { press(V.ctx); V.ctx = context(); V.ctxSig = -1; } }   // what the press changed is read at once: a stale 'put down' with empty arms threw
     tickBHold(dt); tickLadder(dt); tickScaffold(dt); tickRoof(dt); drawLadder(); tickMark(dt); drawBeacons(dt); drawBarrow(dt); tickStation(dt);
     if (!s.options.sandbox) tickWork(dt);
-    glow(V.ctx);
+    glow(V.ctx); farGlow();
     {
       const pr = current(), flatNow = pr && !pr.done && C.STAGE[pr.stage] && C.STAGE[pr.stage].flat ? '-' : null;
       if (flatNow !== V.gstage) { V.gstage = flatNow; B.showStage(flatNow); }
