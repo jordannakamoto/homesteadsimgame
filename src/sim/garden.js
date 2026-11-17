@@ -42,7 +42,7 @@ import { ITEMS } from './items.js';
 import { DAY, HOUR, calendarT } from './time.js';
 import { sunTimes, dayOfYear, MONTHS, MONTH_START, DAYS_IN_YEAR, START_DAY_OF_YEAR, monthOf, dayOfMonth } from './calendar.js';
 import { climateModel, CLIMATES, DEFAULT_CLIMATE } from './weather.js';
-import { heightOf } from './core/earthwork.js';
+import { reliefAt as groundRelief } from './core/earthwork.js';
 
 export const CELL_M = 0.3, CELL_AREA = CELL_M * CELL_M;
 const STATE_V = 1;
@@ -166,19 +166,20 @@ const plantsChanged = (s) => listCache.delete(s.plants);
 const reliefCache = new WeakMap();   // bed -> { rev, dim, h: Float32Array, rain: Float32Array, any }
 function reliefOf(ctx, bed) {
   const L = ctx.get && ctx.get('landscape'), grid = L && L.grid;
-  if (!grid) return null;
+  if (!grid || !grid.tiles) return null;
   const dim = bed.x0 + ':' + bed.z0 + ':' + bed.nx + ':' + bed.nz;
   let r = reliefCache.get(bed);
   if (r && r.rev === grid.rev && r.dim === dim) return r.any ? r : null;
   const n = bed.nx * bed.nz, h = new Float32Array(n), rain = new Float32Array(n).fill(1);
-  const gx0 = Math.round(bed.x0 / CELL_M), gz0 = Math.round(bed.z0 / CELL_M);
+  // each square's height: the mean of the shaped ground at its centre and four points round it
+  const hq = (ix, iz) => { const x = bed.x0 + (ix + 0.5) * CELL_M, z = bed.z0 + (iz + 0.5) * CELL_M, o = CELL_M * 0.3; return (groundRelief(grid, x, z) * 2 + groundRelief(grid, x - o, z) + groundRelief(grid, x + o, z) + groundRelief(grid, x, z - o) + groundRelief(grid, x, z + o)) / 6; };
   let any = false;
-  for (let iz = 0; iz < bed.nz; iz++) for (let ix = 0; ix < bed.nx; ix++) { const v = heightOf(grid, gx0 + ix, gz0 + iz); h[iz * bed.nx + ix] = v; if (v) any = true; }
+  for (let iz = 0; iz < bed.nz; iz++) for (let ix = 0; ix < bed.nx; ix++) { const v = hq(ix, iz); h[iz * bed.nx + ix] = v; if (Math.abs(v) > 0.002) any = true; }
   if (any) {
     let sum = 0;
     for (let iz = 0; iz < bed.nz; iz++) for (let ix = 0; ix < bed.nx; ix++) {
       let nb = 0, k = 0;
-      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const x = ix + dx, z = iz + dz; nb += x >= 0 && z >= 0 && x < bed.nx && z < bed.nz ? h[z * bed.nx + x] : heightOf(grid, gx0 + x, gz0 + z); k++; }
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const x = ix + dx, z = iz + dz; nb += x >= 0 && z >= 0 && x < bed.nx && z < bed.nz ? h[z * bed.nx + x] : hq(x, z); k++; }
       const d = h[iz * bed.nx + ix] - nb / k;
       const f = clamp(1 - 4 * d, 0.4, 2);       // 10 cm proud of its neighbours: sheds 40% of its rain; 10 cm sunk: catches 40% more
       rain[iz * bed.nx + ix] = f; sum += f;

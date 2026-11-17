@@ -402,37 +402,44 @@ Water, electricity and room heat are merged and tested headlessly. They become p
 
 ## Digging and landscaping (Yard, key 6)
 
-**What is new**
+The ground is a physical thing now: a smooth surface you shape 10 cm at a time, not a grid. Holes are round bowls, thrown earth lands in a heap and slides down until it holds at its natural slope, and the grass stays firm at the edge of a cut. Everything is put in the way it really is.
 
-- **Yard (key 6).** A hands-on stance next to the Garden with its own bar: Hands, Shovel, Rake, Barrow, Can, Hose, whatever materials you own, and the Yard store.
-- **The shovel.** Click to dig a scoop; the load sits on the blade until you click somewhere to toss it. Earth is conserved: every hole makes a heap somewhere. Loose earth runs down until it holds (about 35 degrees), so tossed loads make real mounds and banks, while untouched turf holds a straight wall. Drag the shovel along the grass to skim the turf off. Earth per scoop is a setting in the Yard store (1×, 2×, 4×; 2× by default, 14 L).
-- **The wheelbarrow** (Yard store, $129). Click to shovel a scoop into it, up to 100 L; walk it over and drag down to tip the whole load out in one heap.
-- **The rake.** Drag over loose ground to level it. It moves earth around, never makes or loses any.
-- **Surfaces.** Gravel, river rock, bark mulch and sand are swept on from a bucket (hold and sweep; drag down to pour faster), and you can see them: pebbles in the gravel, cobbles in the river rock, chips in the bark. They only go on bare ground: skim the turf first, the way a real path is dug out and filled back to grade. Lawn seed on bare soil knits back into turf in about three weeks of warm weather.
-- **Dry creek beds.** Dig a winding shallow channel and sweep river rock along it; set boulders on its banks.
-- **Ponds.** Dig a hole (a shallow shelf round the edge, deeper in the middle), click it with pond liner to lay one sheet over the whole hole, then click it with the hose: it fills at about 15 L a minute (try 10× or 100× speed) and shuts off when full. The water finds its level and can only rise to the lowest point of the rim; rain tops it up and the sun takes a few millimetres a day. Cut into the liner with the shovel and the water runs out. A yellow flag iris goes on the shallow shelf, in 5 to 25 cm of water.
-- **Stones and timbers.** Flagstones (stepping stones), brick pavers (edging), wall stones, boulders and 1.2 m landscape timbers. Click to set one, drag to lay a line, R turns it. Wall stones and timbers stack, so you can build a dry-stone wall, a raised bed or steps course by course, and bank earth up behind them into a terrace. Stones settle with the ground: dig under one and it drops, heap earth under it and it rides up.
-- **Path lights.** Solar lights on stakes that glow at dusk.
-- **Nursery plants.** Lavender, black-eyed Susan, feather reed grass, boxwood, hydrangea, shrub rose, Japanese maple, and for edible landscaping a blueberry and a dwarf apple. Each wants a hole as deep as its root ball (12 to 35 cm): the name tag shows how deep your hole is so far. A new plant needs **watering in**: take the Can (the garden's watering can, now on the Yard bar too) and keep it moist for three weeks while it roots. A dry plant wilts (it goes dull and droops) and stops growing; it never dies. Once rooted it copes on its own except in a hot drought. Point at a plant to see how it is doing.
-- **Gardening overlaps it.** The garden bar has the Trowel (starter tool) and the Shovel. Seed goes into an opening: drag the trowel along the row for a drill, tap for a hole; potatoes, garlic, squash and tomatoes need a hole. The bed sits on the shaped ground, so you can heap a hill for squash or dig a basin. The can waters yard plants and ponds as well as beds.
-- **What the shape does (simulated).** Rain runs off a raised square onto the lower ones beside it and a basin catches it (the bed keeps all the rain that fell on it). A raised square's soil is warmer for germination; a hollow gathers cold air on a still night. Pulling the hoe past a potato draws soil up round it (hilling): hilled potatoes yield up to 15% more.
-- You walk on what you build: mounds lift you, holes drop you.
+**The tools and how they move**
+
+- **Shovel.** Press where you want the blade to go in (it bites), then pull the mouse down to lever the earth up onto the blade; a plain click does both. With a load on the blade, click where it should go: it is thrown, flies in an arc and lands as a heap. Press, pause, then push along the grass to slide the blade under the turf and skim it off. Earth is conserved: every hole makes a heap somewhere. (Earth per scoop: 1×, 2× or 4× in the Yard store's Tools aisle; 2×, 14 L, by default.)
+- **Wheelbarrow.** Click to shovel a scoop in (up to 100 L); walk it over and drag down to tip it out.
+- **Rake.** Drag over loose earth to level it.
+- **Hand tamper.** Click to thump, hold and walk to tamp a strip. Twice is firm.
+- **Landscape fabric.** The woven weed barrier: hold and sweep it over dug-out ground.
+- **Watering can, hose.** Water new plants in; run the hose into a lined pond.
+
+**How things are put in (and what happens if you skip a step)**
+
+- **A path or patio:** dig it out (skim the turf, then dig 5 to 15 cm), tamp it, roll out fabric, lay crushed stone and tamp it again, then gravel, chips, or stone on a little sand. Stones set on loose ground sink and tilt over their first weeks; on tamped ground they stay put. Gravel and chips with no fabric under them grow weeds in a few weeks; pull them by hand (Hands, drag over the path). Point at any ground and the tag tells you what it is and how it was put in ("Crushed stone 8 cm · on fabric · tamped firm").
+- **A garden box:** set the cedar box down (R turns it), fill it with raised-bed soil (or earth from the barrow). The earth stays inside the walls. Then hoe it into a bed in the Garden (5).
+- **A wall:** cut stone or fieldstone, dragged along in courses, one course on top of another, finished with capstones. Set it on tamped ground or it settles.
+- **A pond:** dig a bowl (a shelf round the edge, deeper in the middle), click it with liner to lay one sheet over the whole hole, run the hose in. The water stops at the lowest point of the rim; rain tops it up, the sun takes a little. An iris goes on the shallow shelf.
+- **Plants:** dig a hole as deep as the root ball (the tag counts the centimetres), plant, water in, keep moist for three weeks while it roots.
+
+**Materials (Yard store, by aisle)**
+
+- Wood chips and bark mulch; pea gravel, crushed stone, decomposed granite, slate chips, white marble chips, lava rock, river rock, sand; lawn seed.
+- Cobblestones (granite setts, laid three wide as you drag), flagstones, brick pavers; fieldstone, cut stone, capstones, granite edging, landscape timbers, boulders; solar path lights.
+- Base and fabric; garden boxes and bed soil; pond liner; tools; the nursery (lavender, black-eyed Susan, feather reed grass, boxwood, hydrangea, rose, Japanese maple, blueberry, dwarf apple, iris).
 
 **Try this**
 
-1. Press 6. Dig three scoops in one spot and toss them beside it: a hole and a heap. Rake the heap flat.
-2. Skim a strip of grass, buy gravel and sweep it on: a path. Line it with brick pavers or timbers, and set path lights along it.
-3. Buy a wheelbarrow, dig out a pond with it (a shelf, then a deeper middle), line it in one click, and run the hose. Ring the rim with wall stones; put an iris on the shelf.
-4. Dig a shallow winding channel downhill and lay river rock in it.
-5. Build a raised bed two timbers high, fill it from the barrow, and plant a blueberry. Water it in, then come back over the next three weeks.
-6. Press 5. Draw a drill with the trowel and sow radish along it. Tap holes and set potatoes; later pull the hoe past them to hill them.
+1. Press 6. Dig a few scoops (press and pull down) and throw them beside you (click): a hole and a heap. Rake the heap flat.
+2. Put in a path properly: skim it, tamp it, fabric, crushed stone, tamp, then pea gravel or cobblestones. Put a second path in carelessly beside it and watch the difference over a few weeks (100× speed).
+3. Set a garden box, fill it, and hoe it into a bed (5); sow it with the trowel.
+4. Build a cut-stone wall three courses high with capstones on top.
+5. Dig and line a pond, run the hose, ring it with fieldstone, put an iris on the shelf.
 
 **Rough edges (what to expect)**
 
-- Shaped ground is drawn in 30 cm squares in the pixel-art style; pond edges are square-stepped rather than smooth curves.
-- Pond water is a flat sheet drawn at the level the simulation finds, not the streams' live water; on sloping ground a pond's water can sit slightly high or low at its ends.
-- Ponds fill from rain and the hose only (no runoff from the yard into them yet), and nothing lives in them yet.
-- Nursery plants drink and grow but are not fed by the soil model, and the apple and blueberry do not fruit yet.
+- Thrown earth always lands where you aim (no misses or spray yet).
+- Pond water is a flat sheet at the level the simulation finds, not the streams' live water.
 - No rentable machines yet (mini excavator, plate compactor).
-- The old terrain tools (Dig, Raise, Level on keys 2 to 4) still work at their 1 m scale and do not move earth by hand.
+- The old terrain tools (keys 2 to 4) still work at their 1 m scale.
 - The bar holds more slots than there are number keys: past 9, click them.
+- Yards dug before this update start fresh (the ground's data changed shape).

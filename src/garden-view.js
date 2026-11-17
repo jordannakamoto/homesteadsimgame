@@ -707,7 +707,7 @@
     if (LS()) for (const [gx, gz] of batch) {
       const p = plantAt((gx + 0.5) * CELL, (gz + 0.5) * CELL);
       if (!p || !HILL[p.crop] || p.dead) continue;
-      const L = G.sim.state.sys.landscape, hOf = (x, z) => { const q = L.grid.sq[x + ',' + z]; return q ? q[0] : 0; };
+      const hOf = (x, z) => G.landscape.reliefAt(G.sim.state, (x + 0.5) * CELL, (z + 0.5) * CELL);
       if (hOf(gx, gz) > 0.16) continue;
       let from = null, fh = -9;
       for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
@@ -715,7 +715,7 @@
         if (np || !cellAt((nx + 0.5) * CELL, (nz + 0.5) * CELL)) continue;
         const h = hOf(nx, nz); if (h > fh) { fh = h; from = [nx, nz]; }
       }
-      if (from && cmd('landscape.move', { from, to: [gx, gz], m3: 0.0025 }).ok) { act.hill = (act.hill || 0) + 1; G.burst((gx + 0.5) * CELL, y + 0.1, (gz + 0.5) * CELL, 5, 0x5a4230, 1.0, 1.4, 0.05, 0.45); }
+      if (from && cmd('landscape.move', { from: [(from[0] + 0.5) * CELL, (from[1] + 0.5) * CELL], to: [(gx + 0.5) * CELL, (gz + 0.5) * CELL], m3: 0.0025 }).ok) { act.hill = (act.hill || 0) + 1; G.burst((gx + 0.5) * CELL, y + 0.1, (gz + 0.5) * CELL, 5, 0x5a4230, 1.0, 1.4, 0.05, 0.45); }
     }
   }
   const HOE_W = 0.2;

@@ -16,7 +16,7 @@
   if (!G || !H || !G.sim || !G.sim.handlers.has('landscape.dig') || !G.earthwork || !G.landscape) return;
   const T = G.THREE, EW = G.earthwork, RD = G.landscape, $ = (id) => document.getElementById(id), canvas = $('view');
   const { SURFACES, THINGS, PLANTS, SCOOP_M3 } = RD;
-  const CELL = 0.3, TILE = 16, CS = G.chunkSize || 32;
+  const CELL = 0.3, CS = G.chunkSize || 32;   // CELL: the garden's beds
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const hash = (a, b) => { let h = (a * 374761393 + b * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
@@ -30,136 +30,148 @@
   const cmd = (name, p) => { const r = G.sim.commandNow(name, p); G.markStockDirty && G.markStockDirty(); dirty = true; return r; };
   const money = (v) => '$' + (Math.round(v * 100) / 100).toFixed(v % 1 ? 2 : 0);
   const grid = () => L().grid;
+  const MAT_HEX = { gravel: 0xa49d90, bark: 0x6a412c, sand: 0xd8c79a, riverrock: 0x8c8478, crushed: 0x8a8a86, dg: 0xc4a57a, slate: 0x4f5a63, marble: 0xe6e3dc, lava: 0x7a3b2c, woodchips: 0xa47a4c };
 
   /* ================= the shape of the ground, for everyone ================= */
-  // tiles (16 x 16 squares) that hold a worked square or touch one, so the relief lookup can skip untouched ground fast
-  const tileKey = (tx, tz) => (tx + 32768) * 65536 + (tz + 32768);
-  const tiles = new Set();
-  let tilesRev = -1;
-  function syncTiles() {
-    const g = grid();
-    if (g.rev === tilesRev) return;
-    tilesRev = g.rev; tiles.clear();
-    for (const k in g.sq) {
-      const i = k.indexOf(','), gx = +k.slice(0, i), gz = +k.slice(i + 1);
-      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) tiles.add(tileKey(Math.floor((gx + dx) / TILE), Math.floor((gz + dz) / TILE)));
-    }
-  }
+  // the earthwork heightfield: points 10 cm apart in tiles of 32 x 32 (src/sim/core/earthwork.js)
+  const STEP = 0.1, TS = 32, WALL = RD.FLAG.WALL;
   function relief(x, z) {
-    syncTiles();
-    if (!tiles.size || !tiles.has(tileKey(Math.floor(x / CELL / TILE), Math.floor(z / CELL / TILE)))) return 0;
-    return EW.reliefAt(grid(), x, z);
+    const g = grid();
+    for (const k in g.tiles) return EW.reliefAt(g, x, z);   // anything dug at all
+    return 0;
   }
   const surfaceAt = (x, z) => G.heightAt(x, z) + relief(x, z);
   G.setRelief(relief);
   G.surfaceAt = surfaceAt;
 
   // a garden bed's worked squares are drawn by the garden view (src/garden-view.js), with this relief added
-  function bedTilled(gx, gz) {
+  function bedTilledAt(x, z) {
     const g = GS();
     if (!g || !g.field) return false;
-    const x = (gx + 0.5) * CELL, z = (gz + 0.5) * CELL;
     for (const b of Object.values(g.field.groups)) {
       const ix = Math.floor((x - b.x0) / CELL), iz = Math.floor((z - b.z0) / CELL);
       if (ix >= 0 && iz >= 0 && ix < b.nx && iz < b.nz) { const c = b.cells[iz * b.nx + ix]; return c.till === undefined || c.till > 0; }
     }
     return false;
   }
-  // worth drawing: any surface other than turf, or turf moved more than a few centimetres
-  const shown = (q) => !!q && (q[1] !== '' || Math.abs(q[0]) >= 0.03);
-
-  /* ================= the ground mesh, tile by tile ================= */
-  const groundMat = new T.MeshLambertMaterial({ vertexColors: true });
-  const tileViews = new Map();    // tileKey -> { mesh, sig }
-  const COL = {
-    soil: new T.Color(0x5e4632), soilDry: new T.Color(0x86704f), gravel: new T.Color(0xa49d90), gravelDark: new T.Color(0x6f6a62), bark: new T.Color(0x5a3626), barkLight: new T.Color(0x8a5a3a),
-    sand: new T.Color(0xd8c79a), sod: new T.Color(0x56732f), sodDark: new T.Color(0x3f5a26), sprout: new T.Color(0x6f9a3a), skirt: new T.Color(0x3d2c1f),
-    rock: new T.Color(0x8c8478), rockDark: new T.Color(0x5f5a52), liner: new T.Color(0x232526),
-  };
-  const _c = new T.Color(), _c2 = new T.Color();
-  // the colour of one point of a square's surface: its material, grained by a fixed speckle, darker down in a hole
-  function pointColour(q, gx, gz, k, depth, lifeT) {
-    const r = hash(gx * 7 + k, gz * 13 + k * 3), s = q[1];
-    if (s === 'gravel') _c.copy(r < 0.35 ? COL.gravelDark : COL.gravel).multiplyScalar(0.85 + 0.3 * hash(k, gx + gz));
-    else if (s === 'bark') _c.copy(r < 0.5 ? COL.bark : COL.barkLight).multiplyScalar(0.85 + 0.25 * hash(k + 1, gz));
-    else if (s === 'sand') _c.copy(COL.sand).multiplyScalar(0.93 + 0.12 * r);
-    else if (s === 'riverrock') _c.copy(r < 0.5 ? COL.rockDark : COL.rock).multiplyScalar(0.8 + 0.3 * hash(k + 2, gx));
-    else if (L().liner[gx + ',' + gz]) _c.copy(COL.liner).multiplyScalar(0.85 + 0.3 * r);
-    else if (s === '') _c.copy(r < 0.4 ? COL.sodDark : COL.sod).multiplyScalar(0.9 + 0.15 * hash(gx, k));
-    else {
-      _c.copy(COL.soil).lerp(COL.soilDry, 0.35 + 0.3 * hash(gx + k, gz)).multiplyScalar(r < 0.08 ? 1.25 : r > 0.9 ? 0.75 : 0.95);
-      if (s === 'lawn_sown') {
-        const age = clamp((lifeT - q[3]) / (RD.LAWN.coverDays * 86400), 0, 1);
-        if (hash(k * 3 + gx, gz * 5) < 0.15 + 0.85 * age) _c.lerp(COL.sprout, 0.35 + 0.5 * age);
-      }
-    }
-    return _c.multiplyScalar(1 + clamp(depth * 1.6, -0.45, 0));
+  const bedTilled = (gx, gz) => bedTilledAt((gx + 0.5) * CELL, (gz + 0.5) * CELL);
+  // a point worth drawing: worked (any surface but turf), moved more than a few millimetres, or marked
+  const workedN = (t, n) => t.s[n] !== 0 || Math.abs(t.h[n]) >= 4 || (t.f[n] & ~WALL) !== 0;
+  function workedAt(g, i, j) {
+    const tx = Math.floor(i / TS), tz = Math.floor(j / TS), t = g.tiles[tx + ',' + tz];
+    return !!t && workedN(t, (j - tz * TS) * TS + (i - tx * TS));
   }
-  const SUBP = [0, 1, 2];
-  function buildTile(tx, tz, lifeT) {
-    const g = grid(), pos = [], col = [];
-    const gx0 = tx * TILE, gz0 = tz * TILE;
-    const ownTile = (gx, gz) => shown(EW.square(g, gx, gz)) && !bedTilled(gx, gz);
-    let any = false;
-    for (let gz = gz0; gz < gz0 + TILE; gz++) for (let gx = gx0; gx < gx0 + TILE; gx++) {
-      const q = EW.square(g, gx, gz);
-      if (!shown(q) || bedTilled(gx, gz)) continue;
-      any = true;
-      // the 3 x 3 lattice points of this square: corners, edge middles and centre
-      const P = [];
-      for (const b of SUBP) for (const a of SUBP) {
-        const i = gx * 2 + a, j = gz * 2 + b, x = i * CELL / 2, z = j * CELL / 2, h = EW.latticeH(g, i, j);
-        P.push([x, G.heightAt(x, z) + h + 0.004, z, h]);
-      }
-      let k = 0;
-      const put = (p, extra = 0) => { pos.push(p[0], p[1] - extra, p[2]); const c = extra ? _c2.copy(COL.skirt) : pointColour(q, gx, gz, k, p[3], lifeT); col.push(c.r, c.g, c.b); k++; };
-      for (let b = 0; b < 2; b++) for (let a = 0; a < 2; a++) {
-        const p00 = P[b * 3 + a], p10 = P[b * 3 + a + 1], p01 = P[(b + 1) * 3 + a], p11 = P[(b + 1) * 3 + a + 1];
-        put(p00); put(p01); put(p10); put(p10); put(p01); put(p11);
-      }
-      // skirts where this square meets ground the terrain or a bed draws: they hide any hairline between the meshes
-      const edge = (pa, pb, mid) => { put(pa); put(pa, 0.3); put(mid); put(mid); put(pa, 0.3); put(mid, 0.3); put(mid); put(mid, 0.3); put(pb); put(pb); put(mid, 0.3); put(pb, 0.3); };
-      if (!ownTile(gx, gz - 1)) edge(P[2], P[0], P[1]);
-      if (!ownTile(gx, gz + 1)) edge(P[6], P[8], P[7]);
-      if (!ownTile(gx - 1, gz)) edge(P[0], P[6], P[3]);
-      if (!ownTile(gx + 1, gz)) edge(P[8], P[2], P[5]);
+
+  /* ================= the ground mesh: smooth, tile by tile ================= */
+  const groundMat = new T.MeshLambertMaterial({ vertexColors: true });
+  const tileViews = new Map();    // tile key -> { mesh, sig, quads }
+  const drawn = new Set();         // quad keys drawn (for the grass and the dig mask)
+  const qKey = (i, j) => (i + 100000) * 200000 + (j + 100000);
+  const COL = {
+    soil: new T.Color(0x5e4632), soilDry: new T.Color(0x86704f), firm: new T.Color(0x76604a), sod: new T.Color(0x56732f), sodDark: new T.Color(0x3f5a26),
+    sprout: new T.Color(0x6f9a3a), skirt: new T.Color(0x3d2c1f), liner: new T.Color(0x232526), fabric: new T.Color(0x2e2f2c), fabricLine: new T.Color(0x45463f),
+    gravel: new T.Color(0xa49d90), gravelDark: new T.Color(0x6f6a62), bark: new T.Color(0x5a3626), barkLight: new T.Color(0x8a5a3a), sand: new T.Color(0xd8c79a),
+    rock: new T.Color(0x8c8478), rockDark: new T.Color(0x5f5a52),
+  };
+  const BASE = {
+    gravel: [0xa49d90, 0x6f6a62], riverrock: [0x8c8478, 0x5f5a52], bark: [0x8a5a3a, 0x5a3626], sand: [0xd8c79a, 0xc9b88a],
+    crushed: [0x8a8a86, 0x6c6c69], dg: [0xc4a57a, 0xb08f64], slate: [0x4f5a63, 0x3d464e], marble: [0xe6e3dc, 0xcfcbc2], lava: [0x7a3b2c, 0x5a2a20], woodchips: [0xa47a4c, 0x7d5a36],
+  };
+  for (const k in BASE) BASE[k] = BASE[k].map((h) => new T.Color(h));
+  const _c = new T.Color(), _c2 = new T.Color();
+  // the colour of one point: its material grained by a fixed speckle, fabric or liner where bare, darker down a hole
+  function pointColour(g, t, n, i, j, lifeH) {
+    const r = hash(i * 7 + 3, j * 13 + 1), name = g.codes[t.s[n]], f = t.f[n], h = t.h[n] / 1000;
+    if (BASE[name] && t.l[n] > 2) _c.copy(r < 0.45 ? BASE[name][1] : BASE[name][0]).multiplyScalar(0.88 + 0.22 * hash(i + 5, j * 3));
+    else if (name === '') _c.copy(r < 0.4 ? COL.sodDark : COL.sod).multiplyScalar(0.9 + 0.15 * hash(i, j + 9));
+    else if (f & RD.FLAG.LINER) _c.copy(COL.liner).multiplyScalar(0.85 + 0.3 * r);
+    else if (f & RD.FLAG.FABRIC) _c.copy((i + j) % 2 ? COL.fabric : COL.fabricLine);
+    else {
+      _c.copy(COL.soil).lerp(COL.soilDry, 0.3 + 0.3 * hash(i + 11, j)).multiplyScalar(r < 0.08 ? 1.2 : r > 0.92 ? 0.78 : 0.96);
+      if (f & (RD.FLAG.TAMP1 | RD.FLAG.TAMP2)) _c.lerp(COL.firm, f & RD.FLAG.TAMP2 ? 0.6 : 0.3);   // tamped earth: smoother and paler
+      if (name === 'lawn_sown') { const age = clamp((lifeH - t.t[n]) / (RD.LAWN.coverDays * 24), 0, 1); if (hash(i * 3 + 1, j * 5) < 0.15 + 0.85 * age) _c.lerp(COL.sprout, 0.35 + 0.5 * age); }
     }
-    if (!any) return null;
+    return _c.multiplyScalar(1 + clamp(h * 1.4, -0.45, 0));
+  }
+  const ptRef = (g, i, j) => { const tx = Math.floor(i / TS), tz = Math.floor(j / TS), t = g.tiles[tx + ',' + tz]; return t ? [t, (j - tz * TS) * TS + (i - tx * TS)] : null; };
+  function buildTile(tx, tz, lifeH) {
+    const g = grid(), i0 = tx * TS, j0 = tz * TS, W = TS + 3;
+    // the world height of every point in the tile and one beyond, for smooth normals
+    const Y = new Float32Array(W * W);
+    for (let b = 0; b < W; b++) for (let a = 0; a < W; a++) { const i = i0 + a - 1, j = j0 + b - 1, x = i * STEP, z = j * STEP; Y[b * W + a] = G.heightAt(x, z) + EW.hAt(g, i, j) + 0.004; }
+    const y = (i, j) => Y[(j - j0 + 1) * W + (i - i0 + 1)];
+    const quadOn = (i, j) => (workedAt(g, i, j) || workedAt(g, i + 1, j) || workedAt(g, i, j + 1) || workedAt(g, i + 1, j + 1)) && !bedTilledAt((i + 0.5) * STEP, (j + 0.5) * STEP);
+    const pos = [], nor = [], col = [], quads = [];
+    const vert = (i, j, down = 0) => {
+      const x = i * STEP, z = j * STEP, yy = y(i, j);
+      pos.push(x, yy - down, z);
+      const nx = y(i - 1, j) - y(i + 1, j), nz = y(i, j - 1) - y(i, j + 1), l = Math.hypot(nx, 2 * STEP, nz);
+      if (down) nor.push(0, 1, 0); else nor.push(nx / l, (2 * STEP) / l, nz / l);
+      const r = ptRef(g, i, j), c = down ? _c2.copy(COL.skirt) : r ? pointColour(g, r[0], r[1], i, j, lifeH) : _c.copy(COL.sod);
+      col.push(c.r, c.g, c.b);
+    };
+    for (let j = j0; j < j0 + TS; j++) for (let i = i0; i < i0 + TS; i++) {
+      if (!quadOn(i, j)) continue;
+      quads.push([i, j]);
+      // two triangles split along the shorter diagonal
+      if (Math.abs(y(i, j) - y(i + 1, j + 1)) < Math.abs(y(i + 1, j) - y(i, j + 1))) { vert(i, j); vert(i, j + 1); vert(i + 1, j + 1); vert(i, j); vert(i + 1, j + 1); vert(i + 1, j); }
+      else { vert(i, j); vert(i, j + 1); vert(i + 1, j); vert(i + 1, j); vert(i, j + 1); vert(i + 1, j + 1); }
+      // skirts where the quad meets ground drawn by the terrain or a bed: they hide hairlines between meshes
+      const sk = (a1, b1, a2, b2) => { vert(a1, b1); vert(a1, b1, 0.25); vert(a2, b2); vert(a2, b2); vert(a1, b1, 0.25); vert(a2, b2, 0.25); };
+      if (!quadOn(i, j - 1)) sk(i + 1, j, i, j);
+      if (!quadOn(i, j + 1)) sk(i, j + 1, i + 1, j + 1);
+      if (!quadOn(i - 1, j)) sk(i, j, i, j + 1);
+      if (!quadOn(i + 1, j)) sk(i + 1, j + 1, i + 1, j);
+    }
+    if (!quads.length) return { mesh: null, quads };
     const geo = new T.BufferGeometry();
     geo.setAttribute('position', new T.BufferAttribute(new Float32Array(pos), 3));
+    geo.setAttribute('normal', new T.BufferAttribute(new Float32Array(nor), 3));
     geo.setAttribute('color', new T.BufferAttribute(new Float32Array(col), 3));
-    geo.computeVertexNormals();
     const m = new T.Mesh(geo, groundMat);
     m.receiveShadow = true; m.castShadow = true;
-    const d = detailFor(gx0, gz0, g);
+    const d = detailFor(g, quads, y);
     if (d) m.add(d);
-    return m;
+    return { mesh: m, quads };
   }
-  // Pebbles in the gravel, cobbles in a creek bed, chips in the bark: small shapes scattered over each square of a
-  // laid layer (a fixed pattern per square), built with the tile and drawn with it.
+  // Pieces scattered on laid surfaces (pebbles, cobbles, chips, flakes), and weeds coming up where they grow: a fixed
+  // pattern per quad, built with the tile.
   const DETAIL = {
-    gravel: { n: 9, geo: new T.OctahedronGeometry(1, 0), size: [0.018, 0.034], flat: 0.55, cols: [0xb5ada0, 0x8d877d, 0x6f6a62, 0xc8bfae] },
-    riverrock: { n: 5, geo: new T.IcosahedronGeometry(1, 0), size: [0.04, 0.085], flat: 0.5, cols: [0x9a9286, 0x6d675e, 0xb3a690, 0x7d6d5a, 0x5c5f5c] },
-    bark: { n: 8, geo: new T.BoxGeometry(2, 0.35, 1), size: [0.018, 0.034], flat: 1, cols: [0x6a412c, 0x8a5a3a, 0x4e2e1f] },
+    gravel: { n: 1.0, geo: new T.OctahedronGeometry(1, 0), size: [0.018, 0.034], flat: 0.55, cols: [0xb5ada0, 0x8d877d, 0x6f6a62, 0xc8bfae] },
+    riverrock: { n: 0.6, geo: new T.IcosahedronGeometry(1, 0), size: [0.04, 0.085], flat: 0.5, cols: [0x9a9286, 0x6d675e, 0xb3a690, 0x7d6d5a, 0x5c5f5c] },
+    bark: { n: 0.9, geo: new T.BoxGeometry(2, 0.35, 1), size: [0.018, 0.034], flat: 1, cols: [0x6a412c, 0x8a5a3a, 0x4e2e1f] },
+    crushed: { n: 1.2, geo: new T.TetrahedronGeometry(1, 0), size: [0.016, 0.03], flat: 0.8, cols: [0x9a9a96, 0x7a7a76, 0x5f5f5c, 0xb0afa9] },
+    dg: { n: 0.7, geo: new T.OctahedronGeometry(1, 0), size: [0.006, 0.012], flat: 0.6, cols: [0xd2b38a, 0xa98761, 0xe0c8a2] },
+    slate: { n: 1.0, geo: new T.BoxGeometry(2, 0.25, 1.4), size: [0.018, 0.032], flat: 1, cols: [0x56626c, 0x434d55, 0x6b7680, 0x3a4249] },
+    marble: { n: 1.1, geo: new T.OctahedronGeometry(1, 0), size: [0.016, 0.028], flat: 0.7, cols: [0xf3f1ec, 0xe2ded6, 0xd6d2c9] },
+    lava: { n: 0.8, geo: new T.IcosahedronGeometry(1, 0), size: [0.022, 0.04], flat: 0.75, cols: [0x7e3a2a, 0x5c2a20, 0x96503a, 0x45231c] },
+    woodchips: { n: 1.1, geo: new T.BoxGeometry(2.4, 0.3, 0.8), size: [0.02, 0.04], flat: 1, cols: [0xc19a66, 0xa47a4c, 0x8a6238, 0xd8b588] },
+    weed: { n: 1, geo: new T.ConeGeometry(0.6, 3, 3), size: [0.02, 0.035], flat: 1, cols: [0x4f7a2e, 0x5f8f36, 0x6b9a3c] },
   };
   for (const k in DETAIL) DETAIL[k].pos = DETAIL[k].geo.toNonIndexed().attributes.position.array;
-  function detailFor(gx0, gz0, g) {
+  function detailFor(g, quads, y) {
     const pos = [], col = [];
-    for (let gz = gz0; gz < gz0 + TILE; gz++) for (let gx = gx0; gx < gx0 + TILE; gx++) {
-      const q = EW.square(g, gx, gz);
-      if (!q || !DETAIL[q[1]] || bedTilled(gx, gz)) continue;
-      const D = DETAIL[q[1]], src = D.pos;
-      for (let i = 0; i < D.n; i++) {
-        const x = (gx + 0.06 + 0.88 * hash(gx * 31 + i, gz * 17)) * CELL, z = (gz + 0.06 + 0.88 * hash(gz * 29 + i, gx * 13 + 7)) * CELL;
-        const sz = D.size[0] + (D.size[1] - D.size[0]) * hash(i * 7 + gx, gz * 3), yaw = hash(gx + i * 3, gz + i) * 6.28, cy = Math.cos(yaw), sy = Math.sin(yaw);
-        const y = G.heightAt(x, z) + EW.reliefAt(g, x, z) + 0.004 + sz * D.flat * 0.3;
-        const c = _c.setHex(D.cols[Math.floor(hash(i + gx * 5, gz * 11 + i) * D.cols.length)]);
-        for (let v = 0; v < src.length; v += 3) {
-          const lx = src[v] * sz, ly = src[v + 1] * sz * D.flat, lz = src[v + 2] * sz * 0.8;
-          pos.push(x + lx * cy - lz * sy, y + ly, z + lx * sy + lz * cy);
-          col.push(c.r, c.g, c.b);
+    const scatter = (D, i, j, count, seed) => {
+      const src = D.pos;
+      for (let k = 0; k < count; k++) {
+        const u = hash(i * 31 + k + seed, j * 17), v = hash(j * 29 + k, i * 13 + 7 + seed), x = (i + u) * STEP, z = (j + v) * STEP;
+        const yy = y(i, j) * (1 - u) * (1 - v) + y(i + 1, j) * u * (1 - v) + y(i, j + 1) * (1 - u) * v + y(i + 1, j + 1) * u * v;
+        const sz = D.size[0] + (D.size[1] - D.size[0]) * hash(k * 7 + i, j * 3 + seed), yaw = hash(i + k * 3, j + k) * 6.28, cy = Math.cos(yaw), sy = Math.sin(yaw);
+        const cc = _c.setHex(D.cols[Math.floor(hash(k + i * 5, j * 11 + k) * D.cols.length)]), up = D === DETAIL.weed ? sz * 1.4 : sz * D.flat * 0.3;
+        for (let q = 0; q < src.length; q += 3) {
+          const lx = src[q] * sz, ly = src[q + 1] * sz * D.flat, lz = src[q + 2] * sz * 0.8;
+          pos.push(x + lx * cy - lz * sy, yy + up + ly, z + lx * sy + lz * cy);
+          col.push(cc.r, cc.g, cc.b);
         }
       }
+    };
+    for (const [i, j] of quads) {
+      const r = ptRef(g, i, j);
+      if (!r) continue;
+      const [t, n] = r, D = DETAIL[g.codes[t.s[n]]];
+      if (D && t.l[n] > 2) { const c = Math.floor(D.n) + (hash(i, j + 77) < D.n % 1 ? 1 : 0); if (c) scatter(D, i, j, c, 0); }
+      const wd = (t.f[n] >> 4) & 7;
+      if (wd) scatter(DETAIL.weed, i, j, Math.min(4, wd), 5);
     }
     if (!pos.length) return null;
     const geo = new T.BufferGeometry();
@@ -169,71 +181,60 @@
     const m = new T.Mesh(geo, groundMat); m.receiveShadow = true;
     return m;
   }
-  function tileSig(tx, tz, lifeT) {
-    const g = grid();
-    let s = '';
-    for (let gz = tz * TILE - 1; gz <= tz * TILE + TILE; gz++) for (let gx = tx * TILE - 1; gx <= tx * TILE + TILE; gx++) {
-      const q = EW.square(g, gx, gz);
-      if (!q) continue;
-      s += gx + ',' + gz + ':' + q[0] + q[1] + (q[1] === 'lawn_sown' ? Math.floor((lifeT - q[3]) / 86400 / 3) : '') + (bedTilled(gx, gz) ? 'b' : '') + (L().liner[gx + ',' + gz] ? 'L' : '') + ';';
-    }
-    return s;
-  }
   let groundRev = -1, bedSigSeen = '', heightSig = '';
   function bedsSig() {
     const g = GS(); if (!g || !g.field) return '';
     let s = ''; for (const b of Object.values(g.field.groups)) { s += b.id + b.x0 + b.z0 + b.nx + b.nz; for (const c of b.cells) s += c.till === undefined ? 1 : c.till > 0 ? 1 : 0; }
     return s;
   }
+  // which tiles changed since they were last built: a cheap fingerprint of each tile's arrays and its neighbours' edges
+  const fp = (t) => { if (!t) return 0; let h = 0; for (let n = 0; n < t.h.length; n++) h = (h * 31 + t.h[n] * 7 + t.s[n] * 131 + t.l[n] * 3 + t.f[n] * 17) | 0; return h; };
   function refreshGround(force) {
-    const g = grid(), lifeT = G.sim.state.lifeT, bs = bedsSig();
-    // the terrain under the tiles can change too (Dig, Raise and Level, felled trees): watch its edit count
-    const hs = G.world ? G.world.edits.size + ':' + Math.floor(lifeT / 86400 / 3) : '';
+    const g = grid(), lifeH = Math.round(G.sim.state.lifeT / 3600), bs = bedsSig();
+    const hs = G.world ? G.world.edits.size + ':' + Math.floor(lifeH / 72) : '';
     if (!force && g.rev === groundRev && bs === bedSigSeen && hs === heightSig) return false;
     groundRev = g.rev; bedSigSeen = bs; heightSig = hs;
-    const want = new Set();
-    for (const k in g.sq) { const i = k.indexOf(','), gx = +k.slice(0, i), gz = +k.slice(i + 1); want.add(Math.floor(gx / TILE) + ':' + Math.floor(gz / TILE)); }
+    const keys = Object.keys(g.tiles), want = new Set(keys), prints = new Map();
+    for (const k of keys) prints.set(k, fp(g.tiles[k]));
     for (const [key, v] of [...tileViews]) if (!want.has(key)) { if (v.mesh) { G.scene.remove(v.mesh); v.mesh.geometry.dispose(); for (const ch of v.mesh.children) ch.geometry.dispose(); } tileViews.delete(key); }
-    for (const key of want) {
-      const [tx, tz] = key.split(':').map(Number), sig = tileSig(tx, tz, lifeT), v = tileViews.get(key);
+    for (const key of keys) {
+      const [tx, tz] = key.split(',').map(Number);
+      let sig = prints.get(key) + ':' + bs.length + ':' + hs;
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) sig += ':' + (prints.get(tx + dx + ',' + (tz + dz)) || 0);
+      const v = tileViews.get(key);
       if (v && v.sig === sig && !force) continue;
       if (v && v.mesh) { G.scene.remove(v.mesh); v.mesh.geometry.dispose(); for (const ch of v.mesh.children) ch.geometry.dispose(); }
-      const m = buildTile(tx, tz, lifeT);
-      if (m) G.scene.add(m);
-      tileViews.set(key, { mesh: m, sig });
+      const b = buildTile(tx, tz, lifeH);
+      if (b.mesh) G.scene.add(b.mesh);
+      tileViews.set(key, { mesh: b.mesh, sig, quads: b.quads });
     }
+    drawn.clear();
+    for (const v of tileViews.values()) for (const [i, j] of v.quads) drawn.add(qKey(i, j));
     paintMask(true);
     hideGrass(true);
     return true;
   }
 
   /* ================= the dig mask: where the terrain lets the shaped ground show ================= */
-  const MN = 512;
+  const MN = 1024;
   const maskData = new Uint8Array(MN * MN);
   const maskTex = new T.DataTexture(maskData, MN, MN, T.RedFormat, T.UnsignedByteType);
   maskTex.magFilter = maskTex.minFilter = T.NearestFilter; maskTex.generateMipmaps = false;
-  let maskGx = 0, maskGz = 0, maskOn = false;
+  let maskI = 0, maskJ = 0, maskOn = false;
   function paintMask(force) {
-    const g = grid(), P = G.player;
-    const cgx = Math.floor(P.x / CELL), cgz = Math.floor(P.z / CELL);
-    const moved = Math.abs(cgx - (maskGx + MN / 2)) > 90 || Math.abs(cgz - (maskGz + MN / 2)) > 90;
+    const P = G.player, ci = Math.floor(P.x / STEP), cj = Math.floor(P.z / STEP);
+    const moved = Math.abs(ci - (maskI + MN / 2)) > 300 || Math.abs(cj - (maskJ + MN / 2)) > 300;
     if (!force && !moved) return;
-    let any = false;
-    for (const k in g.sq) if (shown(g.sq[k])) { any = true; break; }
-    if (!any && !maskOn) return;
-    maskGx = cgx - MN / 2; maskGz = cgz - MN / 2;
+    if (!drawn.size && !maskOn) return;
+    maskI = ci - MN / 2; maskJ = cj - MN / 2;
     maskData.fill(0);
-    for (const k in g.sq) {
-      if (!shown(g.sq[k])) continue;
-      const i = k.indexOf(','), x = +k.slice(0, i) - maskGx, z = +k.slice(i + 1) - maskGz;
-      if (x >= 0 && z >= 0 && x < MN && z < MN) maskData[z * MN + x] = 255;
-    }
+    for (const v of tileViews.values()) for (const [i, j] of v.quads) { const x = i - maskI, z = j - maskJ; if (x >= 0 && z >= 0 && x < MN && z < MN) maskData[z * MN + x] = 255; }
     maskTex.needsUpdate = true;
-    G.digMask.win.value.set(maskGx * CELL, maskGz * CELL, CELL, MN);
+    G.digMask.win.value.set(maskI * STEP, maskJ * STEP, STEP, MN);
     if (!maskOn) { G.digMask.enable(maskTex); maskOn = true; }
   }
 
-  /* ================= grass: hidden on worked squares, back when the turf is ================= */
+  /* ================= grass: hidden on worked ground, back when the turf is ================= */
   const ZERO = new T.Matrix4().makeScale(0, 0, 0);
   const grassRec = new WeakMap();   // mesh -> { list, orig: Float32Array, hid: Set, ver }
   const chunkHas = new Set(); let chunkRev = -1;
@@ -242,10 +243,9 @@
     if (!chunks) return;
     if (chunkRev !== g.rev) {
       chunkRev = g.rev; chunkHas.clear();
-      for (const k in g.sq) { const i = k.indexOf(','); chunkHas.add(Math.floor(+k.slice(0, i) * CELL / CS) + ',' + Math.floor(+k.slice(i + 1) * CELL / CS)); }
+      for (const k in g.tiles) { const [tx, tz] = k.split(',').map(Number); for (const [a, b] of [[0, 0], [1, 0], [0, 1], [1, 1]]) chunkHas.add(Math.floor(((tx + a) * TS * STEP) / CS) + ',' + Math.floor(((tz + b) * TS * STEP) / CS)); }
     }
     for (const c of chunks.values()) {
-      // only chunks that hold a worked square, or did
       const near = chunkHas.has(Math.round(c.ox / CS) + ',' + Math.round(c.oz / CS));
       for (const [mesh, list] of [[c.grassMesh, c.grass], [c.flowerMesh, c.flowers]]) {
         if (!mesh || !list) continue;
@@ -254,13 +254,11 @@
         const arr = mesh.instanceMatrix.array;
         if (!rec || rec.list !== list || rec.orig.length !== arr.length) { rec = { list, orig: new Float32Array(arr), hid: new Set(), ver: -1 }; grassRec.set(mesh, rec); }
         else if (rec.ver !== mesh.instanceMatrix.version) {
-          // someone else (the garden) wrote to the matrices: take their values as the originals, except the ones we hid
           for (let i = 0; i < list.length; i++) if (!rec.hid.has(i)) for (let j = 0; j < 16; j++) rec.orig[i * 16 + j] = arr[i * 16 + j];
         } else if (!force) continue;
         let n = 0;
         list.forEach((gr, i) => {
-          const gx = Math.floor((c.ox + gr.lx) / CELL), gz = Math.floor((c.oz + gr.lz) / CELL), q = g.sq[gx + ',' + gz];
-          const hide = shown(q) && !bedTilled(gx, gz);
+          const x = c.ox + gr.lx, z = c.oz + gr.lz, hide = drawn.has(qKey(Math.floor(x / STEP), Math.floor(z / STEP)));
           if (hide && !rec.hid.has(i)) { mesh.setMatrixAt(i, ZERO); rec.hid.add(i); n++; }
           else if (!hide && rec.hid.has(i)) { for (let j = 0; j < 16; j++) arr[i * 16 + j] = rec.orig[i * 16 + j]; rec.hid.delete(i); n++; }
         });
@@ -308,7 +306,17 @@
     if (kind === 'flagstone') { const g = new T.CylinderGeometry(0.5, 0.5, 1, 7, 1); g.translate(0, 0.5, 0); return merge([part(g, 0xb9a988, 0, 0, 0, 0, 0.2, 0, d.w, d.h, d.d, 0.012)]); }
     if (kind === 'paver') return merge([part(box(d.w, d.h, d.d), 0xa65a3f, 0, d.h / 2, 0), part(box(d.w * 0.96, 0.004, d.d * 0.92), 0xb86a4c, 0, d.h + 0.001, 0)]);
     if (kind === 'wallstone') return merge([part(box(d.w, d.h, d.d, 2), 0x8f887a, 0, d.h / 2, 0, 0, 0, 0, 1, 1, 1, 0.035)]);
+    if (kind === 'cobble') return merge([part(box(d.w, d.h, d.d, 2), 0x8d8a85, 0, d.h / 2, 0, 0, 0, 0, 1, 1, 1, 0.012), part(ball(0.5, 1), 0x9a9690, 0, d.h - 0.004, 0, 0, 0, 0, d.w * 0.92, 0.025, d.d * 0.92)]);
+    if (kind === 'cutstone') return merge([part(box(d.w, d.h, d.d, 2), 0xc2a77e, 0, d.h / 2, 0, 0, 0, 0, 1, 1, 1, 0.008), part(box(d.w * 1.002, 0.006, d.d * 1.002), 0xa98f68, 0, d.h - 0.002, 0)]);
+    if (kind === 'capstone') return merge([part(box(d.w, d.h, d.d, 2), 0xb39a76, 0, d.h / 2, 0, 0, 0, 0, 1, 1, 1, 0.006), part(box(d.w * 1.004, 0.004, d.d * 1.004), 0xc9b08a, 0, d.h, 0)]);
+    if (kind === 'curb') return merge([part(box(d.w, d.h, d.d), 0x8f8f8c, 0, d.h / 2, 0), part(box(d.w * 1.002, 0.004, d.d * 0.9), 0xa3a3a0, 0, d.h, 0)]);
     if (kind === 'timber') return merge([part(box(d.w, d.h, d.d), 0x7a6146, 0, d.h / 2, 0), part(box(d.w * 0.98, 0.004, d.d * 0.7), 0x8d7152, 0, d.h + 0.001, 0), part(box(0.004, d.h * 0.9, d.d * 0.9), 0xa88b66, d.w / 2 + 0.001, d.h / 2, 0), part(box(0.004, d.h * 0.9, d.d * 0.9), 0xa88b66, -d.w / 2 - 0.001, d.h / 2, 0)]);
+    if (kind === 'gardenbox') {
+      const t = 0.04, w = d.w, dd = d.d, h = d.h, cedar = 0xa8683f, dark = 0x8c5532;
+      return merge([part(box(w, h, t), cedar, 0, h / 2, dd / 2 - t / 2), part(box(w, h, t), cedar, 0, h / 2, -dd / 2 + t / 2), part(box(t, h, dd), dark, w / 2 - t / 2, h / 2, 0), part(box(t, h, dd), dark, -w / 2 + t / 2, h / 2, 0),
+        part(box(w, 0.012, 0.012), dark, 0, h * 0.5, dd / 2 + 0.002), part(box(w, 0.012, 0.012), dark, 0, h * 0.5, -dd / 2 - 0.002),
+        ...[[1, 1], [1, -1], [-1, 1], [-1, -1]].map(([a, b]) => part(box(0.07, h + 0.03, 0.07), dark, a * (w / 2 - 0.035), (h + 0.03) / 2, b * (dd / 2 - 0.035)))]);
+    }
     if (kind === 'pathlight') return merge([part(stick(d.h - 0.06, 0.012, 5), 0x2c2c2a, 0, 0, 0), part(new T.CylinderGeometry(0.05, 0.045, 0.06, 8), 0x3a3a38, 0, d.h - 0.06, 0), part(new T.CylinderGeometry(0.065, 0.06, 0.015, 8), 0x2c2c2a, 0, d.h + 0.005, 0)]);
     return merge([part(ball(0.5, 1), 0x7d7a72, 0, d.h * 0.5, 0, 0, 0, 0, d.w, d.h, d.d, 0.12)]);
   }
@@ -329,7 +337,7 @@
   const stoneY = (o) => G.heightAt(o.ax, o.az) + o.y;
   function layoutStones() {
     const list = Object.values(L().things);
-    let sig = list.length + ':'; for (const o of list) sig += o.id + ',';
+    let sig = list.length + ':' + L().nextId + ':' + grid().rev + ':';
     sig += heightSig;
     if (sig === stoneSig) return;
     stoneSig = sig;
@@ -463,21 +471,21 @@
   const pondViews = new Map();   // root -> { mesh, sig }
   const hoseMeshes = new Map();
   const hoseGeo = merge([part(new T.TorusGeometry(0.16, 0.02, 5, 14), 0x2f7a3a, 0, 0.03, 0, Math.PI / 2, 0, 0), part(new T.TorusGeometry(0.12, 0.02, 5, 12), 0x2f7a3a, 0, 0.07, 0, Math.PI / 2, 0, 0), part(stick(0.25, 0.012, 4), 0x2f7a3a, 0.16, 0.05, 0, 0, 0, -1.2)]);
-  const pondTop = (pd) => { let s = 0; for (const [gx, gz] of pd.cells) s += G.heightAt((gx + 0.5) * CELL, (gz + 0.5) * CELL); return s / pd.cells.length + pd.level; };
+  const pondTop = (pd) => { let s = 0; for (const [i, j] of pd.pts) s += G.heightAt(i * STEP, j * STEP); return s / pd.pts.length + pd.level; };
   function layoutPonds() {
     const list = RD.pondsOf(G.sim.state), seen = new Set();
     for (const pd of list) {
       seen.add(pd.root);
-      const sig = pd.cells.length + ':' + Math.round(pd.m3 * 200) + ':' + groundRev;
+      const sig = pd.pts.length + ':' + Math.round(pd.m3 * 200) + ':' + groundRev;
       let v = pondViews.get(pd.root);
       if (!v || v.sig !== sig) {
         if (v && v.mesh) { G.scene.remove(v.mesh); v.mesh.geometry.dispose(); }
         let mesh = null;
         if (pd.m3 > 1e-4) {
           const y = pondTop(pd) + 0.002, pos = [], g = grid();
-          for (const [gx, gz] of pd.cells) {
-            if (EW.heightOf(g, gx, gz) >= pd.level - 0.002) continue;
-            const x0 = gx * CELL - 0.02, x1 = (gx + 1) * CELL + 0.02, z0 = gz * CELL - 0.02, z1 = (gz + 1) * CELL + 0.02;
+          for (const [i, j] of pd.pts) {
+            if (EW.hAt(g, i, j) >= pd.level - 0.002) continue;
+            const x0 = (i - 0.6) * STEP, x1 = (i + 0.6) * STEP, z0 = (j - 0.6) * STEP, z1 = (j + 0.6) * STEP;
             pos.push(x0, y, z0, x0, y, z1, x1, y, z0, x1, y, z0, x0, y, z1, x1, y, z1);
           }
           if (pos.length) {
@@ -490,7 +498,7 @@
       // a hose coiled at the rim while it runs
       let h = hoseMeshes.get(pd.root);
       if (pd.hose && !h) {
-        const [gx, gz] = pd.cells[0], x = gx * CELL - 0.15, z = gz * CELL - 0.15;
+        const [gi, gj] = pd.pts[0], x = gi * STEP - 0.2, z = gj * STEP - 0.2;
         h = new T.Mesh(hoseGeo, plantMat); h.position.set(x, surfaceAt(x, z), z); G.scene.add(h); hoseMeshes.set(pd.root, h); h.userData.pd = pd;
       } else if (!pd.hose && h) { G.scene.remove(h); hoseMeshes.delete(pd.root); }
       if (h) h.userData.pd = pd;
@@ -501,7 +509,7 @@
   // the hose's stream, a few drops a frame into the pond
   function hoseSpray() {
     for (const h of hoseMeshes.values()) {
-      const pd = h.userData.pd, [gx, gz] = pd.cells[0], x = (gx + 0.5) * CELL, z = (gz + 0.5) * CELL;
+      const pd = h.userData.pd, [gi, gj] = pd.pts[0], x = gi * STEP, z = gj * STEP;
       if (Math.random() < 0.5) G.burst(x, pondTop(pd) + 0.05, z, 2, 0xcfeaf7, 0.6, 0.6, 0.03, 0.35);
     }
   }
@@ -522,6 +530,8 @@
     use: 'tip', still: [0.44, 0.02, 0.22, 0, 0, 0], stillArm: -0.5, walk: [0.3, 1.74, -0.78, 2.15, 0, 0], walkArm: -1.0 };
   const bucket = (fill) => ({ obj: mesh([part(new T.CylinderGeometry(0.2, 0.16, 0.28, 10), 0x6e7b52, 0, 0.14, 0), part(ball(0.19, 1), fill, 0, 0.28, 0, 0, 0, 0, 1, 0.55, 1)]), use: 'over', overD: 0.55, overH: 0.8, tiltHold: 0.9, tiltMax: 0.35, still: [0.4, 0.5, 0.12, 0, 0, 0], stillArm: -0.15 });
   ITEM.gravel = bucket(0xa49d90); ITEM.bark = bucket(0x6a412c); ITEM.sand = bucket(0xd8c79a); ITEM.seed = bucket(0xd9cf9a); ITEM.riverrock = bucket(0x8c8478);
+  for (const k of ['crushed', 'dg', 'slate', 'marble', 'lava']) ITEM[k] = bucket(MAT_HEX[k]);
+  ITEM.woodchips = bucket(MAT_HEX.woodchips);
   // the wheelbarrow: tray, one wheel, two handles; a heap in the tray as it fills
   {
     const tray = new T.CylinderGeometry(0.42, 0.3, 0.26, 4, 1, true); tray.rotateY(Math.PI / 4);
@@ -531,6 +541,9 @@
     const g = new T.Group(); g.add(obj);
     ITEM.barrow = { obj: g, heap, use: 'hand', still: [0, 0.05, 0.65, 0, 0, 0], reach: [0, 0.05, 0.75, 0, 0, 0], stillArm: -0.4 };
   }
+  ITEM.tamper = { obj: mesh([part(stick(1.2, 0.018, 6), 0x3c3c3a, 0, 0.03, 0), part(box(0.2, 0.025, 0.2), 0x4a4d50, 0, 0.012, 0), part(box(0.16, 0.03, 0.03), 0x2a2a2a, 0, 1.22, 0)]), use: 'tip', still: [0.38, 0.02, 0.24, 0, 0, 0], stillArm: -0.5, walk: [0.3, 1.74, -0.78, 2.15, 0, 0], walkArm: -1.0 };
+  ITEM.fabric = { obj: mesh([part(new T.CylinderGeometry(0.07, 0.07, 0.7, 10), 0x2e2f2c, 0, 0, 0, 0, 0, Math.PI / 2), part(box(0.6, 0.004, 0.4), 0x3a3b37, 0, -0.07, 0.2)]), use: 'hand', still: [0, 0.6, 0.35, 0, 0, 0], reach: [0, 0.35, 0.55, 0, 0, 0], stillArm: -1.1 };
+  ITEM.bedmix = { obj: mesh([part(box(0.36, 0.5, 0.18), 0x3f6a3a, 0, 0.25, 0), part(box(0.3, 0.1, 0.19), 0xd8c88a, 0, 0.3, 0)]), use: 'over', overD: 0.55, overH: 0.8, tiltHold: 0.9, tiltMax: 0.35, still: [0.4, 0.5, 0.12, 0, 0, 0], stillArm: -0.15 };
   ITEM.liner = { obj: mesh([part(new T.CylinderGeometry(0.09, 0.09, 0.6, 10), 0x1f2122, 0, 0, 0, 0, 0, Math.PI / 2), part(box(0.5, 0.004, 0.3), 0x2a2c2d, 0, -0.09, 0.15)]), use: 'hand', still: [0, 0.75, 0.3, 0, 0, 0], reach: [0, 0.5, 0.5, 0, 0, 0], stillArm: -1.1 };
   ITEM.hose = { obj: new T.Group(), use: 'hand', still: [0, 0.7, 0.3, 0, 0, 0], stillArm: -1.1 };
   ITEM.hose.obj.add(new T.Mesh(merge([part(new T.TorusGeometry(0.16, 0.02, 5, 14), 0x2f7a3a, 0, 0, 0), part(new T.TorusGeometry(0.12, 0.02, 5, 12), 0x2f7a3a, 0, 0, 0.03)]), toolMat));
@@ -569,65 +582,107 @@
   const skimmed = new Set();
   let say = () => {}, shovelSay = null;
   const sayS = (m, secs) => (shovelSay || say)(m, secs);
-  const sqOf = (x, z) => [Math.floor(x / CELL), Math.floor(z / CELL)];
   const loaded = () => L().carry.m3 > 1e-6;
   const isWater = (x, z) => G.heightAt(x, z) < (G.sea ?? -0.2) + 0.05 || !!(G.streamWaterAt && G.streamWaterAt(x, z));
   const litres = (m3) => Math.round(m3 * 1000);
-  const matHex = (s) => (s === 'gravel' ? 0xa49d90 : s === 'bark' ? 0x6a412c : s === 'sand' ? 0xd8c79a : s === 'riverrock' ? 0x8c8478 : 0x5e4632);
+  const matHex = (s) => MAT_HEX[s] ?? 0x5e4632;
+  const ptOf = (x, z) => [Math.round(x / STEP), Math.round(z / STEP)];
   function setHeap() {
     const b = L().barrow, bh = ITEM.barrow && ITEM.barrow.heap;
     if (bh) { bh.visible = b.m3 > 1e-6; if (bh.visible) { bh.material.color.setHex(matHex(b.s)); const f = Math.min(1, b.m3 / RD.BARROW_M3); bh.scale.set(0.6 + 0.5 * f, 0.15 + 0.5 * f, 0.8 + 0.5 * f); } }
     const c = L().carry, it = ITEM.shovel;
     it.heap.visible = c.m3 > 1e-6;
-    if (it.heap.visible) { it.heap.material.color.setHex(c.s === 'gravel' ? 0xa49d90 : c.s === 'bark' ? 0x6a412c : c.s === 'sand' ? 0xd8c79a : 0x5e4632); it.heap.scale.set(1, 0.4 + 0.25 * Math.min(2, c.m3 / SCOOP_M3 / 2), 1); }
+    if (it.heap.visible) { it.heap.material.color.setHex(matHex(c.s)); it.heap.scale.set(1, 0.4 + 0.25 * Math.min(2, c.m3 / SCOOP_M3 / 2), 1); }
   }
-  // the shovel, shared with the garden: click to dig a scoop or toss the load; drag along the ground to skim turf
+  // The shovel, shared with the garden. Real motions, made simple:
+  //  - press: the blade goes into the ground where you aim (it bites: a jolt and crumbs)
+  //  - pull the mouse down (the handle back): it levers the earth up onto the blade. A plain click does the same.
+  //  - drag along the ground instead: the blade slides under the turf and skims it off
+  //  - with a load on the blade, click where it should go: it is thrown, flies in an arc and lands as a heap that
+  //    slides down to its natural slope
+  const clump = new T.Mesh(new T.IcosahedronGeometry(0.09, 1), new T.MeshLambertMaterial({ color: 0x5e4632 }));
+  clump.visible = false; clump.castShadow = true; G.scene.add(clump);
+  const flights = [];
+  const _bw = new T.Vector3();
+  function bladePos() { ITEM.shovel.obj.updateWorldMatrix(true, false); return _bw.set(0, 0.16, 0.06).applyMatrix4(ITEM.shovel.obj.matrixWorld); }
+  function flyTick(dt) {
+    for (let k = flights.length - 1; k >= 0; k--) {
+      const f = flights[k];
+      f.t += dt / f.dur;
+      const t = Math.min(1, f.t);
+      clump.visible = true;
+      clump.position.set(f.x0 + (f.x1 - f.x0) * t, f.y0 + (f.y1 - f.y0) * t + Math.sin(Math.PI * t) * f.arc, f.z0 + (f.z1 - f.z0) * t);
+      clump.rotation.set(t * 5, t * 3, 0);
+      clump.scale.set(1 + 0.4 * t, 0.8 - 0.2 * t, 1 + 0.4 * t);
+      if (t >= 1) { flights.splice(k, 1); clump.visible = flights.length > 0; f.land(); }
+    }
+  }
   const shovel = {
+    flying: () => flights.length > 0,
     press(a) {
-      act.kind = 'shovel'; act.n = 0; act.lx = a.x; act.lz = a.z; act.skim = false; act.tossed = false; skimmed.clear();
+      act.kind = 'shovel'; act.n = 0; act.lx = a.x; act.lz = a.z; act.skim = false; act.done = false; act.ox = a.x; act.oz = a.z; act.movedAt = null; skimmed.clear();
       if (!owns('shovel') && !owns('spade')) { act.kind = ''; return sayS('You need a shovel.'); }
-      G.cam.shake = Math.min(G.cam.shake + 0.1, 0.4); G.juice.hitStop = 0.04;
-      if (loaded()) {
-        const c = L().carry, res = cmd('landscape.dump', { x: a.x, z: a.z });
-        act.tossed = true;
-        if (!res.ok) return sayS(res.reason);
-        const y = surfaceAt(a.x, a.z), hex = c.s === 'gravel' ? 0xa49d90 : c.s === 'bark' ? 0x6a412c : c.s === 'sand' ? 0xd8c79a : 0x5e4632;
-        G.burst(a.x, y + 0.35, a.z, 14, hex, 1.4, 1.2, 0.07, 0.6);
-        G.burst(a.x, y + 0.08, a.z, 8, hex, 1.8, 2.2, 0.05, 0.45);
-        setHeap(); tip('tossed', res);
-      }
+      if (flights.length) { act.done = true; return; }
+      if (loaded()) { act.throwing = true; return; }      // wind up: the throw goes on release
+      act.throwing = false;
+      // the blade bites
+      G.cam.shake = Math.min(G.cam.shake + 0.08, 0.4); G.juice.hitStop = 0.05;
+      G.burst(a.x, surfaceAt(a.x, a.z) + 0.04, a.z, 5, EW.sAt(grid(), Math.round(a.x / STEP), Math.round(a.z / STEP)) ? 0x5a4230 : 0x5e8a3a, 0.7, 1.2, 0.04, 0.4);
     },
     frame(a) {
-      if (act.kind !== 'shovel' || act.tossed) return;
-      if (!act.skim && Math.hypot(a.x - a.ox, a.z - a.oz) > 0.22 && a.held < 0.9) act.skim = true;
+      if (act.kind !== 'shovel' || act.done || act.throwing) return;
+      // when the mouse first moves: straight after the press it is a yank (lever); after a pause it is a push (skim)
+      if (act.movedAt == null && Math.hypot(a.dx, a.dy) > 10) act.movedAt = a.held;
+      const pushed = act.movedAt != null && act.movedAt > 0.3;
+      // a quick pull down on the mouse is the handle pulled back: it levers the earth up where the blade went in
+      if (!act.skim && !pushed && a.dy > 40 && a.dy > Math.abs(a.dx) * 1.2) { act.done = true; return shovel.lever(act.ox, act.oz); }
+      // pushing the blade along the ground (after a pause, or sideways) slides it under the turf
+      if (!act.skim && Math.hypot(a.x - act.ox, a.z - act.oz) > 0.22 && (pushed || Math.abs(a.dx) > Math.abs(a.dy))) act.skim = true;
       if (!act.skim) return;
-      // skimming: the blade slides under the turf along the drag; every square it passes is lifted off
-      const len = Math.hypot(a.x - act.lx, a.z - act.lz), n = Math.max(1, Math.ceil(len / 0.1)), cells = [];
-      for (let i = 0; i <= n; i++) {
-        const x = act.lx + ((a.x - act.lx) * i) / n, z = act.lz + ((a.z - act.lz) * i) / n, [gx, gz] = sqOf(x, z), k = gx + ',' + gz;
-        if (skimmed.has(k) || isWater(x, z)) continue;
-        skimmed.add(k); cells.push([gx, gz]);
-      }
+      // skimming: the blade slides under the turf along the drag
+      const len = Math.hypot(a.x - act.lx, a.z - act.lz), n = Math.max(1, Math.ceil(len / 0.08)), pts = [];
+      for (let i = 1; i <= n; i++) { const x = act.lx + ((a.x - act.lx) * i) / n, z = act.lz + ((a.z - act.lz) * i) / n; if (!isWater(x, z)) pts.push([x, z]); }
       act.lx = a.x; act.lz = a.z;
-      if (!cells.length) return;
-      const res = cmd('landscape.skim', { cells });
+      if (!pts.length) return;
+      const res = cmd('landscape.skim', { points: pts });
       if (!res.ok) { if (!act.why) sayS(res.reason); act.why = res.reason; return; }
-      if (res.cells) { act.n += res.cells; G.burst(a.x, surfaceAt(a.x, a.z) + 0.1, a.z, 4 + res.cells * 3, 0x5e8a3a, 1.4, 2.2, 0.07, 0.6); G.burst(a.x, surfaceAt(a.x, a.z) + 0.06, a.z, 4, 0x5a4230, 1.2, 1.6, 0.05, 0.5); }
+      if (res.m2 > 0) { act.n += res.m2; G.burst(a.x, surfaceAt(a.x, a.z) + 0.1, a.z, 5, 0x5e8a3a, 1.4, 2.2, 0.07, 0.6); G.burst(a.x, surfaceAt(a.x, a.z) + 0.06, a.z, 3, 0x5a4230, 1.2, 1.6, 0.05, 0.5); }
+    },
+    lever(x, z) {
+      if (isWater(x, z)) return sayS('That is water.');
+      const res = cmd('landscape.dig', { x, z });
+      if (!res.ok) return sayS(res.reason);
+      const y = surfaceAt(x, z);
+      G.burst(x, y + 0.12, z, 12, res.s === 'soil' ? 0x5a4230 : matHex(res.s), 1.6, 2.8, 0.07, 0.6);
+      if (res.turf) G.burst(x, y + 0.12, z, 6, 0x5e8a3a, 1.6, 2.6, 0.07, 0.7);
+      G.cam.shake = Math.min(G.cam.shake + 0.06, 0.4);
+      if (res.liner) sayS('You cut into the pond liner: the water ran out. The liner is back in your stock.', 5);
+      setHeap(); tip('dug', res);
     },
     release(a) {
       if (act.kind !== 'shovel') return;
       act.kind = '';
-      if (act.tossed) return;
-      if (act.skim) { if (act.n) { sayS('Skimmed the turf off ' + act.n + (act.n === 1 ? ' square' : ' squares') + '. Bare soil takes gravel, bark, sand or lawn seed.'); tip('skim'); } return; }
-      if (isWater(a.x, a.z)) return sayS('That is water.');
-      const res = cmd('landscape.dig', { x: a.x, z: a.z });
-      if (!res.ok) return sayS(res.reason);
-      const y = surfaceAt(a.x, a.z);
-      G.burst(a.x, y + 0.12, a.z, 10, res.s === 'gravel' ? 0xa49d90 : 0x5a4230, 1.5, 2.4, 0.07, 0.6);
-      if (res.turf) G.burst(a.x, y + 0.12, a.z, 6, 0x5e8a3a, 1.6, 2.6, 0.07, 0.7);
-      G.cam.shake = Math.min(G.cam.shake + 0.06, 0.4);
-      if (res.liner) sayS('You cut into the pond liner: the water ran out. The liner is back in your stock.', 5);
-      setHeap(); tip('dug', res);
+      if (act.throwing) {
+        act.throwing = false;
+        if (!loaded()) return;
+        // thrown: the load leaves the blade and flies to where you aimed
+        const c = L().carry, from = bladePos(), tx = a.x, tz = a.z, ty = surfaceAt(tx, tz), d = Math.hypot(tx - from.x, tz - from.z);
+        clump.material.color.setHex(matHex(c.s));
+        ITEM.shovel.heap.visible = false;
+        G.cam.shake = Math.min(G.cam.shake + 0.04, 0.4);
+        flights.push({ x0: from.x, y0: from.y, z0: from.z, x1: tx, y1: ty + 0.05, z1: tz, t: 0, dur: 0.22 + d * 0.09, arc: 0.25 + d * 0.18, land: () => {
+          const res = cmd('landscape.dump', { x: tx, z: tz });
+          if (!res.ok) { setHeap(); return sayS(res.reason); }
+          G.burst(tx, surfaceAt(tx, tz) + 0.12, tz, 14, matHex(res.s), 1.6, 1.4, 0.07, 0.6);
+          G.burst(tx, surfaceAt(tx, tz) + 0.04, tz, 8, matHex(res.s), 2.0, 0.6, 0.05, 0.45);
+          G.cam.shake = Math.min(G.cam.shake + 0.08, 0.4);
+          setHeap(); tip('tossed', res);
+        } });
+        return;
+      }
+      if (act.done) return;
+      if (act.skim) { if (act.n) { sayS('Skimmed ' + act.n.toFixed(1) + ' m² of turf off. Bare earth takes gravel, chips, sand, fabric or lawn seed.'); tip('skim'); } return; }
+      shovel.lever(act.ox, act.oz);      // a plain click: push in and lever up in one go
     },
   };
   // the rake: drag over loose ground and it evens out
@@ -643,31 +698,34 @@
     act.acc += dt;
     if (act.acc < 0.16) return;
     const step = Math.min(0.4, act.acc); act.acc = 0;
-    const res = k === 'seed' ? cmd('landscape.seedLawn', { x: a.x, z: a.z, r: 0.42 }) : cmd('landscape.spread', { surface: k, x: a.x, z: a.z, r: 0.42, m3: 0.035 * step * Math.max(0.25, a.tip) });
+    const res = k === 'seed' ? cmd('landscape.seedLawn', { x: a.x, z: a.z, r: 0.42 }) : cmd('landscape.spread', { surface: k, x: a.x, z: a.z, r: 0.42, m3: (k === 'bedmix' ? 0.12 : 0.035) * step * Math.max(0.25, a.tip) });
     if (!res.ok) { if (act.why !== res.reason) say(res.reason, 4); act.why = res.reason; return; }
     act.n++;
     const hex = k === 'seed' ? 0xe8dca0 : matHex(k);
     G.burst(a.x, a.y + 0.55, a.z, 6, hex, 1.2, 0.3, k === 'seed' ? 0.025 : 0.05, 0.6);
   }
   // setting stones: click sets one; dragging lays a line along the drag at the stone's spacing
-  function setStone(kind, x, z, yaw) {
+  function setStone(kind, x, z, yaw, quiet) {
     const at = stoneAt(kind, x, z);
     const res = cmd('landscape.place', { kind, x: at.below ? at.x : x, z: at.below ? at.z : z, yaw: at.yaw ?? yaw });
-    if (!res.ok) { if (act.why !== res.reason) say(res.reason); act.why = res.reason; return false; }
+    if (!res.ok) { if (act.why !== res.reason && !(quiet && /in the way/.test(res.reason))) say(res.reason); act.why = res.reason; return false; }
     act.n++;
-    G.burst(x, at.y + 0.05, z, 6, 0x8f887a, 1.0, 1.2, 0.04, 0.4);
+    if (!quiet || act.n % 3 === 0) G.burst(x, at.y + 0.05, z, quiet ? 3 : 6, 0x8f887a, 1.0, 1.2, 0.04, 0.4);
     G.cam.shake = Math.min(G.cam.shake + (kind === 'boulder' ? 0.25 : 0.05), 0.4);
     if (res.stacked) tip('course', res);
+    else if (!res.firm && !THINGS[kind].box && !THINGS[kind].glow) tip('loose', res);
     return true;
   }
   function stoneFrame(a, kind) {
     const th = THINGS[kind], d = Math.hypot(a.x - act.lx, a.z - act.lz);
     if (d < th.spacing) return;
     const yaw = Math.atan2(a.x - act.lx, a.z - act.lz) + (th.line === 'tight' ? Math.PI / 2 : 0);
-    const n = Math.floor(d / th.spacing);
+    const n = Math.floor(d / th.spacing), ux = (a.x - act.lx) / d, uz = (a.z - act.lz) / d;
     for (let i = 1; i <= n; i++) {
-      const x = act.lx + ((a.x - act.lx) * i * th.spacing) / d, z = act.lz + ((a.z - act.lz) * i * th.spacing) / d;
-      setStone(kind, x, z, th.line === 'step' ? ghostYaw : yaw);
+      const x = act.lx + ux * i * th.spacing, z = act.lz + uz * i * th.spacing;
+      // cobbles go down in a band: a row across the drag at every step, staggered like real sett paving
+      if (th.band) for (let j = 0; j < th.band; j++) { const o = (j - (th.band - 1) / 2) * th.spacing; setStone(kind, x - uz * o, z + ux * o, yaw, true); }
+      else setStone(kind, x, z, th.line === 'step' ? ghostYaw : yaw);
     }
     act.lx += ((a.x - act.lx) * n * th.spacing) / d; act.lz += ((a.z - act.lz) * n * th.spacing) / d;
     ghostYaw = th.line === 'tight' ? yaw : ghostYaw;
@@ -704,27 +762,37 @@
     can: I('<path d="M10 16h16v16H10z" fill="#5f8a6a" stroke="#d6eadb"/><path d="M26 19l9-7" stroke="#d6eadb" stroke-width="3"/><path d="M12 16c0-6 12-6 12 0" stroke="#d6eadb"/>'),
     hose: I('<circle cx="20" cy="20" r="11" stroke="#58b064" stroke-width="3.2"/><circle cx="20" cy="20" r="6" stroke="#58b064" stroke-width="3"/><path d="M31 20h5" stroke="#58b064" stroke-width="3"/>'),
     liner: I('<rect x="8" y="10" width="24" height="8" rx="4" fill="#2a2c2d" stroke="#bbb"/><path d="M10 18c0 8 20 8 20 0" fill="#3a6a8a" stroke="#bfe0f0"/>'),
+    tamper: I('<path d="M20 5v24" stroke="#bbb" stroke-width="2.6"/><path d="M15 5h10" stroke="#888" stroke-width="3"/><path d="M11 29h18v4H11z" fill="#7d8287" stroke="#ddd"/><path d="M6 35h28" stroke="#a3784e" stroke-width="2" stroke-dasharray="2 2"/>'),
+    fabric: I('<rect x="7" y="9" width="26" height="9" rx="4.5" fill="#2e2f2c" stroke="#bbb"/><path d="M9 18l-2 15h26l-2-15" fill="#3a3b37" stroke="#aaa"/><path d="M11 22h18M10 26h20M9 30h22" stroke="#666" stroke-width="1"/>'),
+    gbox: I('<path d="M5 20l15-7 15 7-15 7z" fill="#5e4632" stroke="#e8d0b0"/><path d="M5 20v8l15 7 15-7v-8" fill="#a8683f" stroke="#e8d0b0"/><path d="M20 27v8" stroke="#e8d0b0"/>'),
+    ashlar: I('<path d="M5 32h14v-7H5zM19 32h16v-7H19zM9 25h16v-7H9zM25 25h10v-7H25zM5 25h4v-7H5z" fill="#c2a77e" stroke="#f3ead8" stroke-width="1.5"/>'),
+    cobble: I('<path d="M6 12h8v8H6zM16 12h8v8h-8zM26 12h8v8h-8zM11 22h8v8h-8zM21 22h8v8h-8z" fill="#8d8a85" stroke="#eee" stroke-width="1.4"/>'),
+    cap: I('<path d="M5 18h30v5H5z" fill="#c9b08a" stroke="#f3ead8" stroke-width="1.6"/><path d="M8 23h24v10H8z" fill="#8f887a" stroke="#efe6d2" stroke-width="1.4"/>'),
+    curb: I('<path d="M4 20h32v8H4z" fill="#8f8f8c" stroke="#eee" stroke-width="1.6"/><path d="M4 28c6-3 26-3 32 0" stroke="#7aa053" stroke-width="2"/>'),
     timber: I('<path d="M5 24h30v6H5zM8 18h24v6H8z" fill="#8d7152" stroke="#efe6d2" stroke-width="1.6"/>'),
     light: I('<path d="M20 16v18" stroke="#888" stroke-width="2.4"/><path d="M14 12h12l-2 5h-8z" fill="#ffd98a" stroke="#efe6d2"/><circle cx="20" cy="9" r="2" fill="#fff3c0" stroke="none"/>'),
     store: I('<path d="M5 16l3-8h24l3 8z" fill="#7e9b5a" stroke="#e8f0d8"/><path d="M7 16v17h26V16" stroke="#efe6d2"/><path d="M16 33v-9h8v9" fill="#8a6238" stroke="#efe6d2"/>'),
   };
   const PLANT_HEX = { lavender: '#8b6fc4', coneflower: '#e8b52a', grass: '#b7a26a', boxwood: '#3d6a31', hydrangea: '#f1f0e2', rose: '#c4243a', maple: '#9b2226', blueberry: '#4a5a9c', apple: '#c0392b', iris: '#f2d02a' };
-  const LAYER_ITEM = { gravel: 'gravel', riverrock: 'river_rock', bark: 'bark_mulch', sand: 'sand', seed: 'grass_seed' };
+  const LAYER_ITEM = { bedmix: 'raised_bed_mix', gravel: 'gravel', crushed: 'crushed_stone', dg: 'decomposed_granite', slate: 'slate_chips', marble: 'marble_chips', lava: 'lava_rock', riverrock: 'river_rock', woodchips: 'wood_chips', bark: 'bark_mulch', sand: 'sand', seed: 'grass_seed' };
   const amount = (k) => { const id = LAYER_ITEM[k], u = ITEMS[id].unit, v = have(id); return u === 'm3' ? Math.round(v * 1000) + ' L' : u === 'kg' ? (v < 1 ? Math.round(v * 1000) + ' g' : v.toFixed(1) + ' kg') : Math.round(v) + ' L'; };
   function slotList() {
     const out = [{ id: 'hands', name: 'Hands', icon: ICONS.hands, title: 'Hands: pick up stones and plants' }];
     out.push({ id: 'shovel', name: 'Shovel', icon: ICONS.shovel, item: ITEM.shovel, dim: !owns('shovel') && !owns('spade'), badge: loaded() ? litres(L().carry.m3) + ' L' : null, title: 'Shovel: dig, carry and toss earth; drag to skim turf' });
     out.push({ id: 'rake', name: 'Rake', icon: ICONS.rake, item: ITEM.rake, dim: !owns('rake'), title: 'Rake: level loose ground' });
+    if (owns('tamper')) out.push({ id: 'tamper', name: 'Tamper', icon: ICONS.tamper, item: ITEM.tamper, title: 'Hand tamper: thump loose ground and the base firm before laying stone' });
+    if (have('landscape_fabric') >= 0.05) out.push({ id: 'fabric', name: 'Fabric', icon: ICONS.fabric, item: ITEM.fabric, badge: have('landscape_fabric').toFixed(0) + ' m²', title: 'Landscape fabric: roll it over dug-out ground before gravel, chips or stone' });
+    if (have('raised_bed_mix') >= 1) out.push({ id: 'bedmix', name: 'Bed soil', icon: ICONS.bucket('#3f2c1f'), item: ITEM.bedmix, badge: Math.round(have('raised_bed_mix')) + ' L', title: 'Raised-bed soil: pour it into a garden box' });
     if (owns('wheelbarrow')) out.push({ id: 'barrow', name: 'Barrow', icon: ICONS.barrow, item: ITEM.barrow, badge: L().barrow.m3 > 1e-6 ? litres(L().barrow.m3) + ' L' : null, title: 'Wheelbarrow: click to shovel a scoop in, drag down to tip it out' });
     const GV = window.__gardenView;
     if (GV && GV.can && owns('watering_can')) out.push({ id: 'can', name: 'Can', icon: ICONS.can, item: GV.can.item, badge: Math.round((G.sim.state.sys.garden.can.litres || 0) * 10) / 10 + ' L', title: 'Watering can: water new plants in; fill it at the pump or the stream' });
     if (owns('garden_hose')) out.push({ id: 'hose', name: 'Hose', icon: ICONS.hose, item: ITEM.hose, title: 'Hose: click a lined pond to fill it' });
     if (have('pond_liner') >= 0.05) out.push({ id: 'liner', name: 'Liner', icon: ICONS.liner, item: ITEM.liner, badge: have('pond_liner').toFixed(1) + ' m²', title: 'Pond liner: click a dug hole to line it' });
-    for (const [k, nm, hex] of [['gravel', 'Gravel', '#a49d90'], ['riverrock', 'River rock', '#8c8478'], ['bark', 'Bark', '#6a412c'], ['sand', 'Sand', '#d8c79a'], ['seed', 'Lawn seed', '#d9cf9a']])
+    for (const [k, nm, hex] of [['woodchips', 'Wood chips', '#a47a4c'], ['bark', 'Bark', '#6a412c'], ['gravel', 'Pea gravel', '#a49d90'], ['crushed', 'Crushed', '#8a8a86'], ['dg', 'Granite fines', '#c4a57a'], ['slate', 'Slate', '#4f5a63'], ['marble', 'Marble', '#e6e3dc'], ['lava', 'Lava rock', '#7a3b2c'], ['riverrock', 'River rock', '#8c8478'], ['sand', 'Sand', '#d8c79a'], ['seed', 'Lawn seed', '#d9cf9a']])
       if (have(LAYER_ITEM[k]) > 1e-6) out.push({ id: k, name: nm, icon: ICONS.bucket(hex), item: ITEM[k], badge: amount(k) });
     for (const k of Object.keys(THINGS)) {
       const th = THINGS[k], n = have(th.item) / th.qty;
-      if (n >= 1 - 1e-6) out.push({ id: k, name: th.name.replace('Brick ', ''), icon: k === 'wallstone' ? ICONS.wall : k === 'timber' ? ICONS.timber : k === 'pathlight' ? ICONS.light : ICONS.stone(k === 'paver' ? '#a65a3f' : k === 'boulder' ? '#7d7a72' : '#b9a988', k === 'boulder' ? 12 : 10, k === 'boulder' ? 14 : k === 'flagstone' ? 3 : 5), item: ITEM[k], badge: Math.floor(n + 1e-6) });
+      if (n >= 1 - 1e-6) out.push({ id: k, name: th.name.replace('Brick ', '').replace('Granite edging', 'Edging'), icon: k === 'wallstone' ? ICONS.wall : k === 'cutstone' ? ICONS.ashlar : k === 'cobble' ? ICONS.cobble : k === 'capstone' ? ICONS.cap : k === 'curb' ? ICONS.curb : k === 'gardenbox' ? ICONS.gbox : k === 'timber' ? ICONS.timber : k === 'pathlight' ? ICONS.light : ICONS.stone(k === 'paver' ? '#a65a3f' : k === 'boulder' ? '#7d7a72' : '#b9a988', k === 'boulder' ? 12 : 10, k === 'boulder' ? 14 : k === 'flagstone' ? 3 : 5), item: ITEM[k], badge: Math.floor(n + 1e-6) });
     }
     for (const k of Object.keys(PLANTS)) if (have(PLANTS[k].item) >= 1) out.push({ id: 'plant:' + k, name: PLANTS[k].name.split(' ').pop(), icon: ICONS.pot(PLANT_HEX[k]), item: ITEM['plant:' + k], badge: Math.floor(have(PLANTS[k].item)), title: PLANTS[k].name });
     out.push({ id: 'store', name: 'Yard store', icon: ICONS.store, title: 'Buy gravel, stones, seed and plants' });
@@ -739,24 +807,42 @@
     if (on) setSlots(); renderStore();
     return r.ok;
   }
-  const STORE = [
-    ['gravel', 0.25, 'Gravel', '250 L: a path 3 m long'], ['bark_mulch', 200, 'Bark mulch', '200 L: 3 m2 of border'], ['sand', 0.1, 'Sand', '100 L: a bed for stones'],
-    ['grass_seed', 1, 'Lawn seed', '1 kg sows 25 m2'], ['flagstone_40', 2, 'Flagstones', '10 stepping stones'], ['paver_brick', 50, 'Brick pavers', '50 bricks: 10 m of edging'],
-    ['stone', 40, 'Wall stones', '40 fieldstones: a low wall'], ['boulder', 1, 'Boulder', 'A feature rock'],
-    ['river_rock', 0.25, 'River rock', '250 L: a dry creek bed 3 m long'], ['pond_liner', 6, 'Pond liner', '6 m2: lines a pond about 1.5 m across'],
-    ['landscape_timber', 10, 'Timbers', '10 of 1.2 m: a raised bed, two courses high'], ['path_light', 6, 'Path lights', '6 solar lights for a path'],
+  // the yard store, by aisle
+  const AISLES = [
+    ['tools', 'Tools', [['trowel', 1], ['rake', 1], ['tamper', 1], ['wheelbarrow', 1], ['watering_can', 1], ['garden_hose', 1]]],
+    ['install', 'Base & fabric', [['landscape_fabric', 10, '10 m2 of weed barrier'], ['crushed_stone', 0.25, '250 L: a 10 cm base for 2.5 m2'], ['sand', 0.1, '100 L: a 3 cm bed for 3 m2']]],
+    ['boxes', 'Garden boxes', [['garden_box_kit', 1, 'A 1.2 x 2.4 m cedar box, 30 cm deep'], ['raised_bed_mix', 400, '400 L: about half a box']]],
+    ['chips', 'Wood chips & mulch', [['wood_chips', 300, '300 L: a 4 m path'], ['bark_mulch', 200, '200 L: 3 m2 of border'], ['grass_seed', 1, '1 kg sows 25 m2']]],
+    ['gravel', 'Gravel & stone', [['gravel', 0.25, '250 L: a path 3 m long'], ['crushed_stone', 0.25, '250 L: a firm path'], ['decomposed_granite', 0.25, '250 L: a smooth path'], ['slate_chips', 0.1, '100 L'], ['marble_chips', 0.1, '100 L'], ['lava_rock', 0.1, '100 L'], ['river_rock', 0.25, '250 L: a dry creek bed'], ['sand', 0.1, '100 L: a bed for stones']]],
+    ['paving', 'Paving', [['granite_sett', 100, '100 cobbles: about 1 m2'], ['flagstone_40', 2, '10 stepping stones'], ['paver_brick', 50, '50 bricks: 10 m of edging']]],
+    ['walls', 'Walls & edging', [['stone', 40, '40 fieldstones: a low wall'], ['cut_stone', 30, '30 blocks: 4 m, three courses'], ['capstone', 8, '8 slabs to top a 4 m wall'], ['granite_curb', 6, '6 lengths: 5.4 m of edging'], ['landscape_timber', 10, '10 of 1.2 m: a raised bed'], ['boulder', 1, 'A feature rock']]],
+    ['water', 'Ponds & lights', [['pond_liner', 6, '6 m2: a pond 1.5 m across'], ['path_light', 6, '6 solar lights']]],
+    ['plants', 'Nursery', Object.keys(PLANTS).map((k) => [PLANTS[k].item, 1])],
   ];
+  let aisle = 'gravel';
+  const chip = (id, nm) => '<button type="button" class="gseed" data-aisle="' + id + '" style="min-width:0;flex:0 0 auto;padding:6px 10px;' + (id === aisle ? 'outline:2px solid #e6c46a;' : 'opacity:.8;') + '"><b>' + nm + '</b></button>';
   function renderStore() {
     let h = '';
     const sc = L().scale || 1;
-    h += '<button type="button" class="gseed" data-scale="1"><b>Earth per scoop</b><span>' + [1, 2, 4].map((v) => (v === sc ? '<b style="display:inline;font-size:14px">' + v + '×</b>' : v + '×')).join(' · ') + '</span><span>' + litres(SCOOP_M3 * sc) + ' L a scoop. Click to change</span></button>';
-    for (const id of ['trowel', 'rake', 'wheelbarrow', 'garden_hose', 'watering_can']) if (!owns(id)) h += '<button type="button" class="gseed" data-buy="' + id + '" data-qty="1"><b>' + esc(ITEMS[id].name) + '</b><span>' + esc(ITEMS[id].blurb || '') + '</span><span>Buy for ' + money(ITEMS[id].priceUsd) + '</span></button>';
-    for (const [id, q, nm, what] of STORE) h += '<button type="button" class="gseed" data-buy="' + id + '" data-qty="' + q + '"><b>' + nm + '</b><span>' + esc(what) + '</span><span>' + money(ITEMS[id].priceUsd * q) + '</span></button>';
-    for (const k of Object.keys(PLANTS)) { const p = PLANTS[k], it = ITEMS[p.item]; h += '<button type="button" class="gseed" data-buy="' + p.item + '" data-qty="1"><b>' + esc(p.name) + '<i style="background:' + PLANT_HEX[k] + '"></i></b><span>' + esc(p.blurb) + '</span><span>Hole ' + Math.round(p.holeM * 100) + ' cm · ' + money(it.priceUsd) + (have(p.item) >= 1 ? ' · have ' + Math.floor(have(p.item)) : '') + '</span></button>'; }
+    for (const [id, nm] of AISLES) h += chip(id, nm);
+    const A = AISLES.find((x) => x[0] === aisle);
+    if (aisle === 'tools') h += '<button type="button" class="gseed" data-scale="1"><b>Earth per scoop</b><span>' + [1, 2, 4].map((v) => (v === sc ? '<b style="display:inline;font-size:14px">' + v + '×</b>' : v + '×')).join(' · ') + '</span><span>' + litres(SCOOP_M3 * sc) + ' L a scoop. Click to change</span></button>';
+    for (const [id, q, what] of A[2]) {
+      const it = ITEMS[id];
+      if (!it) continue;
+      if (A[0] === 'tools') { if (!owns(id)) h += '<button type="button" class="gseed" data-buy="' + id + '" data-qty="1"><b>' + esc(it.name) + '</b><span>' + esc(it.blurb || '') + '</span><span>Buy for ' + money(it.priceUsd) + '</span></button>'; continue; }
+      const pk = A[0] === 'plants' && Object.values(PLANTS).find((p) => p.item === id);
+      const nm = pk ? pk.name + '<i style="background:' + PLANT_HEX[pk.id] + '"></i>' : esc(it.name.replace(/ \(bulk\)/, ''));
+      const sub = pk ? esc(pk.blurb) : esc(it.blurb || '');
+      const foot = (pk ? 'Hole ' + Math.round(pk.holeM * 100) + ' cm · ' : (what ? esc(what) + ' · ' : '')) + money(it.priceUsd * q) + (have(id) > 0 && it.unit === 'each' ? ' · have ' + Math.floor(have(id)) : '');
+      h += '<button type="button" class="gseed" data-buy="' + id + '" data-qty="' + q + '"><b>' + nm + '</b><span>' + sub + '</span><span>' + foot + '</span></button>';
+    }
+    if (aisle === 'tools' && ['trowel', 'rake', 'tamper', 'wheelbarrow', 'watering_can', 'garden_hose'].every(owns)) h += '<button type="button" class="gseed" disabled><b>You have every tool</b><span>Earth per scoop is the setting above</span></button>';
     storeEl.innerHTML = h;
   }
   storeEl.addEventListener('click', (e) => {
     const b = e.target.closest('.gseed'); if (!b) return;
+    if (b.dataset.aisle) { aisle = b.dataset.aisle; renderStore(); return; }
     if (b.dataset.scale) { const sc = L().scale || 1, nx = sc === 1 ? 2 : sc === 2 ? 4 : 1; cmd('landscape.setScale', { scale: nx }); renderStore(); say('Each scoop moves ' + litres(SCOOP_M3 * nx) + ' L now.'); return; }
     if (b.dataset.buy) { buy(b.dataset.buy, +b.dataset.qty); if (b.dataset.buy === 'watering_can' && ITEMS.watering_can) cmd('garden.refill', {}); }
     canvas.focus();
@@ -772,14 +858,18 @@
       else if (id === 'shovel') h = loaded() ? '<b>' + litres(L().carry.m3) + ' L</b> of ' + (L().carry.s === 'soil' ? 'earth' : esc(SURFACES[L().carry.s] ? SURFACES[L().carry.s].name.toLowerCase() : L().carry.s)) + ' on the shovel: <b>click</b> where to toss it.' : '<b>Click</b> to dig a scoop. <b>Drag</b> along the grass to skim the turf off.';
       else if (id === 'barrow') h = L().barrow.m3 > 1e-6 ? '<b>' + litres(L().barrow.m3) + ' L</b> in the barrow. <b>Click</b> to shovel in more, <b>drag down</b> to tip it all out.' : '<b>Click</b> to shovel a scoop into the barrow. When it is full, walk it over and <b>drag down</b> to tip it out.';
       else if (id === 'can') h = '<b>Hold and drag down</b> to pour over new plants: water them in, and keep them moist for three weeks while they root. Fill the can at the pump or the stream.';
+      else if (id === 'tamper') h = '<b>Click</b> to thump the ground, <b>hold and walk</b> to tamp a strip. Twice is firm. Tamp the dug-out earth, then again on the crushed-stone base.';
+      else if (id === 'fabric') h = '<b>Hold and sweep</b> to roll fabric over dug-out ground (' + have('landscape_fabric').toFixed(0) + ' m² left). Gravel, chips and stone go on top; weeds cannot come through.';
       else if (id === 'hose') h = '<b>Click</b> a lined pond to run the hose into it, click again to stop.';
       else if (id === 'liner') h = '<b>Click</b> a dug hole to lay one sheet of liner over all of it (' + have('pond_liner').toFixed(1) + ' m² left). Dig the pond first: a shelf 20 to 30 cm deep round the edge, deeper in the middle.';
       else if (id === 'rake') h = owns('rake') ? '<b>Drag</b> over loose ground to level it.' : 'You need a rake. <button type="button" class="go" data-buy="rake">Buy ' + money(ITEMS.rake.priceUsd) + '</button>';
+      else if (id === 'bedmix') h = '<b>Hold and sweep</b> over a garden box to fill it (' + Math.round(have('raised_bed_mix')) + ' L left). Fill it to the top, then hoe it in the Garden (5).';
+      else if (id === 'gardenbox') h = '<b>Click</b> to set the box down, <b>R</b> turns it. Fill it with bed soil (or earth from the barrow), then hoe it into a bed.';
       else if (id === 'riverrock') h = '<b>Hold and sweep</b> river rock along a dug channel for a dry creek bed (' + amount(id) + ' left). Lay it over pond liner for a beach.';
       else if (LAYER_ITEM[id]) h = id === 'seed' ? '<b>Hold and sweep</b> over bare soil to sow lawn. It knits into turf in about three weeks.' : '<b>Hold and sweep</b> to lay ' + id + ' (' + amount(id) + ' left). Drag down to pour faster. It goes on bare soil: skim the turf first.';
       else if (THINGS[id]) h = '<b>Click</b> to set a ' + THINGS[id].name.toLowerCase() + ', <b>drag</b> to lay a line. <b>R</b> turns it.' + (THINGS[id].stack ? ' Set one on another for the next course.' : '');
       else if (id.startsWith('plant:')) { const p = PLANTS[id.slice(6)]; h = 'Dig a hole about <b>' + Math.round(p.holeM * 100) + ' cm</b> deep with the shovel, then <b>click</b> it with the ' + esc(p.name.toLowerCase()) + '.'; }
-      else h = '<b>Press</b> on a stone or a plant and <b>lift</b> (drag up) to pick it up.';
+      else h = '<b>Press</b> on a stone or a plant and <b>lift</b> (drag up) to pick it up. <b>Drag</b> over a weedy path to pull the weeds.';
     }
     if (!force && h === hintSig) return;
     hintSig = h; hint.innerHTML = h;
@@ -797,10 +887,21 @@
   function tip(what, res) {
     if (told[what]) return;
     told[what] = 1;
-    if (what === 'dug') sayS('A scoop of ' + (res.s === 'soil' ? 'earth' : res.s) + ' (' + litres(res.m3) + ' L). Click anywhere to toss it: a heap, a hill, a bank.', 5);
-    else if (what === 'tossed') sayS('Loose earth runs down until it holds. Rake it level, or keep heaping.', 5);
-    else if (what === 'skim') sayS('Skimmed. Bare soil takes gravel, bark, sand or lawn seed; dig deeper for a sunken path.', 5);
+    if (what === 'dug') sayS('A scoop of ' + (res.s === 'soil' ? 'earth' : res.s) + ' (' + litres(res.m3) + ' L) on the blade. Click where to throw it: a heap, a hill, a bank.', 5);
+    else if (what === 'tossed') sayS('Loose earth slides down until it holds at its natural slope. Rake it level, or keep heaping.', 5);
+    else if (what === 'skim') sayS('A path that lasts: dig it out 10 cm, tamp it, roll out fabric, lay crushed stone and tamp again, then the top.', 7);
+    else if (what === 'loose') sayS('Set on loose ground, stones sink and tilt over the next weeks. To lay them to last: dig out, tamp, fabric, crushed stone, tamp again, then a bed of sand.', 8);
     else if (what === 'course') sayS('Course ' + res.course + '. Stagger the joints and lean the wall back a little into the bank behind it.', 5);
+  }
+
+  // the tamper: lift and drop; each thump firms the loose ground under the plate
+  function thump(a) {
+    const res = cmd('landscape.tamp', { x: a.x, z: a.z });
+    G.cam.shake = Math.min(G.cam.shake + 0.14, 0.45); G.juice.hitStop = 0.05;
+    G.burst(a.x, surfaceAt(a.x, a.z) + 0.03, a.z, 6, 0x9a8a72, 1.6, 0.5, 0.04, 0.5);
+    if (!res.ok) { if (act.why !== res.reason) say(res.reason); act.why = res.reason; return; }
+    act.n++;
+    if (res.firm) { if (act.why !== 'firm') say('Firm. Ready for fabric, a crushed-stone base, or stone.'); act.why = 'firm'; }
   }
 
   /* ================= press, frame, release ================= */
@@ -810,13 +911,14 @@
     if (id === 'shovel') return shovel.press(a);
     if (id === 'can') { const GV = window.__gardenView; if (GV) { GV.bindSay(say); GV.can.press(a); } return; }
     if (id === 'barrow') { act.tipped = false; return; }
+    if (id === 'tamper') { act.acc = 0; thump(a); return; }
     if (id === 'liner') {
       // one sheet over the whole hole under the hand
       const res = cmd('landscape.line', { x: a.x, z: a.z, whole: true });
       act.kind = '';
       if (!res.ok) return say(res.reason, 4);
       G.burst(a.x, surfaceAt(a.x, a.z) + 0.1, a.z, 14, 0x2a2c2d, 1.4, 0.8, 0.06, 0.5);
-      return say('Lined the hole: ' + res.cells + (res.cells === 1 ? ' square' : ' squares') + '. Hide the edge under stones, then run the hose into it.', 5);
+      return say('Lined the hole: ' + res.m2.toFixed(1) + ' m² of liner. Hide the edge under stones, then run the hose into it.', 5);
     }
     if (id === 'hose') {
       const res = cmd('landscape.hose', { x: a.x, z: a.z });
@@ -834,7 +936,7 @@
       say('Planted. Water it in, and it fills out over ' + (PLANTS[k].years > 5 ? 'many years' : PLANTS[k].years + ' years') + '.');
       return;
     }
-    if (id === 'hands') { const t = nearestThing(a.x, a.z); if (t) act.grab = t; }
+    if (id === 'hands') { const t = nearestThing(a.x, a.z); if (t) act.grab = t; else { const q = RD.groundAt(G.sim.state, a.x, a.z); act.weeding = !!(q && q.weeds); } }
   }
   function frame(a, dt) {
     const id = held();
@@ -861,6 +963,15 @@
     }
 
     else if (k === 'rake') rakeFrame(a);
+    else if (k === 'tamper') { act.acc += dt; if (act.acc >= 0.3) { act.acc = 0; thump(a); } }
+    else if (k === 'fabric') {
+      act.acc += dt;
+      if (act.acc >= 0.15) { act.acc = 0; const res = cmd('landscape.fabric', { x: a.x, z: a.z, r: 0.4 }); if (!res.ok) { if (act.why !== res.reason) say(res.reason, 4); act.why = res.reason; } else { act.n += res.m2; } }
+    }
+    else if (k === 'hands' && !act.grab && act.weeding) {
+      act.acc += dt;
+      if (act.acc >= 0.15) { act.acc = 0; const res = cmd('landscape.weed', { x: a.x, z: a.z }); if (res.ok) { act.n++; G.burst(a.x, surfaceAt(a.x, a.z) + 0.1, a.z, 5, 0x5f8f36, 1.2, 1.8, 0.04, 0.5); } }
+    }
     else if (LAYER_ITEM[k]) pourFrame(a, dt, k);
     else if (THINGS[k]) stoneFrame(a, k);
     else if (k === 'hands' && act.grab && a.lift > 0.45) {
@@ -887,6 +998,8 @@
       return say(res.full ? 'The barrow is full: ' + litres(res.load) + ' L. Walk it over and drag down to tip it out.' : 'In the barrow: ' + litres(res.load) + ' of ' + litres(RD.BARROW_M3) + ' L.');
     }
     if (k === 'hands' && act.grab) say('Lift it: drag up.');
+    if (k === 'hands' && act.weeding && act.n) say('Pulled the weeds. Fabric under the next path keeps them from coming back.');
+    if (k === 'fabric' && act.n) say('Rolled out ' + act.n.toFixed(1) + ' m² of fabric. Now the crushed stone base, or gravel or chips straight on top.', 5);
     act.kind = ''; act.grab = null;
     updateHint(true);
   }
@@ -895,31 +1008,36 @@
   let tagSig = '';
   function updateTag(a) {
     if (!on || !a.valid) { if (!label.hidden) label.hidden = true; tagSig = ''; return; }
-    const [gx, gz] = sqOf(a.x, a.z), q = EW.square(grid(), gx, gz), id = held();
+    const q = RD.groundAt(G.sim.state, a.x, a.z), id = held();
     let t = '';
     if (q) {
-      const cm = Math.round(q[0] * 100);
-      t = (SURFACES[q[1]] ? SURFACES[q[1]].name : q[1] === '' ? 'Turf' : q[1]) + (cm <= -2 ? ' · hole ' + -cm + ' cm' : cm >= 2 ? ' · raised ' + cm + ' cm' : '');
-      if (q[2] > 0.005) t += ' · ' + Math.round(q[2] * 100) + ' cm deep';
+      // what the ground is, and how it was put in: the install steps read off as you go
+      const cm = Math.round(q.h * 100), name = SURFACES[q.s] ? SURFACES[q.s].name : q.s === '' ? 'Turf' : q.s === 'lawn_sown' ? 'Sown lawn' : 'Bare earth';
+      t = name + (q.l > 0.005 ? ' ' + Math.round(q.l * 100) + ' cm' : '') + (cm <= -2 ? ' · dug ' + -cm + ' cm' : cm >= 2 ? ' · raised ' + cm + ' cm' : '');
+      if (q.fabric) t += ' · on fabric';
+      if (q.tamped) t += q.tamped >= 2 ? ' · tamped firm' : ' · tamped once';
+      if (q.weeds >= 2) t += ' · weedy';
+      if (q.boxed) t += ' · in the box';
     }
-    // a plant under the hand: its name and how it is doing
     const near = Object.values(L().plants).find((pl) => Math.hypot(pl.x - a.x, pl.z - a.z) < 0.35);
     if (near && !id.startsWith('plant:')) {
-      const z = RD.plantSize(G.sim.state, near.id, G.sim.state.lifeT), pk = PLANTS[near.k];
+      const z = RD.plantSize(G.sim.state, near.id), pk = PLANTS[near.k];
       t = pk.name + ': ' + (pk.wet ? 'growing in the shallows' : z.wilt ? 'wilting, water it' : z.thirsty ? 'thirsty' : !z.rooted ? 'rooting in, keep it moist' : z.k > 0.85 ? 'full grown' : 'growing') + ' · ' + Math.round(z.h * 100) + ' cm';
     }
-    const pd = L().liner[gx + ',' + gz] && RD.pondsOf(G.sim.state).find((p) => p.cells.some(([x, z]) => x === gx && z === gz));
-    if (pd) t = 'Pond · ' + litres(pd.m3) + ' of ' + litres(pd.cap) + ' L' + (pd.m3 > 0 ? ' · ' + Math.max(0, Math.round((pd.level - (q ? q[0] : 0)) * 100)) + ' cm deep here' : ' · empty') + (pd.hose ? ' · filling' : '');
-    if (id.startsWith('plant:') && PLANTS[id.slice(6)].wet) { t = pd && pd.m3 > 0 ? 'Water ' + Math.max(0, Math.round((pd.level - (q ? q[0] : 0)) * 100)) + ' cm deep: 5 to 25 is right' : 'An iris goes in the shallows of a filled pond'; }
+    const pd = q && q.liner && RD.pondsOf(G.sim.state).find((p) => p.pts.some(([i, j]) => Math.abs(i * STEP - a.x) < 0.11 && Math.abs(j * STEP - a.z) < 0.11));
+    if (pd) t = 'Pond · ' + litres(pd.m3) + ' of ' + litres(pd.cap) + ' L' + (pd.m3 > 0 ? ' · ' + Math.max(0, Math.round((pd.level - q.h) * 100)) + ' cm deep here' : ' · empty') + (pd.hose ? ' · filling' : '');
+    if (id.startsWith('plant:') && PLANTS[id.slice(6)].wet) t = pd && pd.m3 > 0 ? 'Water ' + Math.max(0, Math.round((pd.level - q.h) * 100)) + ' cm deep: 5 to 25 is right' : 'An iris goes in the shallows of a filled pond';
     else if (id.startsWith('plant:')) {
-      const p = PLANTS[id.slice(6)], d = q ? Math.max(0, -q[0]) : 0;
+      const p = PLANTS[id.slice(6)];
+      let d = 0;
+      for (let k = 0; k < 9; k++) d = Math.max(d, -RD.reliefAt(G.sim.state, a.x + ((k % 3) - 1) * 0.1, a.z + (Math.floor(k / 3) - 1) * 0.1));
       t = d >= p.holeM * 0.8 ? 'Deep enough: click to plant' : 'Hole ' + Math.round(d * 100) + ' of ' + Math.round(p.holeM * 100) + ' cm';
     }
     if (!t) { if (!label.hidden) label.hidden = true; tagSig = ''; return; }
-    if (t !== tagSig) { tagSig = t; label.textContent = t; label.classList.toggle('warn', /^Hole \d/.test(t)); }
+    if (t !== tagSig) { tagSig = t; label.textContent = t; label.classList.toggle('warn', /^Hole \d|weedy|wilting/.test(t)); }
     label.hidden = false;
-    const s = H.toScreen(a.x, a.y + 0.25, a.z, {});
-    label.style.transform = 'translate(' + Math.round(s.x + 18) + 'px,' + Math.round(s.y - 28) + 'px)';
+    const sc = H.toScreen(a.x, a.y + 0.25, a.z, {});
+    label.style.transform = 'translate(' + Math.round(sc.x + 18) + 'px,' + Math.round(sc.y - 28) + 'px)';
   }
   // path lights glow with the dusk
   let glowK = -1;
@@ -961,6 +1079,7 @@
     if (want !== on) { if (want) enter(); else leave(); }
     if (on) updateTag(H.aim);
     if (hoseMeshes.size) hoseSpray();
+    if (flights.length) flyTick(dt);
     slow += dt;
     if (slow > 0.25 || dirty) {
       slow = 0; dirty = false;
@@ -980,6 +1099,6 @@
 
   window.__landscape = {
     relief, surfaceAt, tools: { shovel }, items: { shovel: ITEM.shovel }, setHeap, bindSay: (fn) => { shovelSay = fn; }, get rev() { return grid().rev; },
-    get on() { return on; }, hold: (id) => H.hold(id), refresh: () => { dirty = true; refreshGround(true); layoutStones(); layoutPlants(true); }, tiles: () => tileViews.size,
+    get on() { return on; }, get flying() { return flights.length > 0; }, hold: (id) => H.hold(id), refresh: () => { dirty = true; refreshGround(true); layoutStones(); layoutPlants(true); }, tiles: () => tileViews.size,
   };
 })();
