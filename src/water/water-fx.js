@@ -77,47 +77,63 @@ export function createWaterFx({ scene, river, groundAt }) {
   let ripNext = 0;
   function ripple(x, z, strength = 1) { rips[ripNext].set(x, z, u.uTime.value, strength); ripNext = (ripNext + 1) % rips.length; }
 
-  // sprites
-  const pos = new Float32Array(MAX * 3), size = new Float32Array(MAX), alpha = new Float32Array(MAX), kind = new Float32Array(MAX);
+  // sprites: camera-facing quads, droplets stretched along their velocity (motion-stretched billboards, the usual
+  // way games draw spray: a fast drop is seen as a short streak, not a dot)
+  const pos = new Float32Array(MAX * 3), vel = new Float32Array(MAX * 3), size = new Float32Array(MAX), alpha = new Float32Array(MAX), kind = new Float32Array(MAX);
   const P = [];                     // live particles
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
-  geo.setAttribute('aSize', new THREE.BufferAttribute(size, 1).setUsage(THREE.DynamicDrawUsage));
-  geo.setAttribute('aAlpha', new THREE.BufferAttribute(alpha, 1).setUsage(THREE.DynamicDrawUsage));
-  geo.setAttribute('aKind', new THREE.BufferAttribute(kind, 1).setUsage(THREE.DynamicDrawUsage));
-  const vp = new THREE.Vector4();
+  const geo = new THREE.InstancedBufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]), 3));
+  geo.setIndex([0, 1, 2, 0, 2, 3]);
+  const inst = (arr, n) => new THREE.InstancedBufferAttribute(arr, n).setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute('iPos', inst(pos, 3)); geo.setAttribute('iVel', inst(vel, 3));
+  geo.setAttribute('iSize', inst(size, 1)); geo.setAttribute('iAlpha', inst(alpha, 1)); geo.setAttribute('iKind', inst(kind, 1));
+  geo.instanceCount = 0;
   const material = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, fog: true,
-    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uViewH: { value: 1000 }, uFoam: { value: null } }]),
+    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uFoam: { value: null }, uViewH: { value: 1000 } }]),
     vertexShader: /* glsl */ `
-      attribute float aSize, aAlpha, aKind;
+      attribute vec3 iPos, iVel; attribute float iSize, iAlpha, iKind;
       uniform float uViewH;
-      varying float vAlpha, vKind, vSeed;
+      varying vec2 vUv; varying float vAlpha, vKind, vSeed;
       #include <fog_pars_vertex>
       void main() {
-        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        vec4 mvPosition = viewMatrix * vec4(iPos, 1.0);
+        vec3 vv = mat3(viewMatrix) * iVel;
+        vec2 ax = vec2(0.0, 1.0); float len = iSize, wid = iSize;
+        if (iKind < 0.5) {
+          float s = length(vv.xy);
+          if (s > 1e-3) ax = vv.xy / s;
+          len = iSize + s * 0.022;                      // the streak a drop draws in about a 45th of a second
+          wid = iSize * 0.55;
+          // never thinner than about a pixel and a half: thinner drops would flicker, so widen them and fade them to match
+          float px = -mvPosition.z * 2.0 / (projectionMatrix[1][1] * uViewH);
+          float w2 = max(wid, px * 0.75);
+          vAlpha = iAlpha * wid / w2; wid = w2; len = max(len, px * 1.5);
+        } else vAlpha = iAlpha;
+        vec2 side = vec2(-ax.y, ax.x);
+        mvPosition.xy += side * position.x * wid + ax * position.y * len;
         gl_Position = projectionMatrix * mvPosition;
-        gl_PointSize = max(1.5, aSize * projectionMatrix[1][1] * uViewH * 0.5 / max(0.1, -mvPosition.z));
-        vAlpha = aAlpha; vKind = aKind; vSeed = fract(position.x * 3.17 + position.z * 1.91);
+        vUv = position.xy; vKind = iKind; vSeed = fract(iPos.x * 3.17 + iPos.z * 1.91);
         #include <fog_vertex>
       }`,
     fragmentShader: /* glsl */ `
-      uniform vec3 uSunCol, uAmb, uSunDir; uniform sampler2D uFoam;
-      varying float vAlpha, vKind, vSeed;
+      uniform vec3 uSunCol, uAmb, uSunDir, uSky; uniform sampler2D uFoam;
+      varying vec2 vUv; varying float vAlpha, vKind, vSeed;
       #include <common>
       #include <fog_pars_fragment>
       void main() {
-        vec2 c = gl_PointCoord * 2.0 - 1.0;
-        float r = length(c);
+        float r = length(vUv);
         if (r > 1.0) discard;
-        vec3 light = uAmb * 1.1 + uSunCol * 0.65 * (0.55 + 0.45 * max(uSunDir.y, 0.0));
-        float a;
-        vec3 col;
-        if (vKind < 0.5) {            // a droplet: a bright core with a soft rim, lit a little from the sun's side
-          a = smoothstep(1.0, 0.35, r);
-          col = light * (1.05 + 0.25 * dot(normalize(vec3(c, 0.6)), normalize(vec3(0.3, 0.6, 0.7))));
-        } else {                      // mist: a soft puff, broken by the foam's noise
-          float n = texture2D(uFoam, gl_PointCoord * 0.45 + vSeed).b;
+        vec3 light = uAmb * 1.05 + uSunCol * 0.6 * (0.55 + 0.45 * max(uSunDir.y, 0.0));
+        float a; vec3 col;
+        if (vKind < 0.5) {
+          // a drop of clear water: mostly the sky it reflects and refracts, a bright rim and a glint of sun
+          float core = 1.0 - smoothstep(0.0, 1.0, r);
+          a = smoothstep(1.0, 0.6, r) * (0.45 + 0.35 * core);
+          col = mix(uSky * 0.9 + uAmb * 0.3, light * 1.15, 0.45 + 0.35 * smoothstep(0.55, 0.9, r)) + uSunCol * 0.6 * smoothstep(0.35, 0.0, distance(vUv, vec2(-0.25, 0.35)));
+        } else {
+          // mist: a soft puff, broken by the foam's noise
+          float n = texture2D(uFoam, vUv * 0.22 + vSeed).b;
           a = smoothstep(1.0, 0.0, r) * smoothstep(0.15, 0.75, n + 0.35 * (1.0 - r));
           col = light * 0.95;
         }
@@ -127,21 +143,21 @@ export function createWaterFx({ scene, river, groundAt }) {
         #include <fog_fragment>
       }`,
   });
-  for (const k of ['uSunCol', 'uAmb', 'uSunDir']) material.uniforms[k] = u[k];
+  for (const k of ['uSunCol', 'uAmb', 'uSunDir', 'uSky']) material.uniforms[k] = u[k];
   material.uniforms.uFoam = u.uFoamTex;
-  const points = new THREE.Points(geo, material);
+  const points = new THREE.Mesh(geo, material), vp = new THREE.Vector4();
   points.frustumCulled = false; points.renderOrder = 3;
   points.onBeforeRender = (r) => { r.getCurrentViewport(vp); material.uniforms.uViewH.value = vp.w; };
   scene.add(points);
 
   const add = (p) => { if (P.length < MAX) P.push(p); };
   // droplets thrown from (x, y, z): n of them, sideways speed up to `spread`, upward speed about `up`
-  function spray(x, y, z, n, spread, up, sz = 0.05, life = 0.8, dir = null) {
+  function spray(x, y, z, n, spread, up, sz = 0.012, life = 0.8, dir = null) {
     for (let i = 0; i < n; i++) {
       const a = Math.random() * 6.283, s = spread * Math.sqrt(Math.random());
       let vx = Math.cos(a) * s, vz = Math.sin(a) * s;
       if (dir) { vx += dir[0]; vz += dir[1]; }
-      add({ k: 0, x, y, z, vx, vy: up * (0.5 + Math.random() * 0.7), vz, age: 0, life: life * (0.6 + Math.random() * 0.7), s0: sz * (0.5 + Math.random()), s1: 0, a: 0.95, floor: y - 0.4 });
+      add({ k: 0, x, y, z, vx, vy: up * (0.5 + Math.random() * 0.7), vz, age: 0, life: life * (0.6 + Math.random() * 0.7), s0: sz * (0.5 + Math.random()), s1: 0, a: 0.85, floor: y - 0.05 });
     }
   }
   function mist(x, y, z, n, spread, sz = 0.8, life = 2.4, a = 0.16) {
@@ -150,11 +166,19 @@ export function createWaterFx({ scene, river, groundAt }) {
       add({ k: 1, x: x + Math.cos(ang) * s * 0.3, y, z: z + Math.sin(ang) * s * 0.3, vx: Math.cos(ang) * s, vy: 0.25 + Math.random() * 0.5, vz: Math.sin(ang) * s, age: 0, life: life * (0.7 + Math.random() * 0.6), s0: sz * (0.5 + Math.random() * 0.5), s1: sz * (1.6 + Math.random()), a });
     }
   }
-  // a foot or a thing breaking the surface at (x, y, z) moving at speed sp (m/s)
+  // a foot or a thing breaking the surface at (x, y, z) moving at speed sp (m/s): a crown of fine drops flung up
+  // and out (more and higher the faster it goes), a few bigger ones, and rings on the water
   function splash(x, y, z, sp, vx = 0, vz = 0) {
-    const k = Math.min(1.5, 0.3 + sp * 0.3);
-    spray(x, y, z, Math.round(6 + 10 * k), 0.6 + 0.8 * k, 1.4 + 1.6 * k, 0.035, 0.6, [vx * 0.35, vz * 0.35]);
-    if (sp > 2) mist(x, y + 0.1, z, 1, 0.3, 0.35, 0.9, 0.1);
+    const k = Math.min(1.5, 0.25 + sp * 0.3);
+    const n = Math.round(10 + 18 * k);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * 6.283, out = (0.35 + 0.9 * Math.random()) * (0.5 + 0.6 * k);
+      add({ k: 0, x: x + Math.cos(a) * 0.08, y: y + 0.01, z: z + Math.sin(a) * 0.08, vx: Math.cos(a) * out + vx * 0.3, vy: (0.9 + 1.6 * Math.random()) * (0.55 + 0.5 * k), vz: Math.sin(a) * out + vz * 0.3, age: 0, life: 0.9, s0: 0.008 + 0.01 * Math.random(), s1: 0, a: 0.95, floor: y - 0.02 });
+    }
+    for (let i = 0; i < Math.round(2 + 3 * k); i++) {
+      const a = Math.random() * 6.283;
+      add({ k: 0, x, y: y + 0.02, z, vx: Math.cos(a) * 0.3 + vx * 0.4, vy: 0.8 + 0.8 * Math.random() * k, vz: Math.sin(a) * 0.3 + vz * 0.4, age: 0, life: 0.7, s0: 0.016 + 0.01 * Math.random(), s1: 0, a: 0.8, floor: y - 0.02 });
+    }
     ripple(x, z, Math.min(1, 0.35 + 0.25 * sp));
   }
   function update(dt, wind = [0, 0]) {
@@ -175,13 +199,14 @@ export function createWaterFx({ scene, river, groundAt }) {
     for (const p of P) {
       const t = p.age / p.life;
       pos[n * 3] = p.x; pos[n * 3 + 1] = p.y; pos[n * 3 + 2] = p.z;
+      vel[n * 3] = p.vx; vel[n * 3 + 1] = p.vy; vel[n * 3 + 2] = p.vz;
       if (p.k === 0) { size[n] = p.s0; alpha[n] = p.a * (1 - t * t); }
       else { size[n] = p.s0 + (p.s1 - p.s0) * Math.sqrt(t); alpha[n] = p.a * Math.min(1, t * 5) * (1 - t); }
       kind[n] = p.k;
       n++;
     }
-    geo.setDrawRange(0, n);
-    for (const k of ['position', 'aSize', 'aAlpha', 'aKind']) geo.attributes[k].needsUpdate = true;
+    geo.instanceCount = n;
+    for (const k of ['iPos', 'iVel', 'iSize', 'iAlpha', 'iKind']) geo.attributes[k].needsUpdate = true;
   }
   void groundAt;
   return { spray, mist, splash, ripple, update, points };

@@ -70,8 +70,13 @@ export const RIVER_SHADE = /* glsl */ `
     vec3 sky = mix(bank, mix(uSky, uZenith, pow(clamp(R.y, 0.0, 1.0), 0.7)), smoothstep(0.04, 0.3, R.y)) * mix(0.35, 1.0, skyVis);
     float sd = max(dot(R, uSunDir), 0.0);
     vec3 glint = uSunCol * (pow(sd, mix(600.0, 120.0, rough)) * mix(40.0, 6.0, rough)) * skyVis;
+    // a broad sheen of the sun on the rippled surface: what shows the water is there when you look straight down
+    vec3 H = normalize(V + uSunDir);
+    glint += uSunCol * pow(max(dot(N, H), 0.0), 60.0) * 0.35 * skyVis;
     float path = d * (1.0 + 1.0 / max(V.y, 0.25));
-    vec3 sigma = vec3(1.9, 0.55, 0.85) + uTurbid * vec3(0.55, 0.65, 1.1);
+    // absorption a metre: clear stream water (pure water's red loss, a little green-brown from dissolved organic
+    // matter), plus what the sediment adds as the stream runs muddy
+    vec3 sigma = vec3(0.55, 0.16, 0.24) + uTurbid * vec3(0.55, 0.5, 0.62);
     vec3 T = exp(-sigma * path);
     float opaque = 1.0 - dot(T, vec3(0.3, 0.45, 0.25));
     vec3 lightIn = uAmb * mix(0.55, 1.0, skyVis) + uSunCol * 0.55 * skyVis * (0.6 + 0.4 * max(uSunDir.y, 0.0));
@@ -82,7 +87,7 @@ export const RIVER_SHADE = /* glsl */ `
     vec2 bedP = q - V.xz / max(V.y, 0.3) * d;
     float ca = texture2D(uTex, bedP * 0.42 + uTime * vec2(0.03, 0.017) + g).b * texture2D(uTex, bedP * 0.61 - uTime * vec2(0.021, 0.031)).b;
     ca = uSnap > 0.5 ? step(0.42, ca) : smoothstep(0.36, 0.5, ca);
-    vec3 caust = uSunCol * vec3(0.9, 1.0, 0.75) * ca * 0.22 * (1.0 - opaque) * skyVis * smoothstep(0.03, 0.15, d);
+    vec3 caust = uSunCol * vec3(0.9, 1.0, 0.75) * ca * 0.22 * (1.0 - opaque) * skyVis * smoothstep(0.03, 0.15, d) * (1.0 - liveShare(q));   // the live window draws them on the bed itself
     // over the bed: what comes back is the water's own light where it is opaque plus the reflection on top, and the
     // bed shows through the rest (alpha blending carries the bed, so divide by the coverage)
     float alpha = clamp(opaque + (fres + 0.04) * (1.0 - opaque), 0.0, 1.0);
@@ -90,7 +95,7 @@ export const RIVER_SHADE = /* glsl */ `
     vec3 col = ((body + caust) * opaque * (1.0 - fres) + sky * fres + glint) / alpha;
     // foam: a lace of bubbles flowed with the water, eroded by a threshold that rises as the foam thins, so it
     // breaks into islands and strands; thin lace where the water runs out at the edges
-    vec2 fuv = q * 0.85;
+    vec2 fuv = q * 2.0;
     vec2 fa = fuv - v * t0 * 0.42, fb = fuv - v * t1 * 0.42 + 0.53;
     vec3 F = mix(texture2D(uFoamTex, fa).rgb, texture2D(uFoamTex, fb).rgb, wb);
     vec3 F2 = mix(texture2D(uFoamTex, fa * 0.37 + 0.2).rgb, texture2D(uFoamTex, fb * 0.37 + 0.7).rgb, wb);
@@ -98,6 +103,8 @@ export const RIVER_SHADE = /* glsl */ `
     float amount = clamp(foamIn * (0.55 + 0.9 * F2.b) + (1.0 - smoothstep(0.0, 0.05, d)) * 0.35 * F2.b, 0.0, 1.0);
     float th = 1.0 - amount;
     float fm = smoothstep(th - 0.06, th + 0.14, lacework * 0.8 + F2.b * 0.35) * smoothstep(0.02, 0.12, amount);
+    // dense white water is a sheet of foam, only softly mottled; the lace shows where it thins
+    fm = max(fm, smoothstep(0.5, 0.85, amount) * (0.72 + 0.28 * F2.b));
     if (uSnap > 0.5) fm = step(bayer4(cell), fm);
     vec3 foamCol = lightIn * (0.78 + 0.32 * lacework) * vec3(0.93, 0.96, 0.96);
     col = mix(col, foamCol, fm * 0.92);
