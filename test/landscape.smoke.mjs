@@ -69,6 +69,27 @@ await G(() => __landscape.hold('shovel'));
 for (let i = 0; i < 3 && (await G((p) => __game.earthwork.heightOf(__game.sim.state.sys.landscape.grid, Math.floor(p.x / 0.3), Math.floor(p.z / 0.3)), spot)) > -0.1; i++) { await click(spot); await click(at(0.6, 1.9)); }
 await G(() => __landscape.hold('plant:lavender')); await click(spot);
 check('dug a hole and planted the lavender in it', (await L()).plants === 1);
+// a wheelbarrow load, a pond (dig, line, hose), timbers and a path light
+await G(() => { const st = __game.sim.state.sys.stock; st.tools.push('wheelbarrow', 'garden_hose'); st.items.pond_liner = 6; st.items.landscape_timber = 6; st.items.path_light = 2; st.items.river_rock = 0.2; __landscape.refresh(); });
+await G(() => __landscape.hold('barrow')); await wait(200);
+for (let i = 0; i < 3; i++) await click(at(1.6, 0.2 + i * 0.3));
+check('scoops go into the wheelbarrow', await G(() => __game.sim.state.sys.landscape.barrow.m3 > 0.02));
+{ const a = await scr(at(-1.4, 1.4).x, at(-1.4, 1.4).z); await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(a.x, a.y + 120, { steps: 8 }); await wait(200); await page.mouse.up(); await wait(300); }
+check('dragging down tips the barrow out', await G(() => __game.sim.state.sys.landscape.barrow.m3 === 0));
+const pondAt = at(-0.9, 0.2);
+await G((p) => { for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) { __game.sim.commandNow('landscape.dig', { x: p.x + dx * 0.3, z: p.z + dz * 0.3 }); __game.sim.commandNow('landscape.dump', { x: p.x + 3, z: p.z + 3 }); } }, pondAt);
+await wait(400); await G(() => __landscape.hold('liner')); await wait(300);
+await click(pondAt);
+const lined = await G(() => Object.keys(__game.sim.state.sys.landscape.liner).length);
+check('one click lines the whole hole', lined >= 9, lined + ' squares');
+await G(() => __landscape.hold('hose')); await wait(200); await click(pondAt);
+check('the hose is running', await G(() => Object.keys(__game.sim.state.sys.landscape.hose).length === 1));
+await G(() => __game.sim.runTicks(240)); await wait(800);
+const pond = await G(() => __game.landscape.pondsOf(__game.sim.state)[0]);
+check('the hose fills the pond', pond && pond.m3 > 0.01, pond ? Math.round(pond.m3 * 1000) + ' L' : 'none');
+await G(() => __landscape.hold('timber')); await drag(at(-1.6, -0.2), at(-1.6, 1.2), 10);
+await G(() => __landscape.hold('pathlight')); await click(at(1.4, 1.4));
+check('timbers and a path light set', await G(() => Object.values(__game.sim.state.sys.landscape.things).filter((o) => o.k === 'timber' || o.k === 'pathlight').length >= 2));
 if (shots) { await G(() => { __game.cam.dist = 7; }); await wait(1500); await page.screenshot({ path: shots + '/yard.png' }); }
 // the garden's bar has the trowel and the shovel
 await page.keyboard.press('Escape'); await wait(500);

@@ -89,7 +89,8 @@ test('nursery plants go in a hole as deep as the root ball, and grow over the ye
   assert.ok(yes.ok, yes.reason);
   near(heightOf(L(sim).grid, 3, 3), 0, 1e-3);                     // filled back to the ground around it
   const s0 = landscapeRead.plantSize(sim.state, yes.id, sim.state.lifeT);
-  const s3 = landscapeRead.plantSize(sim.state, yes.id, sim.state.lifeT + 3 * 365 * DAY);
+  L(sim).plants[yes.id].g = 3;                                    // three years of growth
+  const s3 = landscapeRead.plantSize(sim.state, yes.id, sim.state.lifeT);
   assert.ok(s3.h > s0.h * 2 && s3.k > 0.85);
 });
 
@@ -136,4 +137,74 @@ test('garden: a basin catches the rain that runs off the hill beside it, and the
   sim.runTicks(60);
   const got = bed.cells.map((q, i) => q.w + q.d - before[i]);
   assert.ok(got[0] > got[2] && got[4] < got[2], 'basin ' + got[0].toFixed(2) + ', flat ' + got[2].toFixed(2) + ', hill ' + got[4].toFixed(2));
+});
+
+test('stones settle: dig under a flagstone and it drops into the hollow', () => {
+  const sim = makeSim();
+  sim.state.sys.stock.items.flagstone_40 = 1;
+  const f = c(sim, 'landscape.place', { kind: 'flagstone', x: 0.15, z: 0.15 });
+  const y0 = L(sim).things[f.id].y;
+  assert.ok(c(sim, 'landscape.dig', { x: 0.15, z: 0.15 }).ok);
+  assert.ok(L(sim).things[f.id].y < y0 - 0.05, 'it dropped');
+});
+
+test('wheelbarrow: fill it scoop by scoop, tip it all out in one heap', () => {
+  const sim = makeSim();
+  sim.state.sys.stock.tools.push('wheelbarrow');
+  let n = 0;
+  while (!c(sim, 'landscape.load', { x: 0.15 + (n % 3) * 0.3, z: 0.15 }).full && n < 20) n++;
+  assert.ok(n >= 5 && n <= 8, n + ' scoops');
+  assert.equal(c(sim, 'landscape.load', { x: 0.15, z: 0.15 }).ok, false, 'full');
+  const t = c(sim, 'landscape.tip', { x: 5, z: 5 });
+  assert.ok(t.ok && t.m3 > 0.09);
+  near(netVolume(L(sim).grid), 0, 1e-3);
+});
+
+test('a new shrub dries out unless watered, roots in after three weeks, then copes on its own', () => {
+  const sim = makeSim();
+  const st = sim.state.sys.stock;
+  st.items.plant_rose = 2; st.tools.push('watering_can');
+  c(sim, 'landscape.setScale', { scale: 4 });
+  for (const x of [1.05, 3.05]) { c(sim, 'landscape.dig', { x, z: 1.05 }); c(sim, 'landscape.dump', { x: x + 1, z: 3 }); }
+  const a = c(sim, 'landscape.plant', { kind: 'rose', x: 1.05, z: 1.05 }), b = c(sim, 'landscape.plant', { kind: 'rose', x: 3.05, z: 1.05 });
+  assert.ok(a.ok && b.ok, a.reason || b.reason);
+  sim.state.sys.weather.tempC = 24;
+  const g = sim.state.sys.garden;
+  for (let d = 0; d < 24; d++) {
+    g.can.litres = 9;
+    c(sim, 'landscape.water', { x: 1.05, z: 1.05, litres: 6 });   // only the first is watered
+    sim.runDays(1);
+  }
+  const pa = L(sim).plants[a.id], pb = L(sim).plants[b.id];
+  assert.ok(pa.est >= 21 && pa.g > pb.g, 'watered one rooted and grew: est ' + pa.est + ', g ' + pa.g + ' vs ' + pb.g);
+  assert.ok(pb.w < 0.2, 'the other is dry: ' + pb.w);
+  assert.ok(landscapeRead.plantSize(sim.state, b.id, sim.state.lifeT).wilt);
+});
+
+test('a lined pond fills from the hose to its rim and no further, and loses a little to the sun', () => {
+  const sim = makeSim();
+  const st = sim.state.sys.stock;
+  st.items.pond_liner = 10; st.tools.push('garden_hose');
+  c(sim, 'landscape.setScale', { scale: 4 });
+  // a 3 x 3 square hole, a scoop deep (about 30 cm)
+  for (let gz = 0; gz < 3; gz++) for (let gx = 0; gx < 3; gx++) for (let i = 0; i < 1; i++) { c(sim, 'landscape.dig', { x: gx * 0.3 + 0.15, z: gz * 0.3 + 0.15 }); c(sim, 'landscape.dump', { x: 4 + gx * 0.3, z: 4 + gz * 0.3 }); }
+  assert.equal(c(sim, 'landscape.hose', { x: 0.45, z: 0.45 }).ok, false, 'no liner yet');
+  const ln = c(sim, 'landscape.line', { x: 0.45, z: 0.45, r: 0.5 });
+  assert.ok(ln.ok && ln.cells === 9, ln.reason);
+  assert.ok(c(sim, 'landscape.hose', { x: 0.45, z: 0.45, on: true }).ok);
+  sim.runDays(1);
+  const pd = landscapeRead.pondsOf(sim.state)[0];
+  assert.ok(pd.m3 > pd.cap * 0.98 && pd.m3 <= pd.cap + 1e-9, pd.m3 + ' of ' + pd.cap);
+  assert.equal(pd.hose, false, 'the hose shut off when full');
+  assert.ok(pd.level <= pd.rim + 1e-6 && pd.level > -0.5);
+  sim.state.sys.weather.tempC = 22;
+  sim.runDays(3);
+  const later = landscapeRead.pondsOf(sim.state)[0];
+  assert.ok(later.m3 < pd.m3 && later.m3 > pd.m3 * 0.8, 'evaporation: ' + pd.m3 + ' -> ' + later.m3);
+  // an iris on the shelf
+  st.items.plant_iris = 1;
+  assert.ok(c(sim, 'landscape.plant', { kind: 'iris', x: 0.15, z: 0.15 }).ok);
+  // cutting into the liner lets the water out
+  c(sim, 'landscape.dig', { x: 0.75, z: 0.75 });
+  assert.equal(landscapeRead.pondsOf(sim.state).reduce((a, p) => a + p.m3, 0), 0);
 });

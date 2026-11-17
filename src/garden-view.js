@@ -604,7 +604,8 @@
     else renderSeeds();
     canvas.focus();
   });
-  function say(msg, secs = 3) { flash.msg = msg; flash.until = performance.now() + secs * 1000; updateHint(true); }
+  let sayTo = null;   // while the Yard borrows the can, its messages go to the Yard's bar
+  function say(msg, secs = 3) { if (sayTo) return sayTo(msg, secs); flash.msg = msg; flash.until = performance.now() + secs * 1000; updateHint(true); }
   function buyButton(id, label) { return ' <button type="button" class="go" data-buy="' + id + '">' + esc(label) + ' ' + money(ITEMS[id].priceUsd) + '</button>'; }
   hint.addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
@@ -875,7 +876,10 @@
         drops.count = n; drops.instanceMatrix.needsUpdate = true;
         if (act.acc >= 0.12) {
           const step = Math.min(0.4, act.acc); act.acc = 0;
-          const res = cmd('garden.water', { x: a.x, z: a.z, r: 0.42, litres: Math.min(can, (0.5 + 2.2 * a.tip) * step) });   // a rose pours up to about 2.5 L a second
+          const litres = Math.min(can, (0.5 + 2.2 * a.tip) * step);   // a rose pours up to about 2.5 L a second
+          let res = cellAt(a.x, a.z) ? cmd('garden.water', { x: a.x, z: a.z, r: 0.42, litres }) : { ok: false };
+          // off the beds: shrubs and trees from the nursery, and ponds, take it (src/sim/landscape.js)
+          if (!res.ok && G.sim.handlers.has('landscape.water')) { const r2 = cmd('landscape.water', { x: a.x, z: a.z, litres }); if (r2.ok) res = r2; }
           G.burst(a.x, a.y + 0.08, a.z, 3 + Math.round(a.tip * 4), 0x9fd4f2, 0.9, 0.8, 0.04, 0.35);
           if (res.ok) { act.n++; tipEvent('watered'); }
         }
@@ -1121,6 +1125,7 @@
   /* ================= taking up the garden tools, and putting them away ================= */
   let lastHeld = 'hoe';
   function enter() {
+    sayTo = null;
     on = true; document.body.classList.add('gardening'); bar.hidden = false;
     const r = findRing(); if (r) r.scale.setScalar(0);
     ensureProject(); findSources();
@@ -1186,5 +1191,7 @@
     groundAt: (nx, ny) => { const o = {}; return H.groundAt(nx, ny, o) ? o : null; }, toScreen: (x, y, z) => toScreen(x, y, z, {}),
     meshes: () => [...meshes.entries()].map(([k, m]) => [k, m.count]), beds: () => [...bedViews.keys()], almanac: toggleAlmanac,
     inspect: (x, z) => inspectAt({ x, z }), get firsts() { return tipState.got || {}; }, refresh: () => { dirty = true; refresh(); }, source,
+    // the can, lent to the Yard (src/landscape-view.js): its gestures, its model, and where its messages go
+    can: { item: ITEMSHOW.can, press: (a) => press(a), frame: (a, dt) => frameAct(a, dt), release: (a) => release(a) }, bindSay: (fn) => { sayTo = fn; },
   };
 })();

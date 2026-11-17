@@ -74,6 +74,7 @@
   const COL = {
     soil: new T.Color(0x5e4632), soilDry: new T.Color(0x86704f), gravel: new T.Color(0xa49d90), gravelDark: new T.Color(0x6f6a62), bark: new T.Color(0x5a3626), barkLight: new T.Color(0x8a5a3a),
     sand: new T.Color(0xd8c79a), sod: new T.Color(0x56732f), sodDark: new T.Color(0x3f5a26), sprout: new T.Color(0x6f9a3a), skirt: new T.Color(0x3d2c1f),
+    rock: new T.Color(0x8c8478), rockDark: new T.Color(0x5f5a52), liner: new T.Color(0x232526),
   };
   const _c = new T.Color(), _c2 = new T.Color();
   // the colour of one point of a square's surface: its material, grained by a fixed speckle, darker down in a hole
@@ -82,6 +83,8 @@
     if (s === 'gravel') _c.copy(r < 0.35 ? COL.gravelDark : COL.gravel).multiplyScalar(0.85 + 0.3 * hash(k, gx + gz));
     else if (s === 'bark') _c.copy(r < 0.5 ? COL.bark : COL.barkLight).multiplyScalar(0.85 + 0.25 * hash(k + 1, gz));
     else if (s === 'sand') _c.copy(COL.sand).multiplyScalar(0.93 + 0.12 * r);
+    else if (s === 'riverrock') _c.copy(r < 0.5 ? COL.rockDark : COL.rock).multiplyScalar(0.8 + 0.3 * hash(k + 2, gx));
+    else if (L().liner[gx + ',' + gz]) _c.copy(COL.liner).multiplyScalar(0.85 + 0.3 * r);
     else if (s === '') _c.copy(r < 0.4 ? COL.sodDark : COL.sod).multiplyScalar(0.9 + 0.15 * hash(gx, k));
     else {
       _c.copy(COL.soil).lerp(COL.soilDry, 0.35 + 0.3 * hash(gx + k, gz)).multiplyScalar(r < 0.08 ? 1.25 : r > 0.9 ? 0.75 : 0.95);
@@ -128,6 +131,42 @@
     geo.computeVertexNormals();
     const m = new T.Mesh(geo, groundMat);
     m.receiveShadow = true; m.castShadow = true;
+    const d = detailFor(gx0, gz0, g);
+    if (d) m.add(d);
+    return m;
+  }
+  // Pebbles in the gravel, cobbles in a creek bed, chips in the bark: small shapes scattered over each square of a
+  // laid layer (a fixed pattern per square), built with the tile and drawn with it.
+  const DETAIL = {
+    gravel: { n: 9, geo: new T.OctahedronGeometry(1, 0), size: [0.018, 0.034], flat: 0.55, cols: [0xb5ada0, 0x8d877d, 0x6f6a62, 0xc8bfae] },
+    riverrock: { n: 5, geo: new T.IcosahedronGeometry(1, 0), size: [0.04, 0.085], flat: 0.5, cols: [0x9a9286, 0x6d675e, 0xb3a690, 0x7d6d5a, 0x5c5f5c] },
+    bark: { n: 8, geo: new T.BoxGeometry(2, 0.35, 1), size: [0.018, 0.034], flat: 1, cols: [0x6a412c, 0x8a5a3a, 0x4e2e1f] },
+  };
+  for (const k in DETAIL) DETAIL[k].pos = DETAIL[k].geo.toNonIndexed().attributes.position.array;
+  function detailFor(gx0, gz0, g) {
+    const pos = [], col = [];
+    for (let gz = gz0; gz < gz0 + TILE; gz++) for (let gx = gx0; gx < gx0 + TILE; gx++) {
+      const q = EW.square(g, gx, gz);
+      if (!q || !DETAIL[q[1]] || bedTilled(gx, gz)) continue;
+      const D = DETAIL[q[1]], src = D.pos;
+      for (let i = 0; i < D.n; i++) {
+        const x = (gx + 0.06 + 0.88 * hash(gx * 31 + i, gz * 17)) * CELL, z = (gz + 0.06 + 0.88 * hash(gz * 29 + i, gx * 13 + 7)) * CELL;
+        const sz = D.size[0] + (D.size[1] - D.size[0]) * hash(i * 7 + gx, gz * 3), yaw = hash(gx + i * 3, gz + i) * 6.28, cy = Math.cos(yaw), sy = Math.sin(yaw);
+        const y = G.heightAt(x, z) + EW.reliefAt(g, x, z) + 0.004 + sz * D.flat * 0.3;
+        const c = _c.setHex(D.cols[Math.floor(hash(i + gx * 5, gz * 11 + i) * D.cols.length)]);
+        for (let v = 0; v < src.length; v += 3) {
+          const lx = src[v] * sz, ly = src[v + 1] * sz * D.flat, lz = src[v + 2] * sz * 0.8;
+          pos.push(x + lx * cy - lz * sy, y + ly, z + lx * sy + lz * cy);
+          col.push(c.r, c.g, c.b);
+        }
+      }
+    }
+    if (!pos.length) return null;
+    const geo = new T.BufferGeometry();
+    geo.setAttribute('position', new T.BufferAttribute(new Float32Array(pos), 3));
+    geo.setAttribute('color', new T.BufferAttribute(new Float32Array(col), 3));
+    geo.computeVertexNormals();
+    const m = new T.Mesh(geo, groundMat); m.receiveShadow = true;
     return m;
   }
   function tileSig(tx, tz, lifeT) {
@@ -136,7 +175,7 @@
     for (let gz = tz * TILE - 1; gz <= tz * TILE + TILE; gz++) for (let gx = tx * TILE - 1; gx <= tx * TILE + TILE; gx++) {
       const q = EW.square(g, gx, gz);
       if (!q) continue;
-      s += gx + ',' + gz + ':' + q[0] + q[1] + (q[1] === 'lawn_sown' ? Math.floor((lifeT - q[3]) / 86400 / 3) : '') + (bedTilled(gx, gz) ? 'b' : '') + ';';
+      s += gx + ',' + gz + ':' + q[0] + q[1] + (q[1] === 'lawn_sown' ? Math.floor((lifeT - q[3]) / 86400 / 3) : '') + (bedTilled(gx, gz) ? 'b' : '') + (L().liner[gx + ',' + gz] ? 'L' : '') + ';';
     }
     return s;
   }
@@ -154,11 +193,11 @@
     groundRev = g.rev; bedSigSeen = bs; heightSig = hs;
     const want = new Set();
     for (const k in g.sq) { const i = k.indexOf(','), gx = +k.slice(0, i), gz = +k.slice(i + 1); want.add(Math.floor(gx / TILE) + ':' + Math.floor(gz / TILE)); }
-    for (const [key, v] of [...tileViews]) if (!want.has(key)) { G.scene.remove(v.mesh); v.mesh.geometry.dispose(); tileViews.delete(key); }
+    for (const [key, v] of [...tileViews]) if (!want.has(key)) { if (v.mesh) { G.scene.remove(v.mesh); v.mesh.geometry.dispose(); for (const ch of v.mesh.children) ch.geometry.dispose(); } tileViews.delete(key); }
     for (const key of want) {
       const [tx, tz] = key.split(':').map(Number), sig = tileSig(tx, tz, lifeT), v = tileViews.get(key);
       if (v && v.sig === sig && !force) continue;
-      if (v && v.mesh) { G.scene.remove(v.mesh); v.mesh.geometry.dispose(); }
+      if (v && v.mesh) { G.scene.remove(v.mesh); v.mesh.geometry.dispose(); for (const ch of v.mesh.children) ch.geometry.dispose(); }
       const m = buildTile(tx, tz, lifeT);
       if (m) G.scene.add(m);
       tileViews.set(key, { mesh: m, sig });
@@ -269,6 +308,8 @@
     if (kind === 'flagstone') { const g = new T.CylinderGeometry(0.5, 0.5, 1, 7, 1); g.translate(0, 0.5, 0); return merge([part(g, 0xb9a988, 0, 0, 0, 0, 0.2, 0, d.w, d.h, d.d, 0.012)]); }
     if (kind === 'paver') return merge([part(box(d.w, d.h, d.d), 0xa65a3f, 0, d.h / 2, 0), part(box(d.w * 0.96, 0.004, d.d * 0.92), 0xb86a4c, 0, d.h + 0.001, 0)]);
     if (kind === 'wallstone') return merge([part(box(d.w, d.h, d.d, 2), 0x8f887a, 0, d.h / 2, 0, 0, 0, 0, 1, 1, 1, 0.035)]);
+    if (kind === 'timber') return merge([part(box(d.w, d.h, d.d), 0x7a6146, 0, d.h / 2, 0), part(box(d.w * 0.98, 0.004, d.d * 0.7), 0x8d7152, 0, d.h + 0.001, 0), part(box(0.004, d.h * 0.9, d.d * 0.9), 0xa88b66, d.w / 2 + 0.001, d.h / 2, 0), part(box(0.004, d.h * 0.9, d.d * 0.9), 0xa88b66, -d.w / 2 - 0.001, d.h / 2, 0)]);
+    if (kind === 'pathlight') return merge([part(stick(d.h - 0.06, 0.012, 5), 0x2c2c2a, 0, 0, 0), part(new T.CylinderGeometry(0.05, 0.045, 0.06, 8), 0x3a3a38, 0, d.h - 0.06, 0), part(new T.CylinderGeometry(0.065, 0.06, 0.015, 8), 0x2c2c2a, 0, d.h + 0.005, 0)]);
     return merge([part(ball(0.5, 1), 0x7d7a72, 0, d.h * 0.5, 0, 0, 0, 0, d.w, d.h, d.d, 0.12)]);
   }
   const stoneMat = new T.MeshLambertMaterial({ vertexColors: true });
@@ -279,6 +320,11 @@
     stones[k] = m;
   }
   const _m = new T.Matrix4(), _p = new T.Vector3(), _q = new T.Quaternion(), _e = new T.Euler(), _s = new T.Vector3(), _ic = new T.Color();
+  // the glowing part of the path lights: bright enough at night for the bloom to catch, dark by day
+  const lensMat = new T.MeshBasicMaterial({ color: 0x000000, toneMapped: false });
+  let lenses = new T.InstancedMesh(new T.CylinderGeometry(0.042, 0.04, 0.045, 8), lensMat, 16);
+  lenses.count = 0; lenses.frustumCulled = false; G.scene.add(lenses);
+  const LENS = new T.Color(1.9, 1.45, 0.9);
   let stoneSig = '';
   const stoneY = (o) => G.heightAt(o.ax, o.az) + o.y;
   function layoutStones() {
@@ -306,6 +352,10 @@
       });
       m.count = arr.length; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true;
     }
+    const lights = by.pathlight || [];
+    if (lights.length > lenses.instanceMatrix.count) { G.scene.remove(lenses); lenses = new T.InstancedMesh(lenses.geometry, lensMat, lights.length + 16); lenses.frustumCulled = false; G.scene.add(lenses); }
+    lights.forEach((o, i) => { _m.compose(_p.set(o.x, stoneY(o) + THINGS.pathlight.dims.h - 0.06 + 0.03, o.z), _q.identity(), _s.set(1, 1, 1)); lenses.setMatrixAt(i, _m); });
+    lenses.count = lights.length; lenses.instanceMatrix.needsUpdate = true;
   }
 
   /* ================= nursery plants: built in code at unit size (1 m tall, 1 m across), scaled as they grow ================= */
@@ -347,6 +397,20 @@
         const a = r(i, 1) * 6.28, up = 0.15 + 0.85 * r(i, 2), d = 0.46 * Math.sqrt(1 - up * up * 0.6);
         P.push(part(ball(fr * (0.8 + 0.4 * r(i, 3)), 1), fl, Math.sin(a) * d, 0.42 + 0.48 * up, Math.cos(a) * d, 0, 0, 0, 1, 0.85, 1, fr * 0.3));
       }
+    } else if (look === 'blueberry') {
+      for (let i = 0; i < 7; i++) { const a = r(i, 1) * 6.28, d = 0.12 * r(i, 2); P.push(part(stick(0.7, 0.012, 4), 0x6b4a36, Math.sin(a) * d, 0, Math.cos(a) * d, Math.cos(a) * 0.25, 0, -Math.sin(a) * 0.25)); }
+      P.push(part(ball(0.5, 1), 0x3f6b33, 0, 0.55, 0, 0, 0, 0, 1, 0.8, 1, 0.12));
+      P.push(part(ball(0.3, 1), 0x4c7a3a, 0.15, 0.78, 0.1, 0, 0, 0, 1, 0.8, 1, 0.08));
+      for (let i = 0; i < 30; i++) { const a = r(i, 3) * 6.28, up = r(i, 4), d = 0.47 * Math.sqrt(1 - up * up * 0.5); P.push(part(ball(0.022, 0), i % 4 ? 0x3d4d8c : 0x5866a8, Math.sin(a) * d, 0.4 + 0.42 * up, Math.cos(a) * d)); }
+    } else if (look === 'apple') {
+      P.push(part(stick(0.42, 0.04, 6), 0x5a4232, 0, 0, 0));
+      for (const [a, l] of [[0.3, 0.32], [2.2, 0.3], [4.1, 0.34]]) P.push(part(stick(l, 0.022, 5), 0x5a4232, 0, 0.36, 0, Math.cos(a) * 0.9, 0, -Math.sin(a) * 0.9));
+      P.push(part(ball(0.42, 1), 0x4f7f34, 0, 0.66, 0, 0, 0, 0, 1.1, 0.75, 1.1, 0.1));
+      P.push(part(ball(0.25, 1), 0x5a8a3c, 0.2, 0.84, -0.1, 0, 0, 0, 1, 0.8, 1, 0.07));
+      for (let i = 0; i < 16; i++) { const a = r(i, 5) * 6.28, up = r(i, 6), d = 0.44 * Math.sqrt(1 - up * up * 0.6); P.push(part(ball(0.035, 1), i % 3 ? 0xc0392b : 0xd9a22e, Math.sin(a) * d, 0.5 + 0.35 * up, Math.cos(a) * d)); }
+    } else if (look === 'iris') {
+      for (let i = 0; i < 14; i++) { const a = r(i, 1) * 6.28, lean = 0.05 + 0.15 * r(i, 2); P.push(part(cone(0.85 + 0.15 * r(i, 3), 0.03, 3), 0x5b8a3a, Math.sin(a) * 0.05, 0, Math.cos(a) * 0.05, Math.cos(a) * lean, a, -Math.sin(a) * lean, 1, 1, 0.35)); }
+      for (let i = 0; i < 4; i++) { const a = r(i, 4) * 6.28, d = 0.08; P.push(part(stick(0.75, 0.008, 3), 0x5b8a3a, Math.sin(a) * d, 0, Math.cos(a) * d)); P.push(part(ball(0.06, 0), 0xf2d02a, Math.sin(a) * d, 0.78, Math.cos(a) * d, 0, 0, 0, 1.2, 0.7, 1.2)); }
     } else if (look === 'maple') {
       P.push(part(stick(0.5, 0.035, 6), 0x4a3426, 0, 0, 0));
       for (const [a, l] of [[0.4, 0.5], [2.4, 0.45], [4.3, 0.5]]) P.push(part(stick(l, 0.02, 5), 0x4a3426, 0, 0.42, 0, Math.cos(a) * 0.7, 0, -Math.sin(a) * 0.7));
@@ -371,7 +435,7 @@
   let plantSig = '', plantT = 0;
   function layoutPlants(force) {
     const list = Object.values(L().plants), lifeT = G.sim.state.lifeT;
-    let sig = list.length + ':' + heightSig + ':'; for (const p of list) sig += p.id + ',';
+    let sig = list.length + ':' + heightSig + ':'; for (const p of list) sig += p.id + (p.w < RD.ESTABLISH.wiltAt ? 'w' : '') + ',';
     if (sig === plantSig && !force) return;
     plantSig = sig;
     const by = {}; for (const k in plantMeshes) by[k] = [];
@@ -388,8 +452,57 @@
         const z = RD.plantSize(G.sim.state, p.id, lifeT), n = +p.id.slice(1), v = 0.9 + 0.2 * hash(n, 4);
         _m.compose(_p.set(p.x, surfaceAt(p.x, p.z) - 0.02, p.z), _q.setFromEuler(_e.set(0, p.yaw, 0)), _s.set(z.w * v, z.h * (0.92 + 0.16 * hash(n, 6)), z.w * v));
         m.setMatrixAt(i, _m);
+        m.setColorAt(i, z.wilt ? _ic.setRGB(0.85, 0.72, 0.45) : _ic.setRGB(1, 1, 1));   // a dry plant goes dull and yellow
       });
-      m.count = arr.length; m.instanceMatrix.needsUpdate = true;
+      m.count = arr.length; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    }
+  }
+
+  /* ================= ponds: a flat sheet of water at the level the simulation finds ================= */
+  const pondMat = new T.MeshPhongMaterial({ color: 0x24403f, specular: 0x8fb4bd, shininess: 120, transparent: true, opacity: 0.84, depthWrite: false });
+  const pondViews = new Map();   // root -> { mesh, sig }
+  const hoseMeshes = new Map();
+  const hoseGeo = merge([part(new T.TorusGeometry(0.16, 0.02, 5, 14), 0x2f7a3a, 0, 0.03, 0, Math.PI / 2, 0, 0), part(new T.TorusGeometry(0.12, 0.02, 5, 12), 0x2f7a3a, 0, 0.07, 0, Math.PI / 2, 0, 0), part(stick(0.25, 0.012, 4), 0x2f7a3a, 0.16, 0.05, 0, 0, 0, -1.2)]);
+  const pondTop = (pd) => { let s = 0; for (const [gx, gz] of pd.cells) s += G.heightAt((gx + 0.5) * CELL, (gz + 0.5) * CELL); return s / pd.cells.length + pd.level; };
+  function layoutPonds() {
+    const list = RD.pondsOf(G.sim.state), seen = new Set();
+    for (const pd of list) {
+      seen.add(pd.root);
+      const sig = pd.cells.length + ':' + Math.round(pd.m3 * 200) + ':' + groundRev;
+      let v = pondViews.get(pd.root);
+      if (!v || v.sig !== sig) {
+        if (v && v.mesh) { G.scene.remove(v.mesh); v.mesh.geometry.dispose(); }
+        let mesh = null;
+        if (pd.m3 > 1e-4) {
+          const y = pondTop(pd) + 0.002, pos = [], g = grid();
+          for (const [gx, gz] of pd.cells) {
+            if (EW.heightOf(g, gx, gz) >= pd.level - 0.002) continue;
+            const x0 = gx * CELL - 0.02, x1 = (gx + 1) * CELL + 0.02, z0 = gz * CELL - 0.02, z1 = (gz + 1) * CELL + 0.02;
+            pos.push(x0, y, z0, x0, y, z1, x1, y, z0, x1, y, z0, x0, y, z1, x1, y, z1);
+          }
+          if (pos.length) {
+            const geo = new T.BufferGeometry(); geo.setAttribute('position', new T.BufferAttribute(new Float32Array(pos), 3)); geo.computeVertexNormals();
+            mesh = new T.Mesh(geo, pondMat); mesh.renderOrder = 3; mesh.receiveShadow = true; G.scene.add(mesh);
+          }
+        }
+        pondViews.set(pd.root, (v = { mesh, sig }));
+      }
+      // a hose coiled at the rim while it runs
+      let h = hoseMeshes.get(pd.root);
+      if (pd.hose && !h) {
+        const [gx, gz] = pd.cells[0], x = gx * CELL - 0.15, z = gz * CELL - 0.15;
+        h = new T.Mesh(hoseGeo, plantMat); h.position.set(x, surfaceAt(x, z), z); G.scene.add(h); hoseMeshes.set(pd.root, h); h.userData.pd = pd;
+      } else if (!pd.hose && h) { G.scene.remove(h); hoseMeshes.delete(pd.root); }
+      if (h) h.userData.pd = pd;
+    }
+    for (const [r, v] of [...pondViews]) if (!seen.has(r)) { if (v.mesh) { G.scene.remove(v.mesh); v.mesh.geometry.dispose(); } pondViews.delete(r); }
+    for (const [r, h] of [...hoseMeshes]) if (!seen.has(r)) { G.scene.remove(h); hoseMeshes.delete(r); }
+  }
+  // the hose's stream, a few drops a frame into the pond
+  function hoseSpray() {
+    for (const h of hoseMeshes.values()) {
+      const pd = h.userData.pd, [gx, gz] = pd.cells[0], x = (gx + 0.5) * CELL, z = (gz + 0.5) * CELL;
+      if (Math.random() < 0.5) G.burst(x, pondTop(pd) + 0.05, z, 2, 0xcfeaf7, 0.6, 0.6, 0.03, 0.35);
     }
   }
 
@@ -408,7 +521,19 @@
   ITEM.rake = { obj: mesh([part(stick(1.6, 0.02, 6), 0xc9975a, 0, 0.03, 0), part(box(0.46, 0.03, 0.04), 0x6d767c, 0, 0.03, 0.02), ...Array.from({ length: 12 }, (_, i) => part(box(0.012, 0.08, 0.012), 0x6d767c, -0.21 + i * 0.038, 0.0, 0.05))]),
     use: 'tip', still: [0.44, 0.02, 0.22, 0, 0, 0], stillArm: -0.5, walk: [0.3, 1.74, -0.78, 2.15, 0, 0], walkArm: -1.0 };
   const bucket = (fill) => ({ obj: mesh([part(new T.CylinderGeometry(0.2, 0.16, 0.28, 10), 0x6e7b52, 0, 0.14, 0), part(ball(0.19, 1), fill, 0, 0.28, 0, 0, 0, 0, 1, 0.55, 1)]), use: 'over', overD: 0.55, overH: 0.8, tiltHold: 0.9, tiltMax: 0.35, still: [0.4, 0.5, 0.12, 0, 0, 0], stillArm: -0.15 });
-  ITEM.gravel = bucket(0xa49d90); ITEM.bark = bucket(0x6a412c); ITEM.sand = bucket(0xd8c79a); ITEM.seed = bucket(0xd9cf9a);
+  ITEM.gravel = bucket(0xa49d90); ITEM.bark = bucket(0x6a412c); ITEM.sand = bucket(0xd8c79a); ITEM.seed = bucket(0xd9cf9a); ITEM.riverrock = bucket(0x8c8478);
+  // the wheelbarrow: tray, one wheel, two handles; a heap in the tray as it fills
+  {
+    const tray = new T.CylinderGeometry(0.42, 0.3, 0.26, 4, 1, true); tray.rotateY(Math.PI / 4);
+    const obj = mesh([part(tray, 0x2f6e8e, 0, 0.38, 0, 0, 0, 0, 1, 1, 1.35), part(box(0.5, 0.02, 0.6), 0x2a5f7a, 0, 0.25, 0), part(new T.CylinderGeometry(0.17, 0.17, 0.09, 12), 0x222222, 0, 0.17, 0.62, 0, 0, Math.PI / 2), part(stick(1.3, 0.02, 5), 0x8a6a45, 0.22, 0.2, 0.55, -1.42, 0, 0), part(stick(1.3, 0.02, 5), 0x8a6a45, -0.22, 0.2, 0.55, -1.42, 0, 0), part(stick(0.22, 0.015, 4), 0x444444, 0.2, 0, -0.25), part(stick(0.22, 0.015, 4), 0x444444, -0.2, 0, -0.25)]);
+    obj.scale.setScalar(0.8); obj.rotation.y = Math.PI;
+    const heap = new T.Mesh(ball(0.3, 1), new T.MeshLambertMaterial({ color: 0x5e4632 })); heap.position.set(0, 0.42, 0); heap.visible = false; obj.add(heap);
+    const g = new T.Group(); g.add(obj);
+    ITEM.barrow = { obj: g, heap, use: 'hand', still: [0, 0.05, 0.65, 0, 0, 0], reach: [0, 0.05, 0.75, 0, 0, 0], stillArm: -0.4 };
+  }
+  ITEM.liner = { obj: mesh([part(new T.CylinderGeometry(0.09, 0.09, 0.6, 10), 0x1f2122, 0, 0, 0, 0, 0, Math.PI / 2), part(box(0.5, 0.004, 0.3), 0x2a2c2d, 0, -0.09, 0.15)]), use: 'hand', still: [0, 0.75, 0.3, 0, 0, 0], reach: [0, 0.5, 0.5, 0, 0, 0], stillArm: -1.1 };
+  ITEM.hose = { obj: new T.Group(), use: 'hand', still: [0, 0.7, 0.3, 0, 0, 0], stillArm: -1.1 };
+  ITEM.hose.obj.add(new T.Mesh(merge([part(new T.TorusGeometry(0.16, 0.02, 5, 14), 0x2f7a3a, 0, 0, 0), part(new T.TorusGeometry(0.12, 0.02, 5, 12), 0x2f7a3a, 0, 0, 0.03)]), toolMat));
   for (const k of Object.keys(THINGS)) {
     const o = new T.Mesh(stones[k].geometry, stoneMat); o.castShadow = true;
     const s = k === 'boulder' ? 0.5 : k === 'paver' ? 1.6 : 1;
@@ -448,7 +573,10 @@
   const loaded = () => L().carry.m3 > 1e-6;
   const isWater = (x, z) => G.heightAt(x, z) < (G.sea ?? -0.2) + 0.05 || !!(G.streamWaterAt && G.streamWaterAt(x, z));
   const litres = (m3) => Math.round(m3 * 1000);
+  const matHex = (s) => (s === 'gravel' ? 0xa49d90 : s === 'bark' ? 0x6a412c : s === 'sand' ? 0xd8c79a : s === 'riverrock' ? 0x8c8478 : 0x5e4632);
   function setHeap() {
+    const b = L().barrow, bh = ITEM.barrow && ITEM.barrow.heap;
+    if (bh) { bh.visible = b.m3 > 1e-6; if (bh.visible) { bh.material.color.setHex(matHex(b.s)); const f = Math.min(1, b.m3 / RD.BARROW_M3); bh.scale.set(0.6 + 0.5 * f, 0.15 + 0.5 * f, 0.8 + 0.5 * f); } }
     const c = L().carry, it = ITEM.shovel;
     it.heap.visible = c.m3 > 1e-6;
     if (it.heap.visible) { it.heap.material.color.setHex(c.s === 'gravel' ? 0xa49d90 : c.s === 'bark' ? 0x6a412c : c.s === 'sand' ? 0xd8c79a : 0x5e4632); it.heap.scale.set(1, 0.4 + 0.25 * Math.min(2, c.m3 / SCOOP_M3 / 2), 1); }
@@ -498,6 +626,7 @@
       G.burst(a.x, y + 0.12, a.z, 10, res.s === 'gravel' ? 0xa49d90 : 0x5a4230, 1.5, 2.4, 0.07, 0.6);
       if (res.turf) G.burst(a.x, y + 0.12, a.z, 6, 0x5e8a3a, 1.6, 2.6, 0.07, 0.7);
       G.cam.shake = Math.min(G.cam.shake + 0.06, 0.4);
+      if (res.liner) sayS('You cut into the pond liner: the water ran out. The liner is back in your stock.', 5);
       setHeap(); tip('dug', res);
     },
   };
@@ -517,7 +646,7 @@
     const res = k === 'seed' ? cmd('landscape.seedLawn', { x: a.x, z: a.z, r: 0.42 }) : cmd('landscape.spread', { surface: k, x: a.x, z: a.z, r: 0.42, m3: 0.035 * step * Math.max(0.25, a.tip) });
     if (!res.ok) { if (act.why !== res.reason) say(res.reason, 4); act.why = res.reason; return; }
     act.n++;
-    const hex = k === 'seed' ? 0xe8dca0 : k === 'gravel' ? 0xa49d90 : k === 'bark' ? 0x6a412c : 0xd8c79a;
+    const hex = k === 'seed' ? 0xe8dca0 : matHex(k);
     G.burst(a.x, a.y + 0.55, a.z, 6, hex, 1.2, 0.3, k === 'seed' ? 0.025 : 0.05, 0.6);
   }
   // setting stones: click sets one; dragging lays a line along the drag at the stone's spacing
@@ -571,20 +700,31 @@
     stone: (hex, w, h) => I('<path d="M' + (20 - w) + ' ' + (28) + 'q2-' + h + ' ' + w + '-' + h + 't' + w + ' ' + h + 'z" fill="' + hex + '" stroke="#efe6d2"/><path d="M5 30h30" stroke="#a3784e" stroke-width="2"/>'),
     wall: I('<path d="M6 32h12v-7H6zM20 32h14v-7H20zM10 25h14v-7H10zM26 25h8v-7h-8z" fill="#8f887a" stroke="#efe6d2" stroke-width="1.6"/>'),
     pot: (hex) => I('<path d="M13 24h14l-2 11H15z" fill="#9a5a3a" stroke="#f0c8a8"/><circle cx="20" cy="15" r="8" fill="' + hex + '" stroke="#e8f0d8"/><path d="M20 23v-6" stroke="#6f9a3a"/>'),
+    barrow: I('<path d="M6 14h20l-4 10H11z" fill="#2f6e8e" stroke="#cfe4ee"/><circle cx="25" cy="29" r="4" fill="#222" stroke="#ddd"/><path d="M8 24l-3 8M21 24l4 2M26 14l9-4" stroke="#d8b585" stroke-width="2"/>'),
+    can: I('<path d="M10 16h16v16H10z" fill="#5f8a6a" stroke="#d6eadb"/><path d="M26 19l9-7" stroke="#d6eadb" stroke-width="3"/><path d="M12 16c0-6 12-6 12 0" stroke="#d6eadb"/>'),
+    hose: I('<circle cx="20" cy="20" r="11" stroke="#58b064" stroke-width="3.2"/><circle cx="20" cy="20" r="6" stroke="#58b064" stroke-width="3"/><path d="M31 20h5" stroke="#58b064" stroke-width="3"/>'),
+    liner: I('<rect x="8" y="10" width="24" height="8" rx="4" fill="#2a2c2d" stroke="#bbb"/><path d="M10 18c0 8 20 8 20 0" fill="#3a6a8a" stroke="#bfe0f0"/>'),
+    timber: I('<path d="M5 24h30v6H5zM8 18h24v6H8z" fill="#8d7152" stroke="#efe6d2" stroke-width="1.6"/>'),
+    light: I('<path d="M20 16v18" stroke="#888" stroke-width="2.4"/><path d="M14 12h12l-2 5h-8z" fill="#ffd98a" stroke="#efe6d2"/><circle cx="20" cy="9" r="2" fill="#fff3c0" stroke="none"/>'),
     store: I('<path d="M5 16l3-8h24l3 8z" fill="#7e9b5a" stroke="#e8f0d8"/><path d="M7 16v17h26V16" stroke="#efe6d2"/><path d="M16 33v-9h8v9" fill="#8a6238" stroke="#efe6d2"/>'),
   };
-  const PLANT_HEX = { lavender: '#8b6fc4', coneflower: '#e8b52a', grass: '#b7a26a', boxwood: '#3d6a31', hydrangea: '#f1f0e2', rose: '#c4243a', maple: '#9b2226' };
-  const LAYER_ITEM = { gravel: 'gravel', bark: 'bark_mulch', sand: 'sand', seed: 'grass_seed' };
+  const PLANT_HEX = { lavender: '#8b6fc4', coneflower: '#e8b52a', grass: '#b7a26a', boxwood: '#3d6a31', hydrangea: '#f1f0e2', rose: '#c4243a', maple: '#9b2226', blueberry: '#4a5a9c', apple: '#c0392b', iris: '#f2d02a' };
+  const LAYER_ITEM = { gravel: 'gravel', riverrock: 'river_rock', bark: 'bark_mulch', sand: 'sand', seed: 'grass_seed' };
   const amount = (k) => { const id = LAYER_ITEM[k], u = ITEMS[id].unit, v = have(id); return u === 'm3' ? Math.round(v * 1000) + ' L' : u === 'kg' ? (v < 1 ? Math.round(v * 1000) + ' g' : v.toFixed(1) + ' kg') : Math.round(v) + ' L'; };
   function slotList() {
     const out = [{ id: 'hands', name: 'Hands', icon: ICONS.hands, title: 'Hands: pick up stones and plants' }];
     out.push({ id: 'shovel', name: 'Shovel', icon: ICONS.shovel, item: ITEM.shovel, dim: !owns('shovel') && !owns('spade'), badge: loaded() ? litres(L().carry.m3) + ' L' : null, title: 'Shovel: dig, carry and toss earth; drag to skim turf' });
     out.push({ id: 'rake', name: 'Rake', icon: ICONS.rake, item: ITEM.rake, dim: !owns('rake'), title: 'Rake: level loose ground' });
-    for (const [k, nm, hex] of [['gravel', 'Gravel', '#a49d90'], ['bark', 'Bark', '#6a412c'], ['sand', 'Sand', '#d8c79a'], ['seed', 'Lawn seed', '#d9cf9a']])
+    if (owns('wheelbarrow')) out.push({ id: 'barrow', name: 'Barrow', icon: ICONS.barrow, item: ITEM.barrow, badge: L().barrow.m3 > 1e-6 ? litres(L().barrow.m3) + ' L' : null, title: 'Wheelbarrow: click to shovel a scoop in, drag down to tip it out' });
+    const GV = window.__gardenView;
+    if (GV && GV.can && owns('watering_can')) out.push({ id: 'can', name: 'Can', icon: ICONS.can, item: GV.can.item, badge: Math.round((G.sim.state.sys.garden.can.litres || 0) * 10) / 10 + ' L', title: 'Watering can: water new plants in; fill it at the pump or the stream' });
+    if (owns('garden_hose')) out.push({ id: 'hose', name: 'Hose', icon: ICONS.hose, item: ITEM.hose, title: 'Hose: click a lined pond to fill it' });
+    if (have('pond_liner') >= 0.05) out.push({ id: 'liner', name: 'Liner', icon: ICONS.liner, item: ITEM.liner, badge: have('pond_liner').toFixed(1) + ' m²', title: 'Pond liner: click a dug hole to line it' });
+    for (const [k, nm, hex] of [['gravel', 'Gravel', '#a49d90'], ['riverrock', 'River rock', '#8c8478'], ['bark', 'Bark', '#6a412c'], ['sand', 'Sand', '#d8c79a'], ['seed', 'Lawn seed', '#d9cf9a']])
       if (have(LAYER_ITEM[k]) > 1e-6) out.push({ id: k, name: nm, icon: ICONS.bucket(hex), item: ITEM[k], badge: amount(k) });
     for (const k of Object.keys(THINGS)) {
       const th = THINGS[k], n = have(th.item) / th.qty;
-      if (n >= 1 - 1e-6) out.push({ id: k, name: th.name.replace('Brick ', ''), icon: k === 'wallstone' ? ICONS.wall : ICONS.stone(k === 'paver' ? '#a65a3f' : k === 'boulder' ? '#7d7a72' : '#b9a988', k === 'boulder' ? 12 : 10, k === 'boulder' ? 14 : k === 'flagstone' ? 3 : 5), item: ITEM[k], badge: Math.floor(n + 1e-6) });
+      if (n >= 1 - 1e-6) out.push({ id: k, name: th.name.replace('Brick ', ''), icon: k === 'wallstone' ? ICONS.wall : k === 'timber' ? ICONS.timber : k === 'pathlight' ? ICONS.light : ICONS.stone(k === 'paver' ? '#a65a3f' : k === 'boulder' ? '#7d7a72' : '#b9a988', k === 'boulder' ? 12 : 10, k === 'boulder' ? 14 : k === 'flagstone' ? 3 : 5), item: ITEM[k], badge: Math.floor(n + 1e-6) });
     }
     for (const k of Object.keys(PLANTS)) if (have(PLANTS[k].item) >= 1) out.push({ id: 'plant:' + k, name: PLANTS[k].name.split(' ').pop(), icon: ICONS.pot(PLANT_HEX[k]), item: ITEM['plant:' + k], badge: Math.floor(have(PLANTS[k].item)), title: PLANTS[k].name });
     out.push({ id: 'store', name: 'Yard store', icon: ICONS.store, title: 'Buy gravel, stones, seed and plants' });
@@ -603,12 +743,14 @@
     ['gravel', 0.25, 'Gravel', '250 L: a path 3 m long'], ['bark_mulch', 200, 'Bark mulch', '200 L: 3 m2 of border'], ['sand', 0.1, 'Sand', '100 L: a bed for stones'],
     ['grass_seed', 1, 'Lawn seed', '1 kg sows 25 m2'], ['flagstone_40', 2, 'Flagstones', '10 stepping stones'], ['paver_brick', 50, 'Brick pavers', '50 bricks: 10 m of edging'],
     ['stone', 40, 'Wall stones', '40 fieldstones: a low wall'], ['boulder', 1, 'Boulder', 'A feature rock'],
+    ['river_rock', 0.25, 'River rock', '250 L: a dry creek bed 3 m long'], ['pond_liner', 6, 'Pond liner', '6 m2: lines a pond about 1.5 m across'],
+    ['landscape_timber', 10, 'Timbers', '10 of 1.2 m: a raised bed, two courses high'], ['path_light', 6, 'Path lights', '6 solar lights for a path'],
   ];
   function renderStore() {
     let h = '';
     const sc = L().scale || 1;
     h += '<button type="button" class="gseed" data-scale="1"><b>Earth per scoop</b><span>' + [1, 2, 4].map((v) => (v === sc ? '<b style="display:inline;font-size:14px">' + v + '×</b>' : v + '×')).join(' · ') + '</span><span>' + litres(SCOOP_M3 * sc) + ' L a scoop. Click to change</span></button>';
-    for (const id of ['trowel', 'rake']) if (!owns(id)) h += '<button type="button" class="gseed" data-buy="' + id + '" data-qty="1"><b>' + esc(ITEMS[id].name) + '</b><span>' + esc(ITEMS[id].blurb || '') + '</span><span>Buy for ' + money(ITEMS[id].priceUsd) + '</span></button>';
+    for (const id of ['trowel', 'rake', 'wheelbarrow', 'garden_hose', 'watering_can']) if (!owns(id)) h += '<button type="button" class="gseed" data-buy="' + id + '" data-qty="1"><b>' + esc(ITEMS[id].name) + '</b><span>' + esc(ITEMS[id].blurb || '') + '</span><span>Buy for ' + money(ITEMS[id].priceUsd) + '</span></button>';
     for (const [id, q, nm, what] of STORE) h += '<button type="button" class="gseed" data-buy="' + id + '" data-qty="' + q + '"><b>' + nm + '</b><span>' + esc(what) + '</span><span>' + money(ITEMS[id].priceUsd * q) + '</span></button>';
     for (const k of Object.keys(PLANTS)) { const p = PLANTS[k], it = ITEMS[p.item]; h += '<button type="button" class="gseed" data-buy="' + p.item + '" data-qty="1"><b>' + esc(p.name) + '<i style="background:' + PLANT_HEX[k] + '"></i></b><span>' + esc(p.blurb) + '</span><span>Hole ' + Math.round(p.holeM * 100) + ' cm · ' + money(it.priceUsd) + (have(p.item) >= 1 ? ' · have ' + Math.floor(have(p.item)) : '') + '</span></button>'; }
     storeEl.innerHTML = h;
@@ -616,7 +758,7 @@
   storeEl.addEventListener('click', (e) => {
     const b = e.target.closest('.gseed'); if (!b) return;
     if (b.dataset.scale) { const sc = L().scale || 1, nx = sc === 1 ? 2 : sc === 2 ? 4 : 1; cmd('landscape.setScale', { scale: nx }); renderStore(); say('Each scoop moves ' + litres(SCOOP_M3 * nx) + ' L now.'); return; }
-    if (b.dataset.buy) buy(b.dataset.buy, +b.dataset.qty);
+    if (b.dataset.buy) { buy(b.dataset.buy, +b.dataset.qty); if (b.dataset.buy === 'watering_can' && ITEMS.watering_can) cmd('garden.refill', {}); }
     canvas.focus();
   });
   let hintSig = '';
@@ -628,7 +770,12 @@
       const id = held();
       if (id === 'store') h = 'Pick what to buy. Things you own appear on the bar.';
       else if (id === 'shovel') h = loaded() ? '<b>' + litres(L().carry.m3) + ' L</b> of ' + (L().carry.s === 'soil' ? 'earth' : esc(SURFACES[L().carry.s] ? SURFACES[L().carry.s].name.toLowerCase() : L().carry.s)) + ' on the shovel: <b>click</b> where to toss it.' : '<b>Click</b> to dig a scoop. <b>Drag</b> along the grass to skim the turf off.';
+      else if (id === 'barrow') h = L().barrow.m3 > 1e-6 ? '<b>' + litres(L().barrow.m3) + ' L</b> in the barrow. <b>Click</b> to shovel in more, <b>drag down</b> to tip it all out.' : '<b>Click</b> to shovel a scoop into the barrow. When it is full, walk it over and <b>drag down</b> to tip it out.';
+      else if (id === 'can') h = '<b>Hold and drag down</b> to pour over new plants: water them in, and keep them moist for three weeks while they root. Fill the can at the pump or the stream.';
+      else if (id === 'hose') h = '<b>Click</b> a lined pond to run the hose into it, click again to stop.';
+      else if (id === 'liner') h = '<b>Click</b> a dug hole to lay one sheet of liner over all of it (' + have('pond_liner').toFixed(1) + ' m² left). Dig the pond first: a shelf 20 to 30 cm deep round the edge, deeper in the middle.';
       else if (id === 'rake') h = owns('rake') ? '<b>Drag</b> over loose ground to level it.' : 'You need a rake. <button type="button" class="go" data-buy="rake">Buy ' + money(ITEMS.rake.priceUsd) + '</button>';
+      else if (id === 'riverrock') h = '<b>Hold and sweep</b> river rock along a dug channel for a dry creek bed (' + amount(id) + ' left). Lay it over pond liner for a beach.';
       else if (LAYER_ITEM[id]) h = id === 'seed' ? '<b>Hold and sweep</b> over bare soil to sow lawn. It knits into turf in about three weeks.' : '<b>Hold and sweep</b> to lay ' + id + ' (' + amount(id) + ' left). Drag down to pour faster. It goes on bare soil: skim the turf first.';
       else if (THINGS[id]) h = '<b>Click</b> to set a ' + THINGS[id].name.toLowerCase() + ', <b>drag</b> to lay a line. <b>R</b> turns it.' + (THINGS[id].stack ? ' Set one on another for the next course.' : '');
       else if (id.startsWith('plant:')) { const p = PLANTS[id.slice(6)]; h = 'Dig a hole about <b>' + Math.round(p.holeM * 100) + ' cm</b> deep with the shovel, then <b>click</b> it with the ' + esc(p.name.toLowerCase()) + '.'; }
@@ -661,6 +808,22 @@
     const id = held();
     act.kind = id; act.n = 0; act.lx = a.x; act.lz = a.z; act.acc = 0.16; act.why = ''; act.grab = null;
     if (id === 'shovel') return shovel.press(a);
+    if (id === 'can') { const GV = window.__gardenView; if (GV) { GV.bindSay(say); GV.can.press(a); } return; }
+    if (id === 'barrow') { act.tipped = false; return; }
+    if (id === 'liner') {
+      // one sheet over the whole hole under the hand
+      const res = cmd('landscape.line', { x: a.x, z: a.z, whole: true });
+      act.kind = '';
+      if (!res.ok) return say(res.reason, 4);
+      G.burst(a.x, surfaceAt(a.x, a.z) + 0.1, a.z, 14, 0x2a2c2d, 1.4, 0.8, 0.06, 0.5);
+      return say('Lined the hole: ' + res.cells + (res.cells === 1 ? ' square' : ' squares') + '. Hide the edge under stones, then run the hose into it.', 5);
+    }
+    if (id === 'hose') {
+      const res = cmd('landscape.hose', { x: a.x, z: a.z });
+      act.kind = '';
+      if (!res.ok) return say(res.reason);
+      return say(res.on ? 'The hose is running into the pond: about 15 litres a minute. It turns off when the pond is full (try 10× speed).' : 'Turned the hose off.', 5);
+    }
     if (id === 'rake') { if (!owns('rake')) { act.kind = ''; return say('You need a rake first.'); } cmd('landscape.rake', { x: a.x, z: a.z, r: 0.4, k: 0.6 }); return; }
     if (THINGS[id]) { act.lx = a.x; act.lz = a.z; setStone(id, a.x, a.z, ghostYaw); return; }
     if (id.startsWith('plant:')) {
@@ -685,6 +848,18 @@
     if (!a.down) return;
     const k = act.kind;
     if (k === 'shovel') shovel.frame(a, dt);
+    else if (k === 'can') { const GV = window.__gardenView; if (GV) GV.can.frame(a, dt); }
+    else if (k === 'barrow') {
+      if (!act.tipped && a.tip > 0.45) {
+        act.tipped = true;
+        const res = cmd('landscape.tip', { x: a.x, z: a.z });
+        if (!res.ok) return say(res.reason);
+        const y = surfaceAt(a.x, a.z);
+        G.burst(a.x, y + 0.3, a.z, 24, matHex(res.s), 1.8, 1.4, 0.07, 0.7); G.cam.shake = Math.min(G.cam.shake + 0.2, 0.4);
+        setHeap(); say('Tipped out ' + litres(res.m3) + ' L.');
+      }
+    }
+
     else if (k === 'rake') rakeFrame(a);
     else if (LAYER_ITEM[k]) pourFrame(a, dt, k);
     else if (THINGS[k]) stoneFrame(a, k);
@@ -699,6 +874,18 @@
   function release(a) {
     const k = act.kind;
     if (k === 'shovel') return shovel.release(a);
+    if (k === 'can') { const GV = window.__gardenView; if (GV) GV.can.release(a); act.kind = ''; return; }
+    if (k === 'barrow' && !act.tipped) {
+      act.kind = '';
+      if (isWater(a.x, a.z)) return say('That is water.');
+      const res = cmd('landscape.load', { x: a.x, z: a.z });
+      if (!res.ok) return say(res.reason);
+      const y = surfaceAt(a.x, a.z);
+      G.burst(a.x, y + 0.12, a.z, 10, matHex(res.s), 1.5, 2.2, 0.07, 0.6);
+      if (res.turf) G.burst(a.x, y + 0.12, a.z, 5, 0x5e8a3a, 1.6, 2.6, 0.07, 0.7);
+      setHeap();
+      return say(res.full ? 'The barrow is full: ' + litres(res.load) + ' L. Walk it over and drag down to tip it out.' : 'In the barrow: ' + litres(res.load) + ' of ' + litres(RD.BARROW_M3) + ' L.');
+    }
     if (k === 'hands' && act.grab) say('Lift it: drag up.');
     act.kind = ''; act.grab = null;
     updateHint(true);
@@ -715,7 +902,16 @@
       t = (SURFACES[q[1]] ? SURFACES[q[1]].name : q[1] === '' ? 'Turf' : q[1]) + (cm <= -2 ? ' · hole ' + -cm + ' cm' : cm >= 2 ? ' · raised ' + cm + ' cm' : '');
       if (q[2] > 0.005) t += ' · ' + Math.round(q[2] * 100) + ' cm deep';
     }
-    if (id.startsWith('plant:')) {
+    // a plant under the hand: its name and how it is doing
+    const near = Object.values(L().plants).find((pl) => Math.hypot(pl.x - a.x, pl.z - a.z) < 0.35);
+    if (near && !id.startsWith('plant:')) {
+      const z = RD.plantSize(G.sim.state, near.id, G.sim.state.lifeT), pk = PLANTS[near.k];
+      t = pk.name + ': ' + (pk.wet ? 'growing in the shallows' : z.wilt ? 'wilting, water it' : z.thirsty ? 'thirsty' : !z.rooted ? 'rooting in, keep it moist' : z.k > 0.85 ? 'full grown' : 'growing') + ' · ' + Math.round(z.h * 100) + ' cm';
+    }
+    const pd = L().liner[gx + ',' + gz] && RD.pondsOf(G.sim.state).find((p) => p.cells.some(([x, z]) => x === gx && z === gz));
+    if (pd) t = 'Pond · ' + litres(pd.m3) + ' of ' + litres(pd.cap) + ' L' + (pd.m3 > 0 ? ' · ' + Math.max(0, Math.round((pd.level - (q ? q[0] : 0)) * 100)) + ' cm deep here' : ' · empty') + (pd.hose ? ' · filling' : '');
+    if (id.startsWith('plant:') && PLANTS[id.slice(6)].wet) { t = pd && pd.m3 > 0 ? 'Water ' + Math.max(0, Math.round((pd.level - (q ? q[0] : 0)) * 100)) + ' cm deep: 5 to 25 is right' : 'An iris goes in the shallows of a filled pond'; }
+    else if (id.startsWith('plant:')) {
       const p = PLANTS[id.slice(6)], d = q ? Math.max(0, -q[0]) : 0;
       t = d >= p.holeM * 0.8 ? 'Deep enough: click to plant' : 'Hole ' + Math.round(d * 100) + ' of ' + Math.round(p.holeM * 100) + ' cm';
     }
@@ -724,6 +920,13 @@
     label.hidden = false;
     const s = H.toScreen(a.x, a.y + 0.25, a.z, {});
     label.style.transform = 'translate(' + Math.round(s.x + 18) + 'px,' + Math.round(s.y - 28) + 'px)';
+  }
+  // path lights glow with the dusk
+  let glowK = -1;
+  function glow() {
+    const k = Math.max(0, Math.min(1, (G.nightF ?? 0) * 1.4));
+    if (Math.abs(k - glowK) < 0.01) return;
+    glowK = k; lensMat.color.copy(LENS).multiplyScalar(0.05 + k);
   }
 
   /* ================= taking up the yard tools, and putting them away ================= */
@@ -737,6 +940,7 @@
   }
   function leave() {
     lastHeld = held() === 'store' ? 'shovel' : held();
+    if (window.__gardenView && window.__gardenView.bindSay) window.__gardenView.bindSay(null);
     on = false; document.body.classList.remove('yarding'); if (G.player.tool !== 'garden') document.body.classList.remove('gardening');
     bar.hidden = true; storeEl.hidden = true; ghost.visible = false; label.hidden = true;
     if (H.slots === mySlots) H.close();          // unless the garden has already taken the hands up
@@ -756,6 +960,7 @@
     const want = G.player.tool === 'yard';
     if (want !== on) { if (want) enter(); else leave(); }
     if (on) updateTag(H.aim);
+    if (hoseMeshes.size) hoseSpray();
     slow += dt;
     if (slow > 0.25 || dirty) {
       slow = 0; dirty = false;
@@ -764,6 +969,8 @@
       layoutStones();
       if ((plantT += 1) % 8 === 0) layoutPlants(true); else layoutPlants(false);
       hideGrass(false);
+      layoutPonds();
+      glow();
       if (on) { setSlots(); updateHint(); }
     }
     requestAnimationFrame(tick);

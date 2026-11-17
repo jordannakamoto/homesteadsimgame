@@ -2846,6 +2846,7 @@ function towardOvercast(c, target, k) {
   _ovC.copy(target).multiplyScalar(l / Math.max(lt, 1e-4));
   c.lerp(_ovC, k);
 }
+const SKYK = { day: 1, night: 0 };   // how much day and night there is now, for add-ons (path lights)
 function updateSky() {
   if (window.__game && !window.__game.calendar) window.__game.calendar = calendar;
   const wx = sim.state.sys.weather, site = (wx && wx.site) || SKY.site;
@@ -2853,6 +2854,7 @@ function updateSky() {
   const e = Math.sin(sp.elevationRad);
   const dayF = smoothstep(0.02, 0.4, e), nightF = 1 - smoothstep(-0.22, 0.06, e);
   const goldF = clamp(1 - dayF - nightF, 0, 1);
+  SKYK.day = dayF; SKYK.night = nightF;
   const mix3 = (k) => SKY.day[k] * dayF + SKY.gold[k] * goldF + SKY.night[k] * nightF;
   const mixC = (out, k) => out.setRGB(
     SKY.day[k].r * dayF + SKY.gold[k].r * goldF + SKY.night[k].r * nightF,
@@ -4281,7 +4283,7 @@ resetWorld(SEED);
 setTool('axe');
 lockUi();
 window.__game = {
-  pm, get seed() { return SEED; },
+  pm, get seed() { return SEED; }, get nightF() { return SKYK.night; },
   stepHooks,
   get sim() { return sim; }, setYearDays: (d) => { sim.setYearDays(d); saveGame(); }, savedBuilds: () => simCtl.builds, powerAvailable: () => false,
   stock: {
