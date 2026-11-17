@@ -79,9 +79,23 @@ test('a gable roof: a ridge, rafters in pairs at 0.6 m, a deck, underlayment and
   // a 5.9 m ridge is two boards (no board is longer than 4.8 m) that join between rafters
   const ridge = out.filter((m) => m.kind === 'beam' && m.type === 'ridge');
   assert.equal(ridge.length, 2); assert.ok(near(ridge.reduce((n, m) => n + m.length, 0), 5.9, 1e-3) && ridge.every((m) => m.length <= 4.8 + 1e-9));
-  assert.ok(out.some((m) => m.kind === 'membrane' && m.stage === 'roofing') && out.some((m) => m.kind === 'roofing' && m.material === 'slate'));
-  const deck = out.filter((m) => m.type === 'roof-deck').reduce((a, m) => a + m.area, 0), cover = out.filter((m) => m.kind === 'roofing').reduce((a, m) => a + m.area, 0);
-  assert.ok(near(deck, cover, 0.01));
+  assert.ok(out.some((m) => m.kind === 'membrane' && m.stage === 'dry-in') && out.some((m) => m.kind === 'roofing' && m.material === 'slate'));
+  const deck = out.filter((m) => m.type === 'roof-deck').reduce((a, m) => a + m.area, 0), cover = out.filter((m) => m.kind === 'roofing' && m.type !== 'starter').reduce((a, m) => a + m.area, 0);
+  assert.ok(near(deck, cover, 0.05), deck + ' ' + cover);   // each piece's area is rounded to the square millimetre
+  // dried in from the eave up: drip edge along the eaves, ice-and-water shield at the eave, underlayment strips lapping up the slope, drip edge up the rakes
+  const ul = out.filter((m) => m.kind === 'membrane' && m.parent === 'r.0').sort((a, b) => a.row - b.row);
+  assert.equal(ul[0].type, 'ice-water'); assert.ok(ul.slice(1).every((m) => m.type === 'underlayment'));
+  for (let k = 1; k < ul.length; k++) assert.ok(ul[k].rs[2] < ul[k - 1].rs[3] - 0.05, 'each strip laps the one below');
+  assert.ok(out.some((m) => m.kind === 'drip' && m.stage === 'dry-in') && out.filter((m) => m.kind === 'rake').length >= 4);
+  // the covering in courses from the eave up: a starter strip first, rows 0.3 to 0.6 m, and a ridge cap last
+  const rc = out.filter((m) => m.kind === 'roofing' && m.parent === 'r.0');
+  assert.equal(rc.find((m) => m.row === 0).type, 'starter');
+  assert.ok(Math.max(...rc.map((m) => m.row)) >= 6 && rc.every((m) => m.rs[3] - m.rs[2] < 0.7));
+  assert.ok(out.some((m) => m.kind === 'ridgecap' && m.stage === 'roofing'));
+  // standing seam goes on in panels side by side, eave to ridge
+  const seam = []; F.roofMembers(seam, { id: 'r', mat: 'seam', planes: [plane('r.0', -1)], ridges: [], ties: [] }, {});
+  const pn = seam.filter((m) => m.kind === 'roofing');
+  assert.ok(pn.length >= 10 && pn.every((m) => m.type === 'panel' && near(m.rs[3] - m.rs[2], run, 0.01)));
 });
 
 test('the shopping list: buyable units, real item ids, a plain reason on every line', () => {

@@ -8750,7 +8750,7 @@
       }
       for (const r of S.roofs) {
         const parts = roofParts(r),
-          R = { id: r.id, mat: r.mat || "thatch", planes: [], ridges: [], infills: [], ties: [] };
+          R = { id: r.id, mat: r.mat || "thatch", planes: [], ridges: [], infills: [], ties: [], gutters: [], groundY };
         let n = 0,
           gi = 0;
         const topAt = (x, z) => {
@@ -8765,6 +8765,7 @@
         for (const q of parts) {
           if (q.part === "plane") R.planes.push({ id: r.id + "." + n++, pts: q.pts, eaveY: q.eaveY + yo, ridgeY: q.ridgeY + yo, run: q.run, facing: q.facing, overhang: (r.shape || "gable") === "gable" || r.shape === "shed" ? 0.45 : 0 });
           else if (q.part === "ridge") R.ridges.push({ a: q.a, b: q.b, y: q.y0 + yo + ((r.shape || "gable") === "gable" ? 0 : 0.03) });
+          else if (q.part === "gutter") R.gutters.push({ a: q.a, b: q.b, y: q.y + yo, down: q.down });
         }
         for (const q of parts) if (q.part === "infill") R.infills.push({ id: r.id + ".g" + gi++, a: q.a, b: q.b, y0: H, y1: q.y1 + yo, area: q.area, top: topAt });
         if ((r.shape || "gable") === "gable") {
@@ -8843,7 +8844,7 @@
         opens.push({ id: q.id, stage: "openings", kind: q.kind, parent: w.id, a: [w.a[0] + ux * c, q.sill, w.a[1] + uz * c], b: [w.a[0] + ux * c, q.sill + q.height, w.a[1] + uz * c], n: [-uz, 0, ux], section: { b: q.width, d: q.kind === "door" ? 0.05 : 0.04 }, col: q.kind === "door" ? "timber" : "wrap" });
       }
     }
-    return (S.mem = { ver: S.ver, list, byParent, byId, polys, opens, planes: new Map(desc.roofs.map((R) => [R.id, R.planes.map((p) => p.id)])) });
+    return (S.mem = { ver: S.ver, list, byParent, byId, polys, opens, roofs: desc.roofs, planes: new Map(desc.roofs.map((R) => [R.id, R.planes.map((p) => p.id)])) });
   }
   // every id of a structure that can be planned or built on its own: members, doors and windows, and the pieces
   // that are not made of members (stone walls, round rooms, stairs, pillars)
@@ -8943,7 +8944,7 @@
     }
     for (const r of S.roofs) {
       const pl = mem.planes.get(r.id) || [],
-        f = pl.every((id) => !P(id + ".rc"));
+        f = !mem.list.some((m) => m.stage === "roofing" && pl.includes(m.parent) && P(m.id));
       f && st.finRoof.add(r.id);
       if (f) Db.roofs.push(r);
       else if (pl.every(bare) && !mem.list.some((m) => m.roof === r.id && !P(m.id))) Ds.roofs.push(r);
@@ -9004,6 +9005,7 @@
   })();
   const tapeMat = new T.MeshLambertMaterial({ color: 0x8e9692 });
   const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), siding: col(0xc7b79b), sidingDark: col(0x6f5a47), concrete: CONCRETE, gravel: col(0x8f8b82) };
+  for (const [k, h] of Object.entries(FR.ROOF_COLORS || {})) MCOL[k] = col(h); // the roofing layers while they go on (src/framing.js)
   const _m4 = new T.Matrix4(),
     _c = new T.Color();
   function dropMembers(S) {
@@ -9026,6 +9028,9 @@
       hideLater = B.cmode && !B.on && !B.showLater && !st.all,
       open = new Map(); // stage -> kinds still planned in it, for "needs the piers first"
     for (const m of mem.list) if (P(m.id)) (open.get(m.stage) || open.set(m.stage, new Set()).get(m.stage)).add(m.kind);
+    // roof courses go on from the eave up: only the lowest one still to lay is the bright blueprint, the rest are faint
+    const lowRow = new Map();
+    for (const m of mem.list) if (m.course && P(m.id)) { const k = m.parent + m.kind; lowRow.set(k, Math.min(lowRow.has(k) ? lowRow.get(k) : 1e9, m.row)); }
     const sets = [[], []], // solid, solid under the roof
       ghosts = {}, // "level|top|poly" -> members
       ghostAdd = (m, top) => {
@@ -9034,12 +9039,12 @@
         if (idx > gi && hideLater) return;
         const need = sk[m.kind],
           waits = idx === gi && need && need.some((k) => k !== m.kind && open.get(m.stage) && open.get(m.stage).has(k)),
-          level = idx === gi ? (waits ? "dim" : "cur") : "later",
+          level = idx === gi ? (waits ? "dim" : m.course && m.row > lowRow.get(m.parent + m.kind) ? "later" : "cur") : "later",
           key = level + "|" + top + "|" + (mem.polys.has(m.id) ? 1 : 0);
         (ghosts[key] || (ghosts[key] = [])).push(m);
       };
     for (const m of mem.list) {
-      const roofId = m.roof || (/^(roof-frame|roof-deck|roofing)$/.test(m.stage) || m.type === "roof-batt" || m.type === "ceiling" ? m.parent.split(".")[0] : null),
+      const roofId = m.roof || (/^(roof-frame|roof-deck|dry-in|roofing)$/.test(m.stage) || m.type === "roof-batt" || m.type === "ceiling" ? m.parent.split(".")[0] : null),
         top = roofId ? 1 : 0;
       if (P(m.id)) {
         ghostAdd(m, top);
@@ -9286,8 +9291,8 @@
   }
   /* ready-made plans: small buildings in real framing sizes, set down whole */
   const PLANS = {
-    shed: { id: "shed", name: "Tool shed", size: "2.4 x 3.0 m", w: 2.4, l: 3.0, note: "A single-pitch roof, one door and one window, on six pier blocks.", roof: { shape: "shed", dir: 0, axis: "x", pitch: 1, mat: "shingle" }, door: [2, 0], windows: [[1, 1]], found: "pier-blocks", ins: null, lining: null },
-    cabin: { id: "cabin", name: "Small cabin", size: "3.6 x 4.8 m", w: 3.6, winW: 0.9, l: 4.8, note: "A gable roof, a door and two windows, insulated and lined, on pier blocks.", roof: { shape: "gable", dir: 0, axis: "z", pitch: 1, mat: "shingle" }, door: [2, 1], windows: [[1, 2], [3, 2]], found: "pier-blocks", ins: "fibreglass_batt", lining: "boards" },
+    shed: { id: "shed", name: "Tool shed", size: "2.4 x 3.0 m", w: 2.4, l: 3.0, note: "A single-pitch roof, one door and one window, on six pier blocks.", roof: { shape: "shed", dir: 0, axis: "x", pitch: 1, mat: "shingle", gutters: true }, door: [2, 0], windows: [[1, 1]], found: "pier-blocks", ins: null, lining: null },
+    cabin: { id: "cabin", name: "Small cabin", size: "3.6 x 4.8 m", w: 3.6, winW: 0.9, l: 4.8, note: "A gable roof, a door and two windows, insulated and lined, on pier blocks.", roof: { shape: "gable", dir: 0, axis: "z", pitch: 1, mat: "shingle", gutters: true }, door: [2, 1], windows: [[1, 2], [3, 2]], found: "pier-blocks", ins: "fibreglass_batt", lining: "boards" },
   };
   const planList = () => Object.values(PLANS).map((p) => ({ id: p.id, name: p.name, size: p.size, widthM: p.w, lengthM: p.l, note: p.note, foundation: p.found }));
   // door and windows are [side, module]: side 0 the back (z = 0), 1 the right, 2 the front, 3 the left
@@ -10006,6 +10011,17 @@
       for (const b of [b0, b1]) out.push({ part: "infill", a: P(a0, b), b: P(a1, b), y0: EAVE - 0.02, y1: EAVE + rise, area: (span * (rise + 0.02)) / 2, shape: "triangle" });
       out.push({ part: "infill", a: P(hi, b0), b: P(hi, b1), y0: EAVE - 0.02, y1: EAVE + rise, area: (b1 - b0) * (rise + 0.02), shape: "rectangle" });
     }
+    // gutters, when the roof has them: one under each sloping eave, a little out from its edge, a downspout at its far end
+    if (r.gutters && !out.some((q) => q.part === "gutter"))
+      for (const q of out.slice())
+        if (q.part === "plane" && q.run) {
+          const [a, b] = q.pts,
+            f = q.facing,
+            o = 0.06,
+            A = [a[0] + f[0] * o, a[1] + f[1] * o],
+            Bq = [b[0] + f[0] * o, b[1] + f[1] * o];
+          out.push({ part: "gutter", a: A, b: Bq, y: q.eaveY - 0.08, down: Bq });
+        }
     return out;
   }
   function decorBox(src) {
@@ -10442,7 +10458,7 @@
       const S = B.structs.find((O) => O.id === structId);
       if (!S) return null;
       S.group.updateMatrixWorld(true);
-      return { matrix: S.group.matrixWorld, y0: S.y0, list: membersOf(S).list, planned: S.plan };
+      return { matrix: S.group.matrixWorld, y0: S.y0, list: membersOf(S).list, planned: S.plan, roofs: membersOf(S).roofs };
     },
     memberLook: () => ({ geo: boxGeo, mat: memMat, colors: MCOL }),
     // called when the player climbs out of a room that has no door (see climbOut)

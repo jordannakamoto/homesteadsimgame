@@ -22,13 +22,15 @@
   const low = (t) => t.charAt(0).toLowerCase() + t.slice(1);
 
   const look = B.memberLook();
-  const MARK = [0.09, 0.08, 0.09];       // pencil
-  const asm = window.__assembly.create(G, { geo: look.geo, mat: look.mat, colorOf: (m) => (m.col === 'mark' ? MARK : look.colors[m.col || 'timber'] || look.colors.timber) });
+  const MARK = [0.09, 0.08, 0.09], CHALK = [0.28, 0.5, 0.95];       // pencil, and the blue of a chalk line
+  const asm = window.__assembly.create(G, { geo: look.geo, mat: look.mat, colorOf: (m) => (m.col === 'mark' ? MARK : m.col === 'chalk' ? CHALK : look.colors[m.col || 'timber'] || look.colors.timber) });
   const sounds = window.__assembly.createSounds();
   const carry = window.__carry.create(G);
   const reach = window.__carry.createReach(G, { reach: C.WORK.reachM });
   const CS = window.__cutStation ? window.__cutStation.create(G) : null;     // the sawhorses, and the saw going through each stick
   const SC = window.__scaffold ? window.__scaffold.create(G) : null;         // a rented scaffold bay along a wall
+  const RW = window.__roofwalk && window.__framing ? window.__roofwalk.create(G) : null;   // standing on a decked roof, clipped in at the ridge
+  const FR = window.__framing, RWC = C.ROOFWALK || { slideK: 0.5, slideMps: 0.55, ropeM: 14, anchorReachM: 1.3, edgeM: 0.22, says: '' };
   const REACH = C.WORK.reachM;
   const OFF = { build: 1, garden: 1, hands: 1 };       // other tools own the pointer while they are out
   const V = {
@@ -41,8 +43,8 @@
   const freshOf = (id) => { let f = V.fresh.get(id); if (!f) V.fresh.set(id, (f = new Set())); return f; };
 
   // ------------------------------------------------------------------ what is being built, read once per change
-  const KR = { site: 0, pier: 1, footing: 1, post: 2, beam: 3, skid: 3, stemwall: 3, slab: 4, joist: 5, plate: 6, stud: 7, header: 8, rafter: 9, sheathing: 10, membrane: 11, roofing: 12, cladding: 13, window: 14, door: 15, insulation: 16, lining: 17 };
-  const TR = { rim: -0.5, end: 0, bottom: -0.2, top: -0.1, jack: 0.5, sill: 2.5, cripple: 2.7, gable: 2.6, underlayment: -1 };
+  const KR = { site: 0, pier: 1, footing: 1, post: 2, beam: 3, skid: 3, stemwall: 3, slab: 4, joist: 5, plate: 6, stud: 7, header: 8, rafter: 9, sheathing: 10, drip: 10.5, membrane: 11, rake: 11.5, roofing: 12, ridgecap: 12.6, cladding: 13, gutter: 13.4, downspout: 13.6, window: 14, door: 15, insulation: 16, lining: 17 };
+  const TR = { rim: -0.5, end: 0, bottom: -0.2, top: -0.1, jack: 0.5, sill: 2.5, cripple: 2.7, gable: 2.6, underlayment: -1, 'ice-water': -1, starter: -0.3 };
   function geom(id) {
     const st = V.structs.get(id);
     if (!st) return null;
@@ -51,7 +53,10 @@
     const mw = B.membersOf(id);
     if (!mw) return null;
     g = { ver: st.ver, byId: new Map(), matrix: mw.matrix.clone(), rank: new Map(), walls: new Map(), cx: 0, cz: 0 };
-    for (const m of mw.list) { g.byId.set(m.id, m); if (m.kind === 'membrane' && m.type === 'housewrap') (V.sheetMids || (V.sheetMids = new Set())).add(m.id); }
+    for (const m of mw.list) { g.byId.set(m.id, m); if ((m.kind === 'membrane' && m.type === 'housewrap') || m.roll) (V.sheetMids || (V.sheetMids = new Set())).add(m.id); }
+    // the roof planes in their own frames: for standing on them, and for the chalk line of the next course
+    g.frames = new Map(); g.roofOf = new Map();
+    for (const R of mw.roofs || []) for (const pl of R.planes) { g.frames.set(pl.id, FR.planeFrame(pl)); g.roofOf.set(pl.id, R); }
     // doors and windows are pieces of their own: stand a box in for each so that it can glow and be set
     const inv = g.matrix.clone().invert(), v = new T.Vector3();
     for (const p of B.pieces()) {
@@ -68,7 +73,7 @@
     // the order pieces go in: by stage, then by kind, then along the building
     for (const m of g.byId.values()) {
       const mx = (m.a[0] + m.b[0]) / 2, mz = (m.a[2] + m.b[2]) / 2, my = (m.a[1] + m.b[1]) / 2;
-      g.rank.set(m.id, C.STAGE_ORDER.indexOf(m.stage) * 1e6 + ((KR[m.kind] || 0) + (TR[m.type] || 0) + 2) * 1e4 + (m.kind === 'sheathing' || m.kind === 'cladding' && m.type !== 'vboards' && m.type !== 'batten' || m.kind === 'stud' && m.type === 'cripple' ? my * 300 : 0) + (mx - g.cx) + 0.37 * (mz - g.cz) + 50);
+      g.rank.set(m.id, C.STAGE_ORDER.indexOf(m.stage) * 1e6 + ((KR[m.kind] || 0) + (TR[m.type] || 0) + 2) * 1e4 + (m.kind === 'sheathing' || m.course || m.kind === 'cladding' && m.type !== 'vboards' && m.type !== 'batten' || m.kind === 'stud' && m.type === 'cripple' ? my * 300 : 0) + (mx - g.cx) + 0.37 * (mz - g.cz) + 50);
     }
     // each framed wall: the line it swings up about (the inner edge of its bottom plate)
     for (const m of g.byId.values()) {
@@ -187,6 +192,7 @@
     const main = [], loose = [];
     for (const mid of freshOf(id)) { const m = g.byId.get(mid); m && m.draw !== 0 && main.push(m); }
     if (w && w.layer === 'main' && w.m.draw !== 0) main.push(w.m);
+    for (const c of chalkLines(pr, g)) main.push(c);
     // something too big for one load (siding, roofing) grows as the loads arrive
     for (const mid in pr.members) {
       const pm = pr.members[mid];
@@ -214,6 +220,24 @@
     V.glowSig = '';
     B.setShell(id, !Object.values(pr.tally).some((t) => t[0] > 0));
     braces(id);
+  }
+  // the next course on each roof plane: a blue chalk line snapped along where its top edge goes (underlayment and roofing alike)
+  function chalkLines(pr, g) {
+    const out = [], pl = plan(pr.id), rows = new Map();
+    if (!pl || !g.frames || !g.frames.size) return out;
+    for (const mid of pl.inst) {
+      const pm = pr.members[mid], m = g.byId.get(mid);
+      if (!m || !m.course || !m.rs || !g.frames.has(pm.parent) || pm.need - pm.got < 1e-6) continue;
+      const k = pm.parent + pm.kind, r = rows.get(k);
+      if (!r || m.row < r.row) rows.set(k, { row: m.row, plane: pm.parent, s0: m.rs[0], s1: m.rs[1], t: m.rs[3] });
+      else if (m.row === r.row) { r.s0 = Math.min(r.s0, m.rs[0]); r.s1 = Math.max(r.s1, m.rs[1]); r.t = Math.max(r.t, m.rs[3]); }
+    }
+    for (const r of rows.values()) {
+      const F = g.frames.get(r.plane), t = Math.min(r.t, F.top - 0.02);
+      if (t <= 0.05) continue;
+      out.push({ id: 'chalk:' + r.plane, col: 'chalk', a: F.on(r.s0 + 0.02, t, 0.03), b: F.on(r.s1 - 0.02, t, 0.03), n: [F.up[0] * F.cs, F.k * F.cs, F.up[1] * F.cs], section: { b: 0.004, d: 0.016 } });
+    }
+    return out;
   }
   // a raised wall is held by a temporary brace until the sheathing is on
   function braces(id) {
@@ -261,6 +285,7 @@
     if (f === 'block') return { form: 'block', w: 0.3, l: 0.3, h: 0.2, n: n(1), color: COLORS.block };
     if (f === 'roll') return { form: 'roll', w: 0.17, l: 1.0, h: 0.17, n: n(30), color: itemId === 'housewrap' ? COLORS.wrap : COLORS.felt };
     if (f === 'bundle') return { form: 'heap', w: 0.9, l: 0.33, h: 0.09, n: n(3), color: COLORS.shingle };
+    if (f === 'trim') return { form: 'lumber', w: 0.12, h: 0.05, l: 3.05, n: n(3.05), color: /gutter|downspout/.test(itemId) ? 0xe4e3de : 0xb9bec2 };
     if (f === 'bale') return { form: 'heap', w: 1.15, l: 0.4, h: 0.28, n: n(5), color: COLORS.batt };
     if (f === 'door') return { form: 'lean', w: 0.92, l: 2.03, h: 0.05, n: n(1), color: COLORS.door };
     if (f === 'pane') return { form: 'lean', w: 0.6, l: 0.9, h: 0.07, n: n(1), color: COLORS.pane };
@@ -311,10 +336,10 @@
   const segDist = (px, pz, a, b) => { const dx = b.x - a.x, dz = b.z - a.z, L = dx * dx + dz * dz, t = L > 1e-9 ? Math.max(0, Math.min(1, ((px - a.x) * dx + (pz - a.z) * dz) / L)) : 0; return Math.hypot(px - a.x - dx * t, pz - a.z - dz * t); };
 
   // ---- nail points: where a builder really nails. A stick takes a nail at each end; a sheet takes a few along its edges.
-  const STICKS = new Set(['post', 'beam', 'skid', 'joist', 'plate', 'stud', 'header', 'rafter']);
+  const STICKS = new Set(['post', 'beam', 'skid', 'joist', 'plate', 'stud', 'header', 'rafter', 'drip', 'rake', 'ridgecap', 'gutter', 'downspout']);
   const SHEETS = new Set(['sheathing', 'membrane', 'roofing', 'lining', 'insulation', 'cladding']);
   // the layer that hides a stage's nail heads once it is complete
-  const COVER = { 'floor-frame': 'subfloor', subfloor: 'lining', 'wall-frame': 'lining', 'top-plates': 'lining', 'roof-frame': 'roof-deck', 'roof-deck': 'roofing', sheathing: 'wrap', wrap: 'cladding' };
+  const COVER = { 'floor-frame': 'subfloor', subfloor: 'lining', 'wall-frame': 'lining', 'top-plates': 'lining', 'roof-frame': 'roof-deck', 'roof-deck': 'dry-in', 'dry-in': 'roofing', sheathing: 'wrap', wrap: 'cladding' };
   // a member's nail points in its own frame, or null when it is fastened with plain blows (piers, the site, doors)
   function nailLocal(g, mid) {
     const nm = g.nails || (g.nails = new Map());
@@ -443,7 +468,12 @@
     SC.set(sc && sc.set && !hide ? { ...sc.set, w: SCF.widthM } : null);
     SC.setBundle(!sc || sc.set || hide ? null : V.scafHeld ? { x: P.x + Math.sin(P.face) * 1.1, z: P.z + Math.cos(P.face) * 1.1 } : { x: sc.x, z: sc.z });
     if (V.scafHeld) P.carryK = Math.max(P.carryK || 0, 0.75);
-    if (V.climb) return;
+    if (V.climb || V.hop || (RW && RW.on())) return;
+    // on the plank, push on toward the roof and you step up onto the deck
+    if (RW && SC.onPlank && SC.onPlank()) {
+      const mv = Math.hypot(P.mvx || 0, P.mvz || 0);
+      if (mv > 0.3) { V.scPush = (V.scPush || 0) + dt; if (V.scPush > 0.12 && tryHop(P.mvx / mv, P.mvz / mv)) { SC.release(); V.scPush = 0; V.rev++; return; } } else V.scPush = 0;
+    }
     const r = SC.update(dt, { climbMps: feel().climbMps * 1.25 });
     if (r === 'up') { sounds.play('thunk'); V.rev++; if (!V.named.scaf) { V.named.scaf = 1; flash('On the scaffold: walk the plank; walk back off the ladder end to climb down'); } }
     else if (r === 'down') V.rev++;
@@ -469,6 +499,7 @@
     // walking into the foot of a leaned ladder, heading for the wall, mounts it; walking past does not
     const px = V.lpx === undefined ? P.x : V.lpx, pz = V.lpz === undefined ? P.z : V.lpz; V.lpx = P.x; V.lpz = P.z;
     V.ladCool = Math.max(0, (V.ladCool || 0) - dt);
+    if (V.hop) { tickHop(dt); return; }
     if (!cl) {
       if (P.climbY != null) P.climbY = null;
       if (L && !V.ladCool && !V.placing && !V.raise && dt > 0) {
@@ -484,6 +515,10 @@
       const K = G.keys, fwd = K.KeyW || K.ArrowUp, back = K.KeyS || K.ArrowDown, side = K.KeyA || K.KeyD || K.ArrowLeft || K.ArrowRight || K.Space;
       cl2.age = (cl2.age || 0) + dt;
       cl2.dir = fwd ? 1 : back || cl2.e ? -1 : 0;
+      // come onto the ladder off the roof: the key you walked off with carries you down, until you let go of it
+      if (cl2.fromRoof) { if (fwd || back || side) cl2.dir = -1; else cl2.fromRoof = false; }
+      // at the top, keep pushing on and you step off onto a decked roof
+      if (cl2.top && fwd && !cl2.fromRoof) { cl2.push = (cl2.push || 0) + dt; if (cl2.push > 0.06 && tryHop(Math.sin(L.yaw), Math.cos(L.yaw))) { V.climb = null; V.rev++; return; } } else cl2.push = 0;
       if (side && !fwd && cl2.t < 0.2 && cl2.age > 0.15) { cl2.dir = -1; cl2.t = 0; }       // stepping off the bottom
     }
     const ease = 0.4 + 0.6 * Math.min(1, Math.min(cl2.t, 1 - cl2.t) / 0.15);      // slight ease at both ends
@@ -494,6 +529,107 @@
     P.x = q.fx + Math.sin(L.yaw) * reachOut; P.z = q.fz + Math.cos(L.yaw) * reachOut;
     P.climbY = q.fy + (top - q.fy) * cl2.t;
     P.faceTarget = L.yaw;
+  }
+  // ---- on the roof: stepping from the ladder top or the scaffold plank onto a decked plane, walking it, the anchor and the rope
+  const ladderTop = (L) => { const q = ladPts(L), r = Math.max(0, ladD - 0.38); return { x: q.fx + Math.sin(L.yaw) * r, z: q.fz + Math.cos(L.yaw) * r, y: Math.max(q.fy, q.cy - LAD.topBelowM) }; };
+  // the decked planes of the buildings near you that will bear a person
+  function syncRoof(force) {
+    if (!RW) return;
+    const P = G.player;
+    if (!force && V.roofRev === V.rev && Math.hypot(P.x - V.roofX, P.z - V.roofZ) < 4) return;
+    V.roofRev = V.rev; V.roofX = P.x; V.roofZ = P.z;
+    const list = [];
+    for (const st of V.structs.values()) {
+      if (Math.hypot(st.x - P.x, st.z - P.z) > st.r + 10) continue;
+      const g = geom(st.id);
+      if (!g || !g.frames || !g.frames.size) continue;
+      const mw = B.membersOf(st.id), pr = S().progress[st.id], pads = new Map();
+      for (const m of g.byId.values()) {
+        if (m.type !== 'roof-deck' || !m.rs) continue;
+        const pm = pr && pr.members[m.id];
+        if (pm ? pm.built : !mw.planned.has(m.id)) (pads.get(m.parent) || pads.set(m.parent, []).get(m.parent)).push(m.rs);
+      }
+      for (const [pid, F] of g.frames) {
+        const p = pads.get(pid);
+        if (!p || !p.length) continue;
+        const R = g.roofOf.get(pid), done = !pr || api.stageComplete(pr, 'roofing');
+        list.push({ key: st.id + ':' + pid, matrix: g.matrix, F, pads: p, lift: done ? 0.02 + FR.coveringOf(R.mat).t : 0.03, info: { structId: st.id, plane: pid } });
+      }
+    }
+    RW.setSurfaces(list);
+  }
+  // look ahead along (ux, uz) for a decked plane within a step up (or a little down), and hop onto it, clear of its edge
+  function tryHop(ux, uz, maxUp = 2.05) {
+    if (!RW) return false;
+    syncRoof(true);
+    const P = G.player, y0 = P.climbY != null ? P.climbY : P.y;
+    for (let d = 0.2; d <= 1.8; d += 0.1) {
+      const x = P.x + ux * d, z = P.z + uz * d, h = RW.hit(x, z, y0, maxUp, 0.4);
+      if (!h) continue;
+      for (let e = 0.2; e <= 1.2; e += 0.1) {
+        const tx = x + ux * e, tz = z + uz * e, h2 = RW.hit(tx, tz, h.y, 0.9, 0.9);
+        if (h2 && RW.safe(tx, tz, h2.y, RWC.edgeM + 0.06)) { V.hop = { t: 0, x0: P.x, y0, z0: P.z, x1: tx, y1: h2.y, z1: tz }; sounds.play('thunk'); return true; }
+      }
+      return false;
+    }
+    return false;
+  }
+  function tickHop(dt) {
+    const H = V.hop, P = G.player, sm = (x) => x * x * (3 - 2 * x);
+    H.t += dt / 0.3;
+    const k = Math.min(1, H.t), up = sm(Math.min(1, k / 0.55)), along = sm(Math.max(0, (k - 0.3) / 0.7));
+    P.climbY = H.y0 + (H.y1 - H.y0) * up + 0.12 * Math.sin(Math.PI * k);
+    P.x = H.x0 + (H.x1 - H.x0) * along; P.z = H.z0 + (H.z1 - H.z0) * along;
+    P.faceTarget = Math.atan2(H.x1 - H.x0, H.z1 - H.z0);
+    if (k < 1) return;
+    V.hop = null; P.climbY = null;
+    if (RW.mount(H.x1, H.z1, H.y1)) {
+      V.rev++;
+      if (!V.named.roof) { V.named.roof = 1; note('On the roof', 'The steeper the roof, the slower you go. Walk up to the ridge and press E to fix an anchor and clip in. Walk off the eave by the ladder to climb down.'); }
+    }
+  }
+  function roofHint(text) { if ((V.roofHintT || 0) > 0) return; V.roofHintT = 3.5; flash(text); }
+  function leaveRoof(x, z, lt) {
+    const P = G.player;
+    V.clip = null; RW.release(); V.rev++;
+    if (lt && Math.hypot(x - lt.x, z - lt.z) < 1.1 && P.y - lt.y < 2.6) { V.climb = { t: 1, dir: 0, age: 1, top: true, fromRoof: true }; sounds.play('thunk'); flash('Onto the ladder: keep going to climb down'); return; }
+    if (SC) { const y = SC.over(x, z); if (y !== null && P.y - y > -0.3 && P.y - y < 2.6) { SC.board(x, z); sounds.play('thunk'); flash('Down onto the scaffold plank'); return; } }
+    RW.drop(); flash('Over the edge: you drop down, no harm done');
+  }
+  function tickRoof(dt) {
+    if (!RW) return;
+    const s = S(), P = G.player;
+    V.roofHintT = Math.max(0, (V.roofHintT || 0) - dt);
+    { // the anchor brackets of the buildings still going up
+      const an = [];
+      for (const k in s.anchors || {}) { const pr = s.progress[k]; if (pr && !pr.done) an.push(s.anchors[k]); }
+      const sig = an.map((a) => a.x + ',' + a.z).join(';');
+      if (sig !== V.anSig) { V.anSig = sig; RW.anchors(an); }
+    }
+    if (!RW.on()) { V.clip = null; return; }
+    syncRoof(false);
+    const at = RW.at(), anchor = (V.clip != null && s.anchors && s.anchors[V.clip]) || null, L = s.ladder, lt = L ? ladderTop(L) : null;
+    const r = RW.update(dt, { clipped: !!anchor, anchor, ropeM: RWC.ropeM, slideK: RWC.slideK, slideMps: RWC.slideMps, edgeM: RWC.edgeM, exitOk: (x, z) => !!lt && Math.hypot(x - lt.x, z - lt.z) < 1.0 });
+    if (r && r.leave) { leaveRoof(r.x, r.z, lt); return; }
+    if (r === 'edge' && anchor) roofHint('Clipped in: the rope holds you back from the edge. Unclip at the anchor, or walk off by the ladder');
+    else if ((r === 'slide' || r === 'edge') && at && at.k > RWC.slideK) roofHint(RWC.says || 'Clip in at the ridge anchor before working on a steep roof');
+    RW.rope(anchor);
+    if (Math.hypot(P.x - (V.rpx || 0), P.z - (V.rpz || 0)) > 0.12) { V.rpx = P.x; V.rpz = P.z; }
+  }
+  function roofCtx() {
+    const s = S(), P = G.player, at = RW.at();
+    if (!at) return null;
+    const sid = at.info.structId, an = s.anchors && s.anchors[sid], pr = s.progress[sid];
+    const near = !!an && Math.hypot(P.x - an.x, P.z - an.z) < RWC.anchorReachM && Math.abs(P.y - an.y) < 1.6;
+    if (pr && !pr.done && !an && at.k > 0.05 && at.t > at.F.top - 0.75) return { kind: 'anchor', id: sid };
+    if (near && V.clip !== sid) return { kind: 'clip', id: sid };
+    const pc = pr && !pr.done ? pr : nearBuilding(P.x, P.z), pl = pc && !pc.done ? plan(pc.id) : null;
+    const h = pl && !pl.raise ? aimHands(pc) : null;
+    if (h && h.kind === 'hands') return h;
+    if (near && V.clip === sid) return { kind: 'unclip', id: sid };
+    if (V.clip == null && at.k > RWC.slideK) return { kind: 'hint', text: an ? 'Steep roof: walk to the anchor and press E to clip in' : 'Steep roof: walk up to the ridge and press E to fix a roof anchor', id: sid };
+    if (h && /Too high/.test(h.text || '')) return { kind: 'hint', text: 'On the roof: walk off the eave by the ladder to climb down', id: sid };
+    return h || { kind: 'hint', text: V.clip != null ? 'Clipped in. Walk back to the anchor to unclip, or off the eave by the ladder' : 'On the roof: walk off the eave by the ladder to climb down', id: sid };
   }
   // a kind that is learned is set and nailed as you sweep along its run; the big moments stay manual (the ridge, the first rafter)
   function sweepable(pr, mid, g) {
@@ -519,6 +655,11 @@
     if (!m0 || !ln0 || m0.type === 'ridge' || pm0.kind === 'door' || pm0.kind === 'window' || pm0.kind === 'site') return [];
     if (pm0.kind === 'rafter' && !Object.values(pr.members).some((q) => q.kind === 'rafter' && q.built)) return [];
     const mx = (m0.a[0] + m0.b[0]) / 2, mz = (m0.a[2] + m0.b[2]) / 2, out = [];
+    if (m0.course) {       // a roof course: the rest of this course along the eave, then the course above it, as many pieces as a click sets
+      const rows = [];
+      for (const mid of plan(pr.id).inst) { const pm = pr.members[mid], m = g.byId.get(mid); if (mid !== ctx.mid && pm && m && m.course && pm.kind === pm0.kind && pm.parent === pm0.parent && pm.need - pm.got > 1e-6 && m.row >= m0.row && m.row <= m0.row + 1) rows.push({ mid, k: (m.row - m0.row) * 1000 + Math.hypot((m.a[0] + m.b[0]) / 2 - mx, (m.a[2] + m.b[2]) / 2 - mz) }); }
+      return rows.sort((a, b) => a.k - b.k).slice(0, n).map((o) => o.mid);
+    }
     if (pm0.kind === 'cladding' || V.sheetMids && V.sheetMids.has(ctx.mid)) {       // one gesture lays the whole course (the rest of it, past an opening), and as many courses above as the multiplier says
       const rows = [];
       for (const mid of ctx.q || []) { const pm = pr.members[mid], m = g.byId.get(mid); if (mid !== ctx.mid && pm && m && pm.kind === pm0.kind && pm.parent === pm0.parent && pm.type === pm0.type && pm.need - pm.got > 1e-6 && m.row >= m0.row && m.row <= m0.row + n) rows.push({ mid, k: m.row * 100 + Math.abs((m.a[0] + m.b[0]) / 2 - mx) + Math.abs((m.a[2] + m.b[2]) / 2 - mz) }); }
@@ -532,7 +673,7 @@
     }
     return out.sort((a, b) => a.d - b.d).slice(0, n).map((o) => o.mid);
   }
-  const courseOf = (pm, m) => pm.kind === 'cladding' && m.type === 'boards' || pm.kind === 'membrane' && m.type === 'housewrap';
+  const courseOf = (pm, m) => pm.kind === 'cladding' && m.type === 'boards' || pm.kind === 'membrane' && m.type === 'housewrap' || !!m.course;
   // what the hands can do from here: every open piece within reach, and the one the pointer is on
   function aimHands(pr) {
     const pl = plan(pr.id), g = geom(pr.id), P = G.player, c = S().carried, st = V.structs.get(pr.id);
@@ -566,6 +707,7 @@
     if (sk && sk.id === pr.id) { const pm = pr.members[sk.mid]; if (pm && !pm.built && pm.need > 0 && pm.got >= pm.need - 1e-6 && q.includes(sk.mid)) best = { mid: sk.mid, act: 'nail' }; else V.stick = null; }
     if (best) return { kind: 'hands', id: pr.id, act: best.act, mid: best.mid, q };
     if (want) return { kind: 'hint', text: 'Needs ' + low(plain(lineOf(pr, want).label)), id: pr.id };
+    if (high && RW && !RW.on() && ['dry-in', 'roofing'].includes(pr.stage)) { V.needLadder = 0.5; return { kind: 'hint', text: S().ladder ? 'Roofing is done from on the roof: climb the ladder and keep going onto the deck' : 'Roofing is done from on the roof: lean the ladder at the eave, climb it and step onto the deck', id: pr.id }; }
     if (high) { V.needLadder = 0.5; return { kind: 'hint', text: S().scaffold && S().scaffold.set ? 'Too high: walk into the scaffold ladder, or lean the ladder here' : S().ladder || (S().carried && S().carried.itemId === LAD.itemId) ? 'Too high: lean the ladder on a wall, then walk onto it' : S().stacks.some((k) => k.itemId === LAD.itemId) ? 'Too high: the ladder is in the yard by the stacks (glowing marker)' : 'Too high: bring the ladder', id: pr.id }; }
     return null;
   }
@@ -599,14 +741,15 @@
     V.slides = V.slides.filter((w) => w.t < SLIDE_S);
   }
   // house wrap: a white roll runs along the course (an axis stood on end), the sheet unfurling behind it and settling flat
-  const ROLL_R = 0.075, rollMat = new T.MeshLambertMaterial({ color: 0xf6f8f7 }), rollPool = [], rv = new T.Vector3();
+  const ROLL_R = 0.075, rollMat = new T.MeshLambertMaterial({ color: 0xf6f8f7 }), rollPool = [], rv = new T.Vector3(), Y_UP = new T.Vector3(0, 1, 0);
   const rollGeo = new T.CylinderGeometry(ROLL_R, ROLL_R, 1, 14);
   function wrapRoll(id, layer, mid) {
     const m = geom(id).byId.get(mid);
     if (!m) return;
     let mesh = rollPool.find((q) => !q.visible);
-    if (!mesh) { mesh = new T.Mesh(rollGeo, rollMat); mesh.castShadow = true; mesh.frustumCulled = false; G.scene.add(mesh); rollPool.push(mesh); }
+    if (!mesh) { mesh = new T.Mesh(rollGeo, rollMat.clone()); mesh.castShadow = true; mesh.frustumCulled = false; G.scene.add(mesh); rollPool.push(mesh); }
     mesh.visible = true;
+    { const c = m.roll && look.colors[m.col]; if (c) mesh.material.color.setRGB(c[0], c[1], c[2]); else mesh.material.color.setHex(0xf6f8f7); }
     (V.rolls || (V.rolls = [])).push({ id, layer, mid, t: 0, dur: 0.16 + 0.45 * Math.min(1, m.section.d / 2.7), mesh, last: -1 });
     asm.unfurl(id, layer, mid, 0.001, 0.03, m.out);
   }
@@ -619,11 +762,16 @@
       const p = Math.min(1, w.t / w.dur), f = smooth(Math.min(1, p / 0.85)), settle = p < 0.85 ? 1 : 1 - smooth((p - 0.85) / 0.15);
       if (!m) { w.t = 1e9; continue; }
       asm.unfurl(w.id, w.layer, w.mid, Math.max(0.001, f), 0.03 * settle, m.out);
-      const d = m.section.d, hgt = Math.abs(m.b[1] - m.a[1]);
-      rv.set((m.a[0] + m.b[0]) / 2 + m.n[0] * (-d / 2 + f * d) + m.out[0] * (ROLL_R + 0.004), (m.a[1] + m.b[1]) / 2, (m.a[2] + m.b[2]) / 2 + m.n[2] * (-d / 2 + f * d) + m.out[2] * (ROLL_R + 0.004)).applyMatrix4(g.matrix);
-      w.mesh.position.copy(rv); w.mesh.scale.set(1, hgt, 1); w.mesh.rotation.y += dt * 9 * (1 - p);
+      const d = m.section.d, hgt = m.roll ? Math.hypot(m.b[0] - m.a[0], m.b[1] - m.a[1], m.b[2] - m.a[2]) : Math.abs(m.b[1] - m.a[1]);
+      rv.set((m.a[0] + m.b[0]) / 2 + m.n[0] * (-d / 2 + f * d) + m.out[0] * (ROLL_R + 0.004), (m.a[1] + m.b[1]) / 2 + m.n[1] * (-d / 2 + f * d) + m.out[1] * (ROLL_R + 0.004), (m.a[2] + m.b[2]) / 2 + m.n[2] * (-d / 2 + f * d) + m.out[2] * (ROLL_R + 0.004)).applyMatrix4(g.matrix);
+      w.mesh.position.copy(rv); w.mesh.scale.set(1, hgt, 1);
+      w.spin = (w.spin || 0) + dt * 9 * (1 - p);
+      if (m.roll) {       // a roll on the roof lies along the slope: its axis runs from the strip's lower edge to its upper
+        wA.set(m.a[0], m.a[1], m.a[2]).applyMatrix4(g.matrix); wB.set(m.b[0], m.b[1], m.b[2]).applyMatrix4(g.matrix);
+        w.mesh.quaternion.setFromUnitVectors(Y_UP, wB.sub(wA).normalize()); w.mesh.rotateY(w.spin);
+      } else w.mesh.rotation.set(0, w.spin, 0);
       const step = Math.floor(f * d / 0.4);
-      if (p < 0.9 && step !== w.last) { w.last = step; G.burst(rv.x, rv.y - hgt * 0.5 + 0.9 * Math.min(1, hgt), rv.z, 1, 0xf0f0f0, 0.15, 0.1, 0.02, 0.15); }
+      if (p < 0.9 && step !== w.last) { w.last = step; G.burst(rv.x, m.roll ? rv.y : rv.y - hgt * 0.5 + 0.9 * Math.min(1, hgt), rv.z, 1, 0xf0f0f0, 0.15, 0.1, 0.02, 0.15); }
     }
     for (const w of V.rolls) if (w.t >= w.dur) { w.mesh.visible = false; const pm = S().progress[w.id] && S().progress[w.id].members[w.mid]; liftTo(w.id, w.layer, w.mid, pm && !pm.built ? proud(w.mid) : 0); }
     V.rolls = V.rolls.filter((w) => w.t < w.dur);
@@ -790,7 +938,7 @@
   beaconMesh.frustumCulled = false; beaconMesh.visible = false; beaconMesh.renderOrder = 6; beaconMesh.count = 0;
   G.scene.add(beaconMesh);
   V.aimed = new Set(); V.beacons = []; V.beaconT = 0;
-  const STAGE_PART = { 'roof-frame': 'roof', 'roof-deck': 'roof', roofing: 'roof', foundation: 'floor', 'floor-frame': 'floor', subfloor: 'floor' };
+  const STAGE_PART = { 'roof-frame': 'roof', 'roof-deck': 'roof', 'dry-in': 'roof', roofing: 'roof', gutters: 'roof', foundation: 'floor', 'floor-frame': 'floor', subfloor: 'floor' };
   function yRange(g) {
     if (g.yr) return g.yr;
     let lo = 1e9, hi = -1e9;
@@ -927,11 +1075,13 @@
   const wantsHere = (pr, pl, c) => pl.inst.some((id) => { const ln = lineOf(pr, id); return ln && ln.itemId === c.itemId && pr.members[id].need - pr.members[id].got > 1e-6; });
   const pickable = (d) => !C.SITE_SUPPLY.includes(d.itemId);
   // whatever is in the arms can always be put down: a hint with nothing to press gets that
-  function context() { const x = contextRaw(); if (x && x.kind === 'hint' && !x.drop && S().carried) return { ...x, drop: true }; return x; }
+  function context() { const x = contextRaw(); if (x && x.kind === 'hint' && !x.drop && S().carried && !(RW && RW.on())) return { ...x, drop: true }; return x; }
   function contextRaw() {
     const P = G.player, s = S(), c = s.carried;
     if (OFF[P.tool] || V.placing || s.options.sandbox) return null;
     if (V.auto) return { kind: 'stop', id: V.auto.id };
+    if (V.hop) return null;
+    if (RW && RW.on()) return roofCtx();
     if (V.climb) { const pc = nearBuilding(P.x, P.z), h = pc && !pc.done && plan(pc.id) && !plan(pc.id).raise ? aimHands(pc) : null; return h && h.kind === 'hands' ? h : { kind: 'ladder', act: 'down' }; }
     if (SC && SC.on()) { const pc = nearBuilding(P.x, P.z), h = pc && !pc.done && plan(pc.id) && !plan(pc.id).raise ? aimHands(pc) : null; return h || { kind: 'hint', text: 'On the scaffold: walk back off the ladder end to climb down' }; }
     { const sx = scaffoldCtx(nearBuilding(P.x, P.z) || nearBuilding(reach.x, reach.z)); if (sx) return sx; }
@@ -1019,6 +1169,14 @@
     else if (ctx.kind === 'swap') { putDown(); pickUp(ctx.stack); }
     else if (ctx.kind === 'auto') startAuto(ctx.id, ctx.stage, ctx.guided);
     else if (ctx.kind === 'stop') stopAuto();
+    else if (ctx.kind === 'anchor') {
+      const at = RW.at(), g = geom(ctx.id);
+      if (!at || !g) return;
+      const p = new T.Vector3(...at.F.on(at.s, at.F.top - 0.06, 0.03)).applyMatrix4(g.matrix), r = cmd('fixAnchor', { structId: ctx.id, x: p.x, y: p.y, z: p.z });
+      if (r.ok) { V.clip = ctx.id; sounds.play('knock'); sounds.play('seat'); G.burst(p.x, p.y + 0.05, p.z, 4, 0xe8d9b0, 0.6, 0.7, 0.05, 0.3); note('Anchor fixed, clipped in', 'Screwed through the deck into a rafter. The rope keeps you back from the edge; press E by the anchor to unclip.'); }
+    }
+    else if (ctx.kind === 'clip') { V.clip = ctx.id; V.rev++; sounds.play('seat'); flash('Clipped in: the rope keeps you back from the edge'); }
+    else if (ctx.kind === 'unclip') { V.clip = null; V.rev++; sounds.play('thunk'); flash('Unclipped'); }
     else if (ctx.kind === 'lean') { const r = cmd('leanLadder', ctx.spot); if (r.ok) { sounds.play('thunk'); flash('Ladder up. Walk onto its foot to climb'); } else flash(r.reason); }
     else if (ctx.kind === 'ladder') {
       if (ctx.act === 'down' && V.climb) V.climb.e = true;
@@ -1212,6 +1370,9 @@
     } else if (ctx.kind === 'raise') setPrompt('E', 'Hold and push up to raise the wall', '', V.raise ? Math.min(1, V.raise.p) : 0);
     else if (ctx.kind === 'hands') { const w = workLabel(pr, ctx.mid), pm = pr.members[ctx.mid], b = V.blows[ctx.mid], of = b ? b.of : nailCount(geom(ctx.id), pm, ctx.mid); setPrompt('E', ctx.act === 'set' ? (api.knows(S(), pm.kind) && sweepable(pr, ctx.mid, geom(ctx.id)) ? 'Hold and drag along the run: ' + low(w.text).replace(/s$/, '') : 'Set the ' + low(w.text)) + (pm.line && pr.lines[pm.line].sheet && !api.needsStock(S(), pr, ctx.mid) ? ' (from an offcut)' : '') : ctx.act === 'dig' ? 'Dig and level' : pm.kind === 'pier' ? 'Stamp it level: ' + (b ? b.n : 0) + ' of ' + of : 'Nail them: ' + (b ? b.n : 0) + ' of ' + of, ctx.act === 'set' ? w.count : '', ctx.act === 'set' ? null : (b ? b.n : 0) / of); }
     else if (ctx.kind === 'lean') setPrompt('E', 'Lean the ladder here', '', null);
+    else if (ctx.kind === 'anchor') setPrompt('E', 'Fix a roof anchor at the ridge and clip in', '', null);
+    else if (ctx.kind === 'clip') setPrompt('E', 'Clip in to the roof anchor', '', null);
+    else if (ctx.kind === 'unclip') setPrompt('E', 'Unclip from the anchor', '', null);
     else if (ctx.kind === 'ladder') setPrompt('E', ctx.act === 'climb' ? 'Climb the ladder' : ctx.act === 'take' ? 'Take the ladder down' : 'Climb down', '', null);
     else if (ctx.kind === 'work') { const w = workLabel(pr, V.working ? V.working.memberId : ctx.q[0]); setPrompt('E', 'Hold to build: ' + low(w.text), w.count, W.job ? W.progress() : 0); }
     else if (ctx.kind === 'piece') setPrompt('', 'Click a glowing piece to set it', ctx.q.length + ' ready', W.job ? W.progress() : null);
@@ -1263,8 +1424,12 @@
     if (!ln) return { ...out, line: 'Stand on the plan and hold <kbd>E</kbd> (or the mouse button) to dig it level.', target: at };
     const looseOne = pl.inst.find((id) => pr.members[id].need > 0 && pr.members[id].got >= pr.members[id].need - 1e-6);
     if (looseOne) return { ...out, line: 'A piece is set but loose. ' + (pr.members[looseOne].kind === 'pier' ? 'Point at it and click to stamp it level.' : 'Strike it once to drive all its nails, or hold and drag across the pieces.'), target: at };
-    if (['top-plates', 'roof-frame', 'roof-deck', 'roofing'].includes(v.id) && !s.ladder && !V.climb && !s.options.auto && pr.level !== 'guided' && ((s.carried && s.carried.itemId === LAD.itemId) || s.stacks.some((k) => k.itemId === LAD.itemId))) return { ...out, line: 'This is out of reach from the ground. Carry the ladder to a wall and click to lean it. Walk onto the ladder to climb.', target: at };
+    if (['top-plates', 'roof-frame', 'roof-deck', 'dry-in', 'roofing', 'gutters'].includes(v.id) && !s.ladder && !V.climb && !s.options.auto && pr.level !== 'guided' && ((s.carried && s.carried.itemId === LAD.itemId) || s.stacks.some((k) => k.itemId === LAD.itemId))) return { ...out, line: 'This is out of reach from the ground. Carry the ladder to a wall and click to lean it. Walk onto the ladder to climb.', target: at };
     const c = s.carried;
+    if (['dry-in', 'roofing'].includes(v.id) && RW && c && c.itemId === ln.itemId && pr.level !== 'guided' && !s.options.auto) {
+      if (!RW.on()) return { ...out, line: 'Roofers work on the roof: climb the ladder and keep walking, onto the deck. On a steep roof, fix an anchor at the ridge and clip in first.', target: at };
+      return { ...out, line: 'From the eave up, each layer lapping the one below. The glowing strip is the next one; the blue chalk line marks its top edge.' + (V.clip == null && RW.at() && RW.at().k > RWC.slideK ? ' Steep: clip in at the ridge first.' : ''), target: at };
+    }
     if (c && c.itemId === ln.itemId && first && api.knows(s, pr.members[first].kind)) return { ...out, line: 'You know this work: hold the button and drag along the glowing places. Each piece is set and nailed as you pass.', target: at };
     if (c && c.itemId === ln.itemId) return { ...out, line: 'Carry the ' + stackName(c.itemId) + ' to the ' + low(pr.name) + '. Point at a glowing place: one click sets three pieces, then one strike nails a piece. Hold to keep going.', target: at };
     const stack = homeStack(ln.itemId) || s.stacks.find((k) => k.itemId === ln.itemId);
@@ -1551,7 +1716,7 @@
       }
     }
     if (V.fTap) { V.fTap = false; if (!OFF[G.player.tool]) { press(V.ctx); V.ctx = context(); V.ctxSig = -1; } }   // what the press changed is read at once: a stale 'put down' with empty arms threw
-    tickBHold(dt); tickLadder(dt); tickScaffold(dt); drawLadder(); tickMark(dt); drawBeacons(dt); drawBarrow(dt); tickStation(dt);
+    tickBHold(dt); tickLadder(dt); tickScaffold(dt); tickRoof(dt); drawLadder(); tickMark(dt); drawBeacons(dt); drawBarrow(dt); tickStation(dt);
     if (!s.options.sandbox) tickWork(dt);
     glow(V.ctx);
     {
@@ -1645,5 +1810,5 @@
     for (const mid of pl.inst) { const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid), set = !ln || pm.need - pm.got < 1e-6; if (!set && !(c && c.itemId === ln.itemId)) continue; if (!m) return { mid, x: V.structs.get(pr.id).x, z: V.structs.get(pr.id).z, site: true }; const hw = C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null; worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); wM.lerpVectors(wA, wB, 0.5); const w = { x: wM.x, y: wM.y, z: wM.z }; wM.project(G.camera); return { mid, ...w, sx: (wM.x * 0.5 + 0.5) * reach.w, sy: (-wM.y * 0.5 + 0.5) * reach.h, set }; }
     return null;
   }
-  window.__construct = { scaffoldSpot, scaffold: SC, station: CS, press: (c) => press(c || V.ctx), beaconAt, finishPlace, nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };
+  window.__construct = { roof: RW, syncRoof, tryHop, ladderTop, scaffoldSpot, scaffold: SC, station: CS, press: (c) => press(c || V.ctx), beaconAt, finishPlace, nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };
 })();

@@ -7,6 +7,8 @@
 //   scaffold.update(dt, { climbMps, keys }) -> 'up' | 'down' | null when the player mounts or leaves; holds the player while on it
 //   scaffold.on()                 is the player on it (climbing or on the plank)
 //   scaffold.foot()               { x, z } of the bottom of its ladder, or null
+//   scaffold.onPlank()            standing on the plank (not on its ladder)
+//   scaffold.over(x, z)           the plank's height if (x, z) is over the plank, else null; scaffold.board(x, z): stand on it there
 (() => {
   function create(G) {
     const T = G.THREE,
@@ -64,6 +66,14 @@
         if (p) bundle.position.set(p.x, G.heightAt(p.x, p.z), p.z);
       },
       on: () => !!st,
+      onPlank: () => !!st && !st.climb,
+      over(x, z) { if (!bay) return null; const L = local(bay, x, z); return Math.abs(L.along) < bay.len / 2 - 0.1 && Math.abs(L.across) < bay.w / 2 + 0.15 ? bay.deckY : null; },
+      board(x, z) {
+        if (!bay) return false;
+        const L = local(bay, x, z), q = world(bay, Math.max(-bay.len / 2 + 0.2, Math.min(bay.len / 2 - 0.2, L.along)), Math.max(-bay.w / 2 + 0.15, Math.min(bay.w / 2 - 0.15, L.across))), P = G.player;
+        P.x = q.x; P.z = q.z; P.climbY = null; P.standY = bay.deckY; st = { climb: false }; pushT = 0;
+        return true;
+      },
       foot: () => (bay ? world(bay, -bay.len / 2 - 0.45, 0) : null),
       release,
       update(dt, opt = {}) {

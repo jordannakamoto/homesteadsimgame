@@ -16,11 +16,13 @@ export const STAGES = Object.freeze([
   { id: 'top-plates', name: 'Top plates', needs: ['wall-frame'], verb: 'Add the top plates', what: 'A second plate along the top, lapping the corners.', why: 'Ties the walls together so they stand as one.' },
   { id: 'roof-frame', name: 'Roof frame', needs: ['top-plates'], verb: 'Set the rafters', what: 'Set the rafters from wall to wall.', why: 'The slope sheds rain and snow. Rafters carry it out to the walls.' },
   { id: 'roof-deck', name: 'Roof deck', needs: ['roof-frame'], verb: 'Sheet the roof', what: 'Fix sheets on the rafters.', why: 'Makes the roof one stiff surface for the roofing to sit on.' },
-  { id: 'roofing', name: 'Roofing', needs: ['roof-deck'], verb: 'Lay the roofing', what: 'Roll out the underlayment, then lay the roofing.', why: 'Keeps the water out. After this the building is dried in.' },
+  { id: 'dry-in', name: 'Dry-in', needs: ['roof-deck'], verb: 'Dry in the roof', what: 'Drip edge along the eaves, then underlayment strips from the eave up, each lapping the one below, then drip edge up the rakes.', why: 'Water runs downhill: every layer laps over the one below it, so rain is led out over the edge and never under it.' },
+  { id: 'roofing', name: 'Roofing', needs: ['dry-in'], verb: 'Lay the roofing', what: 'Work from on the roof: a starter strip at the eave, then course after course up the slope, the ridge cap last. On a steep roof, clip in at a ridge anchor first.', why: 'Keeps the water out. After this the building is dried in.' },
   { id: 'sheathing', name: 'Sheathing', needs: ['top-plates'], parentFirst: ['roof-frame'], verb: 'Sheathe the walls', what: 'Fix sheets to the outside of the studs.', why: 'Stops the frame leaning over sideways in the wind.' },
   { id: 'wrap', name: 'Wrap', needs: ['sheathing'], verb: 'Wrap the walls', what: 'Staple housewrap over the sheathing.', why: 'Stops wind and rain getting in while letting damp out.' },
   { id: 'openings', name: 'Windows and doors', needs: ['wrap'], verb: 'Set the door and windows', what: 'Set the window in its opening and hang the door.', why: 'Light, a way in, and they close the building up.' },
   { id: 'cladding', name: 'Cladding', needs: ['openings'], verb: 'Put on the siding', what: 'Nail siding boards over the wrap.', why: 'Protects the wall from weather and sun.' },
+  { id: 'gutters', name: 'Gutters', needs: ['roofing', 'cladding'], verb: 'Hang the gutters', what: 'From the ladder or scaffold: gutters along the eaves, falling a little toward a downspout at one end.', why: 'They catch the rain off the roof and carry it away from the foundation, or into a rain barrel.' },
   { id: 'insulation', name: 'Insulation', needs: ['roofing', 'sheathing'], verb: 'Insulate', what: 'Fill the spaces between studs and rafters with batts.', why: 'Slows heat leaving in winter and coming in during summer.' },
   { id: 'lining', name: 'Lining', needs: ['insulation'], verb: 'Finish the inside', what: 'Fix boards or panels inside, and lay the floor boards.', why: 'Covers the insulation and makes a finished room.' },
 ]);
@@ -32,8 +34,10 @@ export const STAGE_ORDER = Object.freeze(STAGES.map((s) => s.id));
 export const SUPPORT = Object.freeze({
   pier: ['footing'], post: ['pier'], skid: ['footing'], slab: ['footing'], stemwall: ['footing'],
   beam: ['pier', 'post', 'footing', 'stemwall'], rafter: ['beam'],
+  // drying in and roofing, the order roofers lay them: each layer laps the one below
+  membrane: ['drip'], rake: ['membrane'], ridgecap: ['roofing'], downspout: ['gutter'],
 });
-export const SUPPORT_SAYS = Object.freeze({ footing: 'Lay the footings', pier: 'Set the pier blocks', post: 'Set the posts', stemwall: 'Pour the stem wall', beam: 'Set the ridge beam' });
+export const SUPPORT_SAYS = Object.freeze({ footing: 'Lay the footings', pier: 'Set the pier blocks', post: 'Set the posts', stemwall: 'Pour the stem wall', beam: 'Set the ridge beam', drip: 'Fit the drip edge along the eaves', membrane: 'Lay the underlayment', roofing: 'Lay every course', gutter: 'Hang the gutter' });
 
 // ---- what a shopping line is bought as, where the plan's own item is missing or not what a builder buys.
 // Keyed by the line's name (the part of its key after the stage). `each`: one whole unit per member.
@@ -52,6 +56,13 @@ export const ITEMS_CONSTRUCTION = Object.freeze({
   pier_block: { id: 'pier_block', name: 'Precast concrete pier block', category: 'stone', unit: 'each', material: 'concrete', dims: { lengthM: 0.3, widthM: 0.3, thicknessM: 0.2 }, massKgPerUnit: 20, priceUsd: 12, blurb: 'Sits on firm ground; a post or beam drops into the top' },
   roof_underlayment: { id: 'roof_underlayment', name: 'Roof underlayment (felt)', category: 'roofing', unit: 'm2', massKgPerUnit: 0.55, priceUsd: 1.1, dims: { thicknessM: 0.0008 }, blurb: 'The waterproof layer under the roofing' },
   door_prehung: { id: 'door_prehung', name: 'Exterior door, pre-hung', category: 'glass', unit: 'each', massKgPerUnit: 38, priceUsd: 180, dims: { lengthM: 2.03, widthM: 0.915, thicknessM: 0.045 }, blurb: 'Comes in its frame with hinges on: set it in the opening and fix it' },
+  roof_corrugated: { id: 'roof_corrugated', name: 'Corrugated steel sheet', category: 'roofing', unit: 'm2', massKgPerUnit: 4.5, priceUsd: 14, dims: { thicknessM: 0.0005 }, blurb: 'Wavy galvanised sheets screwed through the crests: cheap and quick, for sheds and barns' },
+  roof_green: { id: 'roof_green', name: 'Sedum mat (green roof)', category: 'roofing', unit: 'm2', massKgPerUnit: 20, priceUsd: 60, dims: { thicknessM: 0.07 }, blurb: 'Rolls of living sedum on a growing mat, laid over a waterproof membrane' },
+  roof_ice_water: { id: 'roof_ice_water', name: 'Ice and water shield', category: 'roofing', unit: 'm2', massKgPerUnit: 1.3, priceUsd: 3.5, dims: { thicknessM: 0.001 }, blurb: 'Self-sticking rubberised membrane for the eaves and valleys' },
+  drip_edge: { id: 'drip_edge', name: 'Drip edge, 10 ft', category: 'roofing', unit: 'm', massKgPerUnit: 0.35, priceUsd: 2.6, blurb: 'Bent aluminium edge for the eaves and rakes: water drips off it clear of the fascia' },
+  ridge_cap: { id: 'ridge_cap', name: 'Ridge cap', category: 'roofing', unit: 'm', massKgPerUnit: 1.6, priceUsd: 9, blurb: 'Caps the ridge or a hip, lapped over the top courses' },
+  gutter_alu: { id: 'gutter_alu', name: 'Aluminium gutter, 5 in K-style', category: 'roofing', unit: 'm', massKgPerUnit: 0.9, priceUsd: 10, blurb: 'Hung under the eave on hidden hangers, with a slight fall to the downspout' },
+  downspout_alu: { id: 'downspout_alu', name: 'Aluminium downspout, 2 x 3 in', category: 'roofing', unit: 'm', massKgPerUnit: 0.6, priceUsd: 7.5, blurb: 'Takes the water from the gutter down to the ground' },
   window_shed: { id: 'window_shed', name: 'Shed window 600 x 900', category: 'glass', unit: 'each', massKgPerUnit: 9, priceUsd: 95, dims: { lengthM: 0.9, widthM: 0.6, thicknessM: 0.08 }, blurb: 'A small fixed window in its own frame' },
   framing_nailer: { id: 'framing_nailer', name: 'Framing nail gun', category: 'tools_power', unit: 'each', massKgPerUnit: 3.8, priceUsd: 230, powerW: 1500, blurb: 'Drives a nail a second. Needs power' },
   ladder: { id: 'ladder', name: 'Extension ladder', category: 'tools_hand', unit: 'each', massKgPerUnit: 11, priceUsd: 140, blurb: 'Lean it on a wall or the eave and climb it: anything higher than you can reach from the ground is worked from the ladder' },
@@ -59,7 +70,12 @@ export const ITEMS_CONSTRUCTION = Object.freeze({
 });
 
 // ---- the ladder: it comes with the shed order (a line of the top-plates stage), is leaned by hand and climbed
-export const LADDER = Object.freeze({ itemId: 'ladder', stage: 'site', with: Object.freeze(['wall-frame', 'top-plates', 'roof-frame', 'roof-deck', 'roofing', 'sheathing', 'wrap', 'cladding']), lenM: 3.9, footOutM: 0.95, reachUpM: 2.2, climbMps: 4.5, topBelowM: 0.9, why: 'Anything higher than you can reach from the ground is worked from a ladder: the top plates, the roof.' });
+export const LADDER = Object.freeze({ itemId: 'ladder', stage: 'site', with: Object.freeze(['wall-frame', 'top-plates', 'roof-frame', 'roof-deck', 'dry-in', 'roofing', 'sheathing', 'wrap', 'cladding', 'gutters']), lenM: 3.9, footOutM: 0.95, reachUpM: 2.2, climbMps: 4.5, topBelowM: 0.9, why: 'Anything higher than you can reach from the ground is worked from a ladder: the top plates, the roof.' });
+
+// ---- on the roof: once a plane is decked you can walk on it, slower the steeper it is. A roof anchor screwed through the deck
+// at the ridge, a harness and a rope grab: clipped in you cannot go past the edge (fall restraint). Unclipped on a roof steeper
+// than slideK (rise over run: 6 in 12) you slide slowly down to the eave and stop there. Nobody is hurt: this is a peaceful game.
+export const ROOFWALK = Object.freeze({ slideK: 0.5, slideMps: 0.55, ropeM: 14, anchorReachM: 1.3, edgeM: 0.22, says: 'Clip in at the ridge anchor before working on a steep roof' });
 
 // ---- scaffolding: rented by the day from the Build panel, it arrives as a bundle of frames and planks by the stacks. Set up
 // along a wall it is a platform a bay long with a guard rail and a ladder at one end; walk into the ladder to climb, walk the
@@ -72,8 +88,8 @@ export const ITEMS_SCAFFOLD = Object.freeze({
 // ---- learn once, then sweep: after nailing a few of a kind by hand, that kind is learned and is set and nailed as you sweep along its run
 export const LEARN = Object.freeze({
   needed: 2,
-  group: Object.freeze({ stud: 'stud', plate: 'plate', header: 'header', joist: 'joist', rafter: 'rafter', beam: 'beam', post: 'post', skid: 'skid', sheathing: 'sheet', membrane: 'sheet', roofing: 'sheet', lining: 'sheet', cladding: 'sheet', insulation: 'sheet' }),
-  says: Object.freeze({ stud: 'frame a stud wall', plate: 'lay wall plates', header: 'frame an opening', joist: 'frame a floor', rafter: 'set rafters', beam: 'set a beam', post: 'set posts', skid: 'lay skids', sheet: 'lay sheets' }),
+  group: Object.freeze({ stud: 'stud', plate: 'plate', header: 'header', joist: 'joist', rafter: 'rafter', beam: 'beam', post: 'post', skid: 'skid', sheathing: 'sheet', membrane: 'sheet', roofing: 'course', lining: 'sheet', cladding: 'sheet', insulation: 'sheet', drip: 'flashing', rake: 'flashing', ridgecap: 'flashing', gutter: 'gutter', downspout: 'gutter' }),
+  says: Object.freeze({ stud: 'frame a stud wall', plate: 'lay wall plates', header: 'frame an opening', joist: 'frame a floor', rafter: 'set rafters', beam: 'set a beam', post: 'set posts', skid: 'lay skids', sheet: 'lay sheets', course: 'lay a roof course', flashing: 'fit drip edge and flashing', gutter: 'hang gutters' }),
 });
 export const learnGroup = (kind) => LEARN.group[kind] || null;
 
@@ -84,7 +100,8 @@ export function itemForm(itemId) {
   if (/^(osb|plywood|gypsum)_/.test(itemId)) return 'sheet';
   if (itemId === 'pier_block') return 'block';
   if (/^(nails|screws)_/.test(itemId)) return 'box';
-  if (itemId === 'housewrap' || itemId === 'roof_underlayment' || itemId === 'vapour_barrier' || itemId === 'roof_epdm') return 'roll';
+  if (itemId === 'housewrap' || itemId === 'roof_underlayment' || itemId === 'vapour_barrier' || itemId === 'roof_epdm' || itemId === 'roof_ice_water' || itemId === 'roof_green') return 'roll';
+  if (itemId === 'drip_edge' || itemId === 'ridge_cap' || itemId === 'gutter_alu' || itemId === 'downspout_alu') return 'trim';
   if (/^roof_/.test(itemId)) return 'bundle';
   if (/^ins_|^straw/.test(itemId)) return 'bale';
   if (itemId === 'door_prehung' || /^op_door_/.test(itemId)) return 'door';
@@ -210,12 +227,12 @@ export function feelOf(s) {
 
 // ---- work: blows to put in one member of each kind, and how fast the blows come by the best tool owned
 export const WORK = Object.freeze({
-  beats: Object.freeze({ site: 8, pier: 3, post: 2, beam: 4, skid: 4, footing: 4, stemwall: 5, slab: 6, joist: 3, plate: 3, stud: 3, header: 4, rafter: 4, sheathing: 4, membrane: 3, cladding: 6, roofing: 6, insulation: 2, lining: 5, door: 6, window: 4 }),
+  beats: Object.freeze({ site: 8, pier: 3, post: 2, beam: 4, skid: 4, footing: 4, stemwall: 5, slab: 6, joist: 3, plate: 3, stud: 3, header: 4, rafter: 4, sheathing: 4, membrane: 3, cladding: 6, roofing: 4, insulation: 2, lining: 5, door: 6, window: 4, drip: 2, rake: 2, ridgecap: 3, gutter: 3, downspout: 2 }),
   beatS: 0.33,                        // seconds between blows with a hammer
   tools: Object.freeze([{ tool: 'hammer', speed: 1 }, { tool: 'framing_nailer', speed: 3, power: true }]),
-  sound: Object.freeze({ pier: 'scrape', footing: 'scrape', slab: 'scrape', stemwall: 'scrape', site: 'dig', sheathing: 'thunk', membrane: 'rustle', roofing: 'thunk', insulation: 'rustle', door: 'thunk', window: 'thunk' }),
+  sound: Object.freeze({ pier: 'scrape', footing: 'scrape', slab: 'scrape', stemwall: 'scrape', site: 'dig', sheathing: 'thunk', membrane: 'rustle', roofing: 'thunk', insulation: 'rustle', door: 'thunk', window: 'thunk', gutter: 'thunk' }),
   // by hand: blows to fasten a piece once it is set in place (stamps for a pier block, strokes of the shovel for the site)
-  nails: Object.freeze({ site: 6, pier: 2, post: 1, beam: 2, skid: 2, footing: 2, stemwall: 3, slab: 3, joist: 2, plate: 2, stud: 2, header: 2, rafter: 2, sheathing: 3, membrane: 2, cladding: 3, roofing: 3, insulation: 1, lining: 3, door: 2, window: 2 }),
+  nails: Object.freeze({ site: 6, pier: 2, post: 1, beam: 2, skid: 2, footing: 2, stemwall: 3, slab: 3, joist: 2, plate: 2, stud: 2, header: 2, rafter: 2, sheathing: 3, membrane: 2, cladding: 3, roofing: 3, insulation: 1, lining: 3, door: 2, window: 2, drip: 2, rake: 2, ridgecap: 2, gutter: 2, downspout: 2 }),
   swingS: 0.3,                        // seconds between swings while the button is held
   reachM: 2.1,                        // arm's reach around the character
   guidedSpeed: 2.5,                     // Guided fills a stage in this many times faster than working by hand
@@ -257,10 +274,10 @@ export const FIRST_SHED = Object.freeze({
     { n: 6, does: 'Frame the side walls and the front wall with its door opening', teaches: 'Headers carry load around an opening.', stages: ['wall-frame'] },
     { n: 7, does: 'Add the top plates', teaches: 'Tying the walls together.', stages: ['top-plates'] },
     { n: 8, does: 'Set the rafters', teaches: 'Pitch, and why roofs slope.', stages: ['roof-frame'] },
-    { n: 9, does: 'Roof deck, underlayment and roofing', teaches: 'Dried in: rain now stays outside.', stages: ['roof-deck', 'roofing'] },
+    { n: 9, does: 'Roof deck, then dry it in and lay the roofing, standing on the roof', teaches: 'Every layer laps the one below. Dried in: rain now stays outside.', stages: ['roof-deck', 'dry-in', 'roofing'] },
     { n: 10, does: 'Sheathe the walls', teaches: 'Sheets stop the frame swaying.', stages: ['sheathing'] },
     { n: 11, does: 'Wrap the walls, set the window and hang the door', teaches: 'Closing the envelope.', stages: ['wrap', 'openings'] },
-    { n: 12, does: 'Put on the siding', teaches: 'Protecting the wall.', stages: ['cladding'] },
+    { n: 12, does: 'Put on the siding and hang the gutters', teaches: 'Protecting the wall, and leading the rain away.', stages: ['cladding', 'gutters'] },
     { n: 13, does: 'Finish the inside', teaches: 'A finished room, and insulation seen as a number.', stages: ['insulation', 'lining'] },
   ]),
 });

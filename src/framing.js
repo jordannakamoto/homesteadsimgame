@@ -4,8 +4,8 @@
    Pure arithmetic: no DOM, no three.js. The page reads it as window.__framing; tests read globalThis.__framing. */
 (() => {
   // the order a building is raised in (docs/CONSTRUCTION.md)
-  const STAGES = ["site", "foundation", "floor-frame", "subfloor", "wall-frame", "top-plates", "roof-frame", "roof-deck", "roofing", "sheathing", "wrap", "openings", "cladding", "insulation", "lining", "services"];
-  const STAGE_NAME = { site: "Site", foundation: "Foundation", "floor-frame": "Floor frame", subfloor: "Subfloor", "wall-frame": "Wall frames", "top-plates": "Top plates", "roof-frame": "Roof frame", "roof-deck": "Roof deck", roofing: "Roofing", sheathing: "Sheathing", wrap: "Wrap", openings: "Windows and doors", cladding: "Cladding", insulation: "Insulation", lining: "Lining", services: "Services" };
+  const STAGES = ["site", "foundation", "floor-frame", "subfloor", "wall-frame", "top-plates", "roof-frame", "roof-deck", "dry-in", "roofing", "sheathing", "wrap", "openings", "cladding", "gutters", "insulation", "lining", "services"];
+  const STAGE_NAME = { site: "Site", foundation: "Foundation", "floor-frame": "Floor frame", subfloor: "Subfloor", "wall-frame": "Wall frames", "top-plates": "Top plates", "roof-frame": "Roof frame", "roof-deck": "Roof deck", "dry-in": "Dry-in", roofing: "Roofing", sheathing: "Sheathing", wrap: "Wrap", openings: "Windows and doors", cladding: "Cladding", gutters: "Gutters", insulation: "Insulation", lining: "Lining", services: "Services" };
   // actual (not nominal) sizes of North American lumber, metres: [breadth, depth]
   const LUMBER = { "2x4": [0.038, 0.089], "2x6": [0.038, 0.14], "2x8": [0.038, 0.184], "2x10": [0.038, 0.235], "2x12": [0.038, 0.286], glulam: [0.09, 0.225], "4x4": [0.089, 0.089], "6x6": [0.14, 0.14] };
   const SHEET = { w: 1.22, l: 2.44 };
@@ -407,12 +407,89 @@
 
   /* ---------- roofs ---------- */
   const rafterFor = (run) => (run <= 3.2 ? "2x6" : run <= 4.2 ? "2x8" : "2x10");
+  // How each roof covering goes on, the way roofers lay it: in courses from the eave up, each lapping the one below
+  // (h: how much of a course shows, up the slope; starter: a starter strip at the eave goes first), in panels side by
+  // side from the eave to the ridge (w: panel width), or rolled out from the eave up (h: roll width). t: the thickness drawn.
+  const COVERING = {
+    asphalt: { how: "course", h: 0.45, starter: true, t: 0.012, col: "rAsphalt", name: "shingle" },
+    shingle: { how: "course", h: 0.45, starter: true, t: 0.016, col: "rCedar", name: "shake" },
+    slate: { how: "course", h: 0.35, starter: true, t: 0.014, col: "rSlate", name: "slate" },
+    redslate: { how: "course", h: 0.35, starter: true, t: 0.014, col: "rRedslate", name: "slate" },
+    tile: { how: "course", h: 0.38, starter: true, t: 0.03, col: "rTile", name: "tile" },
+    thatch: { how: "course", h: 0.6, t: 0.18, col: "rThatch", name: "thatch" },
+    seam: { how: "panel", w: 0.45, t: 0.03, col: "rSteel", name: "panel" },
+    steel: { how: "panel", w: 0.45, t: 0.03, col: "rSteel", name: "panel" },
+    copper: { how: "panel", w: 0.45, t: 0.03, col: "rCopper", name: "panel" },
+    corrugated: { how: "panel", w: 0.8, t: 0.02, col: "rCorrugated", name: "sheet" },
+    membrane: { how: "roll", h: 3.0, t: 0.004, col: "rMembrane", name: "membrane" },
+    green: { how: "roll", h: 1.0, t: 0.07, col: "rGreen", name: "sedum mat" },
+  };
+  const coveringOf = (mat) => COVERING[mat] || COVERING.asphalt;
+  // the colours of the roofing layers while they go on (build mode's member colours; the finished roof draws itself)
+  const ROOF_COLORS = { rAsphalt: 0x4c4f55, rCedar: 0x8a6a48, rSlate: 0x56616c, rRedslate: 0x7b3b3b, rTile: 0xa9573b, rThatch: 0xb39a5c, rSteel: 0x7f8a92, rCopper: 0x5fa08a, rCorrugated: 0x9ba2a7, rMembrane: 0x2d2f33, rGreen: 0x5e8a3f, metal: 0xc3c8cc, icewater: 0x25272b, gutter: 0xe4e3de };
+  const ROLL_W = 0.91, // underlayment comes in 36 inch rolls, laid along the eave, each strip lapping the one below by 10 cm
+    ULAP = 0.1,
+    TRIM_LEN = 3.05; // drip edge, ridge cap and gutter come in 10 ft lengths
+  const lengths = (L, max) => {
+    const k = Math.max(1, Math.ceil(L / max - 1e-9));
+    return Array.from({ length: k }, (_, i) => [(L * i) / k, (L * (i + 1)) / k]);
+  };
+  // A roof plane's own coordinates: s along the eave from its first corner, t up the slope (as a horizontal run) from the
+  // eave. on(s, t, lift) is a point lift off the plane's top surface. The outline in (s, t), where a line crosses it, and
+  // whether a point is on it. The page uses the same frame to let the player stand on the deck.
+  function planeFrame(pl) {
+    const pts = pl.pts,
+      e0 = pts[0],
+      e1 = pts[1],
+      EL = hyp(e1[0] - e0[0], e1[1] - e0[1]) || 1,
+      ev = [(e1[0] - e0[0]) / EL, (e1[1] - e0[1]) / EL];
+    let up = [-pl.facing[0], -pl.facing[1]];
+    if (!pl.run) {
+      // a flat roof: joists across the short way
+      up = [-ev[1], ev[0]];
+      const c = pts[2];
+      if ((c[0] - e0[0]) * up[0] + (c[1] - e0[1]) * up[1] < 0) up = [ev[1], -ev[0]];
+    }
+    const k = pl.run ? (pl.ridgeY - pl.eaveY) / pl.run : 0,
+      cs = 1 / Math.sqrt(1 + k * k),
+      nS = [-up[0] * k * cs, cs, -up[1] * k * cs],
+      st = pts.map((p) => [(p[0] - e0[0]) * ev[0] + (p[1] - e0[1]) * ev[1], (p[0] - e0[0]) * up[0] + (p[1] - e0[1]) * up[1]]);
+    let top = 0;
+    for (const q of st) top = Math.max(top, q[1]);
+    const cut = (c, i) => {
+      const xs = [];
+      for (let a = 0, b = st.length - 1; a < st.length; b = a++) {
+        const p = st[a],
+          q = st[b];
+        if (p[i] > c !== q[i] > c) xs.push(p[1 - i] + ((c - p[i]) / (q[i] - p[i])) * (q[1 - i] - p[1 - i]));
+      }
+      return xs.length < 2 ? null : [Math.min(...xs), Math.max(...xs)];
+    };
+    return {
+      e0, ev, up, k, cs, nS, st, EL, top: pl.run || top, eaveY: pl.eaveY,
+      on: (s, t, lift) => [e0[0] + ev[0] * s + up[0] * t + nS[0] * lift, pl.eaveY + k * t + nS[1] * lift, e0[1] + ev[1] * s + up[1] * t + nS[2] * lift],
+      spanAt: (t) => cut(t, 1), // [s0, s1] of the line t across the plane
+      reachAt: (s) => cut(s, 0), // [t0, t1] of the line s up the plane
+      local: (x, z) => [(x - e0[0]) * ev[0] + (z - e0[1]) * ev[1], (x - e0[0]) * up[0] + (z - e0[1]) * up[1]],
+      inside: (s, t) => {
+        let o = false;
+        for (let a = 0, b = st.length - 1; a < st.length; b = a++) {
+          const p = st[a],
+            q = st[b];
+          if (p[1] > t !== q[1] > t && s < p[0] + ((t - p[1]) / (q[1] - p[1])) * (q[0] - p[0])) o = !o;
+        }
+        return o;
+      },
+    };
+  }
   // r: { id, mat, planes: [{ id, pts, eaveY, ridgeY, run, facing }], ridges: [{ a, b, y }], infills: [{ id, a, b, y0, top(x, z) }],
-  //      ties: [{ a, b, y }] } heights are from the structure's base
+  //      ties: [{ a, b, y }], gutters: [{ a: [x, z], b: [x, z], y, down: [x, z] }], groundY(x, z) } heights are from the structure's base
   function roofMembers(out, r, spec) {
     let n = 0;
     const id = (p, c) => p + "." + c + n++,
-      sp = spec.rafters || 0.6;
+      sp = spec.rafters || 0.6,
+      cv = coveringOf(r.mat),
+      capped = cv.how !== "roll";
     for (const rd of r.ridges || []) {
       // a long ridge is spliced from boards that join between a pair of rafters
       const RL = hyp(rd.b[0] - rd.a[0], rd.b[1] - rd.a[1]) || 1,
@@ -421,44 +498,20 @@
       parts.forEach(([p0, p1], k) => M(out, r.id + ".rb" + (k ? k : ""), "beam", "ridge", "roof-frame", r.planes[0].id, "timber", 0.038, LUMBER["2x8"][1], pt(p0), pt(p1), UP, { roof: r.id }));
     }
     for (const pl of r.planes) {
-      const pts = pl.pts,
-        e0 = pts[0],
-        e1 = pts[1],
-        EL = hyp(e1[0] - e0[0], e1[1] - e0[1]),
-        ev = [(e1[0] - e0[0]) / EL, (e1[1] - e0[1]) / EL];
-      let up = [-pl.facing[0], -pl.facing[1]];
-      if (!pl.run) {
-        // a flat roof: joists across the short way
-        up = [-ev[1], ev[0]];
-        const c = pts[2];
-        if ((c[0] - e0[0]) * up[0] + (c[1] - e0[1]) * up[1] < 0) up = [ev[1], -ev[0]];
-      }
-      const k = pl.run ? (pl.ridgeY - pl.eaveY) / pl.run : 0,
-        cs = 1 / Math.sqrt(1 + k * k),
-        nS = [-up[0] * k * cs, cs, -up[1] * k * cs],
+      const F = planeFrame(pl),
+        pts = pl.pts,
+        { ev, up, k, cs, nS, EL, on } = F,
         size = rafterFor(pl.run || 3),
         [RB, RD] = LUMBER[size],
         // how far up the slope a line from the eave stays on this plane
         reach = (s) => {
-          const px = e0[0] + ev[0] * s,
-            pz = e0[1] + ev[1] * s;
-          let best = 0;
-          for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-            const a = pts[j],
-              b = pts[i],
-              dx = b[0] - a[0],
-              dz = b[1] - a[1],
-              den = up[0] * dz - up[1] * dx;
-            if (Math.abs(den) < 1e-9) continue;
-            const t = ((a[0] - px) * dz - (a[1] - pz) * dx) / den,
-              v = ((a[0] - px) * up[1] - (a[1] - pz) * up[0]) / den;
-            if (t > best && v > -1e-6 && v < 1 + 1e-6) best = t;
-          }
-          return best;
+          const q = F.reachAt(s);
+          return q && q[1] > 0 ? q[1] : 0;
         },
-        on = (s, t, lift) => [e0[0] + ev[0] * s + up[0] * t + nS[0] * lift, pl.eaveY + k * t + nS[1] * lift, e0[1] + ev[1] * s + up[1] * t + nS[2] * lift],
         rect = pts.length === 4 && Math.abs(polyArea(pts) - EL * (pl.run || reach(EL / 2))) < 0.02,
         ov = pl.overhang === undefined ? 0.45 : pl.overhang,
+        inPlane = [up[0] * cs, k * cs, up[1] * cs],
+        along = [ev[0], 0, ev[1]],
         at = [];
       if (rect && EL > 2 * ov + 0.5) {
         ov > 0.1 && at.push([RB / 2, "barge"]);
@@ -473,13 +526,84 @@
         lens.push([s, t]);
         M(out, id(pl.id, "rf"), "rafter", pl.run ? type : "roof-joist", "roof-frame", pl.id, "timber", RB, RD, on(s, 0, -(RD / 2 + T.osb)), on(s, t, -(RD / 2 + T.osb)), nS, { size });
       }
-      const slope = (pl.run || reach(EL / 2)) / cs,
+      const slope = F.top / cs,
         area = polyArea(pts) / cs;
-      if (rect) sheetRows(0, EL, 0, slope, (ua, ub, va, vb) => M(out, id(pl.id, "dk"), "sheathing", "roof-deck", "roof-deck", pl.id, "osb", T.osb, vb - va, on(ua, ((va + vb) / 2) * cs, -T.osb / 2), on(ub, ((va + vb) / 2) * cs, -T.osb / 2), [up[0] * cs, k * cs, up[1] * cs], { area: r3((ub - ua) * (vb - va)), thickness: T.osb, col: "osb" }));
-      else M(out, id(pl.id, "dk"), "sheathing", "roof-deck", "roof-deck", pl.id, "osb", T.osb, slope, on(0, 0, 0), on(EL, 0, 0), nS, { area: r3(area), thickness: T.osb, draw: 0 });
-      const skin = (code, kind, type, stage, material, lift, col) => M(out, pl.id + "." + code, kind, type, stage, pl.id, material, 0.006, slope, on(0, (slope / 2) * cs, lift), on(EL, (slope / 2) * cs, lift), [up[0] * cs, k * cs, up[1] * cs], { area: r3(area), thickness: 0.001, col, draw: rect && col ? 1 : 0 });
-      skin("ul", "membrane", "underlayment", "roofing", "underlayment", 0.006, "felt");
-      skin("rc", "roofing", r.mat || "thatch", "roofing", r.mat || "thatch", 0.03, null);
+      // rows of strips or sheets from the eave up, each cut to the outline at its middle: each(v0, v1, s0, s1, row)
+      const rows = (h, lap, each, v00 = 0) => {
+        for (let row = 0, v = v00; v < slope - 0.02; row++) {
+          const vb = Math.min(slope, v + h),
+            s = F.spanAt(((v + vb) / 2) * cs);
+          s && s[1] - s[0] > 0.05 && each(v, vb, s[0], s[1], row);
+          if (vb >= slope - 1e-6) break;
+          v = vb - lap;
+        }
+      };
+      // the roof deck: sheets from the eave up, joints staggered row by row
+      rows(SHEET.w, 0, (v, vb, s0, s1, row) => {
+        for (let u = s0 - (row % 2 ? SHEET.l / 2 : 0); u < s1 - 0.01; u += SHEET.l) {
+          const ua = Math.max(s0, u),
+            ub = Math.min(s1, u + SHEET.l),
+            tm = ((v + vb) / 2) * cs;
+          if (ub - ua > 0.02) M(out, id(pl.id, "dk"), "sheathing", "roof-deck", "roof-deck", pl.id, "osb", T.osb, vb - v, on(ua, tm, -T.osb / 2), on(ub, tm, -T.osb / 2), inPlane, { area: r3((ub - ua) * (vb - v)), thickness: T.osb, col: "osb", rs: [ua, ub, v * cs, vb * cs] });
+        }
+      });
+      // drying in: drip edge along the eave; underlayment strips from the eave up, each lapping the one below (the first, at
+      // the eave, is ice-and-water shield); then drip edge up the rakes, over the underlayment
+      for (const [a, b] of lengths(EL, TRIM_LEN)) M(out, id(pl.id, "de"), "drip", "eave", "dry-in", pl.id, "metal", 0.012, 0.08, on(a, 0.03 * cs, 0.006), on(b, 0.03 * cs, 0.006), inPlane, { col: "metal" });
+      rows(ROLL_W, ULAP, (v, vb, s0, s1, row) => {
+        const ice = row === 0,
+          lift = 0.003 + row * 0.0006;
+        M(out, pl.id + ".ul" + row, "membrane", ice ? "ice-water" : "underlayment", "dry-in", pl.id, ice ? "icewater" : "underlayment", 0.002, s1 - s0, on((s0 + s1) / 2, v * cs, lift), on((s0 + s1) / 2, vb * cs, lift), along, { area: r3((s1 - s0) * (vb - v)), thickness: 0.001, col: ice ? "icewater" : "felt", row, course: 1, roll: 1, out: nS, rs: [s0, s1, v * cs, vb * cs] });
+      });
+      if (rect && pl.run)
+        for (const s of [0.03, EL - 0.03]) for (const [a, b] of lengths(slope, TRIM_LEN)) M(out, id(pl.id, "dr"), "rake", "rake", "dry-in", pl.id, "metal", 0.012, 0.08, on(s, a * cs, 0.012), on(s, b * cs, 0.012), along, { col: "metal" });
+      // the covering, from the eave up
+      const base = 0.014 + cv.t / 2;
+      if (cv.how === "course") {
+        // a starter strip at the eave, then course over course; each course's joints fall half a bundle from the ones below
+        const bands = [];
+        if (cv.starter) bands.push([0, Math.min(slope, 0.25), "starter"]);
+        for (let v = 0; v < slope - 0.02; v += cv.h) bands.push([v, Math.min(slope, v + cv.h + 0.04), "course", Math.min(slope, v + cv.h)]);
+        bands.forEach(([v, vb, type, vx], row) => {
+          const tm = ((v + vb) / 2) * cs,
+            s = F.spanAt(tm),
+            lift = base + row * 0.0015 - (type === "starter" ? 0.004 : 0);
+          if (!s || s[1] - s[0] < 0.05) return;
+          let j = 0;
+          for (let u = s[0] - (row % 2 ? TRIM_LEN / 2 : 0); u < s[1] - 0.01; u += TRIM_LEN) {
+            const ua = Math.max(s[0], u),
+              ub = Math.min(s[1], u + TRIM_LEN);
+            if (ub - ua > 0.05) M(out, pl.id + ".rc" + row + "." + j++, "roofing", type, "roofing", pl.id, r.mat || "thatch", cv.t, vb - v, on(ua, tm, lift), on(ub, tm, lift), inPlane, { area: r3((ub - ua) * ((vx || vb) - v)), thickness: 0.001, col: cv.col, row, course: 1, rs: [ua, ub, v * cs, vb * cs] });
+          }
+        });
+      } else if (cv.how === "panel") {
+        // standing seam (or corrugated sheets): panels side by side along the eave, each running eave to ridge
+        const np = Math.max(1, Math.round(EL / cv.w)),
+          w = EL / np;
+        for (let i = 0; i < np; i++) {
+          const sm = (i + 0.5) * w,
+            q = F.reachAt(sm);
+          if (!q || q[1] - q[0] < 0.1) continue;
+          M(out, pl.id + ".pn" + i, "roofing", "panel", "roofing", pl.id, r.mat || "steel", cv.t, w - 0.006, on(sm, q[0], base), on(sm, q[1], base), along, { area: r3((w * (q[1] - q[0])) / cs), thickness: 0.001, col: cv.col, rs: [i * w, (i + 1) * w, q[0], q[1]] });
+        }
+      } else {
+        // a membrane (or sedum mats) rolled out along the eave, each roll lapping the one below
+        rows(cv.h, 0.08, (v, vb, s0, s1, row) => {
+          M(out, pl.id + ".rc" + row, "roofing", "roll", "roofing", pl.id, r.mat || "membrane", cv.t, s1 - s0, on((s0 + s1) / 2, v * cs, base + row * 0.001), on((s0 + s1) / 2, vb * cs, base + row * 0.001), along, { area: r3((s1 - s0) * (vb - v)), thickness: 0.001, col: cv.col, row, course: 1, roll: 1, out: nS, rs: [s0, s1, v * cs, vb * cs] });
+        });
+      }
+      // last, the caps: a single slope's top edge, or a hip
+      if (capped && pl.run && rect && !(r.ridges || []).length)
+        for (const [a, b] of lengths(EL, TRIM_LEN)) M(out, id(pl.id, "cp"), "ridgecap", "top", "roofing", pl.id, r.mat || "thatch", 0.03, 0.2, on(a, F.top - 0.1 * cs, base + 0.03), on(b, F.top - 0.1 * cs, base + 0.03), inPlane, { col: cv.col });
+      if (capped && pl.run && !rect && pts.length >= 3) {
+        const h0 = on(F.st[1][0], F.st[1][1], base + 0.03),
+          h1 = on(F.st[2][0], F.st[2][1], base + 0.03),
+          HL = hyp(h1[0] - h0[0], h1[1] - h0[1], h1[2] - h0[2]),
+          hz = hyp(h1[0] - h0[0], h1[2] - h0[2]) || 1,
+          hn = [-(h1[2] - h0[2]) / hz, 0, (h1[0] - h0[0]) / hz];
+        for (const [a, b] of lengths(HL, TRIM_LEN)) M(out, id(pl.id, "cp"), "ridgecap", "hip", "roofing", pl.id, r.mat || "thatch", 0.035, 0.28, h0.map((v, i) => v + ((h1[i] - v) * a) / HL), h0.map((v, i) => v + ((h1[i] - v) * b) / HL), hn, { col: cv.col });
+      }
+      void area;
       if (spec.ins)
         for (let q = 0; q + 1 < lens.length; q++) {
           const g = lens[q + 1][0] - lens[q][0] - RB,
@@ -489,6 +613,28 @@
         }
       if (spec.lining) M(out, pl.id + ".ln", "lining", "ceiling", "lining", pl.id, spec.lining === "gypsum" ? "gypsum_board" : "timber", T.lining, slope, on(0, 0, -RD), on(EL, 0, -RD), nS, { area: r3(area), thickness: T.lining, draw: 0 });
     }
+    // the ridge cap goes on last, over the top courses of both slopes
+    if (capped)
+      for (const rd of r.ridges || []) {
+        const RL = hyp(rd.b[0] - rd.a[0], rd.b[1] - rd.a[1]) || 1,
+          ux = (rd.b[0] - rd.a[0]) / RL,
+          uz = (rd.b[1] - rd.a[1]) / RL,
+          pt = (t) => [rd.a[0] + ux * t, rd.y + 0.035 + coveringOf(r.mat).t, rd.a[1] + uz * t];
+        for (const [a, b] of lengths(RL, TRIM_LEN)) M(out, id(r.id, "cap"), "ridgecap", "ridge", "roofing", r.planes[0].id, r.mat || "thatch", 0.04, 0.34, pt(a), pt(b), [-uz, 0, ux], { col: cv.col });
+      }
+    // gutters along the eaves, falling about 5 mm a metre toward a downspout that runs down to the ground
+    (r.gutters || []).forEach((gt, gi) => {
+      const L = hyp(gt.b[0] - gt.a[0], gt.b[1] - gt.a[1]);
+      if (!(L > 0.3)) return;
+      const gid = r.id + ".gt" + gi,
+        d = gt.down || gt.b,
+        toB = hyp(d[0] - gt.b[0], d[1] - gt.b[1]) <= hyp(d[0] - gt.a[0], d[1] - gt.a[1]),
+        P = (u) => [gt.a[0] + ((gt.b[0] - gt.a[0]) * u) / L, gt.y - 0.005 * (toB ? u : L - u), gt.a[1] + ((gt.b[1] - gt.a[1]) * u) / L];
+      for (const [a, b] of lengths(L, TRIM_LEN)) M(out, id(gid, "g"), "gutter", "gutter", "gutters", gid, "aluminium", 0.11, 0.1, P(a), P(b), UP, { col: "gutter" });
+      const gy = r.groundY ? r.groundY(d[0], d[1]) : -0.45,
+        ylo = gt.y - 0.005 * L - 0.06;
+      if (ylo - gy > 0.3) M(out, gid + ".ds", "downspout", "downspout", "gutters", gid, "aluminium", 0.07, 0.07, [d[0], ylo, d[1]], [d[0], gy + 0.08, d[1]], [1, 0, 0], { col: "gutter" });
+    });
     // ties across the building at the top of the walls stop the rafters pushing the walls apart
     for (const t of r.ties || []) M(out, id(r.id, "cj"), "joist", "ceiling", "roof-frame", r.planes[0].id, "timber", 0.038, 0.14, [t.a[0], t.y + 0.07, t.a[1]], [t.b[0], t.y + 0.07, t.b[1]], UP, { roof: r.id });
     for (const g of r.infills || []) {
@@ -539,7 +685,7 @@
     return null;
   };
   const INS_ITEM = { fibreglass_batt: "ins_fibreglass_89", mineral_wool: "ins_mineral_89", sheep_wool: "ins_wool_89", cellulose: "ins_cellulose_140" };
-  const ROOF_ITEM = { thatch: "roof_thatch", slate: "roof_slate", redslate: "roof_slate", tile: "roof_clay", shingle: "roof_cedar", copper: "roof_steel", steel: "roof_steel", asphalt: "roof_asphalt" };
+  const ROOF_ITEM = { thatch: "roof_thatch", slate: "roof_slate", redslate: "roof_slate", tile: "roof_clay", shingle: "roof_cedar", copper: "roof_steel", steel: "roof_steel", asphalt: "roof_asphalt", seam: "roof_steel", corrugated: "roof_corrugated", membrane: "roof_epdm", green: "roof_green" };
   const FLOOR_ITEM = { planks: ["board_pine_1x6", "m"], dark: ["board_oak_1x6", "m"], flags: ["flagstone_40", "m2"], cobble: ["flagstone_40", "m2"] };
   // what a member is bought as: [key, itemId, unit, quantity, label, why]
   function buyAs(m) {
@@ -561,6 +707,11 @@
     if (k === "pier" || k === "stemwall" || k === "slab" || (k === "footing" && m.material === "concrete")) return ["concrete", "concrete_mix", "kg", (m.volume || 0) * 2400 * 0.9, "Concrete mix", "Poured for the foundation: it spreads the weight of the building onto firm ground."];
     if (k === "footing") return ["gravel", "gravel", "m3", m.volume || 0, "Gravel", "A firm, free-draining bed under the foundation so it does not settle or sit in water."];
     if (k === "sheathing") return t === "subfloor" ? ["sub", "osb_18", "sheet", m.area, "Subfloor sheets", "Sheets across the joists. They give you a deck to stand and build on."] : t === "roof-deck" ? ["deck", "osb_11", "sheet", m.area, "Roof sheets", "Sheets on the rafters. They make the roof one stiff surface for the roofing."] : ["wallsh", "osb_11", "sheet", m.area, "Wall sheathing", "Sheets nailed to the outside of the studs. They stop the frame leaning over in wind."];
+    if (k === "drip" || k === "rake") return ["drip", "drip_edge", "m", m.length, "Drip edge", "A bent metal strip along the roof edges: water runs off it clear of the fascia, never back under the roof."];
+    if (k === "ridgecap") return ["ridgecap", "ridge_cap", "m", m.length, "Ridge cap", "Caps the top of the roof, lapped over the last courses. The last piece on: after it the roof is dried in."];
+    if (k === "gutter") return ["gutter", "gutter_alu", "m", m.length, "Gutters", "Catch the rain off the eaves and carry it to the downspout, away from the foundation."];
+    if (k === "downspout") return ["downspout", "downspout_alu", "m", m.length, "Downspouts", "Carry the water from the gutter down to the ground, a drain or a rain barrel."];
+    if (k === "membrane" && t === "ice-water") return ["icewater", "roof_ice_water", "m2", m.area, "Ice and water shield", "A sticky rubber strip along the eaves, where ice dams and driven rain would get under the roofing."];
     if (k === "membrane") return t === "housewrap" ? ["wrap", "housewrap", "m2", m.area, "Housewrap", "Keeps wind and rain out of the wall while letting damp escape."] : ["felt", null, "m2", m.area, "Roof underlayment", "A waterproof layer under the roofing, the second line of defence against leaks.", "roofing underlayment by the square metre"];
     if (k === "cladding" && t === "batten") return ["batten" + m.material, "board_pine_1x6", "m", m.area / 0.14, "Battens", "Narrow strips nailed over each joint between boards. They keep the rain out of the gaps."];
     if (k === "cladding") return ["clad" + m.material, m.material === "dark" ? "board_oak_1x6" : m.material === "log" ? "board_cedar_1x6" : "board_pine_1x6", "m", m.area / 0.14, "Siding boards", "The boards on the outside. They protect the wall from weather and sun."];
@@ -642,5 +793,5 @@
     return out.sort((p, q) => STAGES.indexOf(p.stage) - STAGES.indexOf(q.stage) || (p.label < q.label ? -1 : 1));
   }
 
-  globalThis.__framing = { packSheets, packSticks, STOCK, MAX_RUN, splice, STAGES, STAGE_NAME, LUMBER, SHEET, FOUNDATIONS, generate, materialsList, floorMembers, wallMembers, roofMembers, FLOOR_T };
+  globalThis.__framing = { planeFrame, COVERING, coveringOf, ROOF_COLORS, packSheets, packSticks, STOCK, MAX_RUN, splice, STAGES, STAGE_NAME, LUMBER, SHEET, FOUNDATIONS, generate, materialsList, floorMembers, wallMembers, roofMembers, FLOOR_T };
 })();
