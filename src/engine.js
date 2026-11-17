@@ -3877,7 +3877,8 @@ function updatePlayer(dt) {
     const k = clamp(1 - P.wade * 0.9, 0.4, 1); vx *= k; vz *= k; sp *= k;
     const lean = 0.35 * Math.min(1, P.wade * 1.5) * 7 * dt;
     P.kvx += sw.vx * lean; P.kvz += sw.vz * lean;
-    riverLive.push(0, P.x, P.z, 0.35, vx, vz, 1);
+    riverLive.obstacle(0, P.x, P.z, 0.2);
+    if (sp > 0.5) riverLive.push(0, P.x, P.z, 0.3, vx * 0.3, vz * 0.3, 0.15);     // a little stirring as the legs move
     // a splash at each step (alternate feet, a pace apart), rings spreading from the legs when standing still
     P.splashT = (P.splashT || 0) - dt;
     if (P.splashT <= 0) {

@@ -44,6 +44,7 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
   let bedA = null, feedA = null, bedTex = null, feedTex = null, st = null, fx = null;
   const pushers = Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, 0, 0)), pushV = Array.from({ length: 4 }, () => new THREE.Vector2());
   const pours = Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, 0, 0));
+  const obstU = { value: [new THREE.Vector4(), new THREE.Vector4()] }, orgU = { value: new THREE.Vector2() };
   const shared = river.uniforms;
 
   // ---- simulation passes
@@ -53,10 +54,18 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
   const vs = 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }';
   const common = /* glsl */ `
     precision highp float; precision highp sampler2D;
-    uniform sampler2D S, F, B, T; uniform int n; uniform float dt, l, wetD, wetV;
+    uniform sampler2D S, F, B, T; uniform int n; uniform float dt, l, wetD, wetV; uniform vec2 orgC; uniform vec4 obst[2];
     ivec2 cl(ivec2 p) { return clamp(p, ivec2(0), ivec2(n - 1)); }
     bool inside(ivec2 p) { return p.x >= 0 && p.y >= 0 && p.x < n && p.y < n; }
-    float bed(ivec2 p) { return texelFetch(B, cl(p), 0).r; }
+    // the ground, and whatever stands in the water (legs wading): the water has to go round it, piling up a little in
+    // front and leaving a hollow and a wake behind, as it does round a real leg
+    float bed(ivec2 p) {
+      p = cl(p);
+      float b = texelFetch(B, p, 0).r;
+      vec2 w = orgC + (vec2(p) + 0.5) * l;
+      for (int i = 0; i < 2; i++) if (obst[i].z > 0.0 && distance(w, obst[i].xy) < obst[i].z) b = max(b, obst[i].w);
+      return b;
+    }
     // the baked water here today: depth over the bed, velocity
     vec3 feed(ivec2 p) {
       vec4 t = texelFetch(T, cl(p), 0);
@@ -66,7 +75,7 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
     }`;
   const mat = (frag, extra = {}) => new THREE.ShaderMaterial({
     vertexShader: vs, fragmentShader: common + frag, depthTest: false, depthWrite: false, toneMapped: false,
-    uniforms: { S: { value: null }, F: { value: null }, B: { value: null }, T: { value: null }, n: { value: SIZE }, dt: { value: STEP_DT }, l: { value: CELL }, wetD: shared.uWetDepth, wetV: shared.uWetSpeed, ...extra },
+    uniforms: { S: { value: null }, F: { value: null }, B: { value: null }, T: { value: null }, n: { value: SIZE }, dt: { value: STEP_DT }, l: { value: CELL }, wetD: shared.uWetDepth, wetV: shared.uWetSpeed, orgC: orgU, obst: obstU, ...extra },
   });
   // 1. flux through the four pipes (x: to -x, y: to +x, z: to -z, w: to +z)
   const fluxMat = mat(/* glsl */ `
@@ -333,7 +342,7 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
     const prevRT = renderer.getRenderTarget(), prevXr = renderer.xr.enabled, prevAuto = renderer.autoClear;
     renderer.xr.enabled = false; renderer.autoClear = false;
     if (!built) start(px, pz); else moveTo(px, pz);
-    stateMat.uniforms.org.value.set(win.ox, win.oz);
+    stateMat.uniforms.org.value.set(win.ox, win.oz); orgU.value.set(win.ox, win.oz);
     acc = Math.min(acc + (running ? dt : 0), STEP_DT * MAX_STEPS);
     while (acc >= STEP_DT) {
       acc -= STEP_DT;
@@ -345,6 +354,7 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
     renderer.setRenderTarget(prevRT); renderer.xr.enabled = prevXr; renderer.autoClear = prevAuto;
     for (const p of pushers) p.z = 0;
     for (const p of pours) p.z = 0;
+    for (const o of obstU.value) o.z = 0;
     drawU.uState.value = st[0].texture; drawU.uBed.value = bedTex; drawU.uN.value = SIZE; drawU.uOrg.value.set(win.ox, win.oz);
     const w = SIZE * CELL;
     shared.uWin.value.set(win.ox, win.oz, win.ox + w, win.oz + w);
@@ -387,6 +397,8 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
     available: ok, update, waterAt, chunkChanged, setMode,
     // something moving through the water at (x, z): radius r (m), velocity (vx, vz), strength 0-1
     push(slot, x, z, r, vx, vz, k = 1) { if (slot < 4) { pushers[slot].set(x, z, r, k); pushV[slot].set(vx, vz); } },
+    // something standing in the water at (x, z), radius r, this frame: the water flows round it
+    obstacle(slot, x, z, r) { if (slot < 2) obstU.value[slot].set(x, z, r, heightAt(x, z) + 1.5); },
     // water poured in at (x, z) over radius r, rate m3/s, for this frame
     pour(slot, x, z, r, rate) { if (slot < 4) pours[slot].set(x, z, r, rate); },
     get on() { return on; }, get window() { return { ...win, size: SIZE * CELL }; },
