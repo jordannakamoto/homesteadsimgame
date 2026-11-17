@@ -1,15 +1,16 @@
 // Waterfalls: where a stream drops over a rock step (rivers-gen.js fallsIn), a curtain of falling water from the lip
-// to the pool, spray thrown up where it lands, and the plunge pool stirred white (in the live water, a push at the
-// foot of each fall near the player).
+// to the pool, spray and mist where it lands (water-fx.js), rings spreading on the pool, and the pool churned white
+// (in the live water, a push at the foot of each fall near the player).
 //
-// The curtain is a sheet that follows the path water actually takes off a lip: it leaves at the speed it crossed
-// the lip and falls under gravity (a parabola), narrowing a little as it accelerates and then spreading as it breaks
-// up. Its look, from photographs and from how painters handle small falls:
-//  - a smooth, glassy tongue at the lip, the colour of the water and the rock behind it showing through
-//  - breaking up as it falls: streaks of white water racing down it, with gaps between them
-//  - white and opaque at the foot, where it is mostly air
-// Drawn opaque with an ordered dither instead of blending (no sorting against the water and the spray), on the
-// water's own texel grid in the sheet's own coordinates, so it stays pixel-crisp like the rest.
+// The curtain follows the path water takes off a lip: it leaves at the speed it crossed the lip and falls under
+// gravity (a parabola), narrowing a little as it speeds up, then spreading as it breaks up. Shaded the way game VFX
+// artists build real-time falls (panning noise layers on a mesh, eroded by a rising threshold, with soft particles
+// over it), against how small falls look in photographs:
+//  - a smooth, glassy tongue at the lip: dark water with the sky and banks in it, the rock showing through
+//  - breaking up as it falls: white strands racing down, pulled apart by a slower distortion layer so they waver,
+//    the sheet eroding into strands and gaps (the erosion threshold rises with the fall)
+//  - white and soft at the foot, where it is mostly air, hidden in mist and spray
+// Blended, soft at its sides, lit by the sun and the sky.
 import * as THREE from 'three';
 
 const G = 9.81;
@@ -17,9 +18,9 @@ const G = 9.81;
 export function createFalls({ river, CS }) {
   const su = river.uniforms;
   const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTex: { value: null } }]);
-  for (const k of ['uTime', 'uTex', 'uSunDir', 'uSunCol', 'uAmb', 'uTPM', 'uTurbid']) uniforms[k] = su[k];
+  for (const k of ['uTime', 'uTex', 'uSunDir', 'uSunCol', 'uAmb', 'uSky', 'uZenith', 'uTurbid', 'uFoamTex']) uniforms[k] = su[k];
   const material = new THREE.ShaderMaterial({
-    uniforms, fog: true, side: THREE.DoubleSide,
+    uniforms, fog: true, side: THREE.DoubleSide, transparent: true, depthWrite: false,
     vertexShader: /* glsl */ `
       attribute vec3 aSheet;              // across (m from the middle), down the sheet (m from the lip), how far down (0-1)
       attribute float aHalf;              // half the sheet's width here (m)
@@ -34,30 +35,38 @@ export function createFalls({ river, CS }) {
         #include <fog_vertex>
       }`,
     fragmentShader: /* glsl */ `
-      uniform float uTime, uTPM, uTurbid; uniform sampler2D uTex; uniform vec3 uSunDir, uSunCol, uAmb;
+      uniform float uTime, uTurbid; uniform sampler2D uTex, uFoamTex; uniform vec3 uSunDir, uSunCol, uAmb, uSky, uZenith;
       varying vec3 vSheet; varying float vHalf; varying vec3 vWorld;
       #include <common>
       #include <fog_pars_fragment>
-      const mat4 BAYER = mat4(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
-      float bayer4(vec2 c) { ivec2 i = ivec2(mod(c, 4.0)); return (BAYER[i.y][i.x] + 0.5) / 16.0; }
       void main() {
-        vec2 cell = floor(vSheet.xy * uTPM), q = (cell + 0.5) / uTPM;
-        float fall = vSheet.z;
-        // streaks racing down: noise stretched along the fall, moving at the speed the water has reached
-        float speed = 2.0 + 6.0 * fall;
-        float s1 = texture2D(uTex, vec2(q.x * 0.55, q.y * 0.07 - uTime * speed * 0.07)).b;
-        float s2 = texture2D(uTex, vec2(q.x * 1.3 + 0.37, q.y * 0.11 - uTime * speed * 0.11)).b;
-        float white = clamp(smoothstep(0.42, 0.7, s1 * 0.6 + s2 * 0.55) * smoothstep(0.0, 0.35, fall) + smoothstep(0.6, 1.0, fall), 0.0, 1.0);
-        // how solid the sheet is: whole at the lip, breaking into strands lower down; ragged at the sides
-        float edge = smoothstep(0.0, 0.25 + 0.3 * fall, vHalf - abs(q.x) + (texture2D(uTex, vec2(q.y * 0.2 - uTime * 0.5, q.x * 0.3)).b - 0.5) * 0.4);
-        float body = mix(0.95, 0.35 + 0.65 * smoothstep(0.35, 0.65, s1), smoothstep(0.1, 0.55, fall)) + white * 0.5;
-        if (bayer4(cell) >= clamp(body, 0.0, 1.0) * edge) discard;
+        vec2 uv = vSheet.xy; float fall = vSheet.z;
+        float speed = 1.6 + 5.5 * sqrt(fall);
+        // a slow distortion layer, so the strands waver
+        vec2 wob = (texture2D(uTex, vec2(uv.x * 0.35, uv.y * 0.06 - uTime * 0.35)).rg - 0.5) * vec2(0.35, 0.6);
+        // strands: the foam lace stretched far down the fall and panned at the water's speed, two scales
+        float s1 = texture2D(uFoamTex, vec2(uv.x * 0.9 + wob.x, (uv.y + wob.y) * 0.09 - uTime * speed * 0.09)).r;
+        float s2 = texture2D(uFoamTex, vec2(uv.x * 2.1 + 0.31 + wob.x * 1.5, uv.y * 0.18 - uTime * speed * 0.2)).g;
+        float n = texture2D(uFoamTex, vec2(uv.x * 0.45 + wob.x * 0.5, uv.y * 0.05 - uTime * speed * 0.05)).b;
+        float strands = clamp(s1 * 0.75 + s2 * 0.6, 0.0, 1.0);
+        // the sheet erodes as it falls: a threshold that rises with the fall cuts it into strands and gaps
+        float erode = 0.55 * smoothstep(0.08, 0.9, fall);
+        float body = smoothstep(erode, erode + 0.3, n * 0.7 + strands * 0.45);
+        float white = clamp(smoothstep(0.25, 0.85, strands) * smoothstep(0.0, 0.3, fall) + smoothstep(0.55, 1.0, fall) * (0.5 + 0.5 * n), 0.0, 1.0);
+        // soft, ragged sides
+        float side = vHalf - abs(uv.x) + (texture2D(uTex, vec2(uv.y * 0.15 - uTime * 0.6, uv.x * 0.2)).b - 0.5) * (0.25 + 0.4 * fall);
+        float edge = smoothstep(0.0, 0.18 + 0.35 * fall, side);
+        // light: glassy water at the top (dark, with the sky in it), lit foam lower down
+        vec3 V = normalize(cameraPosition - vWorld);
         vec3 lightIn = uAmb + uSunCol * 0.6 * (0.6 + 0.4 * max(uSunDir.y, 0.0));
-        vec3 glassy = mix(vec3(0.07, 0.09, 0.06), vec3(0.11, 0.09, 0.06), clamp(uTurbid * 0.35, 0.0, 1.0)) * lightIn * 1.6;
-        vec3 foam = lightIn * vec3(0.9, 0.94, 0.94);
-        vec3 c = mix(glassy, foam, clamp(white + 0.25 * fall, 0.0, 1.0));
-        c *= 0.85 + 0.3 * step(0.6, s2);                      // a little light and shade in the strands
-        gl_FragColor = vec4(c, 1.0);
+        vec3 glass = mix(vec3(0.05, 0.07, 0.045), vec3(0.1, 0.085, 0.055), clamp(uTurbid * 0.35, 0.0, 1.0)) * lightIn * 1.4;
+        glass = mix(glass, mix(uSky, uZenith, 0.4) * 0.55, 0.25 + 0.35 * (1.0 - abs(V.y)));
+        vec3 foam = lightIn * (0.82 + 0.28 * s2) * vec3(0.93, 0.96, 0.96);
+        vec3 c = mix(glass, foam, white);
+        float a = edge * mix(mix(0.82, 0.55, smoothstep(0.0, 0.5, fall)) * body, 0.95, white * body);
+        a *= 1.0 - smoothstep(0.9, 1.0, fall) * 0.6;            // melts into the pool and the mist
+        if (a < 0.01) discard;
+        gl_FragColor = vec4(c, a);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
         #include <fog_fragment>
@@ -117,22 +126,34 @@ export function createFalls({ river, CS }) {
     if (ch.fallMesh) { ch.group.remove(ch.fallMesh); ch.fallMesh.geometry.dispose(); ch.fallMesh = null; }
     ch.falls = null; withFalls.delete(ch);
   }
-  // spray where falls near the player land, and the pool stirred in the live water
-  let sprayT = 0;
-  function update(dt, px, pz, { burst, live, wet }) {
-    sprayT -= dt;
-    const emit = sprayT <= 0;
-    if (emit) sprayT = 0.09;
+  // spray, mist and rings where falls near the player land, and the pool stirred in the live water
+  let sprayT = 0, mistT = 0;
+  function update(dt, px, pz, { fx, live, wet }) {
+    sprayT -= dt; mistT -= dt;
+    const emit = sprayT <= 0, emitMist = mistT <= 0;
+    if (emit) sprayT = 0.05;
+    if (emitMist) mistT = 0.18;
     let slot = 1;
     for (const ch of withFalls) for (const f of ch.falls) {
       const h = f.top - f.bottom, d = Math.hypot(f.x - px, f.z - pz);
-      if (d > 60) continue;
+      if (d > 70) continue;
       const v0 = 0.8 + 1.2 * Math.min(1, f.D * 2.5), T = Math.sqrt((2 * h) / G), reach = 0.05 + v0 * T;
-      const bx = f.x + f.dx * reach, bz = f.z + f.dz * reach;
-      if (emit && d < 45) {
-        const n = Math.max(1, Math.round((1 + h) * wet));
-        burst(bx, f.bottom + 0.05, bz, n, 0xeef3f1, 0.6 + 0.25 * f.w, 2.2 + 0.9 * h, 0.06, 0.55);
-        if (Math.random() < 0.35) burst(bx, f.bottom + 0.3, bz, 1, 0xdfe7e8, 0.35 + 0.2 * f.w, 1.1, 0.09, 0.9);
+      const bx = f.x + f.dx * reach, bz = f.z + f.dz * reach, hw = f.w * 0.42;
+      if (d < 55) {
+        const lx = -f.dz, lz = f.dx;
+        if (emit) {
+          // droplets thrown up and out where the sheet hits, along its whole width
+          const n = Math.max(1, Math.round((1.5 + h) * wet));
+          for (let i = 0; i < n; i++) {
+            const u = (Math.random() * 2 - 1) * hw;
+            fx.spray(bx + lx * u, f.bottom + 0.02, bz + lz * u, 1, 0.5 + 0.25 * h, 1.6 + 0.8 * h, 0.04, 0.9, [f.dx * 0.6, f.dz * 0.6]);
+          }
+        }
+        if (emitMist) {
+          const u = (Math.random() * 2 - 1) * hw;
+          fx.mist(bx + lx * u, f.bottom + 0.15, bz + lz * u, 1, 0.4 + 0.15 * h, 0.5 + 0.3 * h, 2.2 + h * 0.6, 0.1 + 0.04 * Math.min(2, h));
+          fx.ripple(bx + lx * u * 0.5 + f.dx * (0.3 + Math.random()), bz + lz * u * 0.5 + f.dz * (0.3 + Math.random()), 0.6);
+        }
       }
       // the falling water drives the pool: pushes it downstream and churns it white
       if (live && slot < 3) live.push(slot++, bx, bz, Math.min(1.6, f.w * 0.45), f.dx * (1.2 + h * 0.6), f.dz * (1.2 + h * 0.6), 0.6);

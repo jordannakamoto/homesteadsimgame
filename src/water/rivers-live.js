@@ -377,5 +377,6 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
     // water poured in at (x, z) over radius r, rate m3/s, for this frame
     pour(slot, x, z, r, rate) { if (slot < 4) pours[slot].set(x, z, r, rate); },
     get on() { return on; }, get window() { return { ...win, size: SIZE * CELL }; },
+    uniforms: drawU,
   };
 }

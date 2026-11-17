@@ -6,6 +6,7 @@ import { createRivers } from './water/rivers-gen.js';
 import { createRiverWater } from './water/rivers-render.js';
 import { createRiverLive } from './water/rivers-live.js';
 import { createFalls } from './water/falls-render.js';
+import { createWaterFx } from './water/water-fx.js';
 import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -40,7 +41,7 @@ THREE.ShaderChunk.opaque_fragment += '\nif ( isnan( gl_FragColor.r + gl_FragColo
 // default), 'fsr' (AMD FSR 1: made for smooth, photoreal, anti-aliased images; on pixel textures it smears texel
 // edges into brush strokes) or 'sharp' (area-weighted nearest: every render pixel stays a crisp block, only the
 // seams between blocks are blended, the usual way to scale pixel art by uneven amounts).
-const LOOK = { ao: false, hudBlur: true, lightBloom: false, compactHdr: false, grassShadows: true, tuftShadow: true, drawOrder: true, farGrass: 'normal', rootShade: 1, grassClumps: true, grassBacklight: true, skyShade: true, sunFog: true, grassSheen: true, farBlend: true, crownShade: true, camFx: false, upscaler: 'bicubic', toneMap: 'aces', taa: false, edgeBelts: true, riverWater: 'live', waterTexel: 'fine' };
+const LOOK = { ao: false, hudBlur: true, lightBloom: false, compactHdr: false, grassShadows: true, tuftShadow: true, drawOrder: true, farGrass: 'normal', rootShade: 1, grassClumps: true, grassBacklight: true, skyShade: true, sunFog: true, grassSheen: true, farBlend: true, crownShade: true, camFx: false, upscaler: 'bicubic', toneMap: 'aces', taa: false, edgeBelts: true, riverWater: 'live', waterTexel: 'smooth' };
 const LOOK_KEY = 'homestead:look';
 try { const s = JSON.parse(localStorage.getItem(LOOK_KEY) || 'null'); if (s) for (const k in LOOK) if (typeof s[k] === typeof LOOK[k]) LOOK[k] = s[k]; } catch (e) { /* no storage */ }
 const saveLook = () => { try { localStorage.setItem(LOOK_KEY, JSON.stringify(LOOK)); } catch (e) { /* no storage */ } };
@@ -969,13 +970,40 @@ function addWind(mat, y0, yr, amp, fade, upNormal, grass) {
   };
 }
 const terrainMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: pixelTex });
+// Under the live stream water (src/water/rivers-live.js) the ground is a stream bed seen close up: rounded pebbles
+// and cobbles (the foam texture's cells, at stone size) in the ground's own colours softened, dark with wet, instead
+// of the ground's pixel texture, which reads as camouflage through clear water. Close up is where you fish and
+// gather, so it is drawn smooth and real rather than pixelled.
+const BED_PARS_F = `
+uniform highp sampler2D uLiveState; uniform sampler2D uFoamTex; uniform vec2 uLiveOrg; uniform float uLiveCell; uniform int uLiveN; uniform vec4 uWin;
+varying vec3 vWPosT;`;
+const BED_F = `#include <map_fragment>
+{
+  vec2 lc = (vWPosT.xz - uLiveOrg) / uLiveCell;
+  if (uWin.z > uWin.x && lc.x > 1.0 && lc.y > 1.0 && lc.x < float(uLiveN) - 1.0 && lc.y < float(uLiveN) - 1.0) {
+    vec2 a = lc - 0.5, f = fract(a); ivec2 i = ivec2(floor(a));
+    float dep = mix(mix(texelFetch(uLiveState, i, 0).r, texelFetch(uLiveState, i + ivec2(1, 0), 0).r, f.x), mix(texelFetch(uLiveState, i + ivec2(0, 1), 0).r, texelFetch(uLiveState, i + ivec2(1, 1), 0).r, f.x), f.y);
+    float uw = smoothstep(0.0, 0.05, dep);
+    if (uw > 0.0) {
+      vec2 sp = vWPosT.xz * 1.3;
+      float wall = texture2D(uFoamTex, sp).r, wall2 = texture2D(uFoamTex, sp * 0.45 + 0.31).r, n = texture2D(uFoamTex, vWPosT.xz * 0.21).b, tint = texture2D(uFoamTex, sp * 0.5 + 0.7).b;
+      float stone = (1.0 - smoothstep(0.3, 0.75, max(wall, wall2 * 0.9)));
+      vec3 soft = texture2D(map, vMapUv, 5.0).rgb;
+      vec3 peb = soft * mix(vec3(0.62, 0.6, 0.55), vec3(1.08, 1.04, 0.95) * (0.8 + 0.45 * tint), stone) * (0.85 + 0.3 * n);
+      diffuseColor.rgb = mix(diffuseColor.rgb, diffuse * peb * 0.82, uw);
+    }
+  }
+}`;
 terrainMat.onBeforeCompile = (sh) => {
   sh.uniforms.uSkyMap = U.skyMap; sh.uniforms.uSkyK = U.skyK;
-  sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>' + SKY_PARS_V)
-    .replace('#include <project_vertex>', '#include <project_vertex>' + SKY_V('(modelMatrix * vec4(transformed, 1.0)).xz'));
-  sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>' + SKY_PARS_F).replace('#include <aomap_fragment>', SKY_F);
+  const lu = riverLive.uniforms, ru = riverWater.uniforms;
+  sh.uniforms.uLiveState = lu.uState; sh.uniforms.uLiveOrg = lu.uOrg; sh.uniforms.uLiveCell = lu.uCell; sh.uniforms.uLiveN = lu.uN; sh.uniforms.uWin = ru.uWin; sh.uniforms.uFoamTex = ru.uFoamTex;
+  sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>' + SKY_PARS_V + '\nvarying vec3 vWPosT;')
+    .replace('#include <project_vertex>', '#include <project_vertex>' + SKY_V('(modelMatrix * vec4(transformed, 1.0)).xz') + '\nvWPosT = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+  sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>' + SKY_PARS_F + BED_PARS_F).replace('#include <aomap_fragment>', SKY_F)
+    .replace('#include <map_fragment>', BED_F);
 };
-terrainMat.customProgramCacheKey = () => 'terrain-sky1';
+terrainMat.customProgramCacheKey = () => 'terrain-sky2-bed';
 const solidMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: pixelTex });
 
 // ============================================================ geometry library
@@ -2606,7 +2634,10 @@ const riverWater = createRiverWater({ U, sea, CS, P, SEA });
 const riverLive = createRiverLive({ renderer, river: riverWater, scene, CS, heightAt, chunkAt: (x, z) => world.chunks.get(ckey(Math.floor(x / CS), Math.floor(z / CS))) });
 riverLive.setMode(LOOK.riverWater === 'baked' ? 'off' : LOOK.riverWater);
 const riverFalls = createFalls({ river: riverWater, CS });
+// spray, mist, splashes and rings on the water (src/water/water-fx.js)
+const waterFx = createWaterFx({ scene, river: riverWater });
 riverWater.uniforms.uTPM.value = LOOK.waterTexel === 'ground' ? 6.4 : 12.8;
+riverWater.uniforms.uSnap.value = LOOK.waterTexel === 'smooth' ? 0 : 1;
 // The stream water at a point: the live simulation's where it runs, else the baked water of the day.
 // { depth (m), vx, vz (m/s), foam } or null where there is no stream.
 function streamWaterAt(x, z) {
@@ -2623,13 +2654,25 @@ function streamWaterAt(x, z) {
 // Rocks of the streams (rivers-gen.js rocksIn): set on the carved ground, wet and dark in the water, mossy above it.
 // Kept on the chunk as { x, z, r, y, hy } (centre height, top above it) for the live water to flow round.
 const _rc = new THREE.Color();
+// stream-worn stones: rounded, a little flattened, lumpy at a large scale only
+const riverRockGeo = (() => {
+  const g = new THREE.IcosahedronGeometry(1, 3), pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const k = 1 + 0.12 * Math.sin(x * 2.1 + z * 1.3) * Math.cos(y * 1.7 - x) + 0.06 * Math.sin(z * 4.3 + y * 3.1);
+    pos.setXYZ(i, x * k, Math.max(y * k * 0.8, -0.3), z * k);
+  }
+  g.computeVertexNormals();
+  const a = col(0x575b5c), b = col(0x8e9393);
+  return paint(g, (c, x, y) => c.copy(a).lerp(b, smoothstep(-0.3, 0.8, y)));
+})();
 function refreshRiverRocks(ch) {
   const list = rivers ? rivers.rocksIn(ch.ox, ch.oz, ch.ox + CS, ch.oz + CS) : [];
   let mesh = ch.riverRockMesh;
   if (mesh && mesh.instanceMatrix.count < list.length) { ch.group.remove(mesh); mesh.dispose(); mesh = ch.riverRockMesh = null; }
   if (!list.length) { if (mesh) mesh.count = 0; ch.riverRocks = null; return; }
   if (!mesh) {
-    mesh = ch.riverRockMesh = new THREE.InstancedMesh(rockGeo, solidMat, list.length);
+    mesh = ch.riverRockMesh = new THREE.InstancedMesh(riverRockGeo, solidMat, list.length);
     mesh.castShadow = true; mesh.receiveShadow = true;
     ch.group.add(mesh);
   }
@@ -2658,7 +2701,9 @@ function updateStreams(dt) {
     u.uWetSpeed.value += (lk.speed - u.uWetSpeed.value) * k;
     u.uTurbid.value += (sw.turbidity - u.uTurbid.value) * k;
   }
-  riverFalls.update(dt, player.x, player.z, { burst, live: riverLive.on ? riverLive : null, wet: u.uWetSpeed.value });
+  riverFalls.update(dt, player.x, player.z, { fx: waterFx, live: riverLive.on ? riverLive : null, wet: u.uWetSpeed.value });
+  const wx = sim.state.sys.weather, wms = wx ? wx.windMs || 0 : 0, wd = wx ? wx.windDirRad || 0 : 0;
+  waterFx.update(dt, [Math.sin(wd) * wms, Math.cos(wd) * wms]);
   riverLive.update(dt, player.x, player.z, simCtl.speed > 0);
   // irrigation: garden cells under stream water (a trench dug from a brook, a flooded bed) soak it up
   irrigT += dt;
@@ -2925,7 +2970,7 @@ function setLook(key, value) {
   if (key === 'edgeBelts' && window.__nature) for (const c of world.chunks.values()) { c.litterItems = null; window.__nature.refresh(c); }
   if (key === 'taa') { applyGfx(); resize(); }
   if (key === 'riverWater') riverLive.setMode(value === 'baked' ? 'off' : value);
-  if (key === 'waterTexel') riverWater.uniforms.uTPM.value = value === 'ground' ? 6.4 : 12.8;      // MSAA off or back on, and the resolve path
+  if (key === 'waterTexel') { riverWater.uniforms.uTPM.value = value === 'ground' ? 6.4 : 12.8; riverWater.uniforms.uSnap.value = value === 'smooth' ? 0 : 1; }      // MSAA off or back on, and the resolve path
   if (key === 'toneMap') {
     renderer.toneMapping = TONE_MAPS[value] || THREE.ACESFilmicToneMapping;   // the composer's output pass follows it by itself
     if (!viaComposer()) scene.traverse((o) => { for (const m of o.material ? [].concat(o.material) : []) m.needsUpdate = true; });
@@ -2997,7 +3042,7 @@ const gfxPanel = (() => {
     up.addEventListener('change', () => { setLook('upscaler', up.value); canvas.focus(); });
     const rw = h('select', { disabled: !RIVERS_ON }, ...[['baked', 'Baked'], ['live', 'Live (64 m round you)'], ['wide', 'Live, wide (128 m)']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.riverWater === v, disabled: v !== 'baked' && !riverLive.available })));
     rw.addEventListener('change', () => { setLook('riverWater', rw.value); canvas.focus(); });
-    const wt = h('select', { disabled: !RIVERS_ON }, ...[['fine', 'Fine (2 per ground pixel)'], ['ground', 'Same as the ground']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.waterTexel === v })));
+    const wt = h('select', { disabled: !RIVERS_ON }, ...[['smooth', 'Smooth (realistic)'], ['fine', 'Pixels, fine'], ['ground', 'Pixels, as the ground']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.waterTexel === v })));
     wt.addEventListener('change', () => { setLook('waterTexel', wt.value); canvas.focus(); });
     const tm = h('select', {}, ...[['aces', 'ACES (original)'], ['agxlook', 'AgX look'], ['agx', 'AgX'], ['neutral', 'Neutral']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.toneMap === v })));
     tm.addEventListener('change', () => { setLook('toneMap', tm.value); canvas.focus(); });
@@ -3056,7 +3101,7 @@ const gfxPanel = (() => {
       chk('skyShade', 'Shade under trees and in hollows', 'Ground and grass beneath tree crowns and down in dips see less sky, so forest floors darken. Baked, no frame cost.'),
       chk('ao', 'Extra ambient occlusion', 'A second, stronger occlusion on top of the Lighting pass (Ultra full, High and Medium half resolution).'),
       h('div', { className: 'row' }, h('span', {}, 'Stream water', h('span', { className: 'hint', textContent: 'Live simulates the water round you on the graphics card: it flows round what you put in it, fills what you dig and stirs as you wade. Baked is the still, cheaper version everywhere. Beyond the live window the baked water shows.' })), rw),
-      h('div', { className: 'row' }, h('span', {}, 'Water pixels', h('span', { className: 'hint', textContent: 'How fine the pixels of the stream water are.' })), wt),
+      h('div', { className: 'row' }, h('span', {}, 'Water style', h('span', { className: 'hint', textContent: 'Smooth draws the foam, flow and ripples of the streams at full detail. The pixel styles cut them into texels like the ground.' })), wt),
       h('div', { className: 'row' }, h('span', {}, 'Upscaler', h('span', { className: 'hint', textContent: 'How a below-full-size render is enlarged. Sharp pixels keeps each pixel a crisp block. FSR 1 is made for photoreal images and smears pixel textures.' })), up),
       h('div', { className: 'row' }, h('span', {}, 'Tone mapping', h('span', { className: 'hint', textContent: 'How bright light is fitted to the screen. AgX rolls bright colours to white without ACES\'s hue shift; Neutral keeps colours as painted.' })), tm),
       h('div', { className: 'row' }, h('span', {}, 'Grass root shade', h('span', { className: 'hint', textContent: '1 is the original; lower lifts the roots, tips unchanged.' })), h('span', {}, rs, ' ', rsVal)),
@@ -3647,8 +3692,13 @@ function updatePlayer(dt) {
     const lean = 0.35 * Math.min(1, P.wade * 1.5) * 7 * dt;
     P.kvx += sw.vx * lean; P.kvz += sw.vz * lean;
     riverLive.push(0, P.x, P.z, 0.35, vx, vz, 1);
-    P.splashT = (P.splashT || 0) - dt * (sp > 0.5 ? 1 : 0.15);
-    if (P.splashT <= 0) { P.splashT = 0.16; burst(P.x, heightAt(P.x, P.z) + P.wade, P.z, sp > 0.5 ? 5 : 2, 0xdfeaea, 0.35, 1.3, 0.05, 0.4); }
+    // a splash at each step (alternate feet, a pace apart), rings spreading from the legs when standing still
+    P.splashT = (P.splashT || 0) - dt;
+    if (P.splashT <= 0) {
+      const wy = heightAt(P.x, P.z) + P.wade, side = (P.stepSide = -(P.stepSide || 1)) * 0.12;
+      if (sp > 0.5) { P.splashT = clamp(0.62 / sp, 0.12, 0.4) * 1.6; waterFx.splash(P.x + Math.cos(P.face) * side, wy, P.z - Math.sin(P.face) * side, sp * Math.min(1, P.wade * 3), vx, vz); }
+      else { P.splashT = 0.9; waterFx.ripple(P.x, P.z, 0.35); }
+    }
   }
   if (P.climbY != null) { vx = vz = 0; P.kvx = P.kvz = 0; }       // on a ladder (set by the construction add-on): it places the player
   P.x += (vx + P.kvx) * dt; P.z += (vz + P.kvz) * dt;
@@ -4162,7 +4212,7 @@ window.__game = {
   },
   saveGame, saveData, setSpeed, get speed() { return simCtl.speed; },
   enemies, spawnEnemy, arrows, fireArrow, MOVES, startMove, juice, updateHud, waveHeight, depthState, lockQuality: () => { autoDropped = true; }, world, player, cam, keys, mouse, cursor, step, render, heightAt, fellTree, applyBrush, setQuality, renderer, THREE,
-  taa, lookFlags: LOOK, get rivers() { return rivers; }, riverWater, riverLive, streamWaterAt, camera, scene, setTool, fade: addWind, fadeR: U.fadeR, burst, editGet: getDelta, editSet: setDelta, baseHeight, chunkSize: CS, treeKinds: TREE, refreshLock: lockUi, forestAt,
+  taa, lookFlags: LOOK, get rivers() { return rivers; }, riverWater, riverLive, streamWaterAt, waterFx, camera, scene, setTool, fade: addWind, fadeR: U.fadeR, burst, editGet: getDelta, editSet: setDelta, baseHeight, chunkSize: CS, treeKinds: TREE, refreshLock: lockUi, forestAt,
   light: SKY, noise: fbm, palette: PAL, quality: () => quality.level, composer: () => composer,
   graphics: { presets: GFX, get preset() { return quality.preset; }, get scale() { return quality.scale; }, get renderScale() { return renderScale(); }, setRenderScale }, bench: perf.bench,
   // Look switches from the console: __game.look.grassRootShade(0..1), __game.look.toggle('ao' | 'grassShadows' | 'tuftShadow' | 'drawOrder'),

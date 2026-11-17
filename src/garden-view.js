@@ -810,7 +810,7 @@
         if (room < 0.05) say('The can is full.'); else drawFrom(act.piece, Math.min(3, room));
       }
     } else if (k === 'dip') {
-      if (act.acc >= 0.15) { const step = act.acc; act.acc = 0; if (S().can.litres < 8.99) { const l = Math.min(6 * step, 9 - S().can.litres); cmd('garden.refill', { litres: l }); if (G.riverLive && streamAt(a.x, a.z)) G.riverLive.pour(2, a.x, a.z, 0.4, -l / 1000 / step); G.burst(a.x, waterY(a.x, a.z) + 0.05, a.z, 3, 0xcfeaf7, 0.8, 0.6, 0.04, 0.4); } else if (!act.n) { act.n = 1; say('The can is full.'); } }
+      if (act.acc >= 0.15) { const step = act.acc; act.acc = 0; if (S().can.litres < 8.99) { const l = Math.min(6 * step, 9 - S().can.litres); cmd('garden.refill', { litres: l }); if (G.riverLive && streamAt(a.x, a.z)) G.riverLive.pour(2, a.x, a.z, 0.4, -l / 1000 / step); if (G.waterFx) G.waterFx.splash(a.x, waterY(a.x, a.z), a.z, 0.6); else G.burst(a.x, waterY(a.x, a.z) + 0.05, a.z, 3, 0xcfeaf7, 0.8, 0.6, 0.04, 0.4); } else if (!act.n) { act.n = 1; say('The can is full.'); } }
     } else if (k.startsWith('seed:')) sowAt(a, false);
     else if (k === 'hands') handsFrame(a);
     else if ((k === 'mulch' || k === 'compost') && act.acc >= 0.16) {

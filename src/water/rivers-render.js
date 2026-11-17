@@ -9,18 +9,21 @@
 // Each chunk also keeps that data (ch.riverData) for the live simulation to start from and feed its edges with.
 import * as THREE from 'three';
 import { RIVER_SHADE } from './river-shade.js';
+import { makeFoamTexture } from './water-fx.js';
 
 export function createRiverWater({ U, sea, CS, P, SEA }) {
   const N = CS + 1;
   const su = sea.uniforms;
   const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
-    uTurbid: { value: 1 }, uSnap: { value: 1 }, uTPM: { value: 12.8 }, uSkyMap: { value: null }, uSkyK: { value: 1 }, uTex: { value: null },
+    uTurbid: { value: 1 }, uSnap: { value: 0 }, uTPM: { value: 12.8 }, uFoamTex: { value: null },
+    uRip: { value: Array.from({ length: 12 }, () => new THREE.Vector4(0, 0, -100, 0)) }, uSkyMap: { value: null }, uSkyK: { value: 1 }, uTex: { value: null },
     uWin: { value: new THREE.Vector4(1, 1, 0, 0) }, uWetDepth: { value: 1 }, uWetSpeed: { value: 1 },
   }]);
   // shared, not copied: time, sun and sky move with the world; the detail texture is the sea's
   uniforms.uTime = U.time; uniforms.uTex = su.uTex;
   uniforms.uSunDir = su.uSunDir; uniforms.uSunCol = su.uSunCol; uniforms.uAmb = su.uAmb; uniforms.uSky = su.uSky; uniforms.uZenith = su.uZenith;
   uniforms.uSkyMap = U.skyMap; uniforms.uSkyK = U.skyK;
+  uniforms.uFoamTex.value = makeFoamTexture();
   const material = new THREE.ShaderMaterial({
     uniforms, fog: true, transparent: true, depthWrite: false,
     vertexShader: `
