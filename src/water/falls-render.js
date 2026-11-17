@@ -13,7 +13,7 @@
 // Blended, soft at its sides, lit by the sun and the sky.
 import * as THREE from 'three';
 
-const G = 9.81;
+const G = 9.81, TALL = 1.6;                 // drops below this (m) are chutes: no curtain, no mist
 
 export function createFalls({ river, CS }) {
   const su = river.uniforms;
@@ -78,7 +78,9 @@ export function createFalls({ river, CS }) {
     const pos = [], sheet = [], half = [], idx = [];
     for (const f of falls) {
       const h = f.top - f.bottom;
-      if (h < 0.3) continue;
+      // a short drop is a chute the water runs down (the stream's own surface draws it); only a real fall, where
+      // the water leaves the rock and drops free, gets a curtain
+      if (h < TALL) continue;
       const v0 = 0.8 + 1.2 * Math.min(1, f.D * 2.5);          // the speed it crosses the lip at (m/s)
       const T = Math.sqrt((2 * h) / G), rows = Math.max(6, Math.ceil(h * 5)), w0 = f.w * 0.42;
       const across = Math.max(3, Math.ceil((w0 * 2) / 0.35));
@@ -143,13 +145,13 @@ export function createFalls({ river, CS }) {
         const lx = -f.dz, lz = f.dx;
         if (emit) {
           // droplets thrown up and out where the sheet hits, along its whole width
-          const n = Math.max(1, Math.round((1.5 + h) * wet));
+          const n = h >= TALL ? Math.max(1, Math.round((1.5 + h) * wet)) : (Math.random() < 0.4 * wet ? 1 : 0);   // a chute throws only the odd drop
           for (let i = 0; i < n; i++) {
             const u = (Math.random() * 2 - 1) * hw;
             fx.spray(bx + lx * u, f.bottom + 0.02, bz + lz * u, 2, 0.5 + 0.25 * h, 1.6 + 0.8 * h, 0.014, 0.9, [f.dx * 0.6, f.dz * 0.6]);
           }
         }
-        if (emitMist) {
+        if (emitMist && h >= TALL) {
           const u = (Math.random() * 2 - 1) * hw;
           fx.mist(bx + lx * u, f.bottom + 0.15, bz + lz * u, 1, 0.4 + 0.15 * h, 0.5 + 0.3 * h, 2.2 + h * 0.6, 0.1 + 0.04 * Math.min(2, h));
           fx.ripple(bx + lx * u * 0.5 + f.dx * (0.3 + Math.random()), bz + lz * u * 0.5 + f.dz * (0.3 + Math.random()), 0.6);

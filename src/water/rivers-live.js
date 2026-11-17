@@ -220,7 +220,7 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
   // ---- the surface: a grid denser near the middle of the window (one vertex a cell there, one every four at the
   // edges for the wide window), its heights read from the simulation in the vertex shader
   const drawU = {
-    uState: { value: null }, uBed: { value: null }, uFeed: { value: null }, uN: { value: SIZE }, uOrg: { value: new THREE.Vector2() }, uCell: { value: CELL }, uWarp: { value: 1 },
+    uState: { value: null }, uBed: { value: null }, uFeed: { value: null }, uBedWin: { value: new THREE.Vector4(1, 1, 0, 0) }, uN: { value: SIZE }, uOrg: { value: new THREE.Vector2() }, uCell: { value: CELL }, uWarp: { value: 1 },
   };
   const material = new THREE.ShaderMaterial({
     fog: true, transparent: true, depthWrite: false,
@@ -254,7 +254,7 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
       }`,
     fragmentShader: /* glsl */ `
       precision highp sampler2D;
-      uniform sampler2D uState, uBed; uniform int uN; uniform vec2 uOrg; uniform float uCell;
+      uniform sampler2D uState, uBed, uFeed; uniform int uN; uniform vec2 uOrg; uniform float uCell; uniform float uWetSpeed;
       varying vec3 vWorld;
       #include <common>
       #include <fog_pars_fragment>
@@ -271,7 +271,13 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
         float b; vec4 s = st(q, b);
         if (s.r < 0.004) discard;                               // the shoreline, at the water's own texel
         float d = max(s.r, vWorld.y - b);
-        vec4 c = shadeRiver(q, cell, vWorld, s.gb, d, s.a);
+        // The surface is drawn moving with the channel's settled current (the baked flow: smooth, as in the baked
+        // water), with only a little of the simulation's own eddying in it: the simulation's velocity, cell by cell,
+        // is too restless to draw the surface by and shows as swirling lines. Where there is no channel (water let
+        // into a trench, a flooded bed) the simulation's is all there is.
+        vec4 fdT = texelFetch(uFeed, clamp(ivec2((q - uOrg) / uCell), ivec2(0), ivec2(uN - 1)), 0);
+        vec2 vel = fdT.r > -1000.0 ? mix(fdT.ba * uWetSpeed, s.gb, 0.2) : s.gb;
+        vec4 c = shadeRiver(q, cell, vWorld, vel, d, s.a);
         gl_FragColor = c;
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -344,7 +350,7 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
     renderer.xr.enabled = false; renderer.autoClear = false;
     if (!built) start(px, pz); else moveTo(px, pz);
     stateMat.uniforms.org.value.set(win.ox, win.oz); orgU.value.set(win.ox, win.oz);
-    acc = Math.min(acc + (running ? dt : 0), STEP_DT * MAX_STEPS);
+    acc = bedOnly ? 0 : Math.min(acc + (running ? dt : 0), STEP_DT * MAX_STEPS);
     while (acc >= STEP_DT) {
       acc -= STEP_DT;
       fluxMat.uniforms.S.value = st[0].texture; fluxMat.uniforms.F.value = fx[0].texture;
@@ -359,8 +365,9 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
     for (const o of froths) o.z = 0;
     drawU.uState.value = st[0].texture; drawU.uBed.value = bedTex; drawU.uN.value = SIZE; drawU.uOrg.value.set(win.ox, win.oz);
     const w = SIZE * CELL;
-    shared.uWin.value.set(win.ox, win.oz, win.ox + w, win.oz + w);
-    mesh.visible = true;
+    drawU.uBedWin.value.set(win.ox, win.oz, win.ox + w, win.oz + w);
+    if (!bedOnly) shared.uWin.value.set(win.ox, win.oz, win.ox + w, win.oz + w);
+    mesh.visible = !bedOnly;
     // read the whole window back a few times a second (asynchronously, a frame or two late), for wading, filling
     // the can and irrigation: 1 MB for the normal window
     readT += dt;
@@ -389,11 +396,16 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
     if (i0 >= SIZE || j0 >= SIZE || i0 + n <= 0 || j0 + n <= 0) return;
     sampleRect(i0 - 1, j0 - 1, i0 + n + 1, j0 + n + 1);
   }
-  function setMode(mode) {          // 'off' | 'live' | 'wide'
-    const want = ok && (mode === 'live' || mode === 'wide');
+  // 'off' | 'live' | 'wide' | 'bed': the last keeps the window's ground and baked water (for the stream-bed look
+  // under the baked water) without simulating or drawing any water of its own
+  let bedOnly = false;
+  function setMode(mode) {
+    const want = ok && (mode === 'live' || mode === 'wide' || mode === 'bed');
     wantSize = mode === 'wide' ? 512 : 256;
+    bedOnly = mode === 'bed';
     on = want;
-    if (!on) { free(); built = false; read.ok = false; shared.uWin.value.set(1, 1, 0, 0); }
+    if (bedOnly) { shared.uWin.value.set(1, 1, 0, 0); if (mesh) mesh.visible = false; }
+    if (!on) { free(); built = false; read.ok = false; shared.uWin.value.set(1, 1, 0, 0); drawU.uBedWin.value.set(1, 1, 0, 0); }
   }
   return {
     available: ok, update, waterAt, chunkChanged, setMode,

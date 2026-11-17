@@ -443,3 +443,8 @@ The ground is a physical thing now: a smooth surface you shape 10 cm at a time, 
 - The old terrain tools (keys 2 to 4) still work at their 1 m scale.
 - The bar holds more slots than there are number keys: past 9, click them.
 - Yards dug before this update start fresh (the ground's data changed shape).
+
+## The building reads from anywhere (branch `quickwins`)
+
+- Every piece that can go in next breathes with a faint glow from any distance, not only within arm's reach, so you can see what's next from across the yard.
+- Pale means you can reach it from where you stand; amber means it is above you: get on the ladder, a scaffold or the roof first. The colour changes as you climb.
