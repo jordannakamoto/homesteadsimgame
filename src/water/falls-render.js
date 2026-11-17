@@ -146,7 +146,7 @@ export function createFalls({ river, CS }) {
           const n = Math.max(1, Math.round((1.5 + h) * wet));
           for (let i = 0; i < n; i++) {
             const u = (Math.random() * 2 - 1) * hw;
-            fx.spray(bx + lx * u, f.bottom + 0.02, bz + lz * u, 1, 0.5 + 0.25 * h, 1.6 + 0.8 * h, 0.04, 0.9, [f.dx * 0.6, f.dz * 0.6]);
+            fx.spray(bx + lx * u, f.bottom + 0.02, bz + lz * u, 2, 0.5 + 0.25 * h, 1.6 + 0.8 * h, 0.014, 0.9, [f.dx * 0.6, f.dz * 0.6]);
           }
         }
         if (emitMist) {

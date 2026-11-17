@@ -970,27 +970,85 @@ function addWind(mat, y0, yr, amp, fade, upNormal, grass) {
   };
 }
 const terrainMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: pixelTex });
-// Under the live stream water (src/water/rivers-live.js) the ground is a stream bed seen close up: rounded pebbles
-// and cobbles (the foam texture's cells, at stone size) in the ground's own colours softened, dark with wet, instead
-// of the ground's pixel texture, which reads as camouflage through clear water. Close up is where you fish and
-// gather, so it is drawn smooth and real rather than pixelled.
+// Under the live stream water (src/water/rivers-live.js) the ground is a stream bed seen close up, drawn smooth and
+// real rather than pixelled (close up is where you wade, fish and gather), the way a clear stream bed actually looks:
+//  - stones sorted by the current: cobbles where it runs fast, gravel where it is middling, sand and silt in slow
+//    pools; each stone a rounded, lit dome with dark cracks between, in the mixed greys, browns, ochres and the odd
+//    pale quartz of river stones, some green-brown with algae where the water is slow
+//  - wet: darker and richer than dry stone
+//  - seen through a moving surface: the bed wobbles with the ripples above it (refraction, faked by offsetting where
+//    the bed is read by the surface slope times the depth)
+//  - caustics: the bright net of light the ripples focus onto the bed, moving with the water, dappled under trees
 const BED_PARS_F = `
-uniform highp sampler2D uLiveState; uniform sampler2D uFoamTex; uniform vec2 uLiveOrg; uniform float uLiveCell; uniform int uLiveN; uniform vec4 uWin;
-varying vec3 vWPosT;`;
+uniform highp sampler2D uLiveState; uniform sampler2D uFoamTex, uSeaTex; uniform vec2 uLiveOrg; uniform float uLiveCell, uTime; uniform int uLiveN; uniform vec4 uWin; uniform vec3 uSunDirB, uSunColB;
+varying vec3 vWPosT;
+vec3 bedHash(vec2 p) { vec3 q = vec3(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)), dot(p, vec2(419.2, 371.9))); return fract(sin(q) * 43758.5453); }
+// stones lying on finer stuff, p in cells: x how far up the stone (0 at its edge, 1 on top; below 0 outside it,
+// down to -1 a third of its size away, for the shade round it), yzw the stone's random numbers. k scales the
+// stones' size: 0 none, 1 full.
+vec4 bedStones(vec2 p, float k) {
+  vec2 i = floor(p), f = fract(p);
+  float best = -9.0; vec3 id = vec3(0.0);
+  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    vec2 g = vec2(float(x), float(y)); vec3 h = bedHash(i + g);
+    vec2 o = g + 0.18 + 0.64 * h.xy - f;
+    float an = h.z * 6.283, ca = cos(an), sa = sin(an);
+    vec2 r = vec2(ca * o.x + sa * o.y, -sa * o.x + ca * o.y); r.x *= 0.7 + 0.6 * h.y;   // flattened, turned stones
+    float rr = (0.24 + 0.24 * fract(h.x * 7.3 + h.y)) * k;
+    float e = rr > 0.0 ? 1.0 - length(r) / rr : -9.0;
+    if (e > best) { best = e; id = h; }
+  }
+  return vec4(max(best, -1.0), id);
+}
+vec3 stoneCol(vec3 id) {
+  vec3 c = id.x < 0.3 ? vec3(0.5, 0.5, 0.48) : id.x < 0.5 ? vec3(0.5, 0.4, 0.3) : id.x < 0.66 ? vec3(0.62, 0.5, 0.32) : id.x < 0.78 ? vec3(0.42, 0.33, 0.27) : id.x < 0.92 ? vec3(0.24, 0.24, 0.23) : vec3(0.78, 0.76, 0.72);
+  return c * (0.7 + 0.6 * id.y);
+}
+float liveAt(vec2 lc, int ch) {
+  vec2 a = lc - 0.5, f = fract(a); ivec2 i = ivec2(floor(a));
+  return mix(mix(texelFetch(uLiveState, i, 0)[ch], texelFetch(uLiveState, i + ivec2(1, 0), 0)[ch], f.x), mix(texelFetch(uLiveState, i + ivec2(0, 1), 0)[ch], texelFetch(uLiveState, i + ivec2(1, 1), 0)[ch], f.x), f.y);
+}`;
 const BED_F = `#include <map_fragment>
+float bedCaustic = 0.0;
 {
   vec2 lc = (vWPosT.xz - uLiveOrg) / uLiveCell;
   if (uWin.z > uWin.x && lc.x > 1.0 && lc.y > 1.0 && lc.x < float(uLiveN) - 1.0 && lc.y < float(uLiveN) - 1.0) {
-    vec2 a = lc - 0.5, f = fract(a); ivec2 i = ivec2(floor(a));
-    float dep = mix(mix(texelFetch(uLiveState, i, 0).r, texelFetch(uLiveState, i + ivec2(1, 0), 0).r, f.x), mix(texelFetch(uLiveState, i + ivec2(0, 1), 0).r, texelFetch(uLiveState, i + ivec2(1, 1), 0).r, f.x), f.y);
-    float uw = smoothstep(0.0, 0.05, dep);
+    float dep = liveAt(lc, 0);
+    float uw = smoothstep(0.0, 0.04, dep);
     if (uw > 0.0) {
-      vec2 sp = vWPosT.xz * 1.3;
-      float wall = texture2D(uFoamTex, sp).r, wall2 = texture2D(uFoamTex, sp * 0.45 + 0.31).r, n = texture2D(uFoamTex, vWPosT.xz * 0.21).b, tint = texture2D(uFoamTex, sp * 0.5 + 0.7).b;
-      float stone = (1.0 - smoothstep(0.3, 0.75, max(wall, wall2 * 0.9)));
-      vec3 soft = texture2D(map, vMapUv, 5.0).rgb;
-      vec3 peb = soft * mix(vec3(0.62, 0.6, 0.55), vec3(1.08, 1.04, 0.95) * (0.8 + 0.45 * tint), stone) * (0.85 + 0.3 * n);
-      diffuseColor.rgb = mix(diffuseColor.rgb, diffuse * peb * 0.82, uw);
+      vec2 v = vec2(liveAt(lc, 1), liveAt(lc, 2)); float sp = length(v);
+      // the surface slope above (the water shader's flowed ripples, simplified) bends the view of the bed
+      float ph = uTime * 0.32, t0 = fract(ph), t1 = fract(ph + 0.5), wb = abs(1.0 - 2.0 * t0);
+      vec2 q = vWPosT.xz;
+      vec2 g = mix(texture2D(uSeaTex, q * 0.31 - v * t0 * 0.55).rg, texture2D(uSeaTex, q * 0.31 - v * t1 * 0.55 + 0.37).rg, wb) - 0.5;
+      g = g * (0.3 + 0.7 * smoothstep(0.05, 1.1, sp)) + (texture2D(uSeaTex, q * 1.7 - v * t0 * 0.9 + uTime * vec2(0.05, 0.03)).rg - 0.5) * 0.35;
+      vec2 bp = q + g * min(dep, 0.6) * 0.5;
+      // what the current leaves: cobbles in fast water, gravel in middling, sand in slow pools, each layer lying on
+      // the finer one, with the finer stuff showing between
+      float big = smoothstep(0.3, 0.9, sp + (texture2D(uFoamTex, bp * 0.11).b - 0.5) * 0.6);
+      float sand = (1.0 - smoothstep(0.08, 0.3, sp)) * smoothstep(0.12, 0.35, dep) * smoothstep(0.35, 0.65, texture2D(uFoamTex, bp * 0.07 + 0.3).b);
+      vec3 sandC = vec3(0.6, 0.54, 0.41) * (0.85 + 0.25 * texture2D(uFoamTex, bp * 0.9).b) * (0.94 + 0.06 * sin(dot(bp, v.yx * 6.0 + vec2(9.0, 3.0))));
+      vec3 lightDir = normalize(uSunDirB + vec3(0.0, 0.6, 0.0));
+      vec3 bed = sandC;
+      vec4 st = bedStones(bp * 12.0, 1.0 - sand * 0.85);
+      for (int L = 0; L < 2; L++) {
+        if (st.x > -1.0) {
+          float hgt = sqrt(max(st.x, 0.0));
+          vec3 sn = normalize(vec3(-dFdx(hgt) * 2.5, 1.0, -dFdy(hgt) * 2.5));
+          float lit = 0.7 + 0.45 * clamp(dot(sn, lightDir), -1.0, 1.0);
+          vec3 sc = stoneCol(st.yzw) * lit * mix(0.6, 1.0, smoothstep(0.0, 0.5, st.x));
+          sc = mix(sc, sc * vec3(0.72, 0.86, 0.52), (1.0 - smoothstep(0.2, 0.7, sp)) * smoothstep(0.3, 0.9, st.x) * smoothstep(0.4, 0.7, st.w));   // algae
+          bed *= mix(1.0, 0.62, smoothstep(-0.6, 0.0, st.x) * step(st.x, 0.0));                                  // shade round it
+          bed = mix(bed, sc, smoothstep(0.0, 0.08, st.x));
+        }
+        st = bedStones(bp * 4.0 + 17.0, big * 1.25);
+      }
+      bed *= vec3(0.78, 0.8, 0.76);                                                                                    // wet: darker
+      diffuseColor.rgb = mix(diffuseColor.rgb, diffuse * bed * 1.6, uw);
+      // caustics: two moving layers of the foam's bright net; where they cross the light is focused
+      vec2 cp = bp * 1.1;
+      float c1 = texture2D(uFoamTex, cp + uTime * vec2(0.031, 0.022) + g * 0.3).r, c2 = texture2D(uFoamTex, cp * 1.37 + 0.41 - uTime * vec2(0.024, 0.035) - g * 0.3).r;
+      bedCaustic = (pow(c1, 3.0) + pow(c2, 3.0)) * 1.6 * uw * smoothstep(0.02, 0.12, dep) * exp(-dep * 1.4) * vSkyVis * max(uSunDirB.y, 0.0);
     }
   }
 }`;
@@ -1015,13 +1073,14 @@ terrainMat.onBeforeCompile = (sh) => {
   sh.uniforms.uSkyMap = U.skyMap; sh.uniforms.uSkyK = U.skyK;
   sh.uniforms.uDigMask = DIG.uDigMask; sh.uniforms.uDigWin = DIG.uDigWin;
   const lu = riverLive.uniforms, ru = riverWater.uniforms;
-  sh.uniforms.uLiveState = lu.uState; sh.uniforms.uLiveOrg = lu.uOrg; sh.uniforms.uLiveCell = lu.uCell; sh.uniforms.uLiveN = lu.uN; sh.uniforms.uWin = ru.uWin; sh.uniforms.uFoamTex = ru.uFoamTex;
+  sh.uniforms.uLiveState = lu.uState; sh.uniforms.uLiveOrg = lu.uOrg; sh.uniforms.uLiveCell = lu.uCell; sh.uniforms.uLiveN = lu.uN; sh.uniforms.uWin = ru.uWin; sh.uniforms.uFoamTex = ru.uFoamTex; sh.uniforms.uSeaTex = ru.uTex; sh.uniforms.uTime = U.time; sh.uniforms.uSunDirB = ru.uSunDir; sh.uniforms.uSunColB = ru.uSunCol;
   sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>' + SKY_PARS_V + '\nvarying vec3 vWPosT;')
     .replace('#include <project_vertex>', '#include <project_vertex>' + SKY_V('(modelMatrix * vec4(transformed, 1.0)).xz') + '\nvWPosT = (modelMatrix * vec4(transformed, 1.0)).xyz;');
   sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>' + SKY_PARS_F + BED_PARS_F + '\n#ifdef DIG_MASK\nuniform highp sampler2D uDigMask; uniform vec4 uDigWin;\n#endif').replace('#include <aomap_fragment>', SKY_F)
-    .replace('#include <map_fragment>', BED_F).replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>' + DIG_F);
+    .replace('#include <map_fragment>', BED_F).replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>' + DIG_F)
+    .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\nreflectedLight.directDiffuse += bedCaustic * uSunColB * diffuseColor.rgb;');
 };
-terrainMat.customProgramCacheKey = () => 'terrain-sky2-bed' + (DIG.on ? '-dig' : '');
+terrainMat.customProgramCacheKey = () => 'terrain-sky3-bed' + (DIG.on ? '-dig' : '');
 const solidMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: pixelTex });
 
 // ============================================================ geometry library
