@@ -22,7 +22,7 @@
   const low = (t) => t.charAt(0).toLowerCase() + t.slice(1);
 
   const look = B.memberLook();
-  const MARK = [0.09, 0.08, 0.09], CHALK = [0.28, 0.5, 0.95];       // pencil, and the blue of a chalk line
+  const MARK = [0.09, 0.08, 0.09], CHALK = [0.8, 0.9, 1.0];       // pencil, and a snapped chalk line (pale blue)
   const asm = window.__assembly.create(G, { geo: look.geo, mat: look.mat, colorOf: (m) => (m.col === 'mark' ? MARK : m.col === 'chalk' ? CHALK : look.colors[m.col || 'timber'] || look.colors.timber) });
   const sounds = window.__assembly.createSounds();
   const carry = window.__carry.create(G);
@@ -235,7 +235,7 @@
     for (const r of rows.values()) {
       const F = g.frames.get(r.plane), t = Math.min(r.t, F.top - 0.02);
       if (t <= 0.05) continue;
-      out.push({ id: 'chalk:' + r.plane, col: 'chalk', a: F.on(r.s0 + 0.02, t, 0.03), b: F.on(r.s1 - 0.02, t, 0.03), n: [F.up[0] * F.cs, F.k * F.cs, F.up[1] * F.cs], section: { b: 0.004, d: 0.016 } });
+      out.push({ id: 'chalk:' + r.plane, col: 'chalk', a: F.on(r.s0 + 0.02, t, 0.05), b: F.on(r.s1 - 0.02, t, 0.05), n: [F.up[0] * F.cs, F.k * F.cs, F.up[1] * F.cs], section: { b: 0.004, d: 0.026 } });
     }
     return out;
   }
@@ -389,6 +389,7 @@
       if (!pts) continue;
       const cv = COVER[pm.stage];
       if (pm.built && cv && pr.tally[cv] && api.stageComplete(pr, cv)) continue;
+      if (pm.built && pm.kind === 'roofing') continue;      // a course's nails are under the course above
       const b = V.blows[mid], flat = C.STAGE[pm.stage].flat && g.walls.has(pm.parent) && !pr.raised[pm.parent], layer = flat ? pm.parent : 'main', h = pm.built ? 0 : 0.045 * (1 - (b ? b.n / b.of : 0));
       let list = by.get(layer);
       if (!list) by.set(layer, (list = []));
@@ -420,10 +421,10 @@
     for (let i = 0; i < 7; i++) { ladParts[2 + i].scale.set(0.4, 0.03, 0.04); ladParts[2 + i].position.set(0, 0, ((i + 0.6) / 7.2) * q.len); }
   }
   // where a ladder would lean if the pointer says so: the raised wall nearest it, the foot a step out
-  function ladderSpot(pr) {
+  function ladderSpot(pr, px = reach.x, pz = reach.z) {
     const g = geom(pr.id);
     if (!g) return null;
-    const inv = g.matrix.clone().invert(), lp = new T.Vector3(reach.x, 0, reach.z).applyMatrix4(inv);
+    const inv = g.matrix.clone().invert(), lp = new T.Vector3(px, 0, pz).applyMatrix4(inv);
     let best = null, bd = 3.2;
     for (const [par, hw] of g.walls) {
       if (!pr.raised[par]) continue;
@@ -472,7 +473,7 @@
     // on the plank, push on toward the roof and you step up onto the deck
     if (RW && SC.onPlank && SC.onPlank()) {
       const mv = Math.hypot(P.mvx || 0, P.mvz || 0);
-      if (mv > 0.3) { V.scPush = (V.scPush || 0) + dt; if (V.scPush > 0.12 && tryHop(P.mvx / mv, P.mvz / mv)) { SC.release(); V.scPush = 0; V.rev++; return; } } else V.scPush = 0;
+      if (mv > 0.3) { V.scPush = (V.scPush || 0) + dt; if (V.scPush > 0.12 && tryHop(P.mvx / mv, P.mvz / mv)) { SC.release(); V.scPush = 0; V.rev++; return; } if (V.scPush > 0.12) V.scPush = -0.15; } else V.scPush = 0;
     }
     const r = SC.update(dt, { climbMps: feel().climbMps * 1.25 });
     if (r === 'up') { sounds.play('thunk'); V.rev++; if (!V.named.scaf) { V.named.scaf = 1; flash('On the scaffold: walk the plank; walk back off the ladder end to climb down'); } }
@@ -518,7 +519,7 @@
       // come onto the ladder off the roof: the key you walked off with carries you down, until you let go of it
       if (cl2.fromRoof) { if (fwd || back || side) cl2.dir = -1; else cl2.fromRoof = false; }
       // at the top, keep pushing on and you step off onto a decked roof
-      if (cl2.top && fwd && !cl2.fromRoof) { cl2.push = (cl2.push || 0) + dt; if (cl2.push > 0.06 && tryHop(Math.sin(L.yaw), Math.cos(L.yaw))) { V.climb = null; V.rev++; return; } } else cl2.push = 0;
+      if (cl2.top && fwd && !cl2.fromRoof) { cl2.push = (cl2.push || 0) + dt; cl2.tryT = (cl2.tryT || 0) - dt; if (cl2.push > 0.06 && cl2.tryT <= 0) { cl2.tryT = 0.25; if (tryHop(Math.sin(L.yaw), Math.cos(L.yaw))) { V.climb = null; V.rev++; return; } } } else cl2.push = cl2.tryT = 0;
       if (side && !fwd && cl2.t < 0.2 && cl2.age > 0.15) { cl2.dir = -1; cl2.t = 0; }       // stepping off the bottom
     }
     const ease = 0.4 + 0.6 * Math.min(1, Math.min(cl2.t, 1 - cl2.t) / 0.15);      // slight ease at both ends
@@ -1810,5 +1811,5 @@
     for (const mid of pl.inst) { const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid), set = !ln || pm.need - pm.got < 1e-6; if (!set && !(c && c.itemId === ln.itemId)) continue; if (!m) return { mid, x: V.structs.get(pr.id).x, z: V.structs.get(pr.id).z, site: true }; const hw = C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null; worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); wM.lerpVectors(wA, wB, 0.5); const w = { x: wM.x, y: wM.y, z: wM.z }; wM.project(G.camera); return { mid, ...w, sx: (wM.x * 0.5 + 0.5) * reach.w, sy: (-wM.y * 0.5 + 0.5) * reach.h, set }; }
     return null;
   }
-  window.__construct = { roof: RW, syncRoof, tryHop, ladderTop, scaffoldSpot, scaffold: SC, station: CS, press: (c) => press(c || V.ctx), beaconAt, finishPlace, nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };
+  window.__construct = { roof: RW, syncRoof, tryHop, ladderTop, ladderSpot, chalkLines: (id) => chalkLines(S().progress[id], geom(id)), scaffoldSpot, scaffold: SC, station: CS, press: (c) => press(c || V.ctx), beaconAt, finishPlace, nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };
 })();
