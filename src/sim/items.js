@@ -107,7 +107,7 @@ add({ id: 'straw_bale', name: 'Straw bale (900 x 460 x 360)', category: 'insulat
 
 // ---- roofing, by the square metre of roof covered
 add({ id: 'roof_asphalt', name: 'Asphalt shingles', category: 'roofing', unit: 'm2', material: 'asphalt_shingle', dims: { thicknessM: 0.007 }, priceUsd: 12 });
-add({ id: 'roof_steel', name: 'Steel roofing 0.5 mm', category: 'roofing', unit: 'm2', material: 'steel_roofing', dims: { thicknessM: 0.0005 }, priceUsd: 22 });
+add({ id: 'roof_steel', name: 'Standing-seam steel 0.5 mm', category: 'roofing', unit: 'm2', material: 'steel_roofing', dims: { thicknessM: 0.0005 }, priceUsd: 22 });
 add({ id: 'roof_cedar', name: 'Cedar shakes', category: 'roofing', unit: 'm2', material: 'cedar_shake', dims: { thicknessM: 0.02 }, priceUsd: 45 });
 add({ id: 'roof_thatch', name: 'Water-reed thatch 300 mm', category: 'roofing', unit: 'm2', material: 'thatch', dims: { thicknessM: 0.3 }, priceUsd: 40 });
 add({ id: 'roof_slate', name: 'Slate 8 mm', category: 'roofing', unit: 'm2', material: 'slate', dims: { thicknessM: 0.008 }, priceUsd: 95 });

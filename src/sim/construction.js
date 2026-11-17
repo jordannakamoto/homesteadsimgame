@@ -36,6 +36,7 @@ export function initConstruction() {
     waste: {},                        // { [itemId]: area m2 } offcuts too small to keep
     horses: null,                     // { x, z, yaw }: the sawhorses, the cut station, set by the work once lumber has come
     scaffold: null,                   // a rented scaffold bay: { until, x, z, set: { x, z, yaw, len, deckY, structId } | null }
+    anchors: {},                      // { [structId]: { x, y, z } }: a roof anchor screwed through the deck at the ridge, to clip a harness to
     unlocked: [...C.UNLOCKS[0].opens],
     tutorial: { card: false, shed: null, seen: {}, done: false },
     options: { sandbox: false, instant: false, cards: true, auto: false, mute: true, gesture: 3 },   // sound is off until it has been tuned
@@ -809,7 +810,7 @@ export const constructionSystem = () => ({
   },
   commands: {
     'construction.setPlan': setPlan,
-    'construction.forget': (c, p) => { if (!c.s.progress[p.structId]) return { ok: false, reason: 'unknown building' }; delete c.s.progress[p.structId]; if (c.s.tutorial.shed === p.structId) c.s.tutorial.shed = null; return { ok: true }; },
+    'construction.forget': (c, p) => { if (!c.s.progress[p.structId]) return { ok: false, reason: 'unknown building' }; delete c.s.progress[p.structId]; if (c.s.anchors) delete c.s.anchors[p.structId]; if (c.s.tutorial.shed === p.structId) c.s.tutorial.shed = null; return { ok: true }; },
     'construction.setDropPoint': (c, p) => { if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.z)) return { ok: false, reason: 'bad place' }; c.s.dropPoint = { x: round6(p.x), z: round6(p.z) }; for (const d of c.s.deliveries) { d.x = c.s.dropPoint.x; d.z = c.s.dropPoint.z; } return { ok: true }; },
     // the hands open or close a door or window that is built (docs/FRAMING.md): id, open? (omitted: toggle)
     'construction.operate': (c, p) => {
@@ -834,6 +835,14 @@ export const constructionSystem = () => ({
     'construction.moveScaffold': (c, p) => { const sc = c.s.scaffold; if (!sc || sc.set) return { ok: false, reason: 'not a bundle' }; if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.z)) return { ok: false, reason: 'bad place' }; sc.x = round6(p.x); sc.z = round6(p.z); return { ok: true }; },
     // the sawhorses are picked up and set down where the work is
     'construction.moveHorses': (c, p) => { if (!p || ![p.x, p.z, p.yaw].every(Number.isFinite)) return { ok: false, reason: 'bad place' }; c.s.horses = { x: round6(p.x), z: round6(p.z), yaw: round6(p.yaw) }; return { ok: true }; },
+    // a roof anchor at the ridge: fixed once per building (fixing it again moves it), taken off with the building
+    'construction.fixAnchor': (c, p) => {
+      if (!p || !c.s.progress[p.structId] || ![p.x, p.y, p.z].every(Number.isFinite)) return { ok: false, reason: 'bad place' };
+      if (!c.s.anchors) c.s.anchors = {};
+      c.s.anchors[p.structId] = { x: round6(p.x), y: round6(p.y), z: round6(p.z) };
+      c.emit('construction.anchor', { structId: p.structId });
+      return { ok: true, anchor: c.s.anchors[p.structId] };
+    },
     'construction.barrowGrab': barrowGrab,
     'construction.barrowLoad': barrowLoad,
     'construction.barrowMove': (c, p) => { if (!c.s.barrow || !c.s.barrow.held) return { ok: false, reason: 'not held' }; barrowPlace(c.s, p.x, p.z, p.yaw); return { ok: true }; },

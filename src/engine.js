@@ -981,7 +981,7 @@ const terrainMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: pixe
 //    the bed is read by the surface slope times the depth)
 //  - caustics: the bright net of light the ripples focus onto the bed, moving with the water, dappled under trees
 const BED_PARS_F = `
-uniform highp sampler2D uLiveState; uniform sampler2D uFoamTex, uSeaTex; uniform vec2 uLiveOrg; uniform float uLiveCell, uTime; uniform int uLiveN; uniform vec4 uWin; uniform vec3 uSunDirB, uSunColB; uniform float uBedVox;
+uniform highp sampler2D uLiveState, uLiveFeed; uniform sampler2D uFoamTex, uSeaTex; uniform vec2 uLiveOrg; uniform float uLiveCell, uTime; uniform int uLiveN; uniform vec4 uWin; uniform vec3 uSunDirB, uSunColB; uniform float uBedVox;
 varying vec3 vWPosT;
 vec3 bedHash(vec2 p) { vec3 q = vec3(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)), dot(p, vec2(419.2, 371.9))); return fract(sin(q) * 43758.5453); }
 // stones lying on finer stuff, p in cells: x how far up the stone (0 at its edge, 1 on top; below 0 outside it,
@@ -1020,7 +1020,11 @@ float bedCaustic = 0.0;
     float dep = liveAt(lc, 0);
     float uw = smoothstep(0.0, 0.04, dep);
     if (uw > 0.0) {
-      vec2 v = vec2(liveAt(lc, 1), liveAt(lc, 2)); float sp = length(v);
+      vec2 v = vec2(liveAt(lc, 1), liveAt(lc, 2));
+      // what lies on the bed follows the channel's settled current (the baked flow), not the moment's water, so
+      // it holds still as you move about
+      vec4 fdT = texelFetch(uLiveFeed, ivec2(lc), 0);
+      float sp = fdT.r > -1000.0 ? length(fdT.ba) : length(v), fdep = fdT.r > -1000.0 ? fdT.r - fdT.g : dep;
       // the surface slope above (the water shader's flowed ripples, simplified) bends the view of the bed
       float ph = uTime * 0.32, t0 = fract(ph), t1 = fract(ph + 0.5), wb = abs(1.0 - 2.0 * t0);
       vec2 q = vWPosT.xz;
@@ -1031,7 +1035,7 @@ float bedCaustic = 0.0;
       // what the current leaves: cobbles in fast water, gravel in middling, sand in slow pools, each layer lying on
       // the finer one, with the finer stuff showing between
       float big = smoothstep(0.3, 0.9, sp + (texture2D(uFoamTex, bp * 0.11).b - 0.5) * 0.6);
-      float sand = (1.0 - smoothstep(0.08, 0.3, sp)) * smoothstep(0.12, 0.35, dep) * smoothstep(0.35, 0.65, texture2D(uFoamTex, bp * 0.07 + 0.3).b);
+      float sand = (1.0 - smoothstep(0.08, 0.3, sp)) * smoothstep(0.12, 0.35, fdep) * smoothstep(0.35, 0.65, texture2D(uFoamTex, bp * 0.07 + 0.3).b);
       vec3 sandC = vec3(0.6, 0.54, 0.41) * (0.85 + 0.25 * texture2D(uFoamTex, bp * 0.9).b) * (0.94 + 0.06 * sin(dot(bp, v.yx * 6.0 + vec2(9.0, 3.0))));
       vec3 lightDir = normalize(uSunDirB + vec3(0.0, 0.6, 0.0));
       vec3 bed = sandC;
@@ -1081,14 +1085,14 @@ terrainMat.onBeforeCompile = (sh) => {
   sh.uniforms.uSkyMap = U.skyMap; sh.uniforms.uSkyK = U.skyK;
   sh.uniforms.uDigMask = DIG.uDigMask; sh.uniforms.uDigWin = DIG.uDigWin;
   const lu = riverLive.uniforms, ru = riverWater.uniforms;
-  sh.uniforms.uLiveState = lu.uState; sh.uniforms.uLiveOrg = lu.uOrg; sh.uniforms.uLiveCell = lu.uCell; sh.uniforms.uLiveN = lu.uN; sh.uniforms.uWin = ru.uWin; sh.uniforms.uFoamTex = ru.uFoamTex; sh.uniforms.uSeaTex = ru.uTex; sh.uniforms.uTime = U.time; sh.uniforms.uSunDirB = ru.uSunDir; sh.uniforms.uSunColB = ru.uSunCol; sh.uniforms.uBedVox = U.bedVox;
+  sh.uniforms.uLiveState = lu.uState; sh.uniforms.uLiveFeed = lu.uFeed; sh.uniforms.uLiveOrg = lu.uOrg; sh.uniforms.uLiveCell = lu.uCell; sh.uniforms.uLiveN = lu.uN; sh.uniforms.uWin = ru.uWin; sh.uniforms.uFoamTex = ru.uFoamTex; sh.uniforms.uSeaTex = ru.uTex; sh.uniforms.uTime = U.time; sh.uniforms.uSunDirB = ru.uSunDir; sh.uniforms.uSunColB = ru.uSunCol; sh.uniforms.uBedVox = U.bedVox;
   sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>' + SKY_PARS_V + '\nvarying vec3 vWPosT;')
     .replace('#include <project_vertex>', '#include <project_vertex>' + SKY_V('(modelMatrix * vec4(transformed, 1.0)).xz') + '\nvWPosT = (modelMatrix * vec4(transformed, 1.0)).xyz;');
   sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>' + SKY_PARS_F + BED_PARS_F + '\n#ifdef DIG_MASK\nuniform highp sampler2D uDigMask; uniform vec4 uDigWin;\n#endif').replace('#include <aomap_fragment>', SKY_F)
     .replace('#include <map_fragment>', BED_F).replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>' + DIG_F)
     .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\nreflectedLight.directDiffuse += bedCaustic * uSunColB * diffuseColor.rgb;');
 };
-terrainMat.customProgramCacheKey = () => 'terrain-sky3-bed' + (DIG.on ? '-dig' : '');
+terrainMat.customProgramCacheKey = () => 'terrain-sky4-bed' + (DIG.on ? '-dig' : '');
 const solidMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: pixelTex });
 
 // ============================================================ geometry library
@@ -2102,21 +2106,11 @@ class Chunk {
       }
       const dd = clamp(Math.abs(delta) * 1.6, 0, 1) * 0.85;
       if (dd > 0) _c.lerp(PAL.dirt, dd);
-      // streams: wet gravel on riffles and silt in pools; a gravel bar up the inside of a bend and bare earth on the
-      // cut bank outside it; rock where a fall drops; and the ground at the water's edge dark with wet
+      // streams (riverTint): kept untinted too, for the finer bank mesh (refreshBanks)
       if (rivers) {
-        const ri = rivers.riverInfo(this.ox + i, this.oz + j);
-        if (ri && ri.dist < ri.w / 2 + 1.5 * ri.D + 2.5) {
-          const half = ri.w / 2, bed = 1 - smoothstep(half - 0.4, half + 1.0, ri.dist);
-          const bar = ri.bend < 0 ? -ri.bend * (1 - smoothstep(half + 0.2, half + 0.6 - ri.bend * 1.6, ri.dist)) : 0;
-          _c.lerp(ri.riffle || bar > bed ? RIVER_PAL.gravel : RIVER_PAL.silt, Math.max(bed * 0.85, bar * 0.8));
-          const cut = ri.bend > 0 ? ri.bend * smoothstep(0.22, 0.42, slope) * (1 - smoothstep(half + 0.4, half + 1.5 * ri.D + 2.2, ri.dist)) : 0;
-          _c.lerp(RIVER_PAL.earth, cut * 0.9);
-          const along = ri.seg ? ri.t * ri.seg.k % 1 : 0;
-          const rock = ri.seg && ri.seg.fall ? smoothstep(0.82, 0.9, along) * (1 - smoothstep(0.97, 1, along)) * (1 - smoothstep(half + 0.6, half + 2.5, ri.dist)) : 0;
-          _c.lerp(slope > 0.3 ? PAL.rockDark : PAL.rock, Math.max(rock, smoothstep(0.35, 0.6, slope) * (1 - smoothstep(half, half + 2, ri.dist)) * 0.7 * (1 - cut)));
-          _c.multiplyScalar(1 - 0.28 * (1 - smoothstep(half - 0.1, half + 0.9, ri.dist)) * (1 - bed * 0.5));
-        }
+        const pre = this.colPre || (this.colPre = new Float32Array(N * N * 3)), band = this.bandV || (this.bandV = new Uint8Array(N * N));
+        pre[k * 3] = _c.r; pre[k * 3 + 1] = _c.g; pre[k * 3 + 2] = _c.b;
+        band[k] = riverTint(_c, rivers.riverInfo(this.ox + i, this.oz + j), slope) ? 1 : 0;
       }
       const v = 0.96 + 0.08 * ((hash2(this.ox + i, this.oz + j, SEED) & 255) / 255);
       colr[k * 3] = _c.r * v; colr[k * 3 + 1] = _c.g * v; colr[k * 3 + 2] = _c.b * v;
@@ -2162,7 +2156,7 @@ class Chunk {
     geo.attributes.normal.needsUpdate = true;
     geo.attributes.color.needsUpdate = true;
     geo.computeBoundingSphere();
-    if (rivers) { riverWater.refresh(this, rivers); refreshRiverRocks(this); riverFalls.refresh(this, rivers); riverLive.chunkChanged(this); }
+    if (rivers) { refreshBanks(this); riverWater.refresh(this, rivers); refreshRiverRocks(this); riverFalls.refresh(this, rivers); riverLive.chunkChanged(this); }
     for (const tr of this.trees) this.treeMeshes[tr.type].setMatrixAt(tr.slot, this.treeMatrix(tr, _m));
     for (const mesh of this.treeMeshes) if (mesh) { mesh.instanceMatrix.needsUpdate = true; mesh.computeBoundingSphere(); }
     if (this.rockMesh) {
@@ -2190,6 +2184,7 @@ class Chunk {
   dispose() {
     clearShade(this);
     riverWater.dispose(this); riverFalls.dispose(this);
+    if (this.bankMesh) { this.bankMesh.geometry.dispose(); this.bankMesh = null; }
     if (this.riverRockMesh) { this.riverRockMesh.dispose(); this.riverRockMesh = null; }
     scene.remove(this.group);
     clearEnemies((e) => e.chunkKey === this.key);
@@ -2736,6 +2731,105 @@ function streamWaterAt(x, z) {
   if (!(k >= 0 && k < D.surf.length) || isNaN(D.surf[k])) return null;
   const u = riverWater.uniforms, sfc = D.bed[k] + (D.surf[k] - D.bed[k]) * u.uWetDepth.value, depth = sfc - heightAt(x, z);
   return depth > 0 ? { depth, vx: D.vel[k * 2] * u.uWetSpeed.value, vz: D.vel[k * 2 + 1] * u.uWetSpeed.value, foam: D.foam[k] } : null;
+}
+// Stream colours on the ground: wet gravel on riffles and silt in pools; a gravel bar up the inside of a bend and
+// bare earth on the cut bank outside it; rock where a fall drops; and the ground at the water's edge dark with wet.
+// ri: rivers.riverInfo at the point. True when the point is in a stream's band (channel and banks).
+function riverTint(c, ri, slope) {
+  if (!ri || ri.dist >= ri.w / 2 + 1.5 * ri.D + 2.5) return false;
+  const half = ri.w / 2, bed = 1 - smoothstep(half - 0.4, half + 1.0, ri.dist);
+  const bar = ri.bend < 0 ? -ri.bend * (1 - smoothstep(half + 0.2, half + 0.6 - ri.bend * 1.6, ri.dist)) : 0;
+  c.lerp(ri.riffle || bar > bed ? RIVER_PAL.gravel : RIVER_PAL.silt, Math.max(bed * 0.85, bar * 0.8));
+  const cut = ri.bend > 0 ? ri.bend * smoothstep(0.22, 0.42, slope) * (1 - smoothstep(half + 0.4, half + 1.5 * ri.D + 2.2, ri.dist)) : 0;
+  c.lerp(RIVER_PAL.earth, cut * 0.9);
+  const along = ri.seg ? ri.t * ri.seg.k % 1 : 0;
+  const rock = ri.seg && ri.seg.fall ? smoothstep(0.82, 0.9, along) * (1 - smoothstep(0.97, 1, along)) * (1 - smoothstep(half + 0.6, half + 2.5, ri.dist)) : 0;
+  c.lerp(slope > 0.3 ? PAL.rockDark : PAL.rock, Math.max(rock, smoothstep(0.35, 0.6, slope) * (1 - smoothstep(half, half + 2, ri.dist)) * 0.7 * (1 - cut)));
+  c.multiplyScalar(1 - 0.28 * (1 - smoothstep(half - 0.1, half + 0.9, ri.dist)) * (1 - bed * 0.5));
+  return true;
+}
+// Stream banks at twice the ground's resolution: in a chunk a stream crosses, the ground's 1 m squares in the
+// stream's band are left out of the terrain mesh and drawn instead as 0.5 m squares, their extra points on the true
+// carved shape (cut banks, bars, steps, plunge pools), coloured afresh at that resolution. Their corners, and the
+// middles of edges shared with ordinary squares, stay on the coarse surface, so there are no cracks.
+const BANK_R = 2, BANK_N = CS * BANK_R + 1;
+function refreshBanks(ch) {
+  const geo = ch.terrain.geometry;
+  if (ch.bankMesh) { ch.group.remove(ch.bankMesh); ch.bankMesh.geometry.dispose(); ch.bankMesh = null; }
+  const band = ch.bandV;
+  if (!rivers || !band) { if (ch.fullIdx) { geo.setIndex(ch.fullIdx); ch.fullIdx = null; } return; }
+  const inBand = (i, j) => band[j * N + i] || band[j * N + i + 1] || band[(j + 1) * N + i] || band[(j + 1) * N + i + 1];
+  const quads = [];
+  for (let j = 0; j < CS; j++) for (let i = 0; i < CS; i++) if (inBand(i, j)) quads.push(j * CS + i);
+  if (!quads.length) { if (ch.fullIdx) { geo.setIndex(ch.fullIdx); ch.fullIdx = null; } return; }
+  if (!ch.fullIdx) ch.fullIdx = geo.index;
+  const isQ = new Uint8Array(CS * CS);
+  for (const q of quads) isQ[q] = 1;
+  // the terrain without the band's squares
+  const full = ch.fullIdx.array, keep = [];
+  for (let q = 0; q < CS * CS; q++) if (!isQ[q]) for (let t = 0; t < 6; t++) keep.push(full[q * 6 + t]);
+  geo.setIndex(new THREE.BufferAttribute(new Uint16Array(keep), 1));
+  // fine points: base heights and stream info cached on the chunk (they only change if the world does)
+  if (!ch.fineBase) { ch.fineBase = new Float32Array(BANK_N * BANK_N).fill(NaN); ch.fineInfo = new Array(BANK_N * BANK_N); }
+  const h = ch.h, base = ch.base;
+  const coarse = (lx, lz) => ch.heightLocal(lx, lz);
+  const delta = (lx, lz) => { const i = Math.floor(lx), j = Math.floor(lz), fx = lx - i, fz = lz - j, k = (j + 1) * P + i + 1, d = (kk) => h[kk] - base[kk];
+    return lerp(lerp(d(k), d(k + 1), fx), lerp(d(k + P), d(k + P + 1), fx), fz); };
+  const vid = new Int32Array(BANK_N * BANK_N).fill(-1), pos = [], uv = [], col = [], idx = [];
+  // is a fine point free to take the true shape? Not on the chunk's edge, and not on an edge it shares with an
+  // ordinary square (those must follow the coarse surface)
+  const freePoint = (fi, fj) => {
+    if (fi % BANK_R === 0 && fj % BANK_R === 0) return false;
+    const qi = Math.floor(fi / BANK_R), qj = Math.floor(fj / BANK_R);
+    if (fi % BANK_R === 0) { if (fi === 0 || fi === BANK_N - 1) return false; return isQ[qj * CS + qi - 1] && isQ[qj * CS + Math.min(qi, CS - 1)]; }
+    if (fj % BANK_R === 0) { if (fj === 0 || fj === BANK_N - 1) return false; return isQ[(qj - 1) * CS + qi] && isQ[Math.min(qj, CS - 1) * CS + qi]; }
+    return true;
+  };
+  const point = (fi, fj) => {
+    const k = fj * BANK_N + fi;
+    if (vid[k] >= 0) return vid[k];
+    const lx = fi / BANK_R, lz = fj / BANK_R, x = ch.ox + lx, z = ch.oz + lz;
+    let y;
+    if (freePoint(fi, fj)) {
+      if (isNaN(ch.fineBase[k])) ch.fineBase[k] = baseHeight(x, z);
+      y = ch.fineBase[k] + delta(lx, lz);
+    } else y = coarse(lx, lz);
+    vid[k] = pos.length / 3;
+    pos.push(x, y, z); uv.push(x / 5, z / 5);
+    return vid[k];
+  };
+  for (const q of quads) {
+    const qi = q % CS, qj = (q / CS) | 0;
+    for (let b = 0; b < BANK_R; b++) for (let a = 0; a < BANK_R; a++) {
+      const fi = qi * BANK_R + a, fj = qj * BANK_R + b;
+      const p00 = point(fi, fj), p10 = point(fi + 1, fj), p01 = point(fi, fj + 1), p11 = point(fi + 1, fj + 1);
+      idx.push(p00, p01, p10, p10, p01, p11);
+    }
+  }
+  const g2 = new THREE.BufferGeometry();
+  g2.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+  g2.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uv), 2));
+  g2.setIndex(idx);
+  g2.computeVertexNormals();
+  // colours: the ground's own colour (interpolated from the coarse points, before the stream's) with the stream's
+  // colours worked out again at each fine point
+  const nor = g2.attributes.normal.array, pre = ch.colPre;
+  for (let v = 0; v < pos.length / 3; v++) {
+    const lx = pos[v * 3] - ch.ox, lz = pos[v * 3 + 2] - ch.oz;
+    const i = Math.min(CS - 1, Math.floor(lx)), j = Math.min(CS - 1, Math.floor(lz)), fx = lx - i, fz = lz - j;
+    const c3 = (o) => lerp(lerp(pre[(j * N + i) * 3 + o], pre[(j * N + i + 1) * 3 + o], fx), lerp(pre[((j + 1) * N + i) * 3 + o], pre[((j + 1) * N + i + 1) * 3 + o], fx), fz);
+    _c.setRGB(c3(0), c3(1), c3(2));
+    const fk = Math.round(lz * BANK_R) * BANK_N + Math.round(lx * BANK_R);
+    if (ch.fineInfo[fk] === undefined) ch.fineInfo[fk] = rivers.riverInfo(pos[v * 3], pos[v * 3 + 2]);
+    riverTint(_c, ch.fineInfo[fk], 1 - nor[v * 3 + 1]);
+    const vv = 0.96 + 0.08 * ((hash2(Math.round(pos[v * 3] * 2), Math.round(pos[v * 3 + 2] * 2), SEED) & 255) / 255);
+    col.push(_c.r * vv, _c.g * vv, _c.b * vv);
+  }
+  g2.setAttribute('color', new THREE.BufferAttribute(new Float32Array(col), 3));
+  g2.computeBoundingSphere();
+  const m = new THREE.Mesh(g2, terrainMat);
+  m.receiveShadow = true; m.renderOrder = ch.terrain.renderOrder;
+  ch.bankMesh = m; ch.group.add(m);
 }
 // Rocks of the streams (rivers-gen.js rocksIn): set on the carved ground, wet and dark in the water, mossy above it.
 // Kept on the chunk as { x, z, r, y, hy } (centre height, top above it) for the live water to flow round.
@@ -3783,7 +3877,8 @@ function updatePlayer(dt) {
     const k = clamp(1 - P.wade * 0.9, 0.4, 1); vx *= k; vz *= k; sp *= k;
     const lean = 0.35 * Math.min(1, P.wade * 1.5) * 7 * dt;
     P.kvx += sw.vx * lean; P.kvz += sw.vz * lean;
-    riverLive.push(0, P.x, P.z, 0.35, vx, vz, 1);
+    riverLive.obstacle(0, P.x, P.z, 0.2);
+    if (sp > 0.5) riverLive.push(0, P.x, P.z, 0.3, vx * 0.3, vz * 0.3, 0.15);     // a little stirring as the legs move
     // a splash at each step (alternate feet, a pace apart), rings spreading from the legs when standing still
     P.splashT = (P.splashT || 0) - dt;
     if (P.splashT <= 0) {

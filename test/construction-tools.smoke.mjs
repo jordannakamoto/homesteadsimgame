@@ -1,6 +1,7 @@
 // The construction tools in the built page, quickly: the sawhorses and the saw, layout marks on a wall lying flat, walls
 // tilted up, stepping through bare framing, scaffolding rented, set up along a wall, climbed by walking into its ladder
-// and worked from. Needs dist/index.html and Playwright.   node test/construction-tools.smoke.mjs
+// and worked from; then the roof: up the ladder and onto the deck, an anchor at the top, clipped in, a course laid, and
+// down the ladder again. Needs dist/index.html and Playwright.   node test/construction-tools.smoke.mjs
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 const file = 'file://' + process.cwd() + '/dist/index.html';
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] });
@@ -91,6 +92,52 @@ check('walking back off the ladder end climbs down', !s.on && Math.abs(s.y - s.g
 // the ladder is always there for work at height
 s = await G(() => { const c = __game.sim.state.sys.construction; return !!c.ladder || c.stacks.some((k) => k.itemId === 'ladder') || (c.carried && c.carried.itemId === 'ladder'); });
 check('a ladder is on site for the work at height', s);
+
+// ---- the roof, worked from on the roof: deck and dry-in by "work until done", then by hand up there
+await G(() => __game.sim.commandNow('construction.returnScaffold', {}));
+for (const st of ['top-plates', 'roof-frame', 'roof-deck', 'dry-in']) await workStage(st);
+await G(() => __game.sim.commandNow('construction.setOption', { key: 'auto', value: false }));
+s = await G(() => {
+  const c = __game.sim, cs = c.state.sys.construction, pr = __construct.current(), g = __construct.geom(pr.id), api = c.systems.find((q) => q.name === 'construction').api;
+  if (cs.carried) c.commandNow('construction.putDown', { x: __game.player.x + 1, z: __game.player.z });
+  if (!cs.ladder) { const lk = cs.stacks.find((k) => k.itemId === 'ladder'); if (lk) c.commandNow('construction.pickUp', { stackId: lk.id }); }
+  const F = [...g.frames.values()][0], em = new __game.THREE.Vector3(...F.on(F.EL / 2, 0, 0)).applyMatrix4(g.matrix);
+  const lean = cs.ladder ? { ok: true } : c.commandNow('construction.leanLadder', __construct.ladderSpot(pr, em.x, em.z));
+  const want = Object.values(pr.lines).find((l) => l.stage === 'roofing' && /^roof_/.test(l.itemId)).itemId, rk = cs.stacks.find((k) => k.itemId === want);
+  if (rk) c.commandNow('construction.pickUp', { stackId: rk.id });
+  __construct.V.rev++;
+  return { dry: api.stageComplete(pr, 'dry-in'), lean: lean.ok, carried: cs.carried && cs.carried.itemId };
+});
+check('decked and dried in; the ladder at the eave, shingles in the arms', s.dry && s.lean && /^roof_/.test(s.carried || ''), JSON.stringify(s));
+await G(() => { const L = __game.sim.state.sys.construction.ladder, P = __game.player; P.x = L.x - Math.sin(L.yaw) * 0.6; P.z = L.z - Math.cos(L.yaw) * 0.6; P.climbY = P.standY = null; __game.cam.yaw = L.yaw + Math.PI; });
+await tick(3);
+await page.keyboard.down('KeyW');
+let climbed = false;
+for (let i = 0; i < 60; i++) { await tick(2); const q = await G(() => ({ c: !!__construct.V.climb, r: __construct.roof.on() })); climbed = climbed || q.c; if (q.r) break; }
+await page.keyboard.up('KeyW'); await tick(3);
+s = await G(() => { const h = __construct.roof.at(); return { on: __construct.roof.on(), k: h && h.k }; });
+check('walk into the ladder, keep walking: up it and onto the deck', climbed && s.on, JSON.stringify(s));
+// up to the top edge: one press fixes the anchor and clips in; the rope keeps you back from the rake
+await G(() => { const d = __construct.roof.at().down; __game.cam.yaw = Math.atan2(d[0], d[1]); });
+await page.keyboard.down('KeyW'); for (let i = 0; i < 40; i++) { await tick(1); if (await G(() => { const h = __construct.roof.at(); return !__construct.roof.on() || h.t > h.F.top - 0.6; })) break; } await page.keyboard.up('KeyW'); await tick(3);
+if ((await G(() => __construct.context() && __construct.context().kind)) === 'anchor') await G(() => __construct.press());
+await G(() => { const d = __construct.roof.at().down; __game.cam.yaw = Math.atan2(-d[1], d[0]); });
+await page.keyboard.down('KeyW'); await tick(50); await page.keyboard.up('KeyW'); await tick(3);
+s = await G(() => ({ clip: __construct.V.clip, on: __construct.roof.on(), anchors: Object.keys(__game.sim.state.sys.construction.anchors || {}).length }));
+check('an anchor at the top, clipped in, held back from the edge by the rope', s.clip != null && s.on && s.anchors === 1, JSON.stringify(s));
+// down to the eave and lay the first course, from the eave up
+await G(() => { const d = __construct.roof.at().down; __game.cam.yaw = Math.atan2(-d[0], -d[1]); });
+await page.keyboard.down('KeyW'); for (let i = 0; i < 40; i++) { await tick(1); if (await G(() => { const h = __construct.roof.at(); return !__construct.roof.on() || h.t < 0.6; })) break; } await page.keyboard.up('KeyW'); await tick(4);
+let rows = [];
+for (let i = 0; i < 30; i++) { await G(() => { __construct.V.cool = 0; __construct.press(); }); await tick(3); rows = await G(() => { const pr = __construct.current(), g = __construct.geom(pr.id); return Object.keys(pr.members).filter((id) => pr.members[id].kind === 'roofing' && pr.members[id].built).map((id) => g.byId.get(id).row); }); if (rows.length) break; }
+check('set and nailed from on the roof: the starter course goes on first, at the eave', rows.length > 0 && rows.every((r) => r === 0), JSON.stringify(rows));
+// back down: off the eave by the ladder and down it
+await G(() => { const L = __game.sim.state.sys.construction.ladder, P = __game.player, lt = __construct.ladderTop(L); __game.cam.yaw = Math.atan2(P.x - lt.x, P.z - lt.z); });
+await page.keyboard.down('KeyW');
+let onLadder = false, down = false;
+for (let i = 0; i < 120; i++) { await tick(2); const q = await G(() => ({ c: !!__construct.V.climb, r: __construct.roof.on(), y: __game.player.y, g: __game.heightAt(__game.player.x, __game.player.z) })); onLadder = onLadder || q.c; if (!q.c && !q.r && q.y - q.g < 0.3) { down = true; break; } }
+await page.keyboard.up('KeyW'); await tick(3);
+check('walk off the eave by the ladder: onto it, down it, unclipped', onLadder && down && (await G(() => __construct.V.clip)) == null);
 check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 await browser.close();
 console.log(fails.length ? '\n' + fails.length + ' failed' : '\nall passed');

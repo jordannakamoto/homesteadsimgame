@@ -69,7 +69,14 @@
     fsel: null,
     pkind: "pillar",
     dstyle: "door",
-    rshape: 0,
+    // the roof in hand: shape, which way it is turned, pitch (inches per 12), overhangs in metres, gutters, finish
+    rsh: "gable",
+    rturn: 0,
+    pitch12: 8,
+    eave: 0.45,
+    rake: 0.3,
+    gutters: false,
+    rcolor: null,
     tshape: "cone",
     pwidth: 2,
     pmat: "cobble",
@@ -86,7 +93,7 @@
     savedV: 0,
     wmat: "timber",
     fmat: "planks",
-    rmat: "thatch",
+    rmat: "asphalt",
     stairDir: 0,
     prevTool: "axe",
     pending: { ox: 0, oz: 0, yaw: 0, y0: 0, isNew: true },
@@ -198,7 +205,31 @@
   };
   const PATHS = { cobble: { name: "Cobbles", c: col(0x8e8a80) }, dirt: { name: "Packed earth", c: col(0x8a6b47) }, gravel: { name: "Gravel", c: col(0xb5ad9c) }, boards: { name: "Boardwalk", c: col(0x9b7b4f) } };
   const FLOORS = { planks: { name: "Planks", c: C.floor }, flags: { name: "Flagstone", c: col(0x9a968c) }, dark: { name: "Dark boards", c: col(0x6b5238) }, tile: { name: "Clay tiles", c: col(0xb4654a), c2: col(0xc98a62) }, marble: { name: "Marble", c: col(0xd9d6cf), c2: col(0x4c4f55) }, cobble: { name: "Cobbles", c: col(0x86837b), c2: col(0x77746c) }, carpet: { name: "Red carpet", c: col(0x8c2f2c) }, moss: { name: "Lawn", c: col(0x5f8a3c) } };
-  const ROOFS = { thatch: { name: "Thatch", c: C.thatch }, slate: { name: "Slate", c: col(0x56616c) }, tile: { name: "Clay tile", c: col(0xa9573b) }, shingle: { name: "Wood shingle", c: col(0x6a4f37) }, copper: { name: "Green copper", c: col(0x5fa08a) }, redslate: { name: "Red slate", c: col(0x7b3b3b) } };
+  // Roof coverings. look: how the surface is drawn (courses of a given exposure in metres, standing seams, corrugations,
+  // a flat membrane, a planted mat). min / max: the slopes it is laid at, as rise in inches per 12 of run (roofers' pitch).
+  const ROOFS = {
+    thatch: { name: "Thatch", c: C.thatch, group: "classic", look: "course", course: 0.5, lift: 0.06, alt: 0.035, butt: 0.08, min: 8, good: 12 },
+    slate: { name: "Slate", c: col(0x56616c), group: "classic", look: "course", course: 0.42, min: 4 },
+    tile: { name: "Clay tile", c: col(0xa9573b), group: "classic", look: "course", course: 0.4, alt: 0.03, min: 2.5 },
+    shingle: { name: "Wood shingle", c: col(0x6a4f37), group: "classic", look: "course", course: 0.45, min: 3 },
+    copper: { name: "Green copper", c: col(0x5fa08a), group: "classic", look: "course", course: 0.5, min: 3 },
+    redslate: { name: "Red slate", c: col(0x7b3b3b), group: "classic", look: "course", course: 0.42, min: 4 },
+    asphalt: { name: "Asphalt shingles", c: col(0x47494d), group: "modern", look: "course", course: 0.26, lift: 0.02, alt: 0.012, butt: 0.012, min: 2, good: 4, colors: ["charcoal", "weathered", "brown", "slateblue", "forest", "red"] },
+    seam: { name: "Standing seam metal", c: col(0x3a3e43), group: "modern", look: "seam", min: 1, colors: ["charcoal", "black", "forest", "red", "slateblue", "bronze", "galvalume", "white"] },
+    corrugated: { name: "Corrugated metal", c: col(0xa8aeb1), group: "modern", look: "corr", min: 3, colors: ["galvalume", "charcoal", "red", "forest"] },
+    membrane: { name: "Rubber membrane", c: col(0x2b2c2e), group: "modern", look: "flat", min: 0.25 },
+    green: { name: "Green roof", c: col(0x5f7f3c), group: "modern", look: "green", max: 3 },
+  };
+  // finishes a metal or shingle roof comes in
+  const ROOF_COLORS = {
+    charcoal: ["Charcoal", col(0x3a3e43)], black: ["Black", col(0x222326)], weathered: ["Weathered wood", col(0x6f6a62)], brown: ["Brown", col(0x5a4636)],
+    slateblue: ["Slate blue", col(0x46566a)], forest: ["Forest green", col(0x334d3a)], red: ["Barn red", col(0x7d3027)], bronze: ["Bronze", col(0x5b4a37)],
+    galvalume: ["Galvalume", col(0xa8aeb1)], white: ["White", col(0xdedcd6)],
+  };
+  const roofCol = (r) => {
+    const M = ROOFS[r.mat || "thatch"] || ROOFS.thatch;
+    return r.color && ROOF_COLORS[r.color] && M.colors && M.colors.includes(r.color) ? ROOF_COLORS[r.color][1] : M.c;
+  };
   let PAL = WALLS.timber,
     RPAL = C.thatch;
 
@@ -229,6 +260,11 @@
       tile: Object.freeze([LY("clay-roof-tile", 0.015, "covering"), LY("softwood-boards", 0.02, "deck"), LY("air", 0.14, "rafter-bay")]),
       shingle: Object.freeze([LY("wood-shingle", 0.02, "covering"), LY("softwood-boards", 0.02, "deck"), LY("air", 0.14, "rafter-bay")]),
       copper: Object.freeze([LY("copper-sheet", 0.0007, "covering"), LY("softwood-boards", 0.02, "deck"), LY("air", 0.14, "rafter-bay")]),
+      asphalt: Object.freeze([LY("asphalt-shingle", 0.007, "covering"), LY("softwood-boards", 0.02, "deck"), LY("air", 0.14, "rafter-bay")]),
+      seam: Object.freeze([LY("steel-sheet", 0.0006, "covering"), LY("softwood-boards", 0.02, "deck"), LY("air", 0.14, "rafter-bay")]),
+      corrugated: Object.freeze([LY("steel-sheet", 0.0005, "covering"), LY("softwood-boards", 0.02, "deck"), LY("air", 0.14, "rafter-bay")]),
+      membrane: Object.freeze([LY("epdm-membrane", 0.0015, "covering"), LY("softwood-boards", 0.02, "deck"), LY("air", 0.14, "rafter-bay")]),
+      green: Object.freeze([LY("topsoil", 0.08, "covering"), LY("epdm-membrane", 0.0015, "membrane"), LY("softwood-boards", 0.02, "deck"), LY("air", 0.14, "rafter-bay")]),
     },
     fence: Object.freeze([LY("softwood-rails", 0.07, "fence")]),
     leaf: Object.freeze([LY("softwood-boards", 0.045, "leaf")]),
@@ -736,156 +772,489 @@
     ebox(g, i, j, d, 0, 1, WALL_H, EAVE, 0.095, PAL.beam);
   }
 
-  // one sloping face, from the eave edge e0-e1 up to p0-p1 (which may be a single point)
-  function roofFace(rg, e0, e1, p0, p1, seed) {
-    const mx = (p0[0] + p1[0] - e0[0] - e1[0]) / 2,
-      my = (p0[1] + p1[1] - e0[1] - e1[1]) / 2,
-      mz = (p0[2] + p1[2] - e0[2] - e1[2]) / 2;
-    const ex = e1[0] - e0[0],
-      ey = e1[1] - e0[1],
-      ez = e1[2] - e0[2];
-    let n = [ey * mz - ez * my, ez * mx - ex * mz, ex * my - ey * mx];
-    const nl = Math.hypot(n[0], n[1], n[2]) || 1,
-      s = n[1] < 0 ? -1 : 1;
-    n = [(n[0] / nl) * s, (n[1] / nl) * s, (n[2] / nl) * s];
-    const bands = Math.max(2, Math.ceil(Math.hypot(mx, my, mz) / 0.5));
-    const L = (a, b, t, up) => [a[0] + (b[0] - a[0]) * t + n[0] * up, a[1] + (b[1] - a[1]) * t + n[1] * up, a[2] + (b[2] - a[2]) * t + n[2] * up];
-    for (let b = 0; b < bands; b++) {
-      const t0 = b / bands,
-        t1 = Math.min(1, (b + 1) / bands + 0.02),
-        up = 0.02 + (b % 2) * 0.03,
-        colr = shade(RPAL, 0.84 + 0.2 * hash(seed, b, 3) - 0.1 * t0);
-      rg.tri(L(e0, p0, t0, up), L(e1, p1, t0, up), L(e1, p1, t1, up), n, colr);
-      rg.tri(L(e0, p0, t0, up), L(e1, p1, t1, up), L(e0, p0, t1, up), n, colr);
-    }
-  }
-  const RSHAPES = [
-    ["gable", 0, "Gable roof", 1],
-    ["gable", 1, "Gable roof, ridge turned", 1],
-    ["gable", 0, "Steep gable roof", 1.7],
-    ["gable", 1, "Steep gable roof, ridge turned", 1.7],
-    ["hip", 0, "Hip roof", 1],
-    ["hip", 0, "Spire roof", 2.2],
-    ["shed", 0, "Lean-to roof", 1],
-    ["shed", 1, "Lean-to roof, turned", 1],
-    ["shed", 2, "Lean-to roof, turned twice", 1],
-    ["shed", 3, "Lean-to roof, turned thrice", 1],
-    ["flat", 0, "Flat roof", 1],
-  ];
-  const TOP_NAME = { cone: "Pointed roof", dome: "Dome", crenel: "Battlements" };
-  function roofPieces(g, r) {
-    const shape = r.shape || "gable";
-    if (shape === "gable") return gableRoof(g, r);
+  /* ---------- roofs: one geometry for drawing, framing and the plan ---------- */
+  // Pitch is rise in inches per 12 of run, as roofers give it. Saves from before carry `pitch` as a multiplier instead.
+  const ROOF_SHAPES = { gable: "Gable", hip: "Hip", gambrel: "Gambrel", saltbox: "Saltbox", shed: "Lean-to", flat: "Flat" };
+  const ROOF_LONG = { gable: "Gable roof", hip: "Hip roof", gambrel: "Gambrel roof", saltbox: "Saltbox roof", shed: "Lean-to roof", flat: "Flat roof" };
+  const RIDGED = { gable: 1, gambrel: 1, saltbox: 1 };
+  const ROOF_HEEL = 0.1;
+  const TURNS = { gable: 2, gambrel: 2, saltbox: 4, shed: 4 };
+  const pitchOf = (r) => {
+    const s = r.shape || "gable";
+    if (s === "flat") return 0.25;
+    if (r.pitch12 != null) return r.pitch12;
+    if (s === "shed") return 5;
+    const p = r.pitch || 1;
+    return p >= 2 ? 16 : p > 1.2 ? 12 : 7;
+  };
+  const eaveOf = (r) => (r.eave != null ? r.eave : r.shape === "flat" ? 0.15 : 0.45);
+  const rakeOf = (r) => (r.rake != null ? r.rake : 0.3);
+  const degOf = (p12) => (Math.atan(p12 / 12) * 180) / Math.PI;
+  const p12Text = (p) => (Math.round(p * 100) / 100) + "/12";
+
+  // The parts of a rectangular roof, in the structure's own metres, heights as in a normal storey. The one description
+  // that drawing (roofPieces), framing (roofMembers via frameOf) and the piece list all read:
+  //  plane  { pts (outline in plan, eave edge first, overhangs included), eaveY, ridgeY, run (plan distance eave edge to
+  //           top), facing (downslope, plan unit), eave, rake (overhang past the walls at the ends of the eave edge),
+  //           drip (its eave edge is a real eave), outer (per edge pts[n]->pts[n+1]: a free edge), pitch12 }
+  //  infill { a, b (on the wall line), y0, y1, area, shape, outline [[x, y, z]...] }  the wall under a gable or lean-to
+  //  ridge  { a, b, y0, y1 }   hip { a, b, y0 (eave end), y1 (ridge end) }
+  //  gutter { a, b (gutter centre line), y (its top), down (first downspout), downs, wall (where each meets the wall),
+  //           out (outward unit), plane (index of its plane in this list) }
+  function roofParts(r) {
     const x0 = r.i0,
       x1 = r.i1 + 1,
       z0 = r.j0,
       z1 = r.j1 + 1,
-      ov = 0.45,
-      seed = r.i0 * 3 + r.j0;
+      shape = r.shape || "gable",
+      s = pitchOf(r) / 12,
+      e = eaveOf(r),
+      k = rakeOf(r),
+      // the roof sits on the walls with a heel: its deck passes over the top of the wall a little above it
+      Y0 = EAVE + ROOF_HEEL,
+      out = [];
+    const plane = (pts, eaveY, ridgeY, run, facing, more) => out.push({ part: "plane", pts, eaveY, ridgeY, run, facing, eave: e, rake: 0, drip: true, outer: pts.map(() => false), pitch12: s * 12, ...more });
+    let ends = k; // how far each gutter runs past the building's corner
     if (shape === "flat") {
-      g.abox(x0 - 0.14, EAVE - 0.02, z0 - 0.14, x1 + 0.14, EAVE + 0.1, z1 + 0.14, shade(RPAL, 0.92));
-      for (const [a, b, c, e] of [
-        [x0 - 0.14, z0 - 0.14, x1 + 0.14, z0 + 0.02],
-        [x0 - 0.14, z1 - 0.02, x1 + 0.14, z1 + 0.14],
-        [x0 - 0.14, z0, x0 + 0.02, z1],
-        [x1 - 0.02, z0, x1 + 0.14, z1],
-      ])
-        g.abox(a, EAVE + 0.1, b, c, EAVE + 0.28, e, shade(RPAL, 0.78));
-      return;
-    }
-    if (shape === "hip") {
+      const y = EAVE + 0.1;
+      ends = e;
+      plane([[x0 - e, z0 - e], [x1 + e, z0 - e], [x1 + e, z1 + e], [x0 - e, z1 + e]], y, y, 0, [0, 0], { rake: e, outer: [true, true, true, true], pitch12: 0.25 });
+    } else if (RIDGED[shape]) {
+      const ax = r.axis === "x",
+        P = (a, b) => (ax ? [a, b] : [b, a]),
+        A0 = ax ? x0 : z0,
+        A1 = ax ? x1 : z1,
+        B0 = ax ? z0 : x0,
+        B1 = ax ? z1 : x1,
+        a0 = A0 - k,
+        a1 = A1 + k,
+        span = B1 - B0,
+        half = span / 2;
+      // the section across the ridge, wall to wall: [b, y] from B0 up and over to B1
+      let prof;
+      if (shape === "gambrel") {
+        const w = half * 0.4,
+          sl = clamp(s * 2.4, 1.2, 2.6),
+          yb = Y0 + w * sl;
+        prof = [[B0, Y0], [B0 + w, yb], [B0 + half, yb + (half - w) * s], [B1 - w, yb], [B1, Y0]];
+      } else if (shape === "saltbox") {
+        const short = span * 0.36,
+          br = (r.dir || 0) & 1 ? B1 - short : B0 + short;
+        prof = [[B0, Y0], [br, Y0 + short * s], [B1, Y0]];
+      } else prof = [[B0, Y0], [B0 + half, Y0 + half * s], [B1, Y0]];
+      const apex = shape === "gambrel" ? 2 : 1,
+        top = prof[apex][1];
+      const seg = (lo, hi, side, first) => {
+        const sl = (hi[1] - lo[1]) / Math.abs(hi[0] - lo[0]),
+          bE = first ? lo[0] + side * e : lo[0],
+          yE = first ? lo[1] - sl * e : lo[1];
+        plane([P(a0, bE), P(a1, bE), P(a1, hi[0]), P(a0, hi[0])], yE, hi[1], Math.abs(hi[0] - bE), P(0, side), { rake: k, drip: first, outer: [first, true, false, true], pitch12: sl * 12 });
+      };
+      for (let n = 0; n < apex; n++) seg(prof[n], prof[n + 1], -1, n === 0);
+      for (let n = prof.length - 1; n > apex; n--) seg(prof[n], prof[n - 1], 1, n === prof.length - 1);
+      // the wall under each end: up from the wall top to the underside of the roof
+      const sec = [[B0, EAVE - 0.02], ...prof, [B1, EAVE - 0.02]];
+      let area = 0;
+      for (let n = 0; n < sec.length; n++) {
+        const p = sec[n],
+          q = sec[(n + 1) % sec.length];
+        area += p[0] * q[1] - q[0] * p[1];
+      }
+      for (const a of [A0, A1])
+        out.push({
+          part: "infill", a: P(a, B0), b: P(a, B1), y0: EAVE - 0.02, y1: top, area: Math.abs(area) / 2, shape: prof.length === 3 ? "triangle" : "polygon",
+          outline: sec.map(([b, y]) => { const [x, z] = P(a, b); return [x, y, z]; }),
+        });
+      out.push({ part: "ridge", a: P(a0 - 0.06, prof[apex][0]), b: P(a1 + 0.06, prof[apex][0]), y0: top, y1: top + 0.2 });
+    } else if (shape === "hip") {
       const w = x1 - x0,
         l = z1 - z0,
         half = Math.min(w, l) / 2,
-        rise = clamp(half * 0.85, 0.7, 2.9) * (r.pitch || 1),
-        ye = EAVE - (rise / half) * ov,
-        yt = EAVE + rise;
-      const c00 = [x0 - ov, ye, z0 - ov],
-        c10 = [x1 + ov, ye, z0 - ov],
-        c11 = [x1 + ov, ye, z1 + ov],
-        c01 = [x0 - ov, ye, z1 + ov];
-      const r0 = w >= l ? [x0 + half, yt, (z0 + z1) / 2] : [(x0 + x1) / 2, yt, z0 + half],
-        r1 = w >= l ? [x1 - half, yt, (z0 + z1) / 2] : [(x0 + x1) / 2, yt, z1 - half];
+        ye = Y0 - s * e,
+        yt = Y0 + half * s,
+        run = half + e,
+        c00 = [x0 - e, z0 - e],
+        c10 = [x1 + e, z0 - e],
+        c11 = [x1 + e, z1 + e],
+        c01 = [x0 - e, z1 + e],
+        r0 = w >= l ? [x0 + half, (z0 + z1) / 2] : [(x0 + x1) / 2, z0 + half],
+        r1 = w >= l ? [x1 - half, (z0 + z1) / 2] : [(x0 + x1) / 2, z1 - half],
+        ridge = Math.hypot(r1[0] - r0[0], r1[1] - r0[1]);
+      ends = e;
+      // eave edge first; a square plan has no ridge, so the long faces are triangles too
+      const face = (e0, e1, p0, p1, facing) => (ridge > 1e-6 && p0 !== p1 ? plane([e0, e1, p1, p0], ye, yt, run, facing, { outer: [true, false, false, false] }) : plane([e0, e1, p0], ye, yt, run, facing, { outer: [true, false, false] }));
       if (w >= l) {
-        roofFace(g, c00, c10, r0, r1, seed);
-        roofFace(g, c01, c11, r0, r1, seed + 1);
-        roofFace(g, c10, c11, r1, r1, seed + 2);
-        roofFace(g, c00, c01, r0, r0, seed + 3);
+        face(c00, c10, r0, r1, [0, -1]);
+        face(c11, c01, r1, r0, [0, 1]);
+        face(c10, c11, r1, r1, [1, 0]);
+        face(c01, c00, r0, r0, [-1, 0]);
       } else {
-        roofFace(g, c00, c01, r0, r1, seed);
-        roofFace(g, c10, c11, r0, r1, seed + 1);
-        roofFace(g, c00, c10, r0, r0, seed + 2);
-        roofFace(g, c01, c11, r1, r1, seed + 3);
+        face(c01, c00, r1, r0, [-1, 0]);
+        face(c10, c11, r0, r1, [1, 0]);
+        face(c00, c10, r0, r0, [0, -1]);
+        face(c11, c01, r1, r1, [0, 1]);
       }
-      g.obox([(r0[0] + r1[0]) / 2, yt + 0.06, (r0[2] + r1[2]) / 2], [Math.abs(r1[0] - r0[0]) / 2 + 0.1, 0, 0], [0, 0.09, 0], [0, 0, Math.abs(r1[2] - r0[2]) / 2 + 0.1], PAL.beam);
-      return;
+      if (ridge > 1e-6) out.push({ part: "ridge", a: r0, b: r1, y0: yt, y1: yt + 0.18 });
+      const near0 = w >= l ? [c00, c01] : [c00, c10];
+      for (const c of [c00, c10, c11, c01]) out.push({ part: "hip", a: c, b: near0.includes(c) ? r0 : r1, y0: ye, y1: yt });
+    } else {
+      // lean-to: one slope, running down in direction r.dir; the eave on the low side, the rake on the other three
+      const [dx, dz] = DIRS[r.dir || 0],
+        ax = dx !== 0,
+        sgn = dx + dz,
+        a0 = ax ? x0 : z0,
+        a1 = ax ? x1 : z1,
+        b0 = ax ? z0 : x0,
+        b1 = ax ? z1 : x1,
+        hi = sgn > 0 ? a0 : a1,
+        lo = sgn > 0 ? a1 : a0,
+        span = a1 - a0,
+        rise = span * s,
+        P = (a, b) => (ax ? [a, b] : [b, a]),
+        eA = lo + sgn * e,
+        tA = hi - sgn * k;
+      plane([P(eA, b0 - k), P(eA, b1 + k), P(tA, b1 + k), P(tA, b0 - k)], Y0 - s * e, Y0 + rise + s * k, span + e + k, P(sgn, 0), { rake: k, outer: [true, true, true, true] });
+      const V = (a, b, y) => {
+        const [x, z] = P(a, b);
+        return [x, y, z];
+      };
+      const lift = Y0 - EAVE + 0.02;
+      for (const b of [b0, b1]) out.push({ part: "infill", a: P(a0, b), b: P(a1, b), y0: EAVE - 0.02, y1: Y0 + rise, area: span * (lift + rise / 2), shape: "triangle", outline: [V(lo, b, EAVE - 0.02), V(hi, b, EAVE - 0.02), V(hi, b, Y0 + rise), V(lo, b, Y0)] });
+      out.push({ part: "infill", a: P(hi, b0), b: P(hi, b1), y0: EAVE - 0.02, y1: Y0 + rise, area: (b1 - b0) * (rise + lift), shape: "rectangle", outline: [V(hi, b0, EAVE - 0.02), V(hi, b1, EAVE - 0.02), V(hi, b1, Y0 + rise), V(hi, b0, Y0 + rise)] });
     }
-    // lean-to: one slope, running down in direction r.dir
-    const [dx, dz] = DIRS[r.dir || 0];
-    const alongX = dx !== 0,
-      sgn = dx + dz;
-    const a0 = alongX ? x0 : z0,
-      a1 = alongX ? x1 : z1,
-      b0 = alongX ? z0 : x0,
-      b1 = alongX ? z1 : x1;
-    const hi = sgn > 0 ? a0 : a1,
-      lo = sgn > 0 ? a1 : a0,
-      span = a1 - a0,
-      rise = clamp(span * 0.45, 0.6, 2.6),
-      sl = rise / span;
-    const m = (a, y, b) => (alongX ? [a, y, b] : [b, y, a]);
-    roofFace(g, m(lo + sgn * ov, EAVE - sl * ov, b0 - ov), m(lo + sgn * ov, EAVE - sl * ov, b1 + ov), m(hi - sgn * 0.25, EAVE + rise + sl * 0.25, b0 - ov), m(hi - sgn * 0.25, EAVE + rise + sl * 0.25, b1 + ov), seed);
-    const gc = shade(C.gable, 0.95),
-      nb = alongX ? [0, 0, 1] : [1, 0, 0],
-      na = alongX ? [1, 0, 0] : [0, 0, 1];
-    for (const b of [b0, b1]) g.tri(m(lo, EAVE - 0.02, b), m(hi, EAVE - 0.02, b), m(hi, EAVE + rise, b), nb, gc);
-    g.tri(m(hi, EAVE - 0.02, b0), m(hi, EAVE - 0.02, b1), m(hi, EAVE + rise, b1), na, gc);
-    g.tri(m(hi, EAVE - 0.02, b0), m(hi, EAVE + rise, b1), m(hi, EAVE + rise, b0), na, gc);
+    if (r.gutters) {
+      const planes = out.filter((q) => q.part === "plane" && q.drip);
+      for (const pl of planes) {
+        const [p0, p1] = pl.pts,
+          L = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]),
+          ev = [(p1[0] - p0[0]) / L, (p1[1] - p0[1]) / L],
+          o = pl.run ? pl.facing : [ev[1], -ev[0]],
+          off = 0.07,
+          a = [p0[0] + o[0] * off, p0[1] + o[1] * off],
+          b = [p1[0] + o[0] * off, p1[1] + o[1] * off],
+          at = (t) => [a[0] + ev[0] * t, a[1] + ev[1] * t],
+          inset = Math.min(L / 2, ends + 0.12),
+          downs = L > 9 ? [at(inset), at(L - inset)] : [at(inset)],
+          back = pl.eave + off - 0.06;
+        out.push({ part: "gutter", a, b, y: pl.eaveY - 0.03, down: downs[0], downs, wall: downs.map((d) => [d[0] - o[0] * back, d[1] - o[1] * back]), out: o, plane: out.indexOf(pl) });
+      }
+    }
+    return out;
   }
-  function gableRoof(g, r) {
-    // a = along the ridge, b = across it
-    const alongX = r.axis === "x";
-    const a0 = (alongX ? r.i0 : r.j0) - 0.45,
-      a1 = (alongX ? r.i1 : r.j1) + 1 + 0.45;
-    const b0 = alongX ? r.j0 : r.i0,
-      b1 = (alongX ? r.j1 : r.i1) + 1;
-    const half = (b1 - b0) / 2,
-      bc = (b0 + b1) / 2,
-      rise = clamp(half * 0.85, 0.7, 2.9) * (r.pitch || 1),
-      ov = 0.45,
-      sl = rise / half;
-    const pt = (a, b, y) => (alongX ? [a, y, b] : [b, y, a]);
-    const vec = (a, b, y) => (alongX ? [a, y, b] : [b, y, a]);
-    const run = half + ov,
-      drop = rise + sl * ov,
-      L = Math.hypot(run, drop),
-      n = Math.max(2, Math.ceil(L / 0.5));
-    for (const side of [-1, 1]) {
-      const db = (side * run) / L,
-        dy = -drop / L; // unit vector down the slope (b, y)
-      const nb = (side * drop) / L,
-        ny = run / L; // outward normal
-      for (let k = 0; k < n; k++) {
-        const tm = ((k + 0.5) / n) * L,
-          hl = L / n / 2 + 0.03,
-          lift = 0.06 + (k % 2) * 0.025;
-        const cb = bc + db * tm + nb * lift,
-          cy = EAVE + rise + dy * tm + ny * lift;
-        const sh = 0.84 + 0.22 * hash(r.i0 + k, r.j0 + side, 3) - 0.1 * (k / n);
-        g.obox(pt((a0 + a1) / 2, cb, cy), vec((a1 - a0) / 2, 0, 0), vec(0, db * hl, dy * hl), vec(0, nb * 0.06, ny * 0.06), shade(RPAL, sh));
-      }
-    }
-    g.obox(pt((a0 + a1) / 2, bc, EAVE + rise + 0.1), vec((a1 - a0) / 2 + 0.06, 0, 0), vec(0, 0, 0.1), vec(0, 0.1, 0), PAL.beam);
-    // gable ends, on the wall line
-    for (const a of [a0 + 0.45, a1 - 0.45]) {
-      for (const off of [-0.07, 0.07]) {
-        const A = pt(a + off, b0, EAVE - 0.02),
-          Bp = pt(a + off, b1, EAVE - 0.02),
-          Cp = pt(a + off, bc, EAVE + rise);
-        g.tri(A, Bp, Cp, vec(Math.sign(off), 0, 0), shade(C.gable, 0.95));
-      }
-    }
+  // the roof the tool has in hand, for a rectangle
+  const ROOF_KEEP = ["shape", "axis", "dir", "pitch", "pitch12", "eave", "rake", "gutters", "color", "mat"];
+  function roofFromHand(rect) {
+    const sh = B.rsh,
+      wide = rect.i1 - rect.i0 >= rect.j1 - rect.j0,
+      t = B.rturn || 0,
+      M = ROOFS[B.rmat] || ROOFS.thatch,
+      r = { shape: sh, axis: RIDGED[sh] ? (wide !== !!(t & 1) ? "x" : "z") : wide ? "x" : "z", dir: sh === "shed" ? t & 3 : sh === "saltbox" ? (t >> 1) & 1 : 0, pitch12: sh === "flat" ? 0.25 : B.pitch12, eave: B.eave, rake: B.rake, gutters: !!B.gutters, mat: B.rmat };
+    if (B.rcolor && M.colors && M.colors.includes(B.rcolor)) r.color = B.rcolor;
+    return r;
   }
+  // which way a roof is turned, as the tool counts it
+  const turnOfRoof = (r) => {
+    const sh = r.shape || "gable",
+      wide = r.i1 - r.i0 >= r.j1 - r.j0;
+    return sh === "shed" ? (r.dir || 0) & 3 : RIDGED[sh] ? (wide !== (r.axis === "x") ? 1 : 0) + (sh === "saltbox" ? ((r.dir || 0) & 1) * 2 : 0) : 0;
+  };
+  // pick up a roof's plan as the one in hand
+  function takeRoof(r) {
+    B.rsh = r.shape || "gable";
+    B.rturn = turnOfRoof(r);
+    if (B.rsh !== "flat") B.pitch12 = pitchOf(r);
+    B.eave = eaveOf(r);
+    B.rake = rakeOf(r);
+    B.gutters = !!r.gutters;
+    B.rcolor = r.color || null;
+  }
+  const sameRoofPlan = (a, b) =>
+    (a.shape || "gable") === (b.shape || "gable") && (!RIDGED[a.shape || "gable"] || a.axis === b.axis) && (a.dir || 0) === (b.dir || 0) && pitchOf(a) === pitchOf(b) && eaveOf(a) === eaveOf(b) && rakeOf(a) === rakeOf(b) && !!a.gutters === !!b.gutters && (a.color || null) === (b.color || null) && (a.mat || "thatch") === (b.mat || "thatch");
+  const roofRec = (r) => {
+    const nr = { i0: r.i0, i1: r.i1, j0: r.j0, j1: r.j1 };
+    for (const k of ROOF_KEEP) if (r[k] !== undefined && r[k] !== null) nr[k] = r[k];
+    return nr;
+  };
+  // how much roofing a roof takes, measured on the slope, and the slopes it has
+  function roofStats(r) {
+    let area = 0,
+      lo = 1e9,
+      hi = 0,
+      gut = 0,
+      downs = 0;
+    for (const q of roofParts({ ...r, gutters: true })) {
+      if (q.part === "plane") {
+        const kk = q.run ? (q.ridgeY - q.eaveY) / q.run : 0;
+        area += polyArea(q.pts) * Math.sqrt(1 + kk * kk);
+        lo = Math.min(lo, q.pitch12);
+        hi = Math.max(hi, q.pitch12);
+      } else if (q.part === "gutter") ((gut += Math.hypot(q.b[0] - q.a[0], q.b[1] - q.a[1])), (downs += q.downs.length));
+    }
+    return { area, lo: lo > 1e8 ? 0 : lo, hi, gutterM: gut, downspouts: downs };
+  }
+  // what a roofer would say about laying this covering at these slopes, in plain words
+  function roofWarnings(mat, lo, hi, eave) {
+    const M = ROOFS[mat] || ROOFS.thatch,
+      out = [],
+      name = M.name.toLowerCase();
+    if (M.min && lo < M.min - 1e-6) out.push({ text: "Too shallow for " + name, title: name[0].toUpperCase() + name.slice(1) + " needs " + p12Text(M.min) + " or steeper; this roof has " + p12Text(lo) + ". Water would back up under it." + (mat === "thatch" ? " Thatch really wants 45° (12/12)." : "") });
+    else if (mat === "asphalt" && lo < 4 - 1e-6) out.push({ text: "Double underlayment", title: "Asphalt shingles below 4/12 need two layers of underlayment under them." });
+    else if (mat === "thatch" && lo < 12 - 1e-6) out.push({ text: "Thatch wants 45°", title: "Thatch sheds water best at 12/12 (45°) or steeper; at " + p12Text(lo) + " it wears out sooner." });
+    if (M.max && hi > M.max + 1e-6) out.push({ text: "Too steep for a green roof", title: "Green roofs are laid on low slopes, " + p12Text(M.max) + " or less; steeper, the soil slides off." });
+    if (eave > 0.6 + 1e-6) out.push({ text: "Eave needs brackets", title: "An eave deeper than 0.6 m needs brackets or outlookers to carry it." });
+    return out;
+  }
+
+  // ---- drawing, all of it from roofParts ----
+  function clipHalf(poly, o, d, t, ge) {
+    const out = [],
+      f = (p) => ((p[0] - o[0]) * d[0] + (p[1] - o[1]) * d[1] - t) * (ge ? 1 : -1);
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i],
+        b = poly[(i + 1) % poly.length],
+        fa = f(a),
+        fb = f(b);
+      if (fa >= 0) out.push(a);
+      if (fa >= 0 !== fb >= 0) {
+        const u = fa / (fa - fb);
+        out.push([a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u]);
+      }
+    }
+    return out;
+  }
+  const stripOf = (poly, o, d, t0, t1) => clipHalf(clipHalf(poly, o, d, t0, true), o, d, t1, false);
+  const nrm3 = (v) => {
+    const l = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / l, v[1] / l, v[2] / l];
+  };
+  const SEDUM = [col(0x5f8a3a), col(0x7a9a3e), col(0x4d7434), col(0x9aa64a), col(0x8a5040), col(0x6e8f46)];
+  const GUTTER_C = col(0xe8e6e0);
+  function roofPlane(g, pl, M, seed, trim) {
+    const pts = pl.pts,
+      e0 = pts[0],
+      e1 = pts[1],
+      EL = Math.hypot(e1[0] - e0[0], e1[1] - e0[1]) || 1,
+      ev = [(e1[0] - e0[0]) / EL, (e1[1] - e0[1]) / EL];
+    let up = [-pl.facing[0], -pl.facing[1]];
+    if (!pl.run) {
+      up = [-ev[1], ev[0]];
+      if ((pts[2][0] - e0[0]) * up[0] + (pts[2][1] - e0[1]) * up[1] < 0) up = [ev[1], -ev[0]];
+    }
+    const kk = pl.run ? (pl.ridgeY - pl.eaveY) / pl.run : 0,
+      cs = 1 / Math.sqrt(1 + kk * kk),
+      n = [-up[0] * kk * cs, cs, -up[1] * kk * cs],
+      down3 = [-up[0] * cs, -kk * cs, -up[1] * cs],
+      tOf = (p) => (p[0] - e0[0]) * up[0] + (p[1] - e0[1]) * up[1],
+      sOf = (p) => (p[0] - e0[0]) * ev[0] + (p[1] - e0[1]) * ev[1],
+      P3 = (p, h) => [p[0] + n[0] * h, pl.eaveY + kk * tOf(p) + n[1] * h, p[1] + n[2] * h],
+      fan = (poly, h, colr, nn) => {
+        if (poly.length < 3) return;
+        const A = poly.map((p) => P3(p, h));
+        for (let i = 1; i + 1 < A.length; i++) g.tri(A[0], A[i], A[i + 1], nn || n, colr);
+      };
+    let T = 0;
+    for (const p of pts) T = Math.max(T, tOf(p));
+    T = T || 1;
+    const look = M.look,
+      top = look === "course" ? (M.lift || 0.03) + (M.alt || 0.025) : look === "green" ? 0.05 : 0.025,
+      th = 0.13;
+    if (look === "course") {
+      // courses laid from the eave up, every other one a little proud, each with its butt edge showing
+      const lift = M.lift || 0.03,
+        alt = M.alt || 0.025,
+        butt = M.butt || 0.02,
+        nb = Math.max(1, Math.ceil(T / ((M.course || 0.45) * cs)));
+      for (let b = 0; b < nb; b++) {
+        const t0 = (T * b) / nb,
+          t1 = Math.min(T, (T * (b + 1)) / nb + 0.02),
+          poly = stripOf(pts, e0, up, t0, t1);
+        if (poly.length < 3) continue;
+        const h = lift + (b % 2) * alt,
+          colr = shade(RPAL, 0.84 + 0.2 * hash(seed, b, 3) - 0.1 * (t0 / T));
+        fan(poly, h, colr);
+        const low = poly.filter((p) => Math.abs(tOf(p) - t0) < 1e-6);
+        if (low.length >= 2) {
+          low.sort((p, q) => sOf(p) - sOf(q));
+          const a = low[0],
+            c = low[low.length - 1],
+            A = P3(a, h),
+            C2 = P3(c, h),
+            dd = butt + (b % 2) * alt;
+          g.tri(A, C2, [C2[0] - n[0] * dd, C2[1] - n[1] * dd, C2[2] - n[2] * dd], down3, shade(colr, 0.7));
+          g.tri(A, [C2[0] - n[0] * dd, C2[1] - n[1] * dd, C2[2] - n[2] * dd], [A[0] - n[0] * dd, A[1] - n[1] * dd, A[2] - n[2] * dd], down3, shade(colr, 0.7));
+        }
+      }
+    } else if (look === "seam") {
+      // panels about 0.45 m wide from eave to ridge, a raised seam between each pair
+      const w = 0.45,
+        np = Math.max(1, Math.round(EL / w)),
+        pw = EL / np,
+        up3 = [up[0] * cs, kk * cs, up[1] * cs];
+      for (let m = 0; m < np; m++) fan(stripOf(pts, e0, ev, m * pw, (m + 1) * pw + 0.002), 0.02, shade(RPAL, 0.95 + 0.07 * hash(seed, m, 5)));
+      for (let m = 0; m <= np; m++) {
+        const sp = stripOf(pts, e0, ev, m * pw - 0.004, m * pw + 0.004);
+        if (sp.length < 3) continue;
+        let ta = 1e9,
+          tb = -1e9;
+        for (const p of sp) ((ta = Math.min(ta, tOf(p))), (tb = Math.max(tb, tOf(p))));
+        if (tb - ta < 0.05) continue;
+        const mid = [e0[0] + ev[0] * m * pw + up[0] * (ta + tb) / 2, e0[1] + ev[1] * m * pw + up[1] * (ta + tb) / 2],
+          c = P3(mid, 0.042),
+          hl = (tb - ta) / cs / 2;
+        g.obox(c, [up3[0] * hl, up3[1] * hl, up3[2] * hl], [n[0] * 0.022, n[1] * 0.022, n[2] * 0.022], [ev[0] * 0.012, 0, ev[1] * 0.012], shade(RPAL, 1.12));
+      }
+    } else if (look === "corr") {
+      // fine corrugations: narrow strips that turn alternately to and from the light
+      const w = 0.07,
+        ns = Math.max(2, Math.round(EL / w)),
+        sw = EL / ns,
+        evn = [ev[0], 0, ev[1]];
+      for (let m = 0; m < ns; m++) {
+        const tilt = m % 2 ? 0.45 : -0.45;
+        fan(stripOf(pts, e0, ev, m * sw, (m + 1) * sw + 0.001), 0.02, shade(RPAL, m % 2 ? 1.05 : 0.86), nrm3([n[0] + evn[0] * tilt, n[1], n[2] + evn[2] * tilt]));
+      }
+    } else if (look === "flat") {
+      const w = 1.5,
+        ns = Math.max(1, Math.round(EL / w));
+      for (let m = 0; m < ns; m++) fan(stripOf(pts, e0, ev, (m * EL) / ns, ((m + 1) * EL) / ns + 0.002), 0.025, shade(RPAL, 0.96 + 0.06 * hash(seed, m, 9)));
+    } else if (look === "green") {
+      // a sedum mat: a dark growing layer with low clumps all over it
+      fan(pts, 0.03, shade(RPAL, 0.6));
+      const st = 0.42,
+        tri3 = (a, b, c, colr) => {
+          const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]],
+            v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]],
+            nn = nrm3([u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]);
+          g.tri(a, b, c, nn[1] < 0 ? [-nn[0], -nn[1], -nn[2]] : nn, colr);
+        };
+      for (let si = 0; si * st < EL; si++)
+        for (let ti = 0; ti * st < T; ti++) {
+          const s = (si + 0.2 + 0.6 * hash(seed + si, ti, 11)) * st,
+            t = (ti + 0.2 + 0.6 * hash(seed + ti, si, 12)) * st,
+            p = [e0[0] + ev[0] * s + up[0] * t, e0[1] + ev[1] * s + up[1] * t];
+          if (!pip(pts, p[0], p[1])) continue;
+          const rr = 0.08 + 0.08 * hash(si, ti, seed),
+            hh = 0.04 + 0.07 * hash(ti, si, seed + 1),
+            colr = shade(SEDUM[Math.floor(hash(si, ti, seed + 2) * SEDUM.length)], 0.85 + 0.25 * hash(si, ti, 4)),
+            q = (a, b) => P3([p[0] + ev[0] * a + up[0] * b, p[1] + ev[1] * a + up[1] * b], 0.03),
+            apex = P3(p, 0.03 + hh),
+            ring = [q(-rr, 0), q(0, -rr), q(rr, 0), q(0, rr)];
+          for (let m = 0; m < 4; m++) tri3(ring[m], ring[(m + 1) % 4], apex, colr);
+        }
+    }
+    // the edges you see: fascia on the eave, barge boards on the rakes, and the soffit under the overhang
+    let cx = 0,
+      cz = 0;
+    for (const p of pts) ((cx += p[0] / pts.length), (cz += p[1] / pts.length));
+    pts.forEach((a, i) => {
+      if (!pl.outer[i]) return;
+      const b = pts[(i + 1) % pts.length],
+        L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      let o = [(b[1] - a[1]) / L, -(b[0] - a[0]) / L];
+      if (((a[0] + b[0]) / 2 - cx) * o[0] + ((a[1] + b[1]) / 2 - cz) * o[1] < 0) o = [-o[0], -o[1]];
+      const A = P3(a, top),
+        Bq = P3(b, top),
+        on = [o[0], 0, o[1]];
+      g.tri(A, Bq, [Bq[0], Bq[1] - th, Bq[2]], on, trim);
+      g.tri(A, [Bq[0], Bq[1] - th, Bq[2]], [A[0], A[1] - th, A[2]], on, trim);
+      if (!pl.run) {
+        // a flat roof: a low upstand round the edge holds the membrane and the gravel in
+        g.obox([(A[0] + Bq[0]) / 2 - o[0] * 0.035, A[1] + 0.04, (A[2] + Bq[2]) / 2 - o[1] * 0.035], [(Bq[0] - A[0]) / 2, 0, (Bq[2] - A[2]) / 2], [0, 0.05, 0], [-o[0] * 0.035, 0, -o[1] * 0.035], trim);
+      }
+    });
+    const sof = pts.map((p) => {
+      const q = P3(p, top);
+      return [q[0], q[1] - th, q[2]];
+    });
+    for (let i = 1; i + 1 < sof.length; i++) g.tri(sof[0], sof[i], sof[i + 1], [-n[0], -n[1], -n[2]], shade(trim, 0.85));
+  }
+  // a square-section bar from p0 to p1 (downspouts)
+  function rod(g, p0, p1, hw, colr) {
+    const d = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]],
+      L = Math.hypot(d[0], d[1], d[2]) || 1,
+      u = [d[0] / L, d[1] / L, d[2] / L],
+      ref = Math.abs(u[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0],
+      a = nrm3([u[1] * ref[2] - u[2] * ref[1], u[2] * ref[0] - u[0] * ref[2], u[0] * ref[1] - u[1] * ref[0]]),
+      b = [u[1] * a[2] - u[2] * a[1], u[2] * a[0] - u[0] * a[2], u[0] * a[1] - u[1] * a[0]];
+    g.obox([(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2, (p0[2] + p1[2]) / 2], [d[0] / 2 + u[0] * hw, d[1] / 2 + u[1] * hw, d[2] / 2 + u[2] * hw], [a[0] * hw, a[1] * hw, a[2] * hw], [b[0] * hw, b[1] * hw, b[2] * hw], colr);
+  }
+  // a K-style gutter along the eave, falling gently to its downspouts, which come down the wall to the ground
+  function gutterPiece(g, q, foot) {
+    const L = Math.hypot(q.b[0] - q.a[0], q.b[1] - q.a[1]) || 1,
+      ev = [(q.b[0] - q.a[0]) / L, (q.b[1] - q.a[1]) / L],
+      o = q.out,
+      fall = 0.004,
+      ts = q.downs.map((d) => (d[0] - q.a[0]) * ev[0] + (d[1] - q.a[1]) * ev[1]),
+      cuts = [0, ...(ts.length > 1 ? [L / 2] : []), L],
+      W = 0.065,
+      Hh = 0.055,
+      c = GUTTER_C,
+      dist = (t) => Math.min(...ts.map((s) => Math.abs(t - s))),
+      maxD = Math.max(...cuts.map(dist)),
+      // the gutter's top is highest farthest from a downspout
+      yOf = (t) => q.y - fall * (maxD - dist(t));
+    for (let m = 0; m + 1 < cuts.length; m++) {
+      const t0 = cuts[m],
+        t1 = cuts[m + 1],
+        y0 = yOf(t0),
+        y1 = yOf(t1),
+        cx = q.a[0] + ev[0] * (t0 + t1) / 2,
+        cz = q.a[1] + ev[1] * (t0 + t1) / 2,
+        cy = (y0 + y1) / 2 - Hh,
+        U = [(ev[0] * (t1 - t0)) / 2, (y1 - y0) / 2, (ev[1] * (t1 - t0)) / 2];
+      g.obox([cx, cy - Hh + 0.008, cz], U, [0, 0.008, 0], [o[0] * W, 0, o[1] * W], c); // bottom
+      g.obox([cx + o[0] * (W - 0.008), cy + 0.008, cz + o[1] * (W - 0.008)], U, [0, Hh + 0.008, 0], [o[0] * 0.008, 0, o[1] * 0.008], c); // front, with its lip
+      g.obox([cx - o[0] * (W - 0.006), cy, cz - o[1] * (W - 0.006)], U, [0, Hh, 0], [o[0] * 0.006, 0, o[1] * 0.006], shade(c, 0.9)); // back
+    }
+    for (const t of [0, L]) {
+      const y = yOf(t);
+      g.obox([q.a[0] + ev[0] * t, y - Hh, q.a[1] + ev[1] * t], [ev[0] * 0.006, 0, ev[1] * 0.006], [0, Hh, 0], [o[0] * W, 0, o[1] * W], c); // end caps
+    }
+    const bottom = -(foot || 0.3) + 0.08;
+    q.downs.forEach((d, n) => {
+      const wl = q.wall[n],
+        y = yOf(ts[n]) - 2 * Hh,
+        top = [d[0], y, d[1]],
+        neck = [d[0], y - 0.12, d[1]],
+        atWall = [wl[0], y - 0.38, wl[1]],
+        foot0 = [wl[0], bottom + 0.22, wl[1]],
+        kick = [wl[0] + o[0] * 0.3, bottom, wl[1] + o[1] * 0.3];
+      rod(g, top, neck, 0.04, c);
+      rod(g, neck, atWall, 0.04, c);
+      rod(g, atWall, foot0, 0.04, c);
+      rod(g, foot0, kick, 0.04, c);
+    });
+  }
+  function roofPieces(g, r, foot) {
+    const M = ROOFS[r.mat || "thatch"] || ROOFS.thatch,
+      seed = r.i0 * 3 + r.j0,
+      trim = M.group === "modern" ? shade(RPAL, M.look === "green" ? 0.55 : 0.8) : PAL.beam,
+      cap = M.group === "modern" ? shade(RPAL, M.look === "green" ? 0.5 : 0.85) : PAL.beam;
+    roofParts(r).forEach((q, n) => {
+      if (q.part === "plane") roofPlane(g, q, M, seed + n * 7, trim);
+      else if (q.part === "ridge") {
+        const L = Math.hypot(q.b[0] - q.a[0], q.b[1] - q.a[1]) || 1,
+          u = [(q.b[0] - q.a[0]) / L, (q.b[1] - q.a[1]) / L];
+        g.obox([(q.a[0] + q.b[0]) / 2, q.y0 + 0.09, (q.a[1] + q.b[1]) / 2], [(q.b[0] - q.a[0]) / 2, 0, (q.b[1] - q.a[1]) / 2], [0, 0.08, 0], [-u[1] * 0.11, 0, u[0] * 0.11], cap);
+      } else if (q.part === "hip") {
+        const a = [q.a[0], q.y0 + 0.07, q.a[1]],
+          b = [q.b[0], q.y1 + 0.07, q.b[1]],
+          L = Math.hypot(q.b[0] - q.a[0], q.b[1] - q.a[1]) || 1,
+          u = [(q.b[0] - q.a[0]) / L, (q.b[1] - q.a[1]) / L];
+        g.obox([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2], [(b[0] - a[0]) / 2, (b[1] - a[1]) / 2, (b[2] - a[2]) / 2], [0, 0.06, 0], [-u[1] * 0.08, 0, u[0] * 0.08], cap);
+      } else if (q.part === "infill") {
+        const L = Math.hypot(q.b[0] - q.a[0], q.b[1] - q.a[1]) || 1,
+          nx = -(q.b[1] - q.a[1]) / L,
+          nz = (q.b[0] - q.a[0]) / L,
+          gc = shade(C.gable, 0.95);
+        for (const off of [-0.07, 0.07]) {
+          const V = q.outline.map((p) => [p[0] + nx * off, p[1], p[2] + nz * off]);
+          for (let i = 1; i + 1 < V.length; i++) g.tri(V[0], V[i], V[i + 1], [nx * Math.sign(off), 0, nz * Math.sign(off)], gc);
+        }
+      } else if (q.part === "gutter") gutterPiece(g, q, foot);
+    });
+  }
+  const TOP_NAME = { cone: "Pointed roof", dome: "Dome", crenel: "Battlements" };
 
   // a wall piece between two arbitrary points, drawn by mapping the unit wall onto it
   function freePiece(g, x0, z0, x1, z1, type, depth, seed, oy) {
@@ -3174,8 +3543,8 @@
     }
     rg.yo = (hs - 1) * EAVE;
     for (const r of D.roofs) {
-      RPAL = ROOFS[r.mat || "thatch"].c;
-      roofPieces(rg, r);
+      RPAL = roofCol(r);
+      roofPieces(rg, r, full);
     }
     const ends = new Set();
     (D.segs || []).forEach((sg, n) => {
@@ -3207,12 +3576,12 @@
     for (const [n, r] of (D.rings || []).entries()) {
       rg.yo = r.h * EAVE * (hs - 1);
       PAL = WALLS[r.mat || "timber"];
-      RPAL = ROOFS[r.rmat || "thatch"].c;
+      RPAL = (ROOFS[r.rmat || "thatch"] || ROOFS.thatch).c;
       ringPieces(g, rg, r, full, D.portals && D.portals[n]);
     }
     rg.yo = (hs - 1) * EAVE;
     for (const p of D.polys || []) {
-      RPAL = ROOFS[p.rmat || "thatch"].c;
+      RPAL = (ROOFS[p.rmat || "thatch"] || ROOFS.thatch).c;
       polyPieces(g, rg, p);
     }
     // pillars, and a beam between any two that stand close together
@@ -4601,18 +4970,13 @@
         else if (room) rect = { i0: room.i0, i1: room.i1, j0: room.j0, j1: room.j1 };
       }
       if (rect) {
-        const wide = rect.i1 - rect.i0 >= rect.j1 - rect.j0,
-          RS = RSHAPES[B.rshape];
-        rect.axis = wide !== (RS[0] === "gable" && RS[1] === 1) ? "x" : "z";
-        rect.shape = RS[0];
-        rect.dir = RS[1];
-        rect.pitch = RS[3];
+        Object.assign(rect, roofFromHand(rect));
         if (B.alt) {
           S && S.roofs.forEach((r, idx) => !(r.i1 < rect.i0 || r.i0 > rect.i1 || r.j1 < rect.j0 || r.j0 > rect.j1) && op.delRoofs.push(idx));
         } else {
           const same = S ? S.roofs.findIndex((r) => r.i0 === rect.i0 && r.i1 === rect.i1 && r.j0 === rect.j0 && r.j1 === rect.j1) : -1,
             old = same >= 0 ? S.roofs[same] : null;
-          if (old && old.axis === rect.axis && (old.shape || "gable") === rect.shape && (old.dir || 0) === rect.dir && (old.pitch || 1) === rect.pitch && (old.mat || "thatch") === B.rmat) ((op.note = "Click to select this roof"), (op.pick = old.id));
+          if (old && sameRoofPlan(old, rect)) ((op.note = "Click to select this roof"), (op.pick = old.id));
           else {
             // a different shape or covering over an existing roof replaces it in place
             old && (op.delRoofs.push(same), (rect.id = old.id));
@@ -4620,7 +4984,9 @@
             op.replacing = !!old;
           }
         }
-        op.label = (op.replacing ? "Re-roof: " : "") + RSHAPES[B.rshape][2] + " " + size(rect.i1 - rect.i0 + 1, rect.j1 - rect.j0 + 1) + " · " + ROOFS[B.rmat].name.toLowerCase();
+        const st = roofStats(rect),
+          warn = roofWarnings(rect.mat, st.lo, st.hi, rect.shape === "flat" ? 0 : rect.eave);
+        op.label = (op.replacing ? "Re-roof: " : "") + ROOF_LONG[rect.shape] + " " + size(rect.i1 - rect.i0 + 1, rect.j1 - rect.j0 + 1) + " · " + ROOFS[rect.mat].name.toLowerCase() + " · " + (rect.shape === "flat" ? "flat" : p12Text(pitchOf(rect)) + " " + Math.round(degOf(pitchOf(rect))) + "°") + " · " + fmtA(st.area) + (warn.length ? " · " + warn.map((w) => w.text).join(" · ") : "");
       } else {
         op.marker = [vtx.i, vtx.j];
         op.note = "Click inside a room, or drag a rectangle";
@@ -5051,7 +5417,7 @@
       S.walls.set(ek(i, j, d), ty);
     }
     for (const r of op.addRoofs) {
-      const nr = { i0: r.i0, i1: r.i1, j0: r.j0, j1: r.j1, axis: r.axis, shape: r.shape, dir: r.dir, pitch: r.pitch, mat: r.mat || B.rmat };
+      const nr = roofRec({ ...r, mat: r.mat || B.rmat });
       if (r.id) nr.id = r.id;
       S.roofs.push(nr);
     }
@@ -6347,9 +6713,8 @@
       else ((B.dstyle = DOOR_NAME[ty] ? ty : "door"), (B.tool = "door"));
     } else if (q.kind === "floor" || q.kind === "poly") ((B.fmat = q.kind === "floor" ? q.g.mat : q.p.fmat), (B.tool = "floor"));
     else if (q.kind === "roof") {
-      const r = q.r,
-        n = RSHAPES.findIndex((R) => R[0] === (r.shape || "gable") && R[3] === (r.pitch || 1) && (R[0] === "shed" ? R[1] === (r.dir || 0) : R[0] !== "gable" || (R[1] === 1) === ((r.i1 - r.i0 >= r.j1 - r.j0) !== (r.axis === "x"))));
-      B.rshape = n < 0 ? 0 : n;
+      const r = q.r;
+      takeRoof(r);
       B.rmat = r.mat || "thatch";
       B.tool = "roof";
     } else if (q.kind === "polyroof") ((B.rmat = q.p.rmat || "thatch"), (B.tool = "roof"));
@@ -6757,7 +7122,7 @@
       d = B.drag,
       ty = B.typed;
     const fine = B.tool === "door" || B.tool === "window" || B.tool === "opening" || B.tool === "erase" || B.tool === "decor";
-    const key = [B.tool, F.isNew ? "n" + F.ox + "," + F.oz + "," + F.yaw : F.id, d ? d.a.i + "," + d.a.j : "-", POINT_TOOL[B.tool] ? h.sx + "," + h.sz + h.snap : fine ? Math.round(h.lx * 6) + "," + Math.round(h.lz * 6) : Math.round(h.lx * 2) + "," + Math.round(h.lz * 2), fine && h.rlx !== undefined ? Math.round(h.rlx * 2) + "," + Math.round(h.rlz * 2) : "", B.alt, B.levels, B.level, B.hs, B.lift, B.style, B.wstyle, B.dstyle, B.otype, B.osize, B.osill, B.oflip, B.fsel, B.ctrl, B.rshape, B.tshape, B.pwidth, B.pmat, B.dkind, B.drot, B.dcol, B.pkind, B.wmat, B.fmat, B.rmat, B.stairDir, B.free, B.version, W.wood, ty.a, ty.b, B.gap, snapOn(), B.tapMode, B.measA ? 1 : 0].join("|");
+    const key = [B.tool, F.isNew ? "n" + F.ox + "," + F.oz + "," + F.yaw : F.id, d ? d.a.i + "," + d.a.j : "-", POINT_TOOL[B.tool] ? h.sx + "," + h.sz + h.snap : fine ? Math.round(h.lx * 6) + "," + Math.round(h.lz * 6) : Math.round(h.lx * 2) + "," + Math.round(h.lz * 2), fine && h.rlx !== undefined ? Math.round(h.rlx * 2) + "," + Math.round(h.rlz * 2) : "", B.alt, B.levels, B.level, B.hs, B.lift, B.style, B.wstyle, B.dstyle, B.otype, B.osize, B.osill, B.oflip, B.fsel, B.ctrl, B.rsh, B.rturn, B.pitch12, B.eave, B.rake, B.gutters, B.rcolor, B.tshape, B.pwidth, B.pmat, B.dkind, B.drot, B.dcol, B.pkind, B.wmat, B.fmat, B.rmat, B.stairDir, B.free, B.version, W.wood, ty.a, ty.b, B.gap, snapOn(), B.tapMode, B.measA ? 1 : 0].join("|");
     if (key !== B.key) {
       B.key = key;
       if (B.tool === "measure" || B.tapMode) {
@@ -6790,7 +7155,7 @@
     tower: "Drag outward from the middle of a round room.",
     wall: "Drag a wall at any angle, or click point to point. Drawing over a wall restyles it.",
     floor: "Drag out floor. Laying it over an old floor replaces the surface.",
-    roof: "Click a room to roof it, or drag a rectangle. Click a roof to change it to this one.",
+    roof: "Click a room to roof it, or drag a rectangle. Click a roof to change it to this one. Enter roofs the whole building under the cursor.",
     door: "Point at a wall: the door follows along it and snaps to the centre and between openings. Click to hang it. Click one to select it, then drag its edges to resize or drag it to move. F flips the swing, Delete removes it.",
     window: "Point at a wall: the window follows the pointer, up and down too, and snaps to the usual sill, the centre and its neighbours' heads. Click to place. Click one to select it, then drag its edges to resize or drag it to move. Delete removes it.",
     stairs: "Drag from the foot of the stairs the way they should climb.",
@@ -6826,6 +7191,7 @@
         text = "Room " + w + " × " + l + " m · " + fmtA(room.cells.length) + " · " + (room.enclosed ? (room.roofed ? "walled and roofed" : "walled in, no roof yet") : plural(room.gaps.length, "open edge") + " marked in amber");
       }
     }
+    if (B.flash && performance.now() < B.flash.until) text = B.flash.text;
     if (TOUCH()) text = text.replace(/\bShift-click adds, /, "").replace(/\bClick\b/g, "Tap").replace(/\bclick\b/g, "tap").replace(/ Esc (stops|cancels|puts it down)\./, "").replace(/ Type a number for an exact size\./, " Tap the size to type it.").replace(" Delete removes it.", "").replace(" Delete removes them.", "");
     if (text !== B.hintText) ((B.hintText = text), B.uiVer++);
   }
@@ -7248,7 +7614,7 @@
     else if (t === "copy") B.clipb && (B.clipb.rot = (B.clipb.rot + (back ? 7 : 1)) % 8);
     else if (t === "roof") {
       if (overTower()) B.tshape = cyc(Object.keys(TOP_NAME), B.tshape, back);
-      else B.rshape = (B.rshape + (back ? RSHAPES.length - 1 : 1)) % RSHAPES.length;
+      else B.rsh = cyc(Object.keys(ROOF_SHAPES), B.rsh, back);
     } else if (t === "select" && B.sel.length) selEdit((q) => (q.kind === "decor" ? ((q.it[3] = ((q.it[3] || 0) + (back ? 7 : 1)) % 8), true) : false));
     B.key = "";
     touchUi();
@@ -7372,7 +7738,7 @@
   const swatches = (set, kind) =>
     Object.keys(set).map((k) => {
       const m = set[k];
-      return { v: k, name: m.name, sw: kind === "wall" ? [m.courses ? "courses" : m.brace ? "brace" : m.flat ? "flat" : "planks", hexOf(m.plank), hexOf(m.beam)] : [kind === "floor" ? (m.c2 ? "check" : k === "planks" || k === "dark" ? "boards" : "plain") : kind, hexOf(m.c), hexOf(m.c2 || shade(m.c, 0.72))] };
+      return { v: k, name: m.name, sw: kind === "wall" ? [m.courses ? "courses" : m.brace ? "brace" : m.flat ? "flat" : "planks", hexOf(m.plank), hexOf(m.beam)] : [kind === "floor" ? (m.c2 ? "check" : k === "planks" || k === "dark" ? "boards" : "plain") : kind === "roof" ? (k === "asphalt" ? "asph" : { seam: "seam", corr: "corr", flat: "plain", green: "green" }[m.look] || "roof") : kind, hexOf(m.c), hexOf(m.c2 || shade(m.c, kind === "roof" && m.look === "seam" ? 1.5 : 0.72))] };
     });
   const SW = { wall: swatches(WALLS, "wall"), floor: swatches(FLOORS, "floor"), roof: swatches(ROOFS, "roof"), path: swatches(PATHS, "path"), dye: DYES.map((d, n) => ({ v: n, name: d[0], sw: ["dye", hexOf(d[1]), hexOf(d[1])] })) };
   const tiles = (names, pre) => Object.keys(names).map((k) => ({ v: k, name: names[k], icon: pre + k }));
@@ -7380,8 +7746,6 @@
   const WIN_SHORT = { window: "Square", window2: "Arched", window4: "Shuttered", window3: "Arrow slit" };
   const DOOR_SHORT = { door: "Door", door2: "Double", gate: "Castle gate" };
   const TOP_SHORT = { cone: "Pointed", dome: "Dome", crenel: "Battlements" };
-  const ROOF_SHAPES = { gable: "Gable", hip: "Hip", shed: "Lean-to", flat: "Flat" };
-  const roofIndex = (shape, steep, turn) => (shape === "gable" ? (turn & 1) + (steep ? 2 : 0) : shape === "hip" ? (steep ? 5 : 4) : shape === "shed" ? 6 + (turn & 3) : 10);
   const G_ = {
     sw: (id, label, items, value, key) => ({ type: "swatches", id, label, items, value, key }),
     tiles: (id, label, items, value, key) => ({ type: "tiles", id, label, items, value, key }),
@@ -7481,17 +7845,16 @@
     if (has("floor", "poly", "ring")) g.push(G_.sw("s:fmat", "Floor", SW.floor, common(refs.filter((q) => /^(floor|poly|ring)$/.test(q.kind)).map((q) => (q.g ? q.g.mat : q.p ? q.p.fmat || "planks" : q.r.fmat || "planks")))));
     if (one && one.kind === "roof") {
       const r = one.r,
-        turn = r.shape === "shed" ? r.dir || 0 : (r.i1 - r.i0 >= r.j1 - r.j0) !== (r.axis === "x") ? 1 : 0;
-      g.push(G_.tiles("s:rshape", "Shape", tiles(ROOF_SHAPES, "r-"), r.shape || "gable"));
-      if (r.shape !== "flat" && r.shape !== "shed") g.push(G_.toggle("s:steep", "Steep", (r.pitch || 1) > 1, "r-steep"));
-      if (r.shape === "gable" || r.shape === "shed") g.push(G_.act("s:rturn", "Turn", "turn"));
-      void turn;
+        sh = r.shape || "gable";
+      g.push(G_.tiles("s:rshape", "Shape", tiles(ROOF_SHAPES, "r-"), sh));
+      if (TURNS[sh]) g.push(G_.act("s:rturn", "Turn", "turn"));
+      roofPlanView(g, "s:", { shape: sh, pitch12: pitchOf(r), eave: eaveOf(r), rake: rakeOf(r), gutters: !!r.gutters, color: r.color || null, mat: r.mat || "thatch" }, r);
     }
     if (one && one.kind === "ring") {
       g.push(G_.chips("s:levels", "Storeys", [1, 2, 3, 4].map((v) => ({ v, name: String(v) })), one.r.h));
       g.push(G_.tiles("s:top", "Top", [{ v: "", name: "Open", icon: "t-none" }, ...tiles(TOP_SHORT, "t-")], one.r.roof === true ? "cone" : one.r.roof || ""));
     }
-    if (has("roof", "polyroof") || (one && one.kind === "ring" && one.r.roof && one.r.roof !== "crenel")) g.push(G_.sw("s:rmat", "Roofing", SW.roof, common(refs.filter((q) => /roof|ring/.test(q.kind)).map((q) => (q.kind === "roof" ? q.r.mat || "thatch" : q.kind === "ring" ? q.r.rmat || "thatch" : q.p.rmat || "thatch")))));
+    if (has("roof", "polyroof") || (one && one.kind === "ring" && one.r.roof && one.r.roof !== "crenel")) roofSwatches(g, "s:rmat", common(refs.filter((q) => /roof|ring/.test(q.kind)).map((q) => (q.kind === "roof" ? q.r.mat || "thatch" : q.kind === "ring" ? q.r.rmat || "thatch" : q.p.rmat || "thatch"))));
     if (one && one.kind === "pillar") g.push(G_.tiles("s:pkind", "Kind", [{ v: "pillar", name: "Pillar", icon: "p-pillar" }, { v: "chimney", name: "Chimney", icon: "p-chimney" }], one.p[3] || "pillar"));
     if (has("path")) {
       g.push(G_.chips("s:pwidth", "Width", [1, 2, 3].map((v) => ({ v, name: v + " m" })), common(refs.filter((q) => q.kind === "path").map((q) => q.p[4]))));
@@ -7524,10 +7887,46 @@
     g.push(G_.act("s:dup", "Copy", "copy", "Ctrl D"));
     g.push(G_.act("s:del", "Delete", "bin", "Del", true));
   }
+  // roofing swatches, classic and modern
+  function roofSwatches(g, id, value, key) {
+    for (const [grp, name] of [["classic", "Classic"], ["modern", "Modern"]]) {
+      const items = SW.roof.filter((x) => (ROOFS[x.v].group || "classic") === grp);
+      g.push(G_.sw(id, name + " roofing", items, items.some((x) => x.v === value) ? value : value === null ? null : undefined, grp === "classic" ? key : undefined));
+    }
+  }
+  const PITCH_CHIPS = [3, 4, 6, 8, 10, 12];
+  // the plan of a roof, in the designer panel: what it measures and what to watch, its pitch, overhangs and finish.
+  // pre "" works on the roof in hand, "s:" on the selected one; r is a roof to measure (the one under the cursor)
+  function roofPlanView(g, pre, cur, r) {
+    const row = (x, sec) => ((x.row = "d"), sec && (x.sec = sec), g.push(x)),
+      flat = cur.shape === "flat",
+      probe = r || { i0: 0, i1: 5, j0: 0, j1: 3, ...roofFromHand({ i0: 0, i1: 5, j0: 0, j1: 3 }), ...cur },
+      st = roofStats(r ? r : probe),
+      warn = roofWarnings(cur.mat, st.lo, st.hi, flat ? 0 : cur.eave),
+      M = ROOFS[cur.mat] || ROOFS.thatch;
+    row({
+      type: "badges",
+      id: pre + "rbadges",
+      items: [
+        r ? { text: fmtA(st.area) + " of roofing", k: "std", title: "Measured on the slope, overhangs included" } : null,
+        { text: flat ? "Flat · 1/4 in 12 to drain" : p12Text(cur.pitch12) + " · " + Math.round(degOf(cur.pitch12)) + "°", title: "Rise in inches for every 12 inches of run, and the angle" },
+        st.lo !== st.hi && !flat ? { text: "Low slope " + p12Text(st.lo) + " · steep " + p12Text(st.hi), title: "This shape has two slopes" } : null,
+        r && cur.gutters && st.downspouts ? { text: fmtM(st.gutterM) + " of gutter · " + plural(st.downspouts, "downspout"), title: "K-style gutters on every eave" } : null,
+        ...warn.map((w) => ({ text: w.text, k: "bad", title: w.title })),
+      ].filter(Boolean),
+    });
+    if (!flat) {
+      row(G_.chips(pre + "pitch", "Pitch", PITCH_CHIPS.map((v) => ({ v, name: v + "/12", note: Math.round(degOf(v)) + "°" })), PITCH_CHIPS.includes(cur.pitch12) ? cur.pitch12 : undefined), "Pitch");
+      row({ type: "num", id: pre + "pitchn", label: "Rise per 12", value: fmt(cur.pitch12), unit: "in", note: Math.round(degOf(cur.pitch12) * 10) / 10 + "°" + (M.min && st.lo < M.min ? " · needs " + p12Text(M.min) : "") , bad: !!(M.min && st.lo < M.min) || !!(M.max && st.hi > M.max) }, "Pitch");
+    }
+    row({ type: "num", id: pre + "eave", label: "Eave", value: fmt(cur.eave), unit: "m", note: cur.eave > 0.6 ? "needs brackets" : "past the wall", bad: cur.eave > 0.6 }, "Overhang");
+    if (cur.shape !== "hip" && !flat) row({ type: "num", id: pre + "rake", label: cur.shape === "shed" ? "Sides and top" : "Gable ends", value: fmt(cur.rake), unit: "m", note: "past the wall" }, "Overhang");
+    row(G_.toggle(pre + "gutters", "Gutters", !!cur.gutters, "roofs", "K-style gutters along every eave, with downspouts to the ground"), "Finish");
+    if (M.colors) row(G_.chips(pre + "rcolor", "Colour", [{ v: null, name: "Standard" }, ...M.colors.map((c) => ({ v: c, name: ROOF_COLORS[c][0] }))], M.colors.includes(cur.color) ? cur.color : null), "Finish");
+  }
   function view() {
     const t = B.tool,
-      g = [],
-      RS = RSHAPES[B.rshape];
+      g = [];
     const lift = () => g.push(G_.step("lift", "Raise", (B.lift > 0 ? "+" : "") + fmt(B.lift) + " m", "+ −"));
     const ceil = (label) => g.push(G_.chips("hs", label || "Ceiling", hsItems(), B.hs, "{ }"));
     const wing = () => g.push(G_.toggle("wing", "Split level", !!B.wingNext, "wing", "Start the next piece as its own level beside the floor under the cursor, at the raised height (or hold Shift)"));
@@ -7562,11 +7961,13 @@
       wing();
       makeUp(g, "", B.found, B.ins, B.lining);
     } else if (t === "roof") {
-      g.push(G_.tiles("rshape", "Shape", tiles(ROOF_SHAPES, "r-"), RS[0], "Shift wheel"));
-      if (RS[0] === "gable" || RS[0] === "hip") g.push(G_.toggle("steep", "Steep", RS[3] > 1, "r-steep"));
-      if (RS[0] === "gable" || RS[0] === "shed") g.push(G_.act("rturn", "Turn", "turn"));
-      g.push(G_.sw("rmat", "Roofing", SW.roof, B.rmat, "M"));
+      g.push(G_.tiles("rshape", "Shape", tiles(ROOF_SHAPES, "r-"), B.rsh, "Shift wheel"));
+      if (TURNS[B.rsh]) g.push(G_.act("rturn", "Turn", "turn"));
+      roofSwatches(g, "rmat", B.rmat, "M");
       g.push(...PAINT());
+      g.push({ ...G_.act("roofall", "Roof the building", "roofs", "Enter"), title: "Cover every floor of the building under the cursor: one roof per rectangle, with this shape's pitch, roofing and overhangs" });
+      const hov = B.op && B.op.addRoofs && B.op.addRoofs[0];
+      roofPlanView(g, "", { shape: B.rsh, pitch12: B.pitch12, eave: B.eave, rake: B.rake, gutters: B.gutters, color: B.rcolor, mat: B.rmat }, hov || null);
       g.push(G_.tiles("tshape", "On a round room", tiles(TOP_SHORT, "t-"), B.tshape));
     } else if (t === "door" || t === "window") openingView(g);
     else if (t === "stairs") g.push(G_.act("turn", "Turn", "turn", "Shift wheel"));
@@ -7596,7 +7997,8 @@
       }
     } else if (t === "copy") g.push(G_.act("turn", "Turn", "turn", "Shift wheel"));
     const busy = B.move ? "move" : B.drag && B.drag.mode === "click" ? "chain" : B.tapMode ? B.tapMode : B.measA ? "measure" : t === "copy" ? "copy" : "";
-    return { designTitle: (t === "window" || t === "door") && freeTool() ? (B.fsel ? "Editing the selected " + t : "Designing the next " + t) : "", tool: t, top: t === "tower" ? "room" : t === "copy" ? "select" : t, tools: TOOLS, groups: g, hint: B.hintText, undo: B.undo.length, redo: B.redo.length, snap: B.snap, free: B.free, level: B.level, levelName: LEVEL_NAME(B.level), busy, sel: B.sel.length, fold: B.fold, sched: B.sched ? schedule() : null };
+    const oneRoof = t === "select" && B.sel.length === 1 && (selRefs()[0] || {}).kind === "roof";
+    return { designTitle: (t === "window" || t === "door") && freeTool() ? (B.fsel ? "Editing the selected " + t : "Designing the next " + t) : t === "roof" ? "Planning the next roof" : oneRoof ? "The selected roof" : "", tool: t, top: t === "tower" ? "room" : t === "copy" ? "select" : t, tools: TOOLS, groups: g, hint: B.hintText, undo: B.undo.length, redo: B.redo.length, snap: B.snap, free: B.free, level: B.level, levelName: LEVEL_NAME(B.level), busy, sel: B.sel.length, fold: B.fold, sched: B.sched ? schedule() : null };
   }
   // ---- a door or window in the view: the gaps either side of it, its sizes, and handles on its edges to resize it
   // the clear gaps from a unit to what stands either side of it along its wall (or the wall's end), as live sizes
@@ -8020,10 +8422,132 @@
     B.key = "";
     touchUi();
   }
+  const flash = (text) => ((B.flash = { text, until: performance.now() + 3500 }), hint(), touchUi());
+  // Roof the building: every floor of the structure under the cursor (or the selection) is split into rectangles, the
+  // largest first, and each gets its own roof with the pitch, roofing and overhangs in hand. Where they meet, the
+  // planes run into each other. One undo step.
+  function roofBuilding() {
+    const h = B.hover,
+      S = h && h.F && !h.F.isNew ? h.F : B.sel.length ? (selRefs()[0] || {}).S : null;
+    // rooms drawn with free walls that make a plain rectangle (the ready-made plans, say) count too
+    const boxes = [];
+    if (S && !S.po)
+      S.polys.forEach((p, pi) => {
+        const q = p.pts;
+        if (q.length !== 4 || !q.every((a, n) => { const b = q[(n + 1) % 4]; return Math.abs(a[0] - b[0]) < 1e-6 !== Math.abs(a[1] - b[1]) < 1e-6; })) return;
+        const xs = q.map((a) => a[0]),
+          zs = q.map((a) => a[1]);
+        boxes.push({ i0: Math.min(...xs), i1: Math.max(...xs) - 1, j0: Math.min(...zs), j1: Math.max(...zs) - 1, pi, roofed: p.roofed });
+      });
+    if (!S || S.po || (!S.floors.size && !boxes.length)) return flash("Point at a building with floors to roof it.");
+    const left = new Set([...S.floors].filter((k) => {
+        const [i, j] = parse(k);
+        return !inRings(S, i + 0.5, j + 0.5);
+      })),
+      rects = [];
+    while (left.size) {
+      let best = null;
+      for (const k of left) {
+        const [i, j] = parse(k);
+        let wMax = 0;
+        while (left.has(ck(i + wMax, j))) wMax++;
+        for (let w = wMax; w >= 1; w--) {
+          let l = 1;
+          for (;;) {
+            let full = true;
+            for (let a = 0; a < w && full; a++) full = left.has(ck(i + a, j + l));
+            if (!full) break;
+            l++;
+          }
+          const area = w * l,
+            sq = Math.min(w, l) / Math.max(w, l);
+          if (!best || area > best.area || (area === best.area && sq > best.sq)) best = { i0: i, i1: i + w - 1, j0: j, j1: j + l - 1, area, sq };
+        }
+      }
+      for (let i = best.i0; i <= best.i1; i++) for (let j = best.j0; j <= best.j1; j++) left.delete(ck(i, j));
+      rects.push(best);
+    }
+    rects.push(...boxes);
+    const op = blankOp(S);
+    for (const b of boxes) b.roofed && op.delPolyRoofs.push(b.pi);
+    S.roofs.forEach((r, idx) => rects.some((q) => !(r.i1 < q.i0 || r.i0 > q.i1 || r.j1 < q.j0 || r.j0 > q.j1)) && op.delRoofs.push(idx));
+    for (const q of rects) {
+      const w = q.i1 - q.i0 + 1,
+        l = q.j1 - q.j0 + 1,
+        rect = { i0: q.i0, i1: q.i1, j0: q.j0, j1: q.j1 },
+        hand = roofFromHand(rect);
+      if (B.rsh !== "flat" && B.rsh !== "shed") {
+        hand.shape = Math.min(w, l) >= 3 && Math.max(w, l) / Math.min(w, l) < 1.5 ? "hip" : "gable";
+        hand.axis = w >= l ? "x" : "z";
+        hand.dir = 0;
+      }
+      op.addRoofs.push(Object.assign(rect, hand));
+    }
+    op.replacing = op.delRoofs.length + op.delPolyRoofs.length > 0;
+    finishOp(op);
+    if (!op.valid) return flash(op.reason || "Nothing to roof here.");
+    applyOp(op);
+    flash("Roofed " + plural(rects.length, "part") + " of the building · " + ROOFS[B.rmat].name.toLowerCase() + " · " + p12Text(B.pitch12) + ". Ctrl+Z undoes it.");
+  }
+  // a roof's plan, on the roof in hand or ("s:") on the selected roofs
+  const stepNum = (cur, v, step, lo, hi) => {
+    const val = v && typeof v === "object" ? cur + v.step * step : +v;
+    return clamp(Math.round(val * 100) / 100, lo, hi);
+  };
+  // pitch steps by whole inches, and by half inches below 3/12
+  const pitchStep = (p, v) => {
+    if (!(v && typeof v === "object")) return clamp(Math.round(+v * 4) / 4, 0.25, 24);
+    const fine = p < 3 || (p === 3 && v.step < 0);
+    return clamp(fine ? Math.round((p + v.step * 0.5) * 2) / 2 : Math.round(p + v.step), 0.5, 24);
+  };
+  function roofTurnSet(r, t) {
+    const sh = r.shape || "gable",
+      wide = r.i1 - r.i0 >= r.j1 - r.j0;
+    if (sh === "shed") r.dir = t & 3;
+    else if (RIDGED[sh]) ((r.axis = wide !== !!(t & 1) ? "x" : "z"), (r.dir = sh === "saltbox" ? (t >> 1) & 1 : 0));
+    else r.dir = 0;
+  }
+  function roofChoose(id, v) {
+    const sel = id.startsWith("s:"),
+      key = sel ? id.slice(2) : id,
+      pstep = (p) => pitchStep(p, v);
+    if (!sel) {
+      if (key === "rshape") ((B.rsh = v), (B.rturn = TURNS[v] ? B.rturn % TURNS[v] : 0));
+      else if (key === "rturn") B.rturn = (B.rturn + 1) % (TURNS[B.rsh] || 1);
+      else if (key === "pitch") B.pitch12 = v;
+      else if (key === "pitchn") B.pitch12 = pstep(B.pitch12);
+      else if (key === "eave") B.eave = stepNum(B.eave, v, 0.05, 0, 1.2);
+      else if (key === "rake") B.rake = stepNum(B.rake, v, 0.05, 0, 0.9);
+      else if (key === "gutters") B.gutters = !B.gutters;
+      else if (key === "rcolor") B.rcolor = v;
+      B.key = "";
+      touchUi();
+      return;
+    }
+    selEdit((q) => {
+      if (q.kind !== "roof") return false;
+      const r = q.r,
+        p = pitchOf(r);
+      if (key === "rshape") {
+        const t = turnOfRoof(r);
+        r.shape = v;
+        if (v !== "flat") r.pitch12 = p < 1 && r.mat !== "membrane" ? B.pitch12 : p;
+        delete r.pitch;
+        roofTurnSet(r, TURNS[v] ? t % TURNS[v] : 0);
+      } else if (key === "rturn") roofTurnSet(r, (turnOfRoof(r) + 1) % (TURNS[r.shape || "gable"] || 1));
+      else if (key === "pitch") ((r.pitch12 = v), delete r.pitch);
+      else if (key === "pitchn") ((r.pitch12 = pstep(p)), delete r.pitch);
+      else if (key === "eave") r.eave = stepNum(eaveOf(r), v, 0.05, 0, 1.2);
+      else if (key === "rake") r.rake = stepNum(rakeOf(r), v, 0.05, 0, 0.9);
+      else if (key === "gutters") r.gutters = !r.gutters;
+      else if (key === "rcolor") v ? (r.color = v) : delete r.color;
+      return true;
+    });
+  }
   function choose(id, v) {
-    const RS = RSHAPES[B.rshape],
-      turnOf = RS[0] === "gable" || RS[0] === "shed" ? RS[1] : 0;
     if (id === "shape") return setTool(v);
+    if (id === "roofall") return roofBuilding();
+    if (/^(s:)?(rshape|rturn|pitch|pitchn|eave|rake|gutters|rcolor)$/.test(id)) return roofChoose(id, v);
     if (id.startsWith("fx:")) fxChoose(id, v);
     else if (id === "found" || id === "ins" || id === "lining") B[id] = v;
     else if (id === "sched") B.sched = !B.sched;
@@ -8043,9 +8567,6 @@
     else if (id === "roofs") B.showRoofs = !B.showRoofs;
     else if (id === "paint") B.tapMode = B.tapMode === "paint" ? "" : "paint";
     else if (id === "pick") B.tapMode = B.tapMode === "pick" ? "" : "pick";
-    else if (id === "rshape") B.rshape = roofIndex(v, RS[3] > 1, turnOf);
-    else if (id === "steep") B.rshape = roofIndex(RS[0], !(RS[3] > 1), turnOf);
-    else if (id === "rturn") B.rshape = roofIndex(RS[0], RS[3] > 1, turnOf + 1);
     else if (id === "otype" && typeof v === "string" && v.startsWith("m:")) {
       // a rustic module style: the old one-metre pieces, which also go in angled walls
       if (B.tool === "window") ((B.wstyle = v.slice(2)), (B.wleg = true));
@@ -8074,9 +8595,6 @@
     else if (id === "s:wmat" || id === "s:fmat" || id === "s:rmat" || id === "s:pmat" || id === "s:dcol") selMaterial(id.slice(2), v);
     else if (id === "s:style") selStyle(v);
     else if (id === "s:otype") selOpenType(v);
-    else if (id === "s:rshape") selEdit((q) => q.kind === "roof" && ((q.r.shape = v), (q.r.pitch = v === "hip" || v === "gable" ? q.r.pitch || 1 : 1), (q.r.dir = q.r.dir || 0), true));
-    else if (id === "s:steep") selEdit((q) => q.kind === "roof" && ((q.r.pitch = (q.r.pitch || 1) > 1 ? 1 : q.r.shape === "hip" ? 2.2 : 1.7), true));
-    else if (id === "s:rturn") selEdit((q) => q.kind === "roof" && (q.r.shape === "shed" ? (q.r.dir = ((q.r.dir || 0) + 1) % 4) : (q.r.axis = q.r.axis === "x" ? "z" : "x"), true));
     else if (id === "s:levels") selEdit((q) => q.kind === "ring" && ((q.r.h = v), true));
     else if (id === "s:top") selEdit((q) => q.kind === "ring" && ((q.r.roof = v || false), (q.r.rmat = q.r.rmat || B.rmat), true));
     else if (id === "s:pkind") selEdit((q) => q.kind === "pillar" && ((q.p[3] = v), true));
@@ -8154,6 +8672,7 @@
       return true;
     }
     if (sized && e.code === "Enter") return (commit(), true);
+    if (B.tool === "roof" && !B.drag && e.code === "Enter" && !e.repeat) return (roofBuilding(), true);
     if (e.code === "PageUp" || e.code === "BracketRight") return (e.preventDefault(), e.shiftKey ? cycleHeight(false) : setLevel(B.level + 1), true);
     if (e.code === "PageDown" || e.code === "BracketLeft") return (e.preventDefault(), e.shiftKey ? cycleHeight(true) : setLevel(B.level - 1), true);
     if (e.code === "Equal" || e.code === "Minus" || e.code === "NumpadAdd" || e.code === "NumpadSubtract") return (choose("lift", e.code === "Equal" || e.code === "NumpadAdd" ? 1 : -1), true);
@@ -8750,7 +9269,7 @@
       }
       for (const r of S.roofs) {
         const parts = roofParts(r),
-          R = { id: r.id, mat: r.mat || "thatch", planes: [], ridges: [], infills: [], ties: [] };
+          R = { id: r.id, mat: r.mat || "thatch", planes: [], ridges: [], infills: [], ties: [], gutters: [], groundY };
         let n = 0,
           gi = 0;
         const topAt = (x, z) => {
@@ -8763,11 +9282,14 @@
           return best < -1e8 ? H : best;
         };
         for (const q of parts) {
-          if (q.part === "plane") R.planes.push({ id: r.id + "." + n++, pts: q.pts, eaveY: q.eaveY + yo, ridgeY: q.ridgeY + yo, run: q.run, facing: q.facing, overhang: (r.shape || "gable") === "gable" || r.shape === "shed" ? 0.45 : 0 });
-          else if (q.part === "ridge") R.ridges.push({ a: q.a, b: q.b, y: q.y0 + yo + ((r.shape || "gable") === "gable" ? 0 : 0.03) });
+          // overhang: how far the plane runs past the walls at the ends of its eave edge (barge rafters go there)
+          if (q.part === "plane") R.planes.push({ id: r.id + "." + n++, pts: q.pts, eaveY: q.eaveY + yo, ridgeY: q.ridgeY + yo, run: q.run, facing: q.facing, overhang: q.rake, eave: q.eave, drip: q.drip, pitch12: q.pitch12 });
+          else if (q.part === "ridge") R.ridges.push({ a: q.a, b: q.b, y: q.y0 + yo });
+          else if (q.part === "hip") (R.hips || (R.hips = [])).push({ a: q.a, b: q.b, y0: q.y0 + yo, y1: q.y1 + yo });
+          else if (q.part === "gutter") (R.gutters || (R.gutters = [])).push({ a: q.a, b: q.b, y: q.y + yo, down: q.down, downs: q.downs, wall: q.wall, out: q.out, plane: r.id + "." + parts.slice(0, q.plane).filter((x) => x.part === "plane").length });
         }
         for (const q of parts) if (q.part === "infill") R.infills.push({ id: r.id + ".g" + gi++, a: q.a, b: q.b, y0: H, y1: q.y1 + yo, area: q.area, top: topAt });
-        if ((r.shape || "gable") === "gable") {
+        if (RIDGED[r.shape || "gable"]) {
           const ax = r.axis === "x",
             a0 = ax ? r.i0 : r.j0,
             a1 = (ax ? r.i1 : r.j1) + 1,
@@ -8843,7 +9365,7 @@
         opens.push({ id: q.id, stage: "openings", kind: q.kind, parent: w.id, a: [w.a[0] + ux * c, q.sill, w.a[1] + uz * c], b: [w.a[0] + ux * c, q.sill + q.height, w.a[1] + uz * c], n: [-uz, 0, ux], section: { b: q.width, d: q.kind === "door" ? 0.05 : 0.04 }, col: q.kind === "door" ? "timber" : "wrap" });
       }
     }
-    return (S.mem = { ver: S.ver, list, byParent, byId, polys, opens, planes: new Map(desc.roofs.map((R) => [R.id, R.planes.map((p) => p.id)])) });
+    return (S.mem = { ver: S.ver, list, byParent, byId, polys, opens, roofs: desc.roofs, planes: new Map(desc.roofs.map((R) => [R.id, R.planes.map((p) => p.id)])) });
   }
   // every id of a structure that can be planned or built on its own: members, doors and windows, and the pieces
   // that are not made of members (stone walls, round rooms, stairs, pillars)
@@ -8943,7 +9465,7 @@
     }
     for (const r of S.roofs) {
       const pl = mem.planes.get(r.id) || [],
-        f = pl.every((id) => !P(id + ".rc"));
+        f = !mem.list.some((m) => m.stage === "roofing" && pl.includes(m.parent) && P(m.id));
       f && st.finRoof.add(r.id);
       if (f) Db.roofs.push(r);
       else if (pl.every(bare) && !mem.list.some((m) => m.roof === r.id && !P(m.id))) Ds.roofs.push(r);
@@ -9004,6 +9526,7 @@
   })();
   const tapeMat = new T.MeshLambertMaterial({ color: 0x8e9692 });
   const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), siding: col(0xc7b79b), sidingDark: col(0x6f5a47), concrete: CONCRETE, gravel: col(0x8f8b82) };
+  for (const [k, h] of Object.entries(FR.ROOF_COLORS || {})) MCOL[k] = col(h); // the roofing layers while they go on (src/framing.js)
   const _m4 = new T.Matrix4(),
     _c = new T.Color();
   function dropMembers(S) {
@@ -9026,6 +9549,9 @@
       hideLater = B.cmode && !B.on && !B.showLater && !st.all,
       open = new Map(); // stage -> kinds still planned in it, for "needs the piers first"
     for (const m of mem.list) if (P(m.id)) (open.get(m.stage) || open.set(m.stage, new Set()).get(m.stage)).add(m.kind);
+    // roof courses go on from the eave up: only the lowest one still to lay is the bright blueprint, the rest are faint
+    const lowRow = new Map();
+    for (const m of mem.list) if (m.course && P(m.id)) { const k = m.parent + m.kind; lowRow.set(k, Math.min(lowRow.has(k) ? lowRow.get(k) : 1e9, m.row)); }
     const sets = [[], []], // solid, solid under the roof
       ghosts = {}, // "level|top|poly" -> members
       ghostAdd = (m, top) => {
@@ -9034,12 +9560,12 @@
         if (idx > gi && hideLater) return;
         const need = sk[m.kind],
           waits = idx === gi && need && need.some((k) => k !== m.kind && open.get(m.stage) && open.get(m.stage).has(k)),
-          level = idx === gi ? (waits ? "dim" : "cur") : "later",
+          level = idx === gi ? (waits ? "dim" : m.course && m.row > lowRow.get(m.parent + m.kind) ? "later" : "cur") : "later",
           key = level + "|" + top + "|" + (mem.polys.has(m.id) ? 1 : 0);
         (ghosts[key] || (ghosts[key] = [])).push(m);
       };
     for (const m of mem.list) {
-      const roofId = m.roof || (/^(roof-frame|roof-deck|roofing)$/.test(m.stage) || m.type === "roof-batt" || m.type === "ceiling" ? m.parent.split(".")[0] : null),
+      const roofId = m.roof || (/^(roof-frame|roof-deck|dry-in|roofing)$/.test(m.stage) || m.type === "roof-batt" || m.type === "ceiling" ? m.parent.split(".")[0] : null),
         top = roofId ? 1 : 0;
       if (P(m.id)) {
         ghostAdd(m, top);
@@ -9286,8 +9812,8 @@
   }
   /* ready-made plans: small buildings in real framing sizes, set down whole */
   const PLANS = {
-    shed: { id: "shed", name: "Tool shed", size: "2.4 x 3.0 m", w: 2.4, l: 3.0, note: "A single-pitch roof, one door and one window, on six pier blocks.", roof: { shape: "shed", dir: 0, axis: "x", pitch: 1, mat: "shingle" }, door: [2, 0], windows: [[1, 1]], found: "pier-blocks", ins: null, lining: null },
-    cabin: { id: "cabin", name: "Small cabin", size: "3.6 x 4.8 m", w: 3.6, winW: 0.9, l: 4.8, note: "A gable roof, a door and two windows, insulated and lined, on pier blocks.", roof: { shape: "gable", dir: 0, axis: "z", pitch: 1, mat: "shingle" }, door: [2, 1], windows: [[1, 2], [3, 2]], found: "pier-blocks", ins: "fibreglass_batt", lining: "boards" },
+    shed: { id: "shed", name: "Tool shed", size: "2.4 x 3.0 m", w: 2.4, l: 3.0, note: "A single-pitch roof, one door and one window, on six pier blocks.", roof: { shape: "shed", dir: 0, axis: "x", pitch12: 4, eave: 0.3, rake: 0.25, mat: "shingle", gutters: true }, door: [2, 0], windows: [[1, 1]], found: "pier-blocks", ins: null, lining: null },
+    cabin: { id: "cabin", name: "Small cabin", size: "3.6 x 4.8 m", w: 3.6, winW: 0.9, l: 4.8, note: "A gable roof, a door and two windows, insulated and lined, on pier blocks.", roof: { shape: "gable", dir: 0, axis: "z", pitch12: 8, mat: "shingle", gutters: true }, door: [2, 1], windows: [[1, 2], [3, 2]], found: "pier-blocks", ins: "fibreglass_batt", lining: "boards" },
   };
   const planList = () => Object.values(PLANS).map((p) => ({ id: p.id, name: p.name, size: p.size, widthM: p.w, lengthM: p.l, note: p.note, foundation: p.found }));
   // door and windows are [side, module]: side 0 the back (z = 0), 1 the right, 2 the front, 3 the left
@@ -9928,86 +10454,6 @@
       }
     return loops.sort((p, q) => polyArea(q) - polyArea(p));
   }
-  // The parts of a rectangular roof, in the structure's own metres, heights as in a normal storey: each sloping
-  // plane with its eave edge, the wall infill under gables and lean-tos, and the ridge beam. Follows roofPieces().
-  function roofParts(r) {
-    const x0 = r.i0,
-      x1 = r.i1 + 1,
-      z0 = r.j0,
-      z1 = r.j1 + 1,
-      ov = 0.45,
-      shape = r.shape || "gable",
-      out = [];
-    const plane = (pts, eaveY, ridgeY, run, facing) => out.push({ part: "plane", pts, eaveY, ridgeY, run, facing });
-    if (shape === "flat") {
-      plane([[x0 - 0.14, z0 - 0.14], [x1 + 0.14, z0 - 0.14], [x1 + 0.14, z1 + 0.14], [x0 - 0.14, z1 + 0.14]], EAVE + 0.1, EAVE + 0.1, 0, [0, 0]);
-    } else if (shape === "gable") {
-      const ax = r.axis === "x",
-        a0 = (ax ? r.i0 : r.j0) - ov,
-        a1 = (ax ? r.i1 : r.j1) + 1 + ov,
-        b0 = ax ? r.j0 : r.i0,
-        b1 = (ax ? r.j1 : r.i1) + 1,
-        half = (b1 - b0) / 2,
-        bc = (b0 + b1) / 2,
-        rise = clamp(half * 0.85, 0.7, 2.9) * (r.pitch || 1),
-        sl = rise / half,
-        run = half + ov,
-        P = (a, b) => (ax ? [a, b] : [b, a]);
-      for (const side of [-1, 1]) plane([P(a0, bc + side * run), P(a1, bc + side * run), P(a1, bc), P(a0, bc)], EAVE - sl * ov, EAVE + rise, run, P(0, side));
-      for (const a of [a0 + ov, a1 - ov]) out.push({ part: "infill", a: P(a, b0), b: P(a, b1), y0: EAVE - 0.02, y1: EAVE + rise, area: ((b1 - b0) * (rise + 0.02)) / 2, shape: "triangle" });
-      out.push({ part: "ridge", a: P(a0 - 0.06, bc), b: P(a1 + 0.06, bc), y0: EAVE + rise, y1: EAVE + rise + 0.2 });
-    } else if (shape === "hip") {
-      const w = x1 - x0,
-        l = z1 - z0,
-        half = Math.min(w, l) / 2,
-        rise = clamp(half * 0.85, 0.7, 2.9) * (r.pitch || 1),
-        ye = EAVE - (rise / half) * ov,
-        yt = EAVE + rise,
-        run = half + ov,
-        c00 = [x0 - ov, z0 - ov],
-        c10 = [x1 + ov, z0 - ov],
-        c11 = [x1 + ov, z1 + ov],
-        c01 = [x0 - ov, z1 + ov],
-        r0 = w >= l ? [x0 + half, (z0 + z1) / 2] : [(x0 + x1) / 2, z0 + half],
-        r1 = w >= l ? [x1 - half, (z0 + z1) / 2] : [(x0 + x1) / 2, z1 - half],
-        ridge = Math.hypot(r1[0] - r0[0], r1[1] - r0[1]);
-      // eave edge first; a square plan has no ridge, so the long faces are triangles too
-      const face = (e0, e1, p0, p1, facing) => plane(ridge > 1e-6 && p0 !== p1 ? [e0, e1, p1, p0] : [e0, e1, p0], ye, yt, run, facing);
-      if (w >= l) {
-        face(c00, c10, r0, r1, [0, -1]);
-        face(c11, c01, r1, r0, [0, 1]);
-        face(c10, c11, r1, r1, [1, 0]);
-        face(c01, c00, r0, r0, [-1, 0]);
-      } else {
-        face(c01, c00, r1, r0, [-1, 0]);
-        face(c10, c11, r0, r1, [1, 0]);
-        face(c00, c10, r0, r0, [0, -1]);
-        face(c11, c01, r1, r1, [0, 1]);
-      }
-      if (ridge > 1e-6) out.push({ part: "ridge", a: r0, b: r1, y0: yt - 0.03, y1: yt + 0.15 });
-    } else {
-      // lean-to: one slope, running down in direction r.dir
-      const [dx, dz] = DIRS[r.dir || 0],
-        ax = dx !== 0,
-        sgn = dx + dz,
-        a0 = ax ? x0 : z0,
-        a1 = ax ? x1 : z1,
-        b0 = ax ? z0 : x0,
-        b1 = ax ? z1 : x1,
-        hi = sgn > 0 ? a0 : a1,
-        lo = sgn > 0 ? a1 : a0,
-        span = a1 - a0,
-        rise = clamp(span * 0.45, 0.6, 2.6),
-        sl = rise / span,
-        P = (a, b) => (ax ? [a, b] : [b, a]),
-        eA = lo + sgn * ov,
-        tA = hi - sgn * 0.25;
-      plane([P(eA, b0 - ov), P(eA, b1 + ov), P(tA, b1 + ov), P(tA, b0 - ov)], EAVE - sl * ov, EAVE + rise + sl * 0.25, span + ov + 0.25, P(sgn, 0));
-      for (const b of [b0, b1]) out.push({ part: "infill", a: P(a0, b), b: P(a1, b), y0: EAVE - 0.02, y1: EAVE + rise, area: (span * (rise + 0.02)) / 2, shape: "triangle" });
-      out.push({ part: "infill", a: P(hi, b0), b: P(hi, b1), y0: EAVE - 0.02, y1: EAVE + rise, area: (b1 - b0) * (rise + 0.02), shape: "rectangle" });
-    }
-    return out;
-  }
   function decorBox(src) {
     if (src.bb) return src.bb;
     let x0 = 1e9,
@@ -10435,6 +10881,12 @@
     materialsList,
     plans: planList,
     placePlan,
+    // roofs: the one geometry (see roofParts), what a roof measures, the roofer's warnings, and the coverings
+    roofParts,
+    roofStats,
+    roofWarnings,
+    roofMaterials: () => Object.keys(ROOFS).map((id) => ({ id, name: ROOFS[id].name, group: ROOFS[id].group, min: ROOFS[id].min || 0, max: ROOFS[id].max || null })),
+    roofBuilding,
     // for the construction add-on: where each building stands and how much of it is still only planned
     structs: () => B.structs.map((S) => (syncKnown(S), { id: S.id, ver: S.ver, x: S.cx, z: S.cz, r: S.rad, y0: S.y0, yaw: S.yaw || 0, level: S.level, planned: S.plan.size, sitePlanned: !!S.sitePlanned, found: S.found })),
     // every member of one building in its own metres, with the matrix that puts them in the world
@@ -10442,7 +10894,7 @@
       const S = B.structs.find((O) => O.id === structId);
       if (!S) return null;
       S.group.updateMatrixWorld(true);
-      return { matrix: S.group.matrixWorld, y0: S.y0, list: membersOf(S).list, planned: S.plan };
+      return { matrix: S.group.matrixWorld, y0: S.y0, list: membersOf(S).list, planned: S.plan, roofs: membersOf(S).roofs };
     },
     memberLook: () => ({ geo: boxGeo, mat: memMat, colors: MCOL }),
     // called when the player climbs out of a room that has no door (see climbOut)

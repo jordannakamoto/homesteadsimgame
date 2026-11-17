@@ -55,11 +55,10 @@ export const RIVER_SHADE = /* glsl */ `
     float t = uTime;
     vec2 ad = vec2(a.x - t * (0.15 + sp), a.y);
     float patchy = smoothstep(-0.25, 0.65, snoise(vec3(ad * vec2(0.3, 0.45), t * 0.06)));
-    float h = snoise(vec3(ad * vec2(0.8, 1.1), t * 0.3)) * 0.5;                             // boils
+    float h = snoise(vec3(ad * vec2(0.5, 0.7), t * 0.2)) * 0.35;                            // slow swells
     h += snoise(vec3(ad * vec2(1.1, 4.2), t * 0.5)) * 0.4 * rough;                          // streaks along the current
-    h += snoise(vec3(ad * vec2(4.5, 3.6), t * 1.3)) * 0.2 * (0.25 + patchy);                // wavelets
-    h += snoise(vec3(ad * vec2(10.0, 8.5), t * 2.1)) * 0.09 * (0.15 + patchy) * (0.4 + rough); // capillaries
-    return h * (0.012 + 0.035 * rough);
+    h += snoise(vec3(ad * vec2(4.5, 3.6), t * 1.3)) * 0.18 * (0.2 + patchy) * rough;       // wavelets where it runs
+    return h * (0.006 + 0.03 * rough);
   }
   // q: where to shade (the texel centre when pixel-snapped); v: velocity (m/s); d: depth (m); foamIn: white water (0-1)
   vec4 shadeRiver(vec2 q, vec2 cell, vec3 world, vec2 v, float d, float foamIn) {
@@ -81,9 +80,13 @@ export const RIVER_SHADE = /* glsl */ `
     float h0 = flowH(a, sp, rough), hx = flowH(a + vec2(e, 0.0), sp, rough), hy = flowH(a + vec2(0.0, e), sp, rough);
     vec2 ga = vec2(hx - h0, hy - h0) / e;
     vec2 g = fd * ga.x + fn * ga.y;
+    // and the earlier look's flowed ripple texture, at a lighter hand, each layer turned so its tiling never lines up
+    mat2 r1 = mat2(0.799, 0.602, -0.602, 0.799), r2 = mat2(0.326, -0.946, 0.946, 0.326);
+    vec2 uvA = r1 * q * 0.37 - v * t0 * 0.6, uvB = r2 * q * 0.37 - v * t1 * 0.6 + 0.37;
+    g += (mix(texture2D(uTex, uvA).rg, texture2D(uTex, uvB).rg, wb) - 0.5) * 0.35 * (0.25 + rough);
     // the finest ruffle, too small to take differences of: tilts each spot a little at random
     vec3 rq = vec3(q * 9.0 - v * uTime * 9.0, uTime * 1.7);
-    g += vec2(snoise(rq), snoise(rq + 31.7)) * 0.05 * (0.4 + rough);
+    g += vec2(snoise(rq), snoise(rq + 31.7)) * 0.025 * rough;
     // ripples spreading where the water was touched: a travelling ring in the slope
     for (int i = 0; i < 12; i++) {
       vec4 r = uRip[i];
@@ -101,15 +104,23 @@ export const RIVER_SHADE = /* glsl */ `
     float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
     float skyVis = mix(1.0, texture2D(uSkyMap, (q + 0.5) / 512.0).r, uSkyK);
     vec3 R = reflect(-V, N); R.y = abs(R.y);
-    vec3 bank = uAmb * vec3(0.16, 0.2, 0.11) + uSunCol * vec3(0.04, 0.05, 0.025);
-    vec3 sky = mix(bank, mix(uSky, uZenith, pow(clamp(R.y, 0.0, 1.0), 0.7)), smoothstep(0.04, 0.3, R.y)) * mix(0.35, 1.0, skyVis);
+    // What the water reflects is mostly its surroundings, not an empty sky (an even sky on a wavy surface is what
+    // reads as oil): the bank, then trees up to a tree line, then sky above. The tree line stands as high as the
+    // place is enclosed (the baked sky-visibility map: little sky seen, tall surroundings), varying round the
+    // compass, and the ripples break the line up as they do on a real stream.
+    float az = atan(R.z, R.x);
+    float line = mix(0.06, 0.62, 1.0 - skyVis) * (0.7 + 0.6 * (snoise(vec3(az * 2.2, q * 0.02)) * 0.5 + 0.5)) + 0.04;
+    vec3 bank = uAmb * vec3(0.2, 0.22, 0.14) + uSunCol * vec3(0.05, 0.05, 0.03);
+    vec3 trees = uAmb * vec3(0.17, 0.24, 0.14) + uSunCol * vec3(0.06, 0.09, 0.04) * (0.6 + 0.4 * snoise(vec3(az * 9.0, R.y * 14.0, 0.0)));
+    vec3 skyC = mix(uSky, uZenith, pow(clamp(R.y, 0.0, 1.0), 0.7));
+    vec3 sky = mix(mix(bank, trees, smoothstep(0.0, 0.06, R.y)), skyC, smoothstep(line - 0.04, line + 0.04, R.y));
     float sd = max(dot(R, uSunDir), 0.0);
     // the sun on the water: a soft sheen over the rippled surface (a mirror-sharp glint on smooth noise would draw
     // rings like a fingerprint), broken into sparkles by the smallest wavelets, more where the water is rough
     vec3 H = normalize(V + uSunDir);
     float nh = max(dot(N, H), 0.0);
-    float sparkle = step(0.82, snoise(vec3(q * 22.0 - v * uTime * 22.0, uTime * 3.0)) * 0.5 + 0.5) * (0.3 + rough);
-    vec3 glint = uSunCol * (pow(nh, 90.0) * (0.35 + 1.6 * sparkle) + pow(sd, 400.0) * 1.5 * sparkle) * skyVis;
+    float sparkle = step(0.9, snoise(vec3(q * 9.0 - v * uTime * 9.0, uTime * 2.0)) * 0.5 + 0.5) * smoothstep(0.4, 1.0, rough);   // only on broken water
+    vec3 glint = uSunCol * (pow(nh, 160.0) * (0.25 + 1.2 * sparkle) + pow(sd, 400.0) * 1.2 * sparkle) * skyVis * step(line, R.y);   // no sun where the reflection is trees
     float path = d * (1.0 + 1.0 / max(V.y, 0.25));
     // loss a metre: stream water carries fine sediment and dissolved organic matter even on a fair day (red lost
     // first, then blue: the olive-green to tea-brown of a real brook), much more when it runs muddy. Shallows show
