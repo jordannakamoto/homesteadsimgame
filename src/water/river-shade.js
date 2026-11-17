@@ -55,10 +55,10 @@ export const RIVER_SHADE = /* glsl */ `
     float t = uTime;
     vec2 ad = vec2(a.x - t * (0.15 + sp), a.y);
     float patchy = smoothstep(-0.25, 0.65, snoise(vec3(ad * vec2(0.3, 0.45), t * 0.06)));
-    float h = snoise(vec3(ad * vec2(0.8, 1.1), t * 0.3)) * 0.5;                             // boils
-    h += snoise(vec3(ad * vec2(1.1, 4.2), t * 0.5)) * 0.4 * rough;                          // streaks along the current
-    h += snoise(vec3(ad * vec2(4.5, 3.6), t * 1.3)) * 0.2 * (0.25 + patchy);                // wavelets
-    h += snoise(vec3(ad * vec2(10.0, 8.5), t * 2.1)) * 0.09 * (0.15 + patchy) * (0.4 + rough); // capillaries
+    float h = snoise(vec3(ad * vec2(0.8, 1.1), t * 0.3)) * 0.22;                            // boils
+    h += snoise(vec3(ad * vec2(1.1, 4.2), t * 0.5)) * 0.28 * rough;                         // streaks along the current
+    h += snoise(vec3(ad * vec2(4.5, 3.6), t * 1.3)) * 0.3 * (0.35 + patchy);                // wavelets
+    h += snoise(vec3(ad * vec2(10.0, 8.5), t * 2.1)) * 0.17 * (0.3 + patchy) * (0.5 + rough); // capillaries
     return h * (0.012 + 0.035 * rough);
   }
   // q: where to shade (the texel centre when pixel-snapped); v: velocity (m/s); d: depth (m); foamIn: white water (0-1)
@@ -81,6 +81,10 @@ export const RIVER_SHADE = /* glsl */ `
     float h0 = flowH(a, sp, rough), hx = flowH(a + vec2(e, 0.0), sp, rough), hy = flowH(a + vec2(0.0, e), sp, rough);
     vec2 ga = vec2(hx - h0, hy - h0) / e;
     vec2 g = fd * ga.x + fn * ga.y;
+    // and the earlier look's flowed ripple texture, at a lighter hand, each layer turned so its tiling never lines up
+    mat2 r1 = mat2(0.799, 0.602, -0.602, 0.799), r2 = mat2(0.326, -0.946, 0.946, 0.326);
+    vec2 uvA = r1 * q * 0.37 - v * t0 * 0.6, uvB = r2 * q * 0.37 - v * t1 * 0.6 + 0.37;
+    g += (mix(texture2D(uTex, uvA).rg, texture2D(uTex, uvB).rg, wb) - 0.5) * 0.55 * (0.4 + rough);
     // the finest ruffle, too small to take differences of: tilts each spot a little at random
     vec3 rq = vec3(q * 9.0 - v * uTime * 9.0, uTime * 1.7);
     g += vec2(snoise(rq), snoise(rq + 31.7)) * 0.05 * (0.4 + rough);
@@ -102,7 +106,7 @@ export const RIVER_SHADE = /* glsl */ `
     float skyVis = mix(1.0, texture2D(uSkyMap, (q + 0.5) / 512.0).r, uSkyK);
     vec3 R = reflect(-V, N); R.y = abs(R.y);
     vec3 bank = uAmb * vec3(0.16, 0.2, 0.11) + uSunCol * vec3(0.04, 0.05, 0.025);
-    vec3 sky = mix(bank, mix(uSky, uZenith, pow(clamp(R.y, 0.0, 1.0), 0.7)), smoothstep(0.04, 0.3, R.y)) * mix(0.35, 1.0, skyVis);
+    vec3 sky = mix(bank, mix(uSky, uZenith, pow(clamp(R.y, 0.0, 1.0), 0.7)), smoothstep(0.03, 0.14, R.y)) * mix(0.5, 1.0, skyVis);
     float sd = max(dot(R, uSunDir), 0.0);
     // the sun on the water: a soft sheen over the rippled surface (a mirror-sharp glint on smooth noise would draw
     // rings like a fingerprint), broken into sparkles by the smallest wavelets, more where the water is rough
