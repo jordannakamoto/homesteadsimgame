@@ -1086,7 +1086,7 @@ terrainMat.onBeforeCompile = (sh) => {
   sh.uniforms.uSkyMap = U.skyMap; sh.uniforms.uSkyK = U.skyK;
   sh.uniforms.uDigMask = DIG.uDigMask; sh.uniforms.uDigWin = DIG.uDigWin;
   const lu = riverLive.uniforms, ru = riverWater.uniforms;
-  sh.uniforms.uLiveState = lu.uState; sh.uniforms.uLiveFeed = lu.uFeed; sh.uniforms.uLiveOrg = lu.uOrg; sh.uniforms.uLiveCell = lu.uCell; sh.uniforms.uLiveN = lu.uN; sh.uniforms.uWin = ru.uWin; sh.uniforms.uFoamTex = ru.uFoamTex; sh.uniforms.uSeaTex = ru.uTex; sh.uniforms.uTime = U.time; sh.uniforms.uSunDirB = ru.uSunDir; sh.uniforms.uSunColB = ru.uSunCol; sh.uniforms.uBedVox = U.bedVox;
+  sh.uniforms.uLiveState = lu.uState; sh.uniforms.uLiveFeed = lu.uFeed; sh.uniforms.uLiveOrg = lu.uOrg; sh.uniforms.uLiveCell = lu.uCell; sh.uniforms.uLiveN = lu.uN; sh.uniforms.uWin = lu.uBedWin; sh.uniforms.uFoamTex = ru.uFoamTex; sh.uniforms.uSeaTex = ru.uTex; sh.uniforms.uTime = U.time; sh.uniforms.uSunDirB = ru.uSunDir; sh.uniforms.uSunColB = ru.uSunCol; sh.uniforms.uBedVox = U.bedVox;
   sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>' + SKY_PARS_V + '\nvarying vec3 vWPosT;')
     .replace('#include <project_vertex>', '#include <project_vertex>' + SKY_V('(modelMatrix * vec4(transformed, 1.0)).xz') + '\nvWPosT = (modelMatrix * vec4(transformed, 1.0)).xyz;');
   sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>' + SKY_PARS_F + BED_PARS_F + '\n#ifdef DIG_MASK\nuniform highp sampler2D uDigMask; uniform vec4 uDigWin;\n#endif').replace('#include <aomap_fragment>', SKY_F)
@@ -2713,13 +2713,13 @@ const { waveHeight, depthState, updateDepthMap, uniforms: waterUniforms, mesh: w
 const riverWater = createRiverWater({ U, sea, CS, P, SEA });
 // the live tier (src/water/rivers-live.js): a shallow-water simulation on the GPU in a window round the player
 const riverLive = createRiverLive({ renderer, river: riverWater, scene, CS, heightAt, chunkAt: (x, z) => world.chunks.get(ckey(Math.floor(x / CS), Math.floor(z / CS))) });
-riverLive.setMode(LOOK.riverWater === 'baked' ? 'off' : LOOK.riverWater);
+riverLive.setMode(LOOK.riverWater === 'baked' ? 'bed' : LOOK.riverWater);
 const riverFalls = createFalls({ river: riverWater, CS });
 // spray, mist, splashes and rings on the water (src/water/water-fx.js)
 const waterFx = createWaterFx({ scene, river: riverWater });
 // what the streams reflect near you: the real surroundings (src/water/reflect-probe.js)
-const reflectProbe = createReflectProbe({ renderer, scene, hide: [riverWater.material, riverLive.material, riverFalls.material, waterFx.points, water] });
-riverWater.uniforms.uEnv.value = reflectProbe.texture;
+const reflectProbe = createReflectProbe({ renderer, scene, hide: [riverWater.material, riverLive.material, riverFalls.material, waterFx.points, water], uniforms: riverWater.uniforms });
+let probeAt = null, probeAway = 0;
 riverWater.uniforms.uTPM.value = LOOK.waterTexel === 'ground' ? 6.4 : 12.8;
 riverWater.uniforms.uSnap.value = LOOK.waterTexel === 'smooth' ? 0 : 1;
 U.bedVox.value = LOOK.bedStyle === 'real' ? 0 : 1;
@@ -2898,9 +2898,12 @@ function updateStreams(dt) {
   waterFx.update(dt, [Math.sin(wd) * wms, Math.cos(wd) * wms]);
   riverLive.update(dt, player.x, player.z, simCtl.speed > 0);
   // the reflection probe, just above the stream water nearest you, while there is stream water near
+  // (kept on for a few seconds after you step away, so it does not blink on and off at a stream's edge)
   const near = LOOK.waterReflect === 'probe' ? nearStream() : null;
-  reflectProbe.setOn(!!near);
-  if (near) { reflectProbe.update(near.x, near.y, near.z); u.uEnvPos.value.set(near.x, near.y, near.z, 1); } else u.uEnvPos.value.w = 0;
+  if (near) { probeAt = near; probeAway = 0; } else probeAway += dt;
+  if (probeAt && probeAway > 4) probeAt = null;
+  reflectProbe.setOn(!!probeAt);
+  if (probeAt) { reflectProbe.update(dt, probeAt.x, probeAt.y, probeAt.z); u.uEnvPos.value.set(player.x, probeAt.y, player.z, 1); } else u.uEnvPos.value.w = 0;
   // irrigation: garden cells under stream water (a trench dug from a brook, a flooded bed) soak it up
   irrigT += dt;
   if (irrigT >= 2 && riverLive.on) {
@@ -3167,7 +3170,7 @@ function setLook(key, value) {
   if (key === 'camFx') resize();
   if (key === 'edgeBelts' && window.__nature) for (const c of world.chunks.values()) { c.litterItems = null; window.__nature.refresh(c); }
   if (key === 'taa') { applyGfx(); resize(); }
-  if (key === 'riverWater') riverLive.setMode(value === 'baked' ? 'off' : value);
+  if (key === 'riverWater') riverLive.setMode(value === 'baked' ? 'bed' : value);
   if (key === 'waterReflect' && value !== 'probe') reflectProbe.setOn(false);
   if (key === 'bedStyle') U.bedVox.value = value === 'real' ? 0 : 1;
   if (key === 'waterTexel') { riverWater.uniforms.uTPM.value = value === 'ground' ? 6.4 : 12.8; riverWater.uniforms.uSnap.value = value === 'smooth' ? 0 : 1; }      // MSAA off or back on, and the resolve path

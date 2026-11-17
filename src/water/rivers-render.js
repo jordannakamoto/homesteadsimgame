@@ -16,7 +16,7 @@ export function createRiverWater({ U, sea, CS, P, SEA }) {
   const su = sea.uniforms;
   const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
     uTurbid: { value: 1 }, uSnap: { value: 0 }, uTPM: { value: 12.8 }, uFoamTex: { value: null },
-    uEnv: { value: null }, uEnvPos: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uEnv: { value: null }, uEnv2: { value: null }, uEnvMix: { value: 0 }, uEnvPos: { value: new THREE.Vector4(0, 0, 0, 0) },
     uRip: { value: Array.from({ length: 24 }, () => new THREE.Vector4(0, 0, -100, 0)) }, uSkyMap: { value: null }, uSkyK: { value: 1 }, uTex: { value: null },
     uWin: { value: new THREE.Vector4(1, 1, 0, 0) }, uWetDepth: { value: 1 }, uWetSpeed: { value: 1 },
   }]);

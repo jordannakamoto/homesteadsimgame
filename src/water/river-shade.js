@@ -19,7 +19,7 @@ export const RIVER_SHADE = /* glsl */ `
   uniform float uTime, uTurbid, uSkyK, uTPM, uSnap; uniform sampler2D uTex, uSkyMap, uFoamTex;
   uniform vec3 uSunDir, uSunCol, uAmb, uSky, uZenith;
   uniform vec4 uWin;                       // the live simulation's window (x0, z0, x1, z1); x1 < x0 when there is none
-  uniform samplerCube uEnv; uniform vec4 uEnvPos;          // the reflection probe (reflect-probe.js): where, and w on/off
+  uniform samplerCube uEnv, uEnv2; uniform vec4 uEnvPos; uniform float uEnvMix;          // the reflection probe (reflect-probe.js): where, and w on/off
   uniform vec4 uRip[24];                   // ripples: x, z, start time, strength
   const mat4 BAYER = mat4(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
   float bayer4(vec2 c) { ivec2 i = ivec2(mod(c, 4.0)); return (BAYER[i.y][i.x] + 0.5) / 16.0; }
@@ -56,10 +56,9 @@ export const RIVER_SHADE = /* glsl */ `
     float t = uTime;
     vec2 ad = vec2(a.x - t * (0.15 + sp), a.y);
     float patchy = smoothstep(-0.25, 0.65, snoise(vec3(ad * vec2(0.3, 0.45), t * 0.06)));
-    float h = snoise(vec3(ad * vec2(0.5, 0.7), t * 0.2)) * 0.35;                            // slow swells
-    h += snoise(vec3(ad * vec2(1.1, 4.2), t * 0.5)) * 0.4 * rough;                          // streaks along the current
-    h += snoise(vec3(ad * vec2(4.5, 3.6), t * 1.3)) * 0.18 * (0.2 + patchy) * rough;       // wavelets where it runs
-    return h * (0.006 + 0.03 * rough);
+    float h = snoise(vec3(ad * vec2(0.5, 0.7), t * 0.2)) * 0.4;                             // slow swells
+    h += snoise(vec3(ad * vec2(0.8, 2.0), t * 0.4)) * 0.35 * rough * (0.5 + 0.5 * patchy);  // broad ridges along the current
+    return h * (0.006 + 0.024 * rough);
   }
   // q: where to shade (the texel centre when pixel-snapped); v: velocity (m/s); d: depth (m); foamIn: white water (0-1)
   vec4 shadeRiver(vec2 q, vec2 cell, vec3 world, vec2 v, float d, float foamIn) {
@@ -77,17 +76,17 @@ export const RIVER_SHADE = /* glsl */ `
     // Its slope, from small differences of that height, gives the normal.
     float rough = 0.25 + 0.75 * smoothstep(0.05, 1.2, sp);
     vec2 a = vec2(dot(q, fd), dot(q, fn));
-    float e = 0.035;
+    float e = 0.14;                                    // wide differences: a soft slope, no thin bright lines
     float h0 = flowH(a, sp, rough), hx = flowH(a + vec2(e, 0.0), sp, rough), hy = flowH(a + vec2(0.0, e), sp, rough);
     vec2 ga = vec2(hx - h0, hy - h0) / e;
     vec2 g = fd * ga.x + fn * ga.y;
     // and the earlier look's flowed ripple texture, at a lighter hand, each layer turned so its tiling never lines up
     mat2 r1 = mat2(0.799, 0.602, -0.602, 0.799), r2 = mat2(0.326, -0.946, 0.946, 0.326);
-    vec2 uvA = r1 * q * 0.37 - v * t0 * 0.6, uvB = r2 * q * 0.37 - v * t1 * 0.6 + 0.37;
-    g += (mix(texture2D(uTex, uvA).rg, texture2D(uTex, uvB).rg, wb) - 0.5) * 0.2 * (0.25 + rough);
+    vec2 uvA = r1 * q * 0.22 - v * t0 * 0.4, uvB = r2 * q * 0.22 - v * t1 * 0.4 + 0.37;
+    g += (mix(texture2D(uTex, uvA).rg, texture2D(uTex, uvB).rg, wb) - 0.5) * 0.12 * (0.25 + rough);
     // the finest ruffle, too small to take differences of: tilts each spot a little at random
     vec3 rq = vec3(q * 9.0 - v * uTime * 9.0, uTime * 1.7);
-    g += vec2(snoise(rq), snoise(rq + 31.7)) * 0.012 * rough;
+    g += vec2(snoise(rq), snoise(rq + 31.7)) * 0.006 * rough;
     // ripples spreading where the water was touched: a travelling ring in the slope
     for (int i = 0; i < 24; i++) {
       vec4 r = uRip[i];
@@ -117,7 +116,8 @@ export const RIVER_SHADE = /* glsl */ `
     vec3 sky = mix(mix(bank, trees, smoothstep(0.0, 0.06, R.y)), skyC, smoothstep(line - 0.04, line + 0.04, R.y));
     // near the player, the real surroundings from the probe, blurred where the water is rough
     float envK = uEnvPos.w * (1.0 - smoothstep(25.0, 50.0, distance(q, uEnvPos.xz)));
-    if (envK > 0.0) sky = mix(sky, textureLod(uEnv, R, 2.0 + 2.5 * rough).rgb, envK);
+    float lod = 2.0 + 2.5 * rough;
+    if (envK > 0.0) sky = mix(sky, mix(textureLod(uEnv, R, lod).rgb, textureLod(uEnv2, R, lod).rgb, uEnvMix), envK);
     float sd = max(dot(R, uSunDir), 0.0);
     // the sun on the water: a soft sheen over the rippled surface (a mirror-sharp glint on smooth noise would draw
     // rings like a fingerprint), broken into sparkles by the smallest wavelets, more where the water is rough
