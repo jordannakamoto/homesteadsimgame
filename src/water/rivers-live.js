@@ -44,7 +44,7 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
   let bedA = null, feedA = null, bedTex = null, feedTex = null, st = null, fx = null;
   const pushers = Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, 0, 0)), pushV = Array.from({ length: 4 }, () => new THREE.Vector2());
   const pours = Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, 0, 0));
-  const obstU = { value: [new THREE.Vector4(), new THREE.Vector4()] }, orgU = { value: new THREE.Vector2() };
+  const obstU = { value: [new THREE.Vector4(), new THREE.Vector4()] }, orgU = { value: new THREE.Vector2() }, froths = [new THREE.Vector4(), new THREE.Vector4()];
   const shared = river.uniforms;
 
   // ---- simulation passes
@@ -103,7 +103,7 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
     }`);
   // 2. depth, velocity, foam
   const stateMat = mat(/* glsl */ `
-    uniform vec4 push[4]; uniform vec2 pushV[4]; uniform vec4 pour[4]; uniform vec2 org;
+    uniform vec4 push[4]; uniform vec2 pushV[4]; uniform vec4 pour[4]; uniform vec4 froth[2]; uniform vec2 org;
     vec4 flux(ivec2 p) { return inside(p) ? texelFetch(F, p, 0) : vec4(0.0); }
     float foamAt(vec2 p) {                                    // bilinear, in cells
       vec2 a = p - 0.5, f = fract(a); ivec2 i = ivec2(floor(a));
@@ -138,6 +138,7 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
         if (pr > 0.0) { float k = 1.0 - smoothstep(0.0, pr, distance(w, pour[i].xy)); d += dt * pour[i].w * k / (3.0 * pr * pr); foam += k * dt * 1.5 * step(0.0, pour[i].w); }
       }
       d = max(d, 0.0);
+      for (int i = 0; i < 2; i++) if (froth[i].z > 0.0 && d > 0.01) foam += dt * froth[i].w * 4.0 * (1.0 - smoothstep(0.0, froth[i].z, distance(w, froth[i].xy)));
       // seepage: the banks and the ground water keep a channel topped up toward its level for the day (so a brook
       // whose spring or tributaries lie inside the window keeps running); it only ever adds, so a dam still fills
       // and a channel cut off upstream runs low and slowly recovers
@@ -147,7 +148,7 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
       int e = min(min(c.x, c.y), min(n - 1 - c.x, n - 1 - c.y));
       if (e < 4) { vec3 fd = feed(c); float k = e < 2 ? 0.5 : 0.15; d = mix(d, fd.x, k); v = mix(v, fd.yz, k); }
       gl_FragColor = vec4(d, v, clamp(foam, 0.0, 1.0));
-    }`, { push: { value: pushers }, pushV: { value: pushV }, pour: { value: pours }, org: { value: new THREE.Vector2() } });
+    }`, { push: { value: pushers }, pushV: { value: pushV }, pour: { value: pours }, froth: { value: froths }, org: { value: new THREE.Vector2() } });
   // the water the window starts with, or carries over when it moves: the old state shifted, else the baked water
   const initMat = mat(/* glsl */ `
     uniform ivec2 shift; uniform int keep, flux;
@@ -355,6 +356,7 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
     for (const p of pushers) p.z = 0;
     for (const p of pours) p.z = 0;
     for (const o of obstU.value) o.z = 0;
+    for (const o of froths) o.z = 0;
     drawU.uState.value = st[0].texture; drawU.uBed.value = bedTex; drawU.uN.value = SIZE; drawU.uOrg.value.set(win.ox, win.oz);
     const w = SIZE * CELL;
     shared.uWin.value.set(win.ox, win.oz, win.ox + w, win.oz + w);
@@ -399,9 +401,12 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
     push(slot, x, z, r, vx, vz, k = 1) { if (slot < 4) { pushers[slot].set(x, z, r, k); pushV[slot].set(vx, vz); } },
     // something standing in the water at (x, z), radius r, this frame: the water flows round it
     obstacle(slot, x, z, r) { if (slot < 2) obstU.value[slot].set(x, z, r, heightAt(x, z) + 1.5); },
+    // white water churned at (x, z) over radius r, this frame (amount about 0-1)
+    froth(slot, x, z, r, amount) { if (slot < 2) froths[slot].set(x, z, r, amount); },
     // water poured in at (x, z) over radius r, rate m3/s, for this frame
     pour(slot, x, z, r, rate) { if (slot < 4) pours[slot].set(x, z, r, rate); },
     get on() { return on; }, get window() { return { ...win, size: SIZE * CELL }; },
     uniforms: drawU,
+    material,
   };
 }
