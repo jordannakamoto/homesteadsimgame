@@ -141,13 +141,14 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
     }`, { push: { value: pushers }, pushV: { value: pushV }, pour: { value: pours }, org: { value: new THREE.Vector2() } });
   // the water the window starts with, or carries over when it moves: the old state shifted, else the baked water
   const initMat = mat(/* glsl */ `
-    uniform ivec2 shift; uniform int keep;
+    uniform ivec2 shift; uniform int keep, flux;
     void main() {
       ivec2 c = ivec2(gl_FragCoord.xy), p = c + shift;
       if (keep == 1 && inside(p)) { gl_FragColor = texelFetch(S, p, 0); return; }
+      if (flux == 1) { gl_FragColor = vec4(0.0); return; }
       vec3 fd = feed(c);
       gl_FragColor = vec4(fd.x, fd.yz, 0.0);
-    }`, { shift: { value: new THREE.Vector2() }, keep: { value: 0 } });
+    }`, { shift: { value: new THREE.Vector2() }, keep: { value: 0 }, flux: { value: 0 } });
   const fluxInit = mat('void main() { gl_FragColor = vec4(0.0); }');
 
   function rt() {
@@ -195,6 +196,7 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
     for (const t of [bedTex, feedTex]) { t.minFilter = t.magFilter = THREE.NearestFilter; t.generateMipmaps = false; }
     st = [rt(), rt()]; fx = [rt(), rt()];
     for (const m of [fluxMat, stateMat, initMat, fluxInit]) { m.uniforms.n.value = SIZE; m.uniforms.B.value = bedTex; m.uniforms.T.value = feedTex; }
+    drawU.uFeed.value = feedTex;
     buildMesh();
     built = false;
   }
@@ -208,7 +210,7 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
   // ---- the surface: a grid denser near the middle of the window (one vertex a cell there, one every four at the
   // edges for the wide window), its heights read from the simulation in the vertex shader
   const drawU = {
-    uState: { value: null }, uBed: { value: null }, uN: { value: SIZE }, uOrg: { value: new THREE.Vector2() }, uCell: { value: CELL }, uWarp: { value: 1 },
+    uState: { value: null }, uBed: { value: null }, uFeed: { value: null }, uN: { value: SIZE }, uOrg: { value: new THREE.Vector2() }, uCell: { value: CELL }, uWarp: { value: 1 },
   };
   const material = new THREE.ShaderMaterial({
     fog: true, transparent: true, depthWrite: false,
@@ -319,8 +321,10 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
     if (sj > 0) sampleRect(0, SIZE - sj, SIZE, SIZE); else if (sj < 0) sampleRect(0, 0, SIZE, -sj);
     initMat.uniforms.keep.value = 1; initMat.uniforms.shift.value.set(si, sj); initMat.uniforms.S.value = st[0].texture;
     pass(initMat, st[1]); st.reverse();
-    // the pipes' flows are not worth carrying over: they rebuild in a few steps
-    pass(fluxInit, fx[0]);
+    // the pipes' flows move with it too, so the current does not stop and restart each time the window moves
+    initMat.uniforms.flux.value = 1; initMat.uniforms.S.value = fx[0].texture;
+    pass(initMat, fx[1]); fx.reverse();
+    initMat.uniforms.flux.value = 0;
   }
   let acc = 0;
   function update(dt, px, pz, running) {
