@@ -31,6 +31,10 @@
 //
 // Stage fractions are of the degree days to first harvest. Stage ids are shared by every crop so the
 // view can draw them: sown, seedling, leafy, flowering, fruiting, ready, past.
+//
+// Sowing depth: most seed goes into a shallow drill (a groove drawn along the row) or a hole; `deep` crops need a hole
+// dug with the trowel: a seed potato about 10 cm down, a transplant's root ball, a squash seed in its hill, a garlic
+// clove 5 cm down. `hill`: soil drawn up round the stems pays (potatoes).
 
 const S = (seedling, leafy, flowering, fruiting, past) => ({ leafy, flowering, fruiting, past });
 
@@ -76,7 +80,7 @@ const list = [
     sowText: 'Sow early, about six weeks before the last frost: peas like cold soil and stop in summer heat. They feed the soil with nitrogen.',
   },
   {
-    id: 'potato', name: 'Potato', plural: 'potatoes', variety: 'Yukon Gold', family: 'nightshade', part: 'tubers',
+    id: 'potato', name: 'Potato', plural: 'potatoes', variety: 'Yukon Gold', family: 'nightshade', part: 'tubers', deep: true, hill: true,
     tb: 7, topt: 20, tceil: 30, germMinC: 7,
     emergeGdd: 150, readyGdd: 800, stages: S(0, 0.25, 0.55, null, 2.2), daysToMaturity: 90, daysFrom: 'planting',
     spacingM: 0.3, seedItem: 'seed_potato', seedsPerUnit: 18, seedsPerPlant: 1, produce: 'food_potato',
@@ -89,7 +93,7 @@ const list = [
     sowText: 'Plant seed potatoes two or three weeks before the last frost; shoots that come up early may be nipped but regrow.',
   },
   {
-    id: 'tomato', name: 'Tomato', plural: 'tomatoes', variety: 'Early Girl (transplants)', family: 'nightshade', part: 'fruit',
+    id: 'tomato', name: 'Tomato', plural: 'tomatoes', variety: 'Early Girl (transplants)', family: 'nightshade', part: 'fruit', deep: true,
     tb: 10, topt: 26, tceil: 35, germMinC: 10, transplant: { lai: 0.15, bioG: 12 },
     emergeGdd: 0, readyGdd: 545, stages: S(0, 0.1, 0.35, 0.55, 3.5), daysToMaturity: 59, daysFrom: 'planting out',
     spacingM: 0.6, seedItem: 'seedling_tomato', seedsPerUnit: 6, seedsPerPlant: 1, produce: 'food_tomato',
@@ -129,7 +133,7 @@ const list = [
     sowText: 'Sow from three weeks before the last frost into early summer. Slow to come up: keep the seed bed moist for two weeks.',
   },
   {
-    id: 'squash', name: 'Winter squash', plural: 'winter squash', variety: 'Waltham Butternut', family: 'cucurbit', part: 'fruit',
+    id: 'squash', name: 'Winter squash', plural: 'winter squash', variety: 'Waltham Butternut', family: 'cucurbit', part: 'fruit', deep: true,
     tb: 10, topt: 28, tceil: 38, germMinC: 15.5,
     emergeGdd: 85, readyGdd: 945, stages: S(0, 0.15, 0.45, 0.6, 1.6), daysToMaturity: 100, daysFrom: 'sowing',
     spacingM: 0.9, seedItem: 'seed_squash', seedsPerUnit: 25, seedsPerPlant: 3, produce: 'produce_squash',
@@ -155,7 +159,7 @@ const list = [
     sowText: 'Sow in spring from a month before the last frost, or in midsummer for autumn and winter. Frost makes it sweeter.',
   },
   {
-    id: 'garlic', name: 'Garlic', plural: 'garlic', variety: 'Music (hardneck)', family: 'allium', part: 'bulbs',
+    id: 'garlic', name: 'Garlic', plural: 'garlic', variety: 'Music (hardneck)', family: 'allium', part: 'bulbs', deep: true,
     tb: 0, topt: 20, tceil: 30, germMinC: 0,
     emergeGdd: 150, readyGdd: 1750, stages: S(0, 0.2, null, null, 1.12), daysToMaturity: 270, daysFrom: 'planting',
     spacingM: 0.15, seedItem: 'seed_garlic', seedsPerUnit: 100, seedsPerPlant: 1, produce: 'produce_garlic',

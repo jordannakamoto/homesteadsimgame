@@ -22,6 +22,10 @@
   const owns = (id) => stock().tools.includes(id);
   const have = (id) => stock().items[id] || 0;
   const life = () => (G.sim.lifeScale ? G.sim.lifeScale() : 1);
+  // the ground as shaped by hand (src/landscape-view.js): holes, hills and hilled rows lift or sink the bed with it
+  const LS = () => window.__landscape;
+  const rel = (x, z) => (LS() ? LS().relief(x, z) : 0);
+  const gy = (x, z) => G.heightAt(x, z) + rel(x, z);
 
   // crop facts the view needs to draw and label them (the growing figures stay in the simulation)
   const CROPS = {
@@ -39,6 +43,8 @@
     wheat: { name: 'Wheat', plural: 'wheat', seed: 'seed_wheat', col: 0xd8b860, spacing: 0.06, per: 9, gesture: 'reap', count: 25 },
   };
   const CROP_IDS = Object.keys(CROPS);
+  // sown in a hole rather than a drill, and worth hilling (as in src/sim/content/crops.js: deep, hill)
+  const DEEP = { potato: 1, tomato: 1, squash: 1, garlic: 1 }, HILL = { potato: 1 };
   const spanOf = (id) => (CROPS[id].spacing > CELL + 1e-9 ? Math.round(CROPS[id].spacing / CELL) : 1);
   const read = G.garden;   // the garden's read-outs (almanac, plantInfo, cellInfo...), from the simulation
   if (!read) return;
@@ -55,6 +61,8 @@
     box: I('<path d="M6 16h28v16H6z" fill="#8a6238" stroke="#e8c79a"/><path d="M6 16l4-6h20l4 6" stroke="#e8c79a"/><path d="M13 10v-3h5v3M22 10v-4h5v4" fill="#f2e8c8" stroke="#f2e8c8" stroke-width="1.4"/><path d="M16 24h8" stroke="#e8c79a"/>'),
     packet: (hex) => I('<path d="M11 6h18v28H11z" fill="#f2e8c8" stroke="#fff6dc"/><path d="M11 12h18" stroke="#c9b98a" stroke-width="1.6"/><circle cx="20" cy="22" r="6" fill="' + hex + '" stroke="none"/><path d="M20 15c0-3 2-4 4-4" stroke="#6f9a3a" stroke-width="1.8"/>'),
   };
+  ICONS.trowel = I('<path d="M27 7l-6 8" stroke="#d8b585" stroke-width="3.2"/><path d="M22 14l-8 10c-2 3-3 7-2 10 3 1 7-1 9-3l6-10z" fill="#b9c2c9" stroke="#cfd6dc"/><path d="M7 34h12" stroke="#a3784e" stroke-width="2" stroke-dasharray="2 3"/>');
+  ICONS.shovel = I('<path d="M27 5l-9 17" stroke="#d8b585" stroke-width="2.6"/><path d="M24 4l6 3" stroke="#3a3a3a" stroke-width="3"/><path d="M15 20l7 4-3 9c-1 2-4 2-6 1s-3-3-2-5z" fill="#9aa4ab" stroke="#cfd6dc"/><path d="M6 34c4-3 9-3 14-1" stroke="#a3784e" stroke-width="2"/>');
   const hexOf = (n) => '#' + n.toString(16).padStart(6, '0');
 
   /* ================= state of the view ================= */
@@ -100,9 +108,25 @@
     return v;
   }
   // the shape of the worked ground: sod is left alone, a first stroke leaves rough clods, worked soil is furrowed
+  // how far a sowing opening sinks the soil at a lattice point: a hole at a square's centre, a drill along its middle line
+  function openDepth(b, x, z) {
+    let d = 0;
+    for (const ox of [-1e-3, 1e-3]) for (const oz of [-1e-3, 1e-3]) {
+      const ix = Math.floor((x + ox - b.x0) / CELL), iz = Math.floor((z + oz - b.z0) / CELL);
+      if (ix < 0 || iz < 0 || ix >= b.nx || iz >= b.nz) continue;
+      const c = b.cells[iz * b.nx + ix];
+      if (!c.open) continue;
+      const cx = b.x0 + (ix + 0.5) * CELL, cz = b.z0 + (iz + 0.5) * CELL;
+      if (c.open === 2 && Math.abs(x - cx) < 1e-3 && Math.abs(z - cz) < 1e-3) d = Math.max(d, 0.075);
+      else if (c.open === 1 && Math.abs(z - cz) < 1e-3) d = Math.max(d, 0.04);
+      else if (c.open === 3 && Math.abs(x - cx) < 1e-3) d = Math.max(d, 0.04);
+    }
+    return d;
+  }
   function shapeBed(v) {
     const b = v.b, pos = v.pos, st = CELL / SUB, along = b.nx >= b.nz, e = 0.07;
     const tp = (x, z) => tillAt(b, Math.floor((x - b.x0) / CELL + 1e-6), Math.floor((z - b.z0) / CELL + 1e-6));
+    if (!v.dip || v.dip.length !== pos.length / 3) v.dip = new Float32Array(pos.length / 3);
     let k = 0;
     for (let iz = 0; iz < b.nz; iz++) for (let ix = 0; ix < b.nx; ix++) {
       const t = tillAt(b, ix, iz);
@@ -110,11 +134,13 @@
         const x0 = b.x0 + ix * CELL + sx * st, z0 = b.z0 + iz * CELL + sz * st;
         for (let q = 0; q < 6; q++) {
           const x = x0 + (q === 2 || q === 3 || q === 5 ? st : 0), z = z0 + (q === 1 || q === 4 || q === 5 ? st : 0);
-          let y = G.heightAt(x, z);
+          let y = gy(x, z);
+          const dp = t >= 1 ? openDepth(b, x, z) : 0;
+          v.dip[k / 3] = dp;
           if (t <= 0) y -= 0.3;
           else if (tp(x - e, z - e) > 0 && tp(x + e, z - e) > 0 && tp(x - e, z + e) > 0 && tp(x + e, z + e) > 0) {
             const across = along ? z - b.z0 : x - b.x0, r = hash(Math.round(x * 60), Math.round(z * 60)) - 0.5;
-            y += t >= 1 ? RAISE + 0.02 * Math.cos((across / CELL) * Math.PI * 2) + r * 0.016 : 0.025 + 0.02 * t + r * 0.07;
+            y += t >= 1 ? RAISE + 0.02 * Math.cos((across / CELL) * Math.PI * 2) + r * 0.016 - dp : 0.025 + 0.02 * t + r * 0.07;
           } else y += 0.006;
           pos[k++] = x; pos[k++] = y; pos[k++] = z;
         }
@@ -126,10 +152,12 @@
   function paintBed(v) {
     const b = S().field.groups[v.b.id] || v.b, info = read.cellInfo;
     let changed = false, reshaped = false;
-    for (let i = 0; i < b.cells.length; i++) { const t = tillOf(b.cells[i]); if (v.till[i] !== t) { v.till[i] = t; reshaped = true; v.sig[i] = -1; } }
-    if (reshaped) { shapeBed(v); hideGrass(true); }
+    for (let i = 0; i < b.cells.length; i++) { const t = tillOf(b.cells[i]) + (b.cells[i].open || 0) * 10; if (v.till[i] !== t) { v.till[i] = t; reshaped = true; v.sig[i] = -1; } }
+    const lr = LS() ? LS().rev : 0;
+    if (v.lrev !== lr) { v.lrev = lr; reshaped = true; }
+    if (reshaped) { shapeBed(v); hideGrass(true); v.sig.fill(-1); }
     for (let i = 0; i < b.cells.length; i++) {
-      const till = v.till[i];
+      const till = tillOf(b.cells[i]);
       if (till <= 0) continue;
       const ci = info(G.sim.state, b.id, i);
       const wet = clamp(ci.water, 0, 1), s = Math.round(wet * 40) + Math.round(ci.mulch * 10) * 64 + Math.round(ci.weed * 10) * 1024;
@@ -139,7 +167,7 @@
       for (let k = 0; k < v.per; k++) {
         const o = i * v.per + k, n = v.noise[o];
         if (till < 1 && hash(o, 91) < (1 - till) * 0.75) { v.col[o * 3] = SOD.r * n; v.col[o * 3 + 1] = SOD.g * n; v.col[o * 3 + 2] = SOD.b * n; }   // turned sod: grass still showing between the clods
-        else { v.col[o * 3] = _c.r * n; v.col[o * 3 + 1] = _c.g * n; v.col[o * 3 + 2] = _c.b * n; }
+        else { const dk = v.dip ? 1 - v.dip[o] * 6 : 1; v.col[o * 3] = _c.r * n * dk; v.col[o * 3 + 1] = _c.g * n * dk; v.col[o * 3 + 2] = _c.b * n * dk; }   // an open drill or hole: dark, damp soil
       }
     }
     if (changed) v.geo.attributes.color.needsUpdate = true;
@@ -150,7 +178,7 @@
       const m = new T.Mesh(geo, coverMat);
       const len = along ? W : D, wide = along ? D : W;
       m.scale.set(wide * 0.55, len, Math.min(0.45, wide * 0.5));
-      const y = G.heightAt(b.x0 + W / 2, b.z0 + D / 2) + RAISE;
+      const y = gy(b.x0 + W / 2, b.z0 + D / 2) + RAISE;
       m.position.set(b.x0 + W / 2, y, b.z0 + D / 2);
       // a half-cylinder standing on the bed: rotate so its open side faces down
       if (along) { m.rotation.set(Math.PI / 2, 0, Math.PI / 2); } else { m.rotation.set(Math.PI / 2, Math.PI / 2, Math.PI / 2); }
@@ -436,7 +464,7 @@
           const gx = j % grid, gz = Math.floor(j / grid);
           const cx = b.x0 + (ix + (span === 1 ? (gx + 0.5) / grid : span / 2)) * CELL + (hash(p.cell * 13 + j, 5) - 0.5) * 0.04 * (span === 1 ? 1 : 0);
           const cz = b.z0 + (iz + (span === 1 ? (gz + 0.5) / grid : span / 2)) * CELL + (hash(p.cell * 17 + j, 9) - 0.5) * 0.04 * (span === 1 ? 1 : 0);
-          const y = G.heightAt(cx, cz) + RAISE;
+          const y = gy(cx, cz) + RAISE;
           const sc = grow * (0.9 + 0.2 * hash(p.cell, j + 3));
           _e.set(wilt * 0.35 * (hash(j, p.cell) - 0.5) * 2, hash(p.cell * 3 + j, 1) * Math.PI * 2, wilt * 0.3, 'YXZ');
           _m.compose(_p.set(cx, y, cz), _q.setFromEuler(_e), _s.set(sc, sc * (1 - 0.32 * wilt), sc));
@@ -460,7 +488,7 @@
   }
   // a short signature of everything that changes how plants look
   function plantSignature() {
-    let sig = '';
+    let sig = (LS() ? LS().rev : 0) + ':';
     for (const p of Object.values(S().plants)) {
       const info = read.stageOf(p);
       sig += p.id + info.stage + Math.round(info.within * 6) + (p.wilt > 0.35 ? 'w' : '') + (p.yellow > 0.35 ? 'y' : '') + (p.dead ? 'd' : '') + (p.bolted ? 'b' : '') + ((p.frostBurn || 0) > 0.25 ? 'f' : '') + ';';
@@ -480,7 +508,7 @@
       for (let j = 0; j < k; j++) {
         const x = b.x0 + ((i % b.nx) + 0.15 + 0.7 * hash(i * 5 + j, 21)) * CELL, z = b.z0 + (Math.floor(i / b.nx) + 0.15 + 0.7 * hash(i * 3 + j, 23)) * CELL;
         const sc = 0.7 + 0.6 * hash(i + j, 2) + w * 0.5;
-        _m.compose(_p.set(x, G.heightAt(x, z) + RAISE, z), _q.setFromEuler(_e.set(0, hash(i, j) * 6.28, 0)), _s.set(sc, sc, sc));
+        _m.compose(_p.set(x, gy(x, z) + RAISE, z), _q.setFromEuler(_e.set(0, hash(i, j) * 6.28, 0)), _s.set(sc, sc, sc));
         weedMesh.setMatrixAt(n++, _m);
       }
     }
@@ -501,6 +529,9 @@
     part(box(0.05, 0.3, 0.05), 0x3f7699, 0, 0.2, -0.24), part(box(0.05, 0.05, 0.12), 0x3f7699, 0, 0.34, -0.19), part(box(0.05, 0.05, 0.12), 0x3f7699, 0, 0.08, -0.19)]),
     use: 'over', overD: 0.6, overH: 0.78, tiltMax: 0.95, still: [0.4, 0.5, 0.1, 0, 0, 0], stillArm: -0.12 };
   const ROSE = new T.Vector3(0, 0.37, 0.52);
+  // the trowel: a pointed scoop at the origin, a short handle up +y
+  ITEMSHOW.trowel = { obj: mesh([part(new T.ConeGeometry(0.06, 0.16, 6, 1, true), 0xb9c2c9, 0, 0.06, 0, Math.PI, 0, 0, 1, 1, 0.45), part(stick(0.05, 0.012, 5), 0x7d868c, 0, 0.13, 0), part(stick(0.13, 0.022, 6), 0xc9975a, 0, 0.17, 0)]),
+    use: 'tip', still: [0.3, 0.75, 0.32, -0.6, 0, 0], stillArm: -1.0 };
   ITEMSHOW.mulch = { obj: mesh([part(new T.CylinderGeometry(0.2, 0.16, 0.26, 10), 0x8a8f94, 0, 0.13, 0), part(ball(0.19, 1), 0xe0c070, 0, 0.27, 0, 0, 0, 0, 1, 0.6, 1)]), use: 'over', overD: 0.55, overH: 0.8, tiltHold: 0.9, tiltMax: 0.3, still: [0.4, 0.5, 0.12, 0, 0, 0], stillArm: -0.15 };
   ITEMSHOW.compost = { obj: mesh([part(new T.CylinderGeometry(0.2, 0.16, 0.26, 10), 0x8a8f94, 0, 0.13, 0), part(ball(0.19, 1), 0x4a3324, 0, 0.27, 0, 0, 0, 0, 1, 0.6, 1)]), use: 'over', overD: 0.55, overH: 0.8, tiltHold: 0.9, tiltMax: 0.3, still: [0.4, 0.5, 0.12, 0, 0, 0], stillArm: -0.15 };
   const packetShow = {};
@@ -526,8 +557,10 @@
   function slotList() {
     const s = S(), out = [];
     out.push({ id: 'hands', name: 'Hands', icon: ICONS.hands, title: 'Hands: harvest and tend' });
-    out.push({ id: 'hoe', name: 'Hoe', icon: ICONS.hoe, item: ITEMSHOW.hoe, dim: !canDig(), title: 'Hoe: break ground and weed' });
+    out.push({ id: 'hoe', name: 'Hoe', icon: ICONS.hoe, item: ITEMSHOW.hoe, dim: !canDig(), title: 'Hoe: break ground, weed, hill potatoes' });
     out.push({ id: 'can', name: 'Can', icon: ICONS.water, item: ITEMSHOW.can, dim: !owns('watering_can'), meter: owns('watering_can') ? s.can.litres / 9 : null, freezeY: true, title: 'Watering can' });
+    out.push({ id: 'trowel', name: 'Trowel', icon: ICONS.trowel, item: ITEMSHOW.trowel, dim: !owns('trowel'), title: 'Trowel: tap for a planting hole, drag for a seed drill' });
+    if (LS()) out.push({ id: 'shovel', name: 'Shovel', icon: ICONS.shovel, item: LS().items.shovel, dim: !owns('shovel') && !owns('spade'), badge: G.sim.state.sys.landscape.carry.m3 > 1e-6 ? Math.round(G.sim.state.sys.landscape.carry.m3 * 1000) + ' L' : null, title: 'Shovel: dig holes, heap hills and raised rows' });
     for (const c of CROP_IDS) if (hasSeed(c)) out.push({ id: 'seed:' + c, name: CROPS[c].name, icon: ICONS.packet(hexOf(CROPS[c].col)), item: packetOf(c), title: CROPS[c].name + ' seed' });
     if (have('mulch_straw') > 0) out.push({ id: 'mulch', name: 'Straw', icon: ICONS.mulch, item: ITEMSHOW.mulch, badge: Math.round(have('mulch_straw')) + ' L' });
     if (have('compost') > 0) out.push({ id: 'compost', name: 'Compost', icon: ICONS.compost, item: ITEMSHOW.compost, badge: Math.round(have('compost')) + ' L' });
@@ -548,6 +581,7 @@
         '<span>' + (CROPS[c].spacing >= 0.3 ? Math.round(CROPS[c].spacing * 100) + ' cm apart' : CROPS[c].count + ' to a 30 cm square') + '</span>' +
         (own > 0 ? '<span class="own">You have ' + ownTxt + open + '</span>' : '<span>Buy for ' + money(it.priceUsd) + (it.unit === 'kg' ? ' a kg' : '') + '</span>') + '</button>';
     }
+    if (!owns('trowel')) h += '<button type="button" class="gseed" data-buy="trowel" data-qty="1"><b>Hand trowel</b><span>Planting holes and seed drills</span><span>Buy for ' + money(ITEMS.trowel.priceUsd) + '</span></button>';
     for (const [id, nm, q] of [['mulch_straw', 'Straw mulch', 150], ['compost', 'Compost', 40]])
       h += '<button type="button" class="gseed" data-buy="' + id + '" data-qty="' + q + '"><b>' + nm + '</b><span>' + (id === 'compost' ? 'Feeds the soil for months' : 'Keeps soil moist, weeds down') + '</span><span>' + (have(id) > 0 ? 'You have ' + Math.round(have(id)) + ' L. ' : '') + 'Buy ' + q + ' L for ' + money(ITEMS[id].priceUsd * q) + '</span></button>';
     seedsEl.innerHTML = h;
@@ -557,7 +591,7 @@
     if (b.dataset.buy) {
       const r = cmd('stock.buy', { id: b.dataset.buy, qty: +b.dataset.qty });
       say(r.ok ? 'Bought.' : 'Not enough money.');
-      if (r.ok) { H.setSlots(slotList()); H.hold(b.dataset.buy === 'compost' ? 'compost' : 'mulch'); }
+      if (r.ok) { H.setSlots(slotList()); H.hold(b.dataset.buy === 'compost' ? 'compost' : b.dataset.buy === 'trowel' ? 'trowel' : 'mulch'); }
       canvas.focus(); return;
     }
     crop = b.dataset.crop;
@@ -592,12 +626,14 @@
     const now = performance.now();
     if (flash.until > now) h = esc(flash.msg);
     else if (id === 'hands') h = '<b>Pull</b> a root crop up, <b>swipe</b> across leaves to cut them, <b>click</b> fruit to pick it. <b>F</b> looks closer.';
+    else if (id === 'trowel') h = owns('trowel') ? '<b>Tap</b> worked soil for a planting hole, or <b>drag</b> along the row to draw a seed drill. Potatoes, garlic, squash and tomatoes go in holes.' : 'You need a trowel to open the soil for seed.' + buyButton('trowel', 'Buy a trowel');
+    else if (id === 'shovel') h = G.sim.state.sys.landscape.carry.m3 > 1e-6 ? '<b>Click</b> to toss the load: heap a hill for squash, or bank up a row.' : '<b>Click</b> to dig a scoop: a deep hole, a trench, soil for a hill. <b>Drag</b> along grass to skim the turf.';
     else if (id === 'hoe') h = canDig() ? '<b>Press</b> the blade into the ground and <b>drag</b> it toward you. ' + (owns('hoe') ? 'Two strokes' : 'Three strokes') + ' turn grass into fine soil.' + (owns('hoe') ? '' : buyButton('hoe', 'A real hoe is quicker')) : 'You need a hoe.' + buyButton('hoe', 'Buy a hoe');
     else if (id === 'can') {
       if (!owns('watering_can')) h = 'You need a watering can.' + buyButton('watering_can', 'Buy a can');
       else if (can < 0.05) h = 'The can is empty. ' + (source.kind === 'none' ? 'There is no pump or pond near. <button type="button" data-act="refill">Fill it here (for now)</button>' : source.kind === 'pond' && !source.fixtures ? '<b>Dip</b> it in the water to fill it.' : 'Fill it at the pump by the well: <b>hold</b> the can under the spout and <b>pump</b> the handle (drag down, let go).');
       else h = '<b>Hold</b> to lift the can, then <b>drag down</b> to tip it and pour. Walk along the row while it pours. <span id="gcan"><i style="width:' + Math.round((can / 9) * 100) + '%"></i></span>' + can.toFixed(1) + ' L';
-    } else if (c) { const adv = sowWord(c); h = '<b>Click</b> worked soil to drop ' + esc(CROPS[c].name.toLowerCase()) + ' seed, or <b>hold and drag</b> along the row.' + (adv && adv.short ? ' <span style="color:' + (adv.now ? '#cfe3a6' : '#e8b48c') + '">' + esc(adv.short) + '.</span>' : ''); }
+    } else if (c) { const adv = sowWord(c); h = (DEEP[c] ? '<b>Click</b> a hole you have dug with the trowel to set the ' + esc(CROPS[c].name.toLowerCase()) + ' in it.' : '<b>Click</b> an open drill or hole to drop ' + esc(CROPS[c].name.toLowerCase()) + ' seed, or <b>hold and drag</b> along the drill.') + (adv && adv.short ? ' <span style="color:' + (adv.now ? '#cfe3a6' : '#e8b48c') + '">' + esc(adv.short) + '.</span>' : ''); }
     else if (id === 'mulch') h = '<b>Hold and sweep</b> over the bed to scatter straw: it keeps the soil moist and the weeds down.';
     else if (id === 'compost') h = '<b>Hold and sweep</b> over the bed to scatter compost. It feeds the soil for months.';
     else h = 'Take a packet from the seed box to hold it.';
@@ -661,11 +697,25 @@
     const res = cmd('garden.till', { cells: batch });
     if (!res.ok) { say(res.reason); return; }
     act.n += batch.length;
-    const y = G.heightAt(x1, z1);
+    const y = gy(x1, z1);
     G.burst(x1, y + 0.12, z1, 5 + batch.length * 2, 0x5a4230, 1.5, 2.6, 0.075, 0.6);       // clods
     if (res.broke) { G.burst(x1, y + 0.12, z1, 6, 0x5e8a3a, 1.6, 2.6, 0.07, 0.7); G.cam.shake = Math.min(G.cam.shake + 0.05, 0.3); }             // torn sod
     if (res.clearedM2 > 0.004) G.burst(x1, y + 0.1, z1, 5, 0x6f9a3a, 1.2, 1.8, 0.05, 0.5);  // cut weeds
     if (res.worked) { G.burst(x1, y + 0.1, z1, 6, 0x3a2c22, 1.0, 1.6, 0.06, 0.5); tipEvent('bed'); }   // fine dark crumbs when the soil comes right
+    // hilling: the blade drawn past a potato pulls soil up round its stems from the free ground beside it
+    if (LS()) for (const [gx, gz] of batch) {
+      const p = plantAt((gx + 0.5) * CELL, (gz + 0.5) * CELL);
+      if (!p || !HILL[p.crop] || p.dead) continue;
+      const L = G.sim.state.sys.landscape, hOf = (x, z) => { const q = L.grid.sq[x + ',' + z]; return q ? q[0] : 0; };
+      if (hOf(gx, gz) > 0.16) continue;
+      let from = null, fh = -9;
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = gx + dx, nz = gz + dz, np = plantAt((nx + 0.5) * CELL, (nz + 0.5) * CELL);
+        if (np || !cellAt((nx + 0.5) * CELL, (nz + 0.5) * CELL)) continue;
+        const h = hOf(nx, nz); if (h > fh) { fh = h; from = [nx, nz]; }
+      }
+      if (from && cmd('landscape.move', { from, to: [gx, gz], m3: 0.0025 }).ok) { act.hill = (act.hill || 0) + 1; G.burst((gx + 0.5) * CELL, y + 0.1, (gz + 0.5) * CELL, 5, 0x5a4230, 1.0, 1.4, 0.05, 0.45); }
+    }
   }
   const HOE_W = 0.2;
 
@@ -678,10 +728,12 @@
     if (k === act.lastKey) return;
     act.lastKey = k;
     if (c.bed.cells[i].pl) { if (first) say('Something is already growing there.'); return; }
-    const res = cmd('garden.sow', { crop: cr, bed: c.bed.id, cells: [i] });
+    // the seed goes where the trowel opened the soil: snap to the open square under the hand
+    if (span === 1 && !c.bed.cells[i].open) { if (first) say(DEEP[cr] ? CROPS[cr].plural.replace(/^./, (m) => m.toUpperCase()) + ' go in a hole: tap the soil with the trowel first.' : 'Open a drill first: drag the trowel along the row.'); act.lastKey = 0; return; }
+    const res = cmd('garden.sow', { crop: cr, bed: c.bed.id, cells: [i], inOpening: true });
     if (!res.ok) { if (first || !act.why) say(res.reason); act.why = res.reason; return; }
     act.n += res.plants;
-    const x = c.bed.x0 + (ix + span / 2) * CELL, z = c.bed.z0 + (iz + span / 2) * CELL, y = G.heightAt(x, z) + RAISE;
+    const x = c.bed.x0 + (ix + span / 2) * CELL, z = c.bed.z0 + (iz + span / 2) * CELL, y = gy(x, z) + RAISE;
     G.burst(x, y + 0.25, z, 5, 0xf2dfa0, 0.25, -0.6, 0.035, 0.35);   // the seed falls
     G.burst(x, y + 0.04, z, 6, 0x6b4f35, 0.7, 1.0, 0.045, 0.4);      // and is pressed in with a puff
     dotKey = '';
@@ -703,9 +755,11 @@
         if (span > 1 && (ix % span || iz % span)) continue;
         const cell = b.cells[iz * b.nx + ix];
         if (cell.pl || tillOf(cell) < 1) continue;
+        if (span > 1) { let hole = false; for (let dz = 0; dz < span && !hole; dz++) for (let dx = 0; dx < span; dx++) { const q = b.cells[(iz + dz) * b.nx + ix + dx]; if (q && q.open === 2) { hole = true; break; } } if (!hole) continue; }
+        else if (!cell.open || (DEEP[cr] && cell.open !== 2)) continue;
         for (let j = 0; j < per && n < 600; j++) {
           const x = b.x0 + (ix + (span > 1 ? span / 2 : ((j % grid) + 0.5) / grid)) * CELL, z = b.z0 + (iz + (span > 1 ? span / 2 : (Math.floor(j / grid) + 0.5) / grid)) * CELL;
-          _dm.makeTranslation(x, G.heightAt(x, z) + RAISE + 0.03, z); dots.setMatrixAt(n++, _dm);
+          _dm.makeTranslation(x, gy(x, z) + RAISE + 0.03, z); dots.setMatrixAt(n++, _dm);
         }
       }
     }
@@ -721,7 +775,7 @@
     const st = read.stageOf(p).stage;
     if (p.dead || st === 'past' || (a && a.shift)) {
       const b = S().field.groups[p.bed], sp = p.span || 1, x = b.x0 + ((p.cell % b.nx) + sp / 2) * CELL, z = b.z0 + (Math.floor(p.cell / b.nx) + sp / 2) * CELL;
-      if (cmd('garden.pull', { bed: p.bed, cells: [p.cell] }).ok) { G.burst(x, G.heightAt(x, z) + 0.2, z, 9, 0x6b4f35, 1.6, 2.4, 0.06, 0.6); say('Pulled it out. The bed is free to sow again.'); return true; }
+      if (cmd('garden.pull', { bed: p.bed, cells: [p.cell] }).ok) { G.burst(x, gy(x, z) + 0.2, z, 9, 0x6b4f35, 1.6, 2.4, 0.06, 0.6); say('Pulled it out. The bed is free to sow again.'); return true; }
     }
     return false;
   }
@@ -747,12 +801,35 @@
   }
   const cmdQuiet = (p) => { const s = read.plantStatus(G.sim.state, p.id); return s && /^Ready/.test(s.status); };
 
+  // the trowel's tip drawn along the row opens a drill in each square it passes, along the way it was drawn
+  function trowelFrame(a) {
+    const dx = a.x - act.lx, dz = a.z - act.lz;
+    if (!act.drill && Math.hypot(a.x - a.ox, a.z - a.oz) < 0.15) return;
+    if (!act.drill) { act.drill = true; act.lx = a.ox; act.lz = a.oz; act.axis = Math.abs(a.x - a.ox) >= Math.abs(a.z - a.oz) ? 'x' : 'z'; }
+    const len = Math.hypot(dx, dz), n = Math.max(1, Math.ceil(len / 0.08)), cells = [];
+    for (let i = 0; i <= n; i++) {
+      const x = act.lx + (dx * i) / n, z = act.lz + (dz * i) / n, gx = Math.floor(x / CELL), gz = Math.floor(z / CELL), k = keyOf(gx, gz);
+      if (!strokeCells.has(k)) { strokeCells.add(k); cells.push([gx, gz]); }
+    }
+    act.lx = a.x; act.lz = a.z;
+    if (!cells.length) return;
+    const res = cmd('garden.open', { cells, kind: 'drill', axis: act.axis });
+    if (!res.ok) { if (!act.why) say(res.reason); act.why = res.reason; return; }
+    if (res.cells) { act.n += res.cells; G.burst(a.x, gy(a.x, a.z) + RAISE + 0.04, a.z, 3, 0x5a4230, 0.8, 1.0, 0.035, 0.35); }
+  }
   function press(a) {
     const id = held();
     act.kind = id; act.acc = 1; act.n = 0; act.grab = null; act.done = false; act.lastKey = 0; act.piece = null; act.armed = false; act.why = '';
     act.lx = a.x; act.lz = a.z;
     tag.hidden = true; tagSig = '';
+    if (id === 'shovel') { if (LS()) { LS().bindSay(say); LS().tools.shovel.press(a); } return; }
+    if (id === 'trowel') {
+      if (!owns('trowel')) { act.kind = ''; return say('You need a trowel first.'); }
+      strokeCells.clear(); act.drill = false;
+      return;
+    }
     if (id === 'hoe') {
+      act.hill = 0;
       if (!canDig()) { act.kind = ''; return say('You need a hoe first.'); }
       strokeCells.clear();
       G.cam.shake = Math.min(G.cam.shake + 0.12, 0.4); G.juice.hitStop = 0.045;   // the blade bites, like the axe landing
@@ -777,6 +854,8 @@
     if (!a.down) { if (drops.count) drops.count = 0; if (on) spacingMarks(a); return; }
     const k = act.kind;
     act.acc += dt;
+    if (k === 'shovel') { if (LS()) LS().tools.shovel.frame(a, dt); return; }
+    if (k === 'trowel') { trowelFrame(a); return; }
     if (k === 'hoe') {
       if (Math.hypot(a.x - act.lx, a.z - act.lz) > 0.06) { hoeAlong(act.lx, act.lz, a.x, a.z); act.lx = a.x; act.lz = a.z; }
     } else if (k === 'can') {
@@ -825,6 +904,17 @@
   function release(a) {
     const k = act.kind;
     drops.count = 0;
+    if (k === 'shovel') { if (LS()) LS().tools.shovel.release(a); act.kind = ''; updateHint(true); return; }
+    if (k === 'trowel') {
+      act.kind = '';
+      if (!act.drill) {
+        const gx = Math.floor(a.x / CELL), gz = Math.floor(a.z / CELL), res = cmd('garden.open', { cells: [[gx, gz]], kind: 'hole' });
+        if (!res.ok) say(res.reason);
+        else if (res.cells) { G.burst(a.x, gy(a.x, a.z) + RAISE + 0.05, a.z, 8, 0x5a4230, 1.0, 1.6, 0.045, 0.45); tipEvent('opened'); }
+      } else if (act.n) { say('Drew a drill ' + Math.round(act.n * 30) + ' cm long. Now drop the seed along it.'); tipEvent('opened'); }
+      updateHint(true); return;
+    }
+    if (k === 'hoe' && act.hill) say('Drew soil up round the potatoes. Hilled ones make more tubers and none go green.');
     if (k === 'hoe' && act.n && a.travel < 0.2) say('Now drag the blade toward you: a long pull works a whole strip.');
     else if (k === 'can' && !act.n && a.held > 0.25 && S().can.litres > 0.01 && a.tip < 0.12) say('Drag the mouse down to tip the can (or hold the right button).');
     else if (k === 'fill' && act.piece && act.piece.category === 'pump' && S().can.litres < 8.9) say('Keep pumping: press again, or drag down and let go. ' + S().can.litres.toFixed(1) + ' of 9 L.');
@@ -879,7 +969,7 @@
       const it = res.items && Object.entries(res.items).find(([id]) => id === ITEMS[read.produceOf(c)].id);
       for (const p of pk) {
         const b = S().field.groups[p.bed] || bedViews.get(p.bed)?.b; if (!b) continue;
-        const span = spanOf(c), x = b.x0 + ((p.cell % b.nx) + span / 2) * CELL, z = b.z0 + (Math.floor(p.cell / b.nx) + span / 2) * CELL, y = G.heightAt(x, z) + 0.2;
+        const span = spanOf(c), x = b.x0 + ((p.cell % b.nx) + span / 2) * CELL, z = b.z0 + (Math.floor(p.cell / b.nx) + span / 2) * CELL, y = gy(x, z) + 0.2;
         G.burst(x, y, z, 10, CROPS[c].col, 2.2, 3.2, 0.06, 0.8);
         if (CROPS[c].gesture === 'pull' || CROPS[c].gesture === 'dig') G.burst(x, y - 0.1, z, 6, 0x6b4f35, 1.4, 2.4, 0.06, 0.5);
       }
@@ -986,7 +1076,7 @@
   const PROJECT = { id: 'salad', title: 'Grow your first salad', blurb: 'Press 5 for the Garden. Work a small patch with the hoe, sow radish and lettuce, water them, and eat them in about four weeks.' };
   const TIPS = {
     start: { h: 'Grow your first salad', b: 'Hold the Hoe (2). Press the blade into the grass and drag it toward you; go over each strip again until it is fine, dark soil. A patch about 1.2 by 1 metre is plenty.', why: 'Turning the sod gives the seeds loose soil without grass roots to fight.' },
-    sow: { h: 'Sow radish and lettuce', b: 'Open the Seed box and take the radish packet. Click the soil to drop seed, or hold and drag along the row. Then do the same with lettuce.', why: 'Radishes are ready in about four weeks, leaf lettuce in about six. Both like the cool spring.' },
+    sow: { h: 'Sow radish and lettuce', b: 'Take the trowel and drag its tip along the row: that draws a drill, a shallow groove for the seed. Then take the radish packet from the Seed box and drag along the drill. Do the same with lettuce.', why: 'Radishes are ready in about four weeks, leaf lettuce in about six. Both like the cool spring.' },
     water: { h: 'Water them in', b: 'Hold the Can (3). Hold the button to lift it, drag down to tip it, and walk along the row. Fill your can at the pump by the well: hold it under the spout and pump the handle.', why: 'Seeds only sprout in moist soil. Dry soil is pale, wet soil dark: water again when it looks pale, not every day.' },
     wait: { h: 'Now let them grow', b: 'Speed up time with the clock buttons if you like. Point at a plant to see how it is doing; F looks closer.', why: 'Plants grow on warmth and light: a cool week is slower than a warm one.' },
     harvest: { h: 'Your first radishes!', b: 'Hold Hands (1). Press on a radish and pull upward until it comes free. Lettuce is cut with a sideways swipe.', why: 'Leave them too long and they turn woody, so pull them when ready.' },

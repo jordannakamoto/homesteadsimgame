@@ -7,7 +7,7 @@ import { createRiverWater } from './water/rivers-render.js';
 import { createRiverLive } from './water/rivers-live.js';
 import { createFalls } from './water/falls-render.js';
 import { createWaterFx } from './water/water-fx.js';
-import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook } from './sim/index.js';
+import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -994,16 +994,34 @@ const BED_F = `#include <map_fragment>
     }
   }
 }`;
+// Hand-dug ground (src/landscape-view.js) is drawn by its own mesh, which can sit below the terrain's surface: a
+// hole, a trench, a sunken path. Where a 30 cm square has been worked, the terrain lets it show through. The mask is a
+// texture of squares around the player; the test is compiled in only once anything has been dug (DIG_MASK), so an
+// untouched world pays nothing for it.
+const DIG = { uDigMask: { value: null }, uDigWin: { value: new THREE.Vector4(0, 0, 0.3, 0) }, on: false };
+function enableDigMask(tex) {
+  DIG.uDigMask.value = tex;
+  if (DIG.on) return;
+  DIG.on = true; terrainMat.defines = { ...(terrainMat.defines || {}), DIG_MASK: '' }; terrainMat.needsUpdate = true;
+}
+const DIG_F = `
+#ifdef DIG_MASK
+{
+  vec2 dc = floor((vWPosT.xz - uDigWin.xy) / uDigWin.z);
+  if (uDigWin.w > 0.0 && dc.x >= 0.0 && dc.y >= 0.0 && dc.x < uDigWin.w && dc.y < uDigWin.w && texelFetch(uDigMask, ivec2(dc), 0).r > 0.5) discard;
+}
+#endif`;
 terrainMat.onBeforeCompile = (sh) => {
   sh.uniforms.uSkyMap = U.skyMap; sh.uniforms.uSkyK = U.skyK;
+  sh.uniforms.uDigMask = DIG.uDigMask; sh.uniforms.uDigWin = DIG.uDigWin;
   const lu = riverLive.uniforms, ru = riverWater.uniforms;
   sh.uniforms.uLiveState = lu.uState; sh.uniforms.uLiveOrg = lu.uOrg; sh.uniforms.uLiveCell = lu.uCell; sh.uniforms.uLiveN = lu.uN; sh.uniforms.uWin = ru.uWin; sh.uniforms.uFoamTex = ru.uFoamTex;
   sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>' + SKY_PARS_V + '\nvarying vec3 vWPosT;')
     .replace('#include <project_vertex>', '#include <project_vertex>' + SKY_V('(modelMatrix * vec4(transformed, 1.0)).xz') + '\nvWPosT = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-  sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>' + SKY_PARS_F + BED_PARS_F).replace('#include <aomap_fragment>', SKY_F)
-    .replace('#include <map_fragment>', BED_F);
+  sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>' + SKY_PARS_F + BED_PARS_F + '\n#ifdef DIG_MASK\nuniform highp sampler2D uDigMask; uniform vec4 uDigWin;\n#endif').replace('#include <aomap_fragment>', SKY_F)
+    .replace('#include <map_fragment>', BED_F).replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>' + DIG_F);
 };
-terrainMat.customProgramCacheKey = () => 'terrain-sky2-bed';
+terrainMat.customProgramCacheKey = () => 'terrain-sky2-bed' + (DIG.on ? '-dig' : '');
 const solidMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: pixelTex });
 
 // ============================================================ geometry library
@@ -3704,7 +3722,8 @@ function updatePlayer(dt) {
   P.x += (vx + P.kvx) * dt; P.z += (vz + P.kvz) * dt;
   P.kvx *= Math.exp(-7 * dt); P.kvz *= Math.exp(-7 * dt);
   pushOut(P, 0.28);
-  const gh = window.__build ? window.__build.ground(P.x, P.z, P.y, heightAt(P.x, P.z)) : heightAt(P.x, P.z);   // built floors count as ground
+  const th = heightAt(P.x, P.z) + (reliefFn ? reliefFn(P.x, P.z) : 0);              // hand-shaped ground (src/landscape-view.js) counts
+  const gh = window.__build ? window.__build.ground(P.x, P.z, P.y, th) : th;   // built floors count as ground
   // climbY: on a ladder, placed by an add-on. standY: on a platform an add-on keeps you on (scaffold planks): you walk, it holds the height
   const ty = P.climbY != null ? P.climbY : P.standY != null ? P.standY : Math.max(gh, waveHeight(P.x, P.z) - 0.95);
   if (P.air) {
@@ -3716,7 +3735,7 @@ function updatePlayer(dt) {
 
   // terrain tools work on the spot just ahead
   ring.visible = false; P.digging = false;
-  if (!armed && P.tool !== 'build' && cursor.valid) {
+  if (!armed && TOOLS.includes(P.tool) && cursor.valid) {     // only the terrain tools: the garden and yard stances work by hand
     ring.visible = true;
     ring.position.set(cursor.x, cursor.y + 0.25, cursor.z);
     ring.material.opacity = 0.85;
@@ -3921,6 +3940,7 @@ function updateHud() {
 }
 let last = performance.now(), fpsAcc = 0, fpsN = 0, fps = 60, slowFor = 0, autoDropped = false;
 const stepHooks = [];
+let reliefFn = null;   // (x, z) -> metres of hand-shaped ground above the terrain, set by the landscape view
 function step(dt) {
   U.time.value += dt;
   if (dt > 0) { const dy = Math.atan2(Math.sin(cam.yaw - cam.prevYaw), Math.cos(cam.yaw - cam.prevYaw)); cam.yawRate = lerp(cam.yawRate, dy / dt, 0.3); cam.prevYaw = cam.yaw; }
@@ -4233,7 +4253,9 @@ window.__game = {
     },
   },
   treeGeo, pineLite: pineLiteGeo, markStockDirty: () => { hudDirty = true; },
-  garden: gardenRead,
+  garden: gardenRead, landscape: landscapeRead, earthwork,
+  // the landscape view's hooks: the ground it shapes is walked on, and shows through the terrain where dug
+  setRelief: (fn) => { reliefFn = fn; }, digMask: { win: DIG.uDigWin, enable: enableDigMask },
   handPose: null, sea: SEA,
   // the sky as reflections see it (world sun direction and colour, horizon and zenith), kept up to date each frame
   skyU: { uGSunDir: waterUniforms.uSunDir, uGSunCol: waterUniforms.uSunCol, uGSky: waterUniforms.uSky, uGZen: waterUniforms.uZenith },

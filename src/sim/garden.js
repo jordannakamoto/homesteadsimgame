@@ -26,7 +26,8 @@
 //   bed:   { id, x0, z0, nx, nz, cells, soil, shade, cover, madeT }
 //   cell:  { w, d, de (water, mm), n, p, k (plant-available N, P, K, g/m2), sn (soil organic N), on (added
 //            organic N), onk (its release rate per year), ph, lime (unreacted g/m2), weed (cover 0..1),
-//            wN (N in the weeds, g/m2), mulch (straw left, L/m2), pl (plant id or null), hist: [crop ids] }
+//            wN (N in the weeds, g/m2), mulch (straw left, L/m2), pl (plant id or null), hist: [crop ids],
+//            open (a sowing opening: 1 drill along x, 3 drill along z, 2 hole; absent when closed) }
 //   plant: growth.newPlant fields plus { id, crop, bed, cell, span, count, area, nUp, pUp, kUp, ks, dryH,
 //            readyT, seedWet, wilt (0..1), yellow (0..1), expectT }   words: plantStatus(state, id)
 // Totals: water in litres { rainL, irrigL, evapL, transpL, drainL, runoffL }, nitrogen in grams { nInit,
@@ -41,6 +42,7 @@ import { ITEMS } from './items.js';
 import { DAY, HOUR, calendarT } from './time.js';
 import { sunTimes, dayOfYear, MONTHS, MONTH_START, DAYS_IN_YEAR, START_DAY_OF_YEAR, monthOf, dayOfMonth } from './calendar.js';
 import { climateModel, CLIMATES, DEFAULT_CLIMATE } from './weather.js';
+import { heightOf } from './core/earthwork.js';
 
 export const CELL_M = 0.3, CELL_AREA = CELL_M * CELL_M;
 const STATE_V = 1;
@@ -152,6 +154,50 @@ function cacheOf(s) {
 const plantList = (s) => cacheOf(s).list;
 const plantsChanged = (s) => listCache.delete(s.plants);
 
+// ---------------------------------------------------------------------------------------- the shape of the ground
+// The ground's shape is the landscape's (src/sim/landscape.js: an earthwork grid on the same 30 cm squares as the
+// beds). A bed reads it three ways:
+//  - rain runs off a raised square onto the lower ones beside it, and a basin catches it. Within a bed the water is
+//    only moved, never made: the shares are scaled so the bed as a whole gets the rain that fell on it.
+//  - a raised square's soil warms sooner in spring (a hill is the traditional seat for squash), and cold air settles
+//    in a hollow on a still night (frost pockets).
+//  - soil drawn up round a potato covers the tubers: no green ones, and more of them (hilling).
+// Cached per bed against the grid's revision.
+const reliefCache = new WeakMap();   // bed -> { rev, dim, h: Float32Array, rain: Float32Array, any }
+function reliefOf(ctx, bed) {
+  const L = ctx.get && ctx.get('landscape'), grid = L && L.grid;
+  if (!grid) return null;
+  const dim = bed.x0 + ':' + bed.z0 + ':' + bed.nx + ':' + bed.nz;
+  let r = reliefCache.get(bed);
+  if (r && r.rev === grid.rev && r.dim === dim) return r.any ? r : null;
+  const n = bed.nx * bed.nz, h = new Float32Array(n), rain = new Float32Array(n).fill(1);
+  const gx0 = Math.round(bed.x0 / CELL_M), gz0 = Math.round(bed.z0 / CELL_M);
+  let any = false;
+  for (let iz = 0; iz < bed.nz; iz++) for (let ix = 0; ix < bed.nx; ix++) { const v = heightOf(grid, gx0 + ix, gz0 + iz); h[iz * bed.nx + ix] = v; if (v) any = true; }
+  if (any) {
+    let sum = 0;
+    for (let iz = 0; iz < bed.nz; iz++) for (let ix = 0; ix < bed.nx; ix++) {
+      let nb = 0, k = 0;
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const x = ix + dx, z = iz + dz; nb += x >= 0 && z >= 0 && x < bed.nx && z < bed.nz ? h[z * bed.nx + x] : heightOf(grid, gx0 + x, gz0 + z); k++; }
+      const d = h[iz * bed.nx + ix] - nb / k;
+      const f = clamp(1 - 4 * d, 0.4, 2);       // 10 cm proud of its neighbours: sheds 40% of its rain; 10 cm sunk: catches 40% more
+      rain[iz * bed.nx + ix] = f; sum += f;
+    }
+    const m = sum / n;
+    for (let i = 0; i < n; i++) rain[i] /= m;
+  }
+  r = { rev: grid.rev, dim, h, rain, any };
+  reliefCache.set(bed, r);
+  return any ? r : null;
+}
+// mean height of a plant's squares above the ground around the bed, m
+function plantRelief(ctx, bed, list) {
+  const r = reliefOf(ctx, bed);
+  if (!r) return 0;
+  let s = 0; for (const i of list) s += r.h[i];
+  return s / list.length;
+}
+
 // ---------------------------------------------------------------------------------------- the soil step (hourly)
 const _out = { evap: 0, transp: 0, drain: 0, ks: 1 };
 const _inp = { et0: 0, kcb: 0, cover: 0, mulch: 0, mulchCut: MULCH.evapCut, rootFrac: 0, p: 0.5, weedKc: 0, frozen: false };
@@ -183,14 +229,14 @@ function soilStep(ctx, s) {
   const T = s.totals;
   let cache = cacheOf(s);
   for (const bed of Object.values(s.field.groups)) {
-    const soil = soilOf(bed), b = bucket(soil), cells = bed.cells;
+    const soil = soilOf(bed), b = bucket(soil), cells = bed.cells, rel = inMm > 0 ? reliefOf(ctx, bed) : null;
     let on = cache.beds.get(bed);
     if (!on) { plantsChanged(s); cache = cacheOf(s); on = cache.beds.get(bed); }
     for (let i = 0; i < cells.length; i++) {
       const c = cells[i];
       let kcb = 0, cover = 0, root = 0, pp = 0.5, p = null;
       if (c.pl) { p = on[i]; if (p) { const pw = p._w || (p._w = plantWater(p, CROPS[p.crop])); kcb = pw.kcb; cover = pw.cover; root = pw.root; pp = CROPS[p.crop].comfortP; } }
-      if (inMm > 0) T.runoffL += infiltrate(c, b, inMm) * CELL_AREA;
+      if (inMm > 0) T.runoffL += infiltrate(c, b, rel ? inMm * rel.rain[i] : inMm) * CELL_AREA;
       const weedKc = 0.9 * c.weed * (1 - 0.5 * cover);
       const I = _inp;
       I.et0 = et0; I.kcb = kcb; I.cover = cover; I.mulch = c.mulch > 0 ? Math.min(1, c.mulch / MULCH.fullCoverLPerM2) : 0; I.rootFrac = root; I.p = pp; I.weedKc = weedKc; I.frozen = frozen;
@@ -275,7 +321,11 @@ function growthStep(ctx, s) {
     const nutrient = clamp((ns - 0.45) / 0.45, 0, 1) * pk;
     const light = (1 - (bed.shade || 0)) * (bed.cover ? COVER_LIGHT : 1);
     E.topWet = seed; E.water = ks; E.nStatus = ns; E.pk = pk; E.nutrient = nutrient; E.light = light;
-    E.minC = minC + (bed.cover ? COVER_FROST_C : 0);
+    // the shape of the ground: a hill warms by day, a hollow gathers cold air by night (about 1 C per 10 cm, capped)
+    const rh = plantRelief(ctx, bed, list);
+    E.soilC = (s.soilC ?? 10) + clamp(rh * 12, -1, 2);
+    if (crop.hill) p.hill = r3(clamp(rh / 0.12, 0, 1));
+    E.minC = minC + (bed.cover ? COVER_FROST_C : 0) + clamp(rh * 8, -1.5, 0.5);
     E.coldestC = climMin < 98 ? climMin + (bed.cover ? COVER_FROST_C : 0) : null;
     if (snowed) E.minC = Math.max(E.minC, -2);   // under snow, plants stay near freezing whatever the air does
     E.rsMJ = rsWin * light * life;
@@ -360,6 +410,7 @@ function ripeKg(p, crop) { return Math.max(0, p.ripeDM - p.pickedDM - p.lostDM) 
 export function yieldKgNow(p, crop) { return crop.harvest === 'repeat' ? ripeKg(p, crop) : (p.yieldDM / crop.dmf / 1000) * p.area * quality(p, crop); }
 function quality(p, crop) {
   let q = 1;
+  if (crop.hill && p.hill) q *= 1 + 0.15 * p.hill;   // hilled potatoes: no green tubers and more set along the buried stem (approx)
   if (p.bolted) q *= 0.5;
   if (crop.harvest === 'once' && p.stage === crop.stages.length - 1 && !crop.keepsAfterKill) q *= 0.6;   // woody, split or bitter
   return q;
@@ -475,13 +526,18 @@ function sow(ctx, p = {}) {
   // where plants can go: free cells in the selection (big plants need a free span x span block)
   const spots = [];
   const taken = new Set();
+  // by hand (p.inOpening): seed goes only where a drill or hole is open, and deep crops only into a hole
+  const fits = (c) => !p.inOpening || (crop.deep ? c.open === 2 : c.open > 0);
+  let unfit = 0;
   for (const { group: g, index: i } of list) {
-    if (span === 1) { if (!g.cells[i].pl && tilled(g.cells[i])) spots.push([g, i, [i]]); continue; }
+    if (span === 1) { if (!g.cells[i].pl && tilled(g.cells[i])) { if (fits(g.cells[i])) spots.push([g, i, [i]]); else unfit++; } continue; }
     const ix = i % g.nx, iz = Math.floor(i / g.nx), cells = block(g, ix, iz, span);
     if (!cells || cells.some((j) => g.cells[j].pl || !tilled(g.cells[j]) || taken.has(g.id + ':' + j))) continue;
+    if (!cells.some((j) => fits(g.cells[j]))) { unfit++; continue; }
     for (const j of cells) taken.add(g.id + ':' + j);
     spots.push([g, i, cells]);
   }
+  if (!spots.length && unfit) return fail(crop.deep ? cap(crop.plural) + ' go in a hole: tap the soil with the trowel first.' : 'Open a drill first: drag the trowel along the row (or tap for a hole).', { needOpening: crop.deep ? 'hole' : 'drill' });
   if (!spots.length) return fail(span > 1 ? cap(crop.plural) + ' need a free ' + Math.round(span * 30) + ' cm square.' : 'Those cells are already planted.');
   const seedsEach = Math.ceil(perCell * crop.seedsPerPlant - 1e-9);
   let sown = 0;
@@ -496,7 +552,7 @@ function sow(ctx, p = {}) {
     if (crop.transplant) { pl.nUp = nCrit(crop, pl.bio); s.totals.nIn += pl.nUp * pl.area; }
     pl._w = plantWater(pl, crop);
     s.plants[id] = pl; plantsChanged(s);
-    for (const j of cells) g.cells[j].pl = id;
+    for (const j of cells) { g.cells[j].pl = id; delete g.cells[j].open; }   // the drill or hole is covered over the seed
     sown++;
   }
   if (sown) ctx.emit('garden.sow', { crop: crop.id, plants: sown });
@@ -549,6 +605,28 @@ function hoe(ctx, p = {}) {
   for (const { group, index } of list) { const c = group.cells[index]; cleared += c.weed; c.on += c.wN; c.wN = 0; c.weed = 0; }
   ctx.emit('garden.hoe', { cells: list.length, cleared });
   return { ok: true, cells: list.length, clearedM2: r3(cleared * CELL_AREA) };
+}
+// Open the soil for sowing with a trowel: p.cells = [[gx, gz]...] on the world grid, as for till. kind 'drill': a
+// shallow groove along the row (p.axis 'x' or 'z', the way it was drawn); 'hole': a hole deep enough for a seed
+// potato, a clove or a root ball. Only worked soil can be opened; a hole is not made smaller by drawing a drill over it.
+function open(ctx, p = {}) {
+  const s = ensure(ctx);
+  if (stockOf(ctx) && !hasTool(ctx, 'trowel')) return fail('You need a trowel.');
+  const kind = p.kind === 'hole' ? 2 : p.axis === 'z' ? 3 : 1;
+  let n = 0, unworked = 0, planted = 0;
+  for (const pt of Array.isArray(p.cells) ? p.cells : []) {
+    const at = cellAt(s.field, (Math.round(pt[0]) + 0.5) * CELL_M, (Math.round(pt[1]) + 0.5) * CELL_M);
+    if (!at) { unworked++; continue; }
+    const c = at.group.cells[at.index];
+    if (!tilled(c)) { unworked++; continue; }
+    if (c.pl) { planted++; continue; }
+    if (c.open === 2 && kind !== 2) continue;
+    if (c.open !== kind) { c.open = kind; n++; }
+  }
+  if (n) ctx.emit('garden.open', { kind: kind === 2 ? 'hole' : 'drill', cells: n });
+  if (!n && unworked) return fail('The trowel wants worked soil: break the ground with the hoe first.');
+  if (!n && planted) return fail('Something is already growing there.');
+  return { ok: true, cells: n };
 }
 // Work the ground with a hoe, stroke by stroke. p.cells = [[gx, gz]...] names 30 cm squares of the world grid
 // (square gx covers x from gx * 0.3 m). Ground outside every bed becomes bed: the nearest touching bed grows to
@@ -619,7 +697,7 @@ function till(ctx, p = {}) {
       if (!c.till) broke++;
       c.till = Math.min(1, r3((c.till || 0) + step));
       if (c.till >= 1) { delete c.till; worked++; c.on += c.wN; c.wN = 0; c.weed = 0.01; }
-    } else if (!c.pl || p.amongPlants !== false) { cleared += c.weed; c.on += c.wN; c.wN = 0; c.weed = 0; }
+    } else if (!c.pl || p.amongPlants !== false) { cleared += c.weed; c.on += c.wN; c.wN = 0; c.weed = 0; if (!c.pl) delete c.open; }
   }
   // beds of the same soil that now touch along an edge become one, when the joined rectangle is free
   for (let again = true, guard = 0; again && guard < 8; guard++) {
@@ -787,7 +865,7 @@ export const garden = {
   commands: {
     'garden.makeBed': makeBed, 'garden.removeBed': removeBed, 'garden.sow': sow, 'garden.water': water, 'garden.refill': refill, 'garden.fill': fill,
     'garden.hoe': hoe, 'garden.till': till, 'garden.mulch': mulch, 'garden.amend': amend, 'garden.harvest': harvest, 'garden.pull': pull,
-    'garden.cover': cover, 'garden.setShade': setShade,
+    'garden.cover': cover, 'garden.setShade': setShade, 'garden.open': open,
   },
 };
 
