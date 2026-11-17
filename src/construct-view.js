@@ -449,6 +449,15 @@
       if (d < bd) { bd = d; best = { hw, t }; }
     }
     if (!best) return null;
+    // pointing inside the walls, well clear of them: a tower on the floor, under the roof frame, its deck 0.6 m under the
+    // top of the walls so the ridge and the far rafters are in reach (a bay along a wall never reaches the middle)
+    { const { hw } = best, inn = (lp.x - hw.mid[0]) * hw.inward[0] + (lp.z - hw.mid[1]) * hw.inward[1];
+      if (inn > 0.7) {
+        const P = G.player, top = new T.Vector3(0, hw.top, 0).applyMatrix4(g.matrix).y, floor = new T.Vector3(0, hw.low, 0).applyMatrix4(g.matrix).y,
+          o = new T.Vector3(0, 0, 0).applyMatrix4(g.matrix), w = new T.Vector3(hw.u[0], 0, hw.u[1]).applyMatrix4(g.matrix).sub(o).normalize(),
+          baseY = Math.max(G.heightAt(px, pz), Math.abs(P.y - floor) < 0.6 ? P.y : floor);
+        return { x: px, z: pz, yaw: Math.atan2(w.x, w.z), len: SCF.towerM, deckY: Math.max(baseY + SCF.minDeckM, top - SCF.towerBelowTopM), baseY, free: true, structId: pr.id };
+      } }
     const { hw } = best, len = Math.min(SCF.bayM, hw.len + 0.3), t = Math.max(-(hw.len - len) / 2 - 0.15, Math.min((hw.len - len) / 2 + 0.15, best.t)), out = 0.12 + SCF.standOffM + SCF.widthM / 2;
     const c = new T.Vector3(hw.mid[0] + hw.u[0] * t - hw.inward[0] * out, 0, hw.mid[1] + hw.u[1] * t - hw.inward[1] * out).applyMatrix4(g.matrix);
     const o = new T.Vector3(0, 0, 0).applyMatrix4(g.matrix), w = new T.Vector3(hw.inward[0], 0, hw.inward[1]).applyMatrix4(g.matrix).sub(o).normalize(), top = new T.Vector3(0, hw.top, 0).applyMatrix4(g.matrix).y;
@@ -471,7 +480,7 @@
     if (V.scafHeld) P.carryK = Math.max(P.carryK || 0, 0.75);
     if (V.climb || V.hop || (RW && RW.on())) return;
     // on the plank, push on toward the roof and you step up onto the deck
-    if (RW && SC.onPlank && SC.onPlank()) {
+    if (RW && SC.onPlank && SC.onPlank() && !(sc && sc.set && sc.set.free)) {
       const mv = Math.hypot(P.mvx || 0, P.mvz || 0);
       if (mv > 0.3) { V.scPush = (V.scPush || 0) + dt; if (V.scPush > 0.12 && tryHop(P.mvx / mv, P.mvz / mv)) { SC.release(); V.scPush = 0; V.rev++; return; } if (V.scPush > 0.12) V.scPush = -0.15; } else V.scPush = 0;
     }
@@ -709,7 +718,7 @@
     if (best) return { kind: 'hands', id: pr.id, act: best.act, mid: best.mid, q };
     if (want) return { kind: 'hint', text: 'Needs ' + low(plain(lineOf(pr, want).label)), id: pr.id };
     if (high && RW && !RW.on() && ['dry-in', 'roofing'].includes(pr.stage)) { V.needLadder = 0.5; return { kind: 'hint', text: S().ladder ? 'Roofing is done from on the roof: climb the ladder and keep going onto the deck' : 'Roofing is done from on the roof: lean the ladder at the eave, climb it and step onto the deck', id: pr.id }; }
-    if (high) { V.needLadder = 0.5; return { kind: 'hint', text: S().scaffold && S().scaffold.set ? 'Too high: walk into the scaffold ladder, or lean the ladder here' : S().ladder || (S().carried && S().carried.itemId === LAD.itemId) ? 'Too high: lean the ladder on a wall, then walk onto it' : S().stacks.some((k) => k.itemId === LAD.itemId) ? 'Too high: the ladder is in the yard by the stacks (glowing marker)' : 'Too high: bring the ladder', id: pr.id }; }
+    if (high) { V.needLadder = 0.5; return { kind: 'hint', text: S().scaffold && !S().scaffold.set ? 'Too high: carry the scaffold inside the frame and set it up as a tower under this' : S().scaffold && S().scaffold.set ? 'Too high: walk into the scaffold ladder, or lean the ladder here' : S().ladder || (S().carried && S().carried.itemId === LAD.itemId) ? 'Too high: lean the ladder on a wall, then walk onto it' : S().stacks.some((k) => k.itemId === LAD.itemId) ? 'Too high: the ladder is in the yard by the stacks (glowing marker)' : 'Too high: bring the ladder', id: pr.id }; }
     return null;
   }
   function finishInstall(id, mid, layer, kind, r) {
@@ -1159,8 +1168,8 @@
     }
     else if (ctx.kind === 'bload') { const r = cmd('barrowLoad', { stackId: ctx.stack.id }); if (r.ok) { sounds.play('thunk'); nameIt(r.itemId); flash('Loaded ' + stackName(r.itemId)); } else flash(r.reason === 'full' ? 'The wheelbarrow is full' : r.reason === 'holds something else' ? 'It already holds something else' : 'Cannot load that'); }
     else if (ctx.kind === 'bdown') { const b = S().barrow; cmd('barrowSet', { x: b.x, z: b.z, yaw: b.yaw }); sounds.play('thunk'); }
-    else if (ctx.kind === 'sgrab') { V.scafHeld = true; V.rev++; sounds.play('lift'); flash('Point at a wall and press again to set the scaffold up there'); }
-    else if (ctx.kind === 'sset') { const r = cmd('setScaffold', ctx.spot); V.scafHeld = false; if (r.ok) { sounds.play('thud'); G.cam.shake = Math.min(G.cam.shake + 0.05, 0.3); note('Scaffold up', 'Walk into the ladder at its end to climb. Up there the top of the wall and the roof edge are in reach.'); } else flash(r.reason); }
+    else if (ctx.kind === 'sgrab') { V.scafHeld = true; V.rev++; sounds.play('lift'); flash('Point at a wall for a bay along it, or inside the frame for a tower, and press again'); }
+    else if (ctx.kind === 'sset') { const r = cmd('setScaffold', ctx.spot); V.scafHeld = false; if (r.ok) { sounds.play('thud'); G.cam.shake = Math.min(G.cam.shake + 0.05, 0.3); note('Scaffold up', ctx.spot.free ? 'Walk into the ladder at its end to climb. From the tower the ridge and the rafters overhead are in reach; take it down and set it up again to move it.' : 'Walk into the ladder at its end to climb. Up there the top of the wall and the roof edge are in reach.'); } else flash(r.reason); }
     else if (ctx.kind === 'sdrop') { const P = G.player; V.scafHeld = false; cmd('moveScaffold', { x: P.x + Math.sin(P.face) * 1.1, z: P.z + Math.cos(P.face) * 1.1 }); sounds.play('thunk'); }
     else if (ctx.kind === 'sstrike') { const P = G.player; const r = cmd('strikeScaffold', { x: P.x + Math.sin(P.face) * 1.1, z: P.z + Math.cos(P.face) * 1.1 }); if (r.ok) { sounds.play('thud'); flash('Scaffold down. Pick the bundle up to set it up along another wall'); } }
     else if (ctx.kind === 'hgrab') { V.horsesHeld = true; V.rev++; sounds.play('lift'); flash('Carry the sawhorses to the work; press again to set them down'); }
@@ -1383,8 +1392,8 @@
     else if (ctx.kind === 'bdown') setPrompt('E', 'Set the wheelbarrow down', '', null);
     else if (ctx.kind === 'hgrab') setPrompt('E', 'Pick up the sawhorses', 'the cut station', null);
     else if (ctx.kind === 'sgrab') setPrompt('E', 'Take the scaffold bundle', '', null);
-    else if (ctx.kind === 'sset') setPrompt('E', 'Set up the scaffold along this wall', '', null);
-    else if (ctx.kind === 'sdrop') setPrompt('E', 'Put the scaffold down (point at a wall to set it up)', '', null);
+    else if (ctx.kind === 'sset') setPrompt('E', ctx.spot.free ? 'Set up a scaffold tower here, under the roof frame' : 'Set up the scaffold along this wall', '', null);
+    else if (ctx.kind === 'sdrop') setPrompt('E', 'Put the scaffold down (point at a wall for a bay, or inside the frame for a tower)', '', null);
     else if (ctx.kind === 'sstrike') setPrompt('E', 'Take the scaffold down', '', null);
     else if (ctx.kind === 'hset') setPrompt('E', 'Set the sawhorses down here', '', null);
     else if (ctx.kind === 'pick') setPrompt('E', (ctx.more ? 'Take more ' : 'Pick up ') + stackName(ctx.stack.itemId), '', null);

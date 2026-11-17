@@ -2,7 +2,9 @@
 // it knows frames, planks and a person on them, not what is being built. Climbing is by movement, the way the owner wants
 // ladders: walk into the ladder at the end and you go up, fast; walk the plank; walk back off the ladder end and you climb down.
 //   window.__scaffold.create(G) -> scaffold
-//   scaffold.set(bay | null)      bay: { x, z, yaw, len, deckY, w }  (x, z: the middle of the plank in plan; yaw: along it)
+//   scaffold.set(bay | null)      bay: { x, z, yaw, len, deckY, w, baseY?, free? }  (x, z: the middle of the plank in plan;
+//                                 yaw: along it; baseY: the floor it stands on, else the ground; free: a tower standing on its
+//                                 own, braced both sides, rails at its ends only so it can stand under joists)
 //   scaffold.setBundle(p | null)  p: { x, z }: frames and planks lying in a stack
 //   scaffold.update(dt, { climbMps, keys }) -> 'up' | 'down' | null when the player mounts or leaves; holds the player while on it
 //   scaffold.on()                 is the player on it (climbing or on the plank)
@@ -31,15 +33,17 @@
     let bay = null, sig = '', bsig = '', st = null, pushT = 0;
     function build(b) {
       for (const c of [...root.children]) root.remove(c);
-      const gy = G.heightAt(b.x, b.z), H = b.deckY - gy, hl = b.len / 2, hw = b.w / 2;
+      const gy = Number.isFinite(b.baseY) ? b.baseY : G.heightAt(b.x, b.z), H = b.deckY - gy, hl = b.len / 2, hw = b.w / 2;
       // in root's frame: z along the plank, x across it (+x toward the wall), y up from the ground under its middle
       for (const z of [-hl, hl]) for (const x of [-hw, hw]) {
-        const g = G.heightAt(b.x + Math.cos(b.yaw) * x + Math.sin(b.yaw) * z, b.z - Math.sin(b.yaw) * x + Math.cos(b.yaw) * z) - gy;
-        bar(root, steel, [x, g, z], [x, H + (x < 0 ? 1.05 : 0.15), z], 0.045);
+        const g = Number.isFinite(b.baseY) ? 0 : G.heightAt(b.x + Math.cos(b.yaw) * x + Math.sin(b.yaw) * z, b.z - Math.sin(b.yaw) * x + Math.cos(b.yaw) * z) - gy;
+        bar(root, steel, [x, g, z], [x, H + (x < 0 && !b.free ? 1.05 : 0.15), z], 0.045);
       }
       for (const z of [-hl, hl]) { bar(root, steel, [-hw, H - 0.02, z], [hw, H - 0.02, z], 0.04); bar(root, steel, [-hw, H * 0.5, z], [hw, H * 0.5, z], 0.035); }
-      bar(root, steel, [-hw, 0.15, -hl], [-hw, H - 0.05, hl], 0.03); bar(root, steel, [-hw, 0.15, hl], [-hw, H - 0.05, -hl], 0.03);   // cross braces on the outside
-      bar(root, steel, [-hw, H + 1.0, -hl], [-hw, H + 1.0, hl], 0.04); bar(root, steel, [-hw, H + 0.5, -hl], [-hw, H + 0.5, hl], 0.035);   // guard rails
+      for (const x of b.free ? [-hw, hw] : [-hw]) { bar(root, steel, [x, 0.15, -hl], [x, H - 0.05, hl], 0.03); bar(root, steel, [x, 0.15, hl], [x, H - 0.05, -hl], 0.03); }   // cross braces
+      if (!b.free) { bar(root, steel, [-hw, H + 1.0, -hl], [-hw, H + 1.0, hl], 0.04); bar(root, steel, [-hw, H + 0.5, -hl], [-hw, H + 0.5, hl], 0.035); }   // guard rails
+      else for (const z of [-hl, hl]) for (const x of [-hw, hw]) bar(root, steel, [x, H, z], [x, H + 0.55, z], 0.035);   // a tower: short posts at the corners
+      if (b.free) for (const z of [-hl, hl]) { const m = new T.Mesh(box, steel); m.scale.set(0.09, 0.09, 0.09); for (const x of [-hw, hw]) { const c = m.clone(); c.position.set(x, 0.05, z); root.add(c); } }   // castors
       for (let k = 0; k < 3; k++) { const x = -hw + 0.13 + k * ((b.w - 0.26) / 2); const m = new T.Mesh(box, plank); m.scale.set(0.23, 0.04, b.len + 0.2); m.position.set(x, H + 0.02, 0); m.castShadow = m.receiveShadow = true; root.add(m); }
       { const m = new T.Mesh(box, toe); m.scale.set(0.02, 0.12, b.len); m.position.set(-hw - 0.01, H + 0.08, 0); root.add(m); }
       // the ladder up the end frame, outside it
@@ -53,7 +57,7 @@
     function release() { const P = G.player; if (st) { P.standY = null; if (st.climb) P.climbY = null; } st = null; }
     return {
       set(b) {
-        const s2 = b ? [b.x, b.z, b.yaw, b.len, b.deckY].join() : '';
+        const s2 = b ? [b.x, b.z, b.yaw, b.len, b.deckY, b.baseY, b.free].join() : '';
         if (s2 === sig) return;
         sig = s2; bay = b ? { w: 0.75, ...b } : null;
         if (!bay) { root.visible = false; release(); return; }
@@ -80,11 +84,11 @@
         const P = G.player, b = bay;
         if (!b) { if (st) release(); return null; }
         const sp = opt.climbMps || 4.5;
-        const L = local(b, P.x, P.z), gy = G.heightAt(b.x, b.z), hl = b.len / 2, hw = b.w / 2;
+        const L = local(b, P.x, P.z), gy = Number.isFinite(b.baseY) ? b.baseY : G.heightAt(b.x, b.z), hl = b.len / 2, hw = b.w / 2;
         if (!st) {
           // walking into the foot of the ladder, heading along the bay, mounts it
           const mv = Math.hypot(P.mvx || 0, P.mvz || 0), dir = mv > 0.3 ? (P.mvx * Math.sin(b.yaw) + P.mvz * Math.cos(b.yaw)) / mv : 0;
-          if (L.along < -hl - 0.15 && L.along > -hl - 0.85 && Math.abs(L.across) < hw && dir > 0.8 && P.y < b.deckY - 0.6 && Math.abs(P.y - G.heightAt(P.x, P.z)) < 0.8) { st = { climb: true, t: 0, dir: 1 }; return 'up'; }
+          if (L.along < -hl - 0.15 && L.along > -hl - 0.85 && Math.abs(L.across) < hw && dir > 0.8 && P.y < b.deckY - 0.6 && Math.abs(P.y - gy) < 0.8) { st = { climb: true, t: 0, dir: 1 }; return 'up'; }
           return null;
         }
         if (st.climb) {                                     // up or down the ladder at the end, quickly

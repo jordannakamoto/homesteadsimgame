@@ -71,6 +71,8 @@ await G(() => __construct.act('rent:3'));
 await tick(2);
 const spot = await G(() => { const pr = __construct.current(), b = __build.structs()[0]; return __construct.scaffoldSpot(pr, b.x + 3, b.z); });
 check('a scaffold spot along the nearest raised wall', !!spot, JSON.stringify(spot));
+const tower = await G(() => { const pr = __construct.current(), b = __build.structs()[0]; return __construct.scaffoldSpot(pr, b.x, b.z); });
+check('pointing inside the frame gives a tower standing on the floor, high enough for the ridge', !!tower && tower.free && tower.deckY - tower.baseY > 1.6, JSON.stringify(tower));
 const up = await G((sp) => __game.sim.commandNow('construction.setScaffold', sp).ok, spot);
 await tick(3);
 check('the scaffold is set up and drawn', up && (await G(() => !!__construct.scaffold.foot())));

@@ -553,6 +553,8 @@ function setScaffold(ctx, p) {
   if (sc.set) return { ok: false, reason: 'already up' };
   if (!p || ![p.x, p.z, p.yaw, p.len, p.deckY].every(Number.isFinite) || p.len < 0.8 || p.len > 4) return { ok: false, reason: 'bad place' };
   sc.set = { x: round6(p.x), z: round6(p.z), yaw: round6(p.yaw), len: round6(p.len), deckY: round6(p.deckY), structId: p.structId === undefined ? null : p.structId };
+  if (p.free) sc.set.free = true;                                  // a tower standing on the floor inside, not a bay along a wall
+  if (Number.isFinite(p.baseY)) sc.set.baseY = round6(p.baseY);
   sc.x = sc.set.x; sc.z = sc.set.z;
   ctx.emit('construction.scaffold', { up: true });
   return { ok: true, set: sc.set };
