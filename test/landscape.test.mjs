@@ -165,3 +165,24 @@ test('garden: seed by hand goes into a drill or a hole; a basin catches the rain
   const got = bed.cells.map((q, i) => q.w + q.d - before[i]);
   assert.ok(got[2] > got[3] && got[4] < got[3], 'basin ' + got[2].toFixed(2) + ', flat ' + got[3].toFixed(2) + ', hill ' + got[4].toFixed(2));
 });
+
+test('materials arrive as bags or a heap; a bag broken open spills where it lies, and laid on grass the weeds come fast', () => {
+  const sim = makeSim();
+  const st = sim.state.sys.stock;
+  st.items.wood_chips = 3 * 56; st.items.gravel = 0.2;
+  const d = c(sim, 'landscape.deliver', { item: 'wood_chips', qty: 3 * 56, x: 0, z: 0 });
+  assert.ok(d.ok && d.bags === 3);
+  const bag = L(sim).things[d.ids[0]];
+  assert.ok(c(sim, 'landscape.moveThing', { id: bag.id, x: 4, z: 4 }).ok);
+  const o = c(sim, 'landscape.open', { id: bag.id });
+  assert.ok(o.ok && !L(sim).things[bag.id]);
+  assert.equal(landscapeRead.groundAt(sim.state, 4, 4).s, 'woodchips');
+  assert.ok(reliefAt(L(sim).grid, 4, 4) > 0.1, 'a heap');
+  const g = c(sim, 'landscape.deliver', { item: 'gravel', qty: 0.2, x: 8, z: 0 });
+  assert.ok(g.ok && reliefAt(L(sim).grid, 8, 0) > 0.15);
+  // scoop chips off the heap and throw them: the shovel takes the layer, not the earth under it
+  assert.equal(c(sim, 'landscape.dig', { x: 4, z: 4 }).s, 'woodchips');
+  c(sim, 'landscape.dump', { x: 6, z: 6 });
+  sim.runDays(14);
+  assert.ok(landscapeRead.groundAt(sim.state, 6, 6).weeds >= 1, 'chips on grass: the grass comes through');
+});

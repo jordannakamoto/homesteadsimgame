@@ -628,7 +628,7 @@
     if (flash.until > now) h = esc(flash.msg);
     else if (id === 'hands') h = '<b>Pull</b> a root crop up, <b>swipe</b> across leaves to cut them, <b>click</b> fruit to pick it. <b>F</b> looks closer.';
     else if (id === 'trowel') h = owns('trowel') ? '<b>Tap</b> worked soil for a planting hole, or <b>drag</b> along the row to draw a seed drill. Potatoes, garlic, squash and tomatoes go in holes.' : 'You need a trowel to open the soil for seed.' + buyButton('trowel', 'Buy a trowel');
-    else if (id === 'shovel') h = G.sim.state.sys.landscape.carry.m3 > 1e-6 ? '<b>Click</b> to toss the load: heap a hill for squash, or bank up a row.' : '<b>Click</b> to dig a scoop: a deep hole, a trench, soil for a hill. <b>Drag</b> along grass to skim the turf.';
+    else if (id === 'shovel') h = G.sim.state.sys.landscape.carry.m3 > 1e-6 ? '<b>Click</b> where to throw the load.' : '<b>Click</b> to dig: each stroke throws a scoop to the ring. <b>Hold</b> to keep digging. <b>Right-click</b> where the earth goes: heap a hill for squash, bank up a row.';
     else if (id === 'hoe') h = canDig() ? '<b>Press</b> the blade into the ground and <b>drag</b> it toward you. ' + (owns('hoe') ? 'Two strokes' : 'Three strokes') + ' turn grass into fine soil.' + (owns('hoe') ? '' : buyButton('hoe', 'A real hoe is quicker')) : 'You need a hoe.' + buyButton('hoe', 'Buy a hoe');
     else if (id === 'can') {
       if (!owns('watering_can')) h = 'You need a watering can.' + buyButton('watering_can', 'Buy a can');
@@ -1130,7 +1130,7 @@
     const r = findRing(); if (r) r.scale.setScalar(0);
     ensureProject(); findSources();
     const anyBed = Object.keys(S().field.groups).length > 0;
-    H.open({ bar: toolsEl, reach: 1.5, camDist: 7.5, pace: 0.5, tipPx: 90, liftPx: 70, slots: slotList(), held: anyBed ? lastHeld : 'hoe', onHold, press, frame: frameAct, release });
+    H.open({ bar: toolsEl, reach: 1.5, camDist: 7.5, pace: 0.5, tipPx: 90, liftPx: 70, slots: slotList(), held: anyBed ? lastHeld : 'hoe', onHold, press, frame: frameAct, release, second: (a) => { if (H.held === 'shovel' && LS()) { LS().bindSay(say); LS().tools.shovel.second(a); } } });
     onHold(held());
     if (!anyBed && !tipState.start) showTip('start');
   }

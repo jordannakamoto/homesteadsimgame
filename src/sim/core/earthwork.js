@@ -118,7 +118,7 @@ export function cut(g, x, z, m3, { r = 0.17, bare = 'soil', maxDepth = 1.2, t = 
 }
 // Put m3 of loose material on a round footprint centred on (x, z). layer: laid on top (it thickens l; only on loose
 // ground unless `onTurf`), else earth (it buries any layer). Then it runs down to its angle of repose.
-export function fill(g, x, z, m3, { r = 0.22, surface = 'soil', layer = false, onTurf = true, t = 0, spread = true } = {}) {
+export function fill(g, x, z, m3, { r = 0.22, surface = 'soil', layer = false, onTurf = true, t = 0, spread = true, markF = 0 } = {}) {
   if (!(m3 > 0)) return 0;
   const fp = footprint(g, x, z, r).filter((p) => onTurf || isLooseCode(sAt(g, p[0], p[1])));
   if (!fp.length) return 0;
@@ -127,6 +127,7 @@ export function fill(g, x, z, m3, { r = 0.22, surface = 'soil', layer = false, o
   for (const [i, j, w] of fp) {
     const [tile, n] = tileOf(g, i, j, true), d = Math.round(((m3 * w) / wsum / A) * 1000);
     tile.h[n] += d;
+    if (layer && markF && tile.s[n] === 0) tile.f[n] |= markF;   // `markF`: flags for a layer laid straight on untouched ground (the caller's)
     if (layer) { if (tile.s[n] !== c) tile.l[n] = 0; tile.l[n] += d; }
     else if (d > 1) tile.l[n] = 0;
     if (d > 1 || layer) { if (tile.s[n] !== c) tile.t[n] = t; tile.s[n] = c; }

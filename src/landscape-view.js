@@ -15,7 +15,7 @@
   const G = window.__game, H = window.__hands;
   if (!G || !H || !G.sim || !G.sim.handlers.has('landscape.dig') || !G.earthwork || !G.landscape) return;
   const T = G.THREE, EW = G.earthwork, RD = G.landscape, $ = (id) => document.getElementById(id), canvas = $('view');
-  const { SURFACES, THINGS, PLANTS, SCOOP_M3 } = RD;
+  const { SURFACES, THINGS, PLANTS, SCOOP_M3 } = RD, RC = RD;
   const CELL = 0.3, CS = G.chunkSize || 32;   // CELL: the garden's beds
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -321,6 +321,10 @@
         part(box(w, 0.012, 0.012), dark, 0, h * 0.5, dd / 2 + 0.002), part(box(w, 0.012, 0.012), dark, 0, h * 0.5, -dd / 2 - 0.002),
         ...[[1, 1], [1, -1], [-1, 1], [-1, -1]].map(([a, b]) => part(box(0.07, h + 0.03, 0.07), dark, a * (w / 2 - 0.035), (h + 0.03) / 2, b * (dd / 2 - 0.035)))]);
     }
+    if (kind === 'bag') {
+      // a plastic sack lying flat, plump in the middle, a darker printed band; tinted per material by the instance colour
+      return merge([part(ball(0.5, 2), 0xe6e6e0, 0, d.h * 0.5, 0, 0, 0, 0, d.w, d.h, d.d, 0.02), part(box(d.w * 0.82, d.h * 0.5, 0.06), 0x9a9a92, 0, d.h * 0.62, 0), part(box(0.05, d.h * 0.4, d.d * 0.9), 0xcfcfc8, d.w * 0.47, d.h * 0.4, 0)]);
+    }
     if (kind === 'pathlight') return merge([part(stick(d.h - 0.06, 0.012, 5), 0x2c2c2a, 0, 0, 0), part(new T.CylinderGeometry(0.05, 0.045, 0.06, 8), 0x3a3a38, 0, d.h - 0.06, 0), part(new T.CylinderGeometry(0.065, 0.06, 0.015, 8), 0x2c2c2a, 0, d.h + 0.005, 0)]);
     return merge([part(ball(0.5, 1), 0x7d7a72, 0, d.h * 0.5, 0, 0, 0, 0, d.w, d.h, d.d, 0.12)]);
   }
@@ -338,6 +342,7 @@
   lenses.count = 0; lenses.frustumCulled = false; G.scene.add(lenses);
   const LENS = new T.Color(1.9, 1.45, 0.9);
   let stoneSig = '';
+  const _bagC = new T.Color(0x56703a);
   const stoneY = (o) => G.heightAt(o.ax, o.az) + o.y;
   function layoutStones() {
     const list = Object.values(L().things);
@@ -360,7 +365,8 @@
         const n = +o.id.slice(1), sc = 0.9 + 0.2 * hash(n, 3);
         _m.compose(_p.set(o.x, stoneY(o), o.z), _q.setFromEuler(_e.set(0, o.yaw + (hash(n, 9) - 0.5) * 0.15, 0)), _s.set(sc, k === 'paver' ? 1 : 0.9 + 0.2 * hash(n, 5), sc));
         m.setMatrixAt(i, _m);
-        m.setColorAt(i, _ic.setScalar(0.85 + 0.3 * hash(n, 7)));
+        if (k === 'bag') m.setColorAt(i, _ic.setHex(o.m === 'bedmix' ? 0x6b5a3a : matHex(o.m)).lerp(_bagC, 0.45));
+        else m.setColorAt(i, _ic.setScalar(0.85 + 0.3 * hash(n, 7)));
       });
       m.count = arr.length; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true;
     }
@@ -598,12 +604,11 @@
     it.heap.visible = c.m3 > 1e-6;
     if (it.heap.visible) { it.heap.material.color.setHex(matHex(c.s)); it.heap.scale.set(1, 0.4 + 0.25 * Math.min(2, c.m3 / SCOOP_M3 / 2), 1); }
   }
-  // The shovel, shared with the garden. Real motions, made simple:
-  //  - press: the blade goes into the ground where you aim (it bites: a jolt and crumbs)
-  //  - pull the mouse down (the handle back): it levers the earth up onto the blade. A plain click does the same.
-  //  - drag along the ground instead: the blade slides under the turf and skims it off
-  //  - with a load on the blade, click where it should go: it is thrown, flies in an arc and lands as a heap that
-  //    slides down to its natural slope
+  // The shovel, shared with the garden. One click is one whole stroke, like a swing of the axe:
+  //  wind up, drive the blade in with a foot (it bites: a jolt and crumbs), lever the earth up, and throw it.
+  //  Every stroke takes a scoop from where you clicked and throws it to the marker: beside the hole unless you
+  //  right-click somewhere else to send it there. Hold the button to keep digging, stroke after stroke.
+  //  Click a bag and the blade rips it open. Drag along the grass instead of clicking and the blade skims the turf.
   const clump = new T.Mesh(new T.IcosahedronGeometry(0.09, 1), new T.MeshLambertMaterial({ color: 0x5e4632 }));
   clump.visible = false; clump.castShadow = true; G.scene.add(clump);
   const flights = [];
@@ -621,29 +626,165 @@
       if (t >= 1) { flights.splice(k, 1); clump.visible = flights.length > 0; f.land(); }
     }
   }
+  const THROW = 3.5;                       // about as far as a shovelful carries
+  const ST = { wind: 0.17, bite: 0.25, lift: 0.31, up: 0.44, rel: 0.53, swing: 0.6, end: 0.8 };
+  const stroke = { on: false, t: 0, kind: '', x: 0, z: 0, tx: 0, tz: 0, bag: null, bit: false, levered: false, thrown: false, next: null, hold: false, ox: 0, oz: 0 };
+  const tossMark = { set: false, x: 0, z: 0, arm: false };
+  function bagAt(x, z) { let best = null, bd = 0.38; for (const o of Object.values(L().things)) if (o.k === 'bag') { const d = Math.hypot(o.x - x, o.z - z); if (d < bd) { best = o; bd = d; } } return best; }
+  const markNear = () => tossMark.set && Math.hypot(tossMark.x - G.player.x, tossMark.z - G.player.z) < 6;
+  // where a scoop dug at (x, z) goes: the marker if one is set and near, else just beside the hole, to the side
+  function tossSpot(x, z, out = [0, 0]) {
+    const P = G.player;
+    let tx = x, tz = z;
+    if (markNear()) { tx = tossMark.x; tz = tossMark.z; }
+    else {
+      const d = Math.hypot(x - P.x, z - P.z) || 1, ux = (x - P.x) / d, uz = (z - P.z) / d;
+      for (const side of [1, -1]) { tx = x + side * uz * 0.9 - ux * 0.15; tz = z - side * ux * 0.9 - uz * 0.15; if (!isWater(tx, tz)) break; }
+    }
+    const d = Math.hypot(tx - P.x, tz - P.z);
+    if (d > THROW) { tx = P.x + ((tx - P.x) * THROW) / d; tz = P.z + ((tz - P.z) * THROW) / d; }
+    out[0] = tx; out[1] = tz; return out;
+  }
+  const _ts = [0, 0];
+  // a load sitting on the blade (not one already in the air)
+  const onBlade = () => loaded() && !flights.length;
+  function startStroke(x, z) {
+    const bag = onBlade() ? null : bagAt(x, z);
+    Object.assign(stroke, { on: true, t: 0, bag: bag && bag.id, bit: false, levered: false, thrown: false, fail: false, ox: x, oz: z });
+    stroke.x = bag ? bag.x : x; stroke.z = bag ? bag.z : z;
+    if (bag) stroke.kind = 'bag';
+    else if (onBlade()) {
+      // earth already on the blade (from before): this stroke just throws it where you clicked
+      stroke.kind = 'toss'; stroke.t = ST.up; stroke.bit = stroke.levered = true;
+      const P = G.player, d = Math.hypot(x - P.x, z - P.z);
+      stroke.tx = d > THROW ? P.x + ((x - P.x) * THROW) / d : x; stroke.tz = d > THROW ? P.z + ((z - P.z) * THROW) / d : z;
+      stroke.x = P.x + (x - P.x) * 0.3; stroke.z = P.z + (z - P.z) * 0.3;
+    } else { stroke.kind = 'dig'; tossSpot(x, z, _ts); stroke.tx = _ts[0]; stroke.tz = _ts[1]; }
+  }
+  function bite() {
+    const x = stroke.x, z = stroke.z, y = surfaceAt(x, z);
+    if (stroke.kind === 'bag') {
+      const o = L().things[stroke.bag];
+      const res = o ? cmd('landscape.open', { id: o.id }) : { ok: false, reason: 'The bag is gone.' };
+      if (!res.ok) { stroke.fail = true; return sayS(res.reason); }
+      const hex = res.m === 'bedmix' ? 0x3f2c1f : matHex(res.m);
+      G.burst(x, y + 0.25, z, 30, hex, 2.2, 2.6, 0.06, 0.8);
+      G.burst(x, y + 0.2, z, 8, 0xd8d0b8, 1.8, 2.2, 0.08, 0.7);         // shreds of the bag
+      G.cam.shake = Math.min(G.cam.shake + 0.2, 0.45); G.juice.hitStop = 0.09;
+      dirty = true;
+      return sayS('Ripped the bag open: ' + Math.round(res.m3 * 1000) + ' L of ' + (res.m === 'bedmix' ? 'bed soil' : (SURFACES[res.m] ? SURFACES[res.m].name.toLowerCase() : res.m)) + '. Right-click where it should go, then shovel it over.', 5);
+    }
+    if (isWater(x, z)) { stroke.fail = true; return sayS('That is water.'); }
+    // the blade bites: a jolt, a stop, crumbs kicked up
+    G.cam.shake = Math.min(G.cam.shake + 0.12, 0.45); G.juice.hitStop = 0.06;
+    const turf = !EW.sAt(grid(), Math.round(x / STEP), Math.round(z / STEP));
+    G.burst(x, y + 0.05, z, 7, turf ? 0x5e8a3a : 0x5a4230, 1.0, 1.6, 0.045, 0.45);
+  }
+  function lever() {
+    const x = stroke.x, z = stroke.z;
+    const res = cmd('landscape.dig', { x, z });
+    if (!res.ok) { stroke.fail = true; return sayS(res.reason); }
+    const y = surfaceAt(x, z);
+    G.burst(x, y + 0.12, z, 12, res.s === 'soil' ? 0x5a4230 : matHex(res.s), 1.6, 2.8, 0.07, 0.6);
+    if (res.turf) G.burst(x, y + 0.12, z, 6, 0x5e8a3a, 1.6, 2.6, 0.07, 0.7);
+    G.cam.shake = Math.min(G.cam.shake + 0.06, 0.45);
+    if (res.liner) sayS('You cut into the pond liner: the water ran out. The liner is back in your stock.', 5);
+    setHeap(); tip(res.s === 'soil' ? 'dug' : 'scooped', res);
+  }
+  function throwLoad() {
+    if (!loaded()) return;
+    const c = L().carry, from = bladePos(), tx = stroke.tx, tz = stroke.tz, ty = surfaceAt(tx, tz), d = Math.hypot(tx - from.x, tz - from.z);
+    clump.material.color.setHex(matHex(c.s));
+    ITEM.shovel.heap.visible = false;
+    G.cam.shake = Math.min(G.cam.shake + 0.04, 0.45);
+    flights.push({ x0: from.x, y0: from.y, z0: from.z, x1: tx, y1: ty + 0.05, z1: tz, t: 0, dur: 0.2 + d * 0.08, arc: 0.3 + d * 0.16, land: () => {
+      const res = cmd('landscape.dump', { x: tx, z: tz });
+      if (!res.ok) { setHeap(); return sayS(res.reason); }
+      G.burst(tx, surfaceAt(tx, tz) + 0.12, tz, 14, matHex(res.s), 1.6, 1.4, 0.07, 0.6);
+      G.burst(tx, surfaceAt(tx, tz) + 0.04, tz, 8, matHex(res.s), 2.0, 0.6, 0.05, 0.45);
+      G.cam.shake = Math.min(G.cam.shake + 0.08, 0.45);
+      setHeap(); tip('tossed', res);
+    } });
+  }
+  function strokeTick(dt) {
+    if (!stroke.on) return;
+    let sp = G.juice && G.juice.hitStop > 0 ? 0.12 : 1;
+    // the next scoop waits until the last one has landed (one load on the blade at a time)
+    if (stroke.kind === 'dig' && !stroke.levered && stroke.t + dt >= ST.lift && flights.length) sp = 0;
+    stroke.t += dt * sp;
+    if (!stroke.bit && stroke.t >= ST.bite) { stroke.bit = true; bite(); if (stroke.fail || stroke.kind === 'bag') stroke.t = Math.max(stroke.t, ST.swing); }
+    if (!stroke.levered && stroke.kind === 'dig' && stroke.t >= ST.lift && !stroke.fail) { stroke.levered = true; lever(); if (stroke.fail) stroke.t = Math.max(stroke.t, ST.swing); }
+    const t = stroke.t;
+    if (!stroke.thrown && stroke.levered && !stroke.fail && t >= ST.rel) { stroke.thrown = true; throwLoad(); }
+    if (t < ST.end) return;
+    // whatever is still on the blade at the end of a stroke goes with it
+    if (onBlade() && stroke.kind !== 'bag') throwLoad();
+    stroke.on = false;
+    // clicked again during the stroke: the next one follows straight on. Still holding: dig again where you aim.
+    const nx = stroke.next; stroke.next = null;
+    if (nx) startStroke(nx[0], nx[1]);
+    else if (stroke.hold && H.aim.down && H.aim.valid && H.held === 'shovel') startStroke(H.aim.x, H.aim.z);
+  }
+  // the stroke's pose: blade and hands at key moments, eased between; the handle runs from the blade to the hands
+  const _D = { x: 0, y: 0, z: 0 }, _T = { x: 0, y: 0, z: 0 }, _B = new T.Vector3(), _Hn = new T.Vector3(), _dir = new T.Vector3(), _UP = new T.Vector3(0, 1, 0);
+  const ease = (k) => k * k * (3 - 2 * k);
+  const KEYS = [
+    // t, blade (relative to the dig spot: dx, dy, dz back toward you), hands (x, y, z), arms, lean, right leg
+    [0, 0, 0.22, 0.05, 0.05, 1.1, 0.28, -0.9, 0.12, 0],
+    [ST.wind, 0, 0.45, 0.12, 0.05, 1.42, 0.16, -1.8, -0.06, -0.15],
+    [ST.bite, 0, -0.16, 0, 0.05, 1.02, 0.36, -1.05, 0.36, -0.55],
+    [ST.lift, 0, -0.14, 0, 0.05, 0.84, 0.06, -0.62, 0.22, -0.1],
+    [ST.up, 0, 0.46, 0.25, 0.05, 0.98, 0.14, -0.85, 0.06, 0],
+    [ST.rel, 'T', 1.08, 0, 0.08, 1.18, 0.22, -1.55, -0.06, 0],
+    [ST.swing, 'T', 1.2, 0, 0.1, 1.22, 0.26, -1.65, -0.08, 0],
+    [ST.end, 'R', 0.02, 0, 0.05, 1.0, 0.28, -0.55, 0, 0],
+  ];
+  function bladeAt(K, out) {
+    if (K[1] === 'T') { const d = Math.hypot(_T.x, _T.z) || 1; return out.set((_T.x / d) * 0.85, K[2], (_T.z / d) * 0.85); }
+    if (K[1] === 'R') return out.set(0.42, K[2], 0.2);
+    const d = Math.hypot(_D.x, _D.z) || 1, back = K[3];
+    return out.set(_D.x - (_D.x / d) * back, _D.y + K[2], _D.z - (_D.z / d) * back);
+  }
+  const _B2 = new T.Vector3(), _H2 = new T.Vector3();
+  ITEM.shovel.anim = (o, pm, toLocal) => {
+    if (!stroke.on) return false;
+    const P = G.player, t = Math.min(stroke.t, ST.end);
+    toLocal(stroke.x, surfaceAt(stroke.x, stroke.z), stroke.z, _D);
+    // the pose reaches no further than arms and a handle can: a far click is dug where you clicked, posed nearer
+    const dd = Math.hypot(_D.x, _D.z);
+    if (dd > 1.15) { _D.x *= 1.15 / dd; _D.z *= 1.15 / dd; }
+    if (dd < 0.55) { const k = 0.55 / (dd || 1); _D.x = dd ? _D.x * k : 0; _D.z = dd ? _D.z * k : 0.55; }
+    toLocal(stroke.tx, P.y + 1, stroke.tz, _T);
+    let i = 0; while (i < KEYS.length - 2 && t > KEYS[i + 1][0]) i++;
+    const A = KEYS[i], Bk = KEYS[i + 1], k = ease(Math.max(0, Math.min(1, (t - A[0]) / (Bk[0] - A[0]))));
+    bladeAt(A, _B); bladeAt(Bk, _B2); _B.lerp(_B2, k);
+    _Hn.set(A[4], A[5], A[6]).lerp(_H2.set(Bk[4], Bk[5], Bk[6]), k);
+    o.position.copy(_B);
+    o.quaternion.setFromUnitVectors(_UP, _dir.subVectors(_Hn, _B).normalize());
+    pm.armL.rotation.x = pm.armR.rotation.x = A[7] + (Bk[7] - A[7]) * k;
+    pm.body.rotation.x += A[8] + (Bk[8] - A[8]) * k;
+    if (pm.legR) pm.legR.rotation.x = A[9] + (Bk[9] - A[9]) * k;
+    // facing: the hole while digging, then round toward where the earth goes as it is thrown
+    const fd = Math.atan2(stroke.x - P.x, stroke.z - P.z);
+    if (t < ST.up || stroke.kind === 'bag' || stroke.fail) P.faceHold = fd;
+    else { const ft = Math.atan2(stroke.tx - P.x, stroke.tz - P.z); let df = ft - fd; df = Math.atan2(Math.sin(df), Math.cos(df)); P.faceHold = fd + df * 0.6; }
+    return true;
+  };
   const shovel = {
-    flying: () => flights.length > 0,
+    flying: () => flights.length > 0 || stroke.on,
     press(a) {
-      act.kind = 'shovel'; act.n = 0; act.lx = a.x; act.lz = a.z; act.skim = false; act.done = false; act.ox = a.x; act.oz = a.z; act.movedAt = null; skimmed.clear();
+      act.kind = 'shovel'; act.n = 0; act.lx = a.x; act.lz = a.z; act.skim = false; act.ox = a.x; act.oz = a.z; act.why = ''; skimmed.clear();
       if (!owns('shovel') && !owns('spade')) { act.kind = ''; return sayS('You need a shovel.'); }
-      if (flights.length) { act.done = true; return; }
-      if (loaded()) { act.throwing = true; return; }      // wind up: the throw goes on release
-      act.throwing = false;
-      // the blade bites
-      G.cam.shake = Math.min(G.cam.shake + 0.08, 0.4); G.juice.hitStop = 0.05;
-      G.burst(a.x, surfaceAt(a.x, a.z) + 0.04, a.z, 5, EW.sAt(grid(), Math.round(a.x / STEP), Math.round(a.z / STEP)) ? 0x5a4230 : 0x5e8a3a, 0.7, 1.2, 0.04, 0.4);
+      if (tossMark.arm) { tossMark.arm = false; act.kind = ''; return shovel.second(a); }
+      stroke.hold = true;
+      if (stroke.on) { stroke.next = [a.x, a.z]; return; }    // clicked mid-stroke: the next one follows on
+      startStroke(a.x, a.z);
     },
     frame(a) {
-      if (act.kind !== 'shovel' || act.done || act.throwing) return;
-      // when the mouse first moves: straight after the press it is a yank (lever); after a pause it is a push (skim)
-      if (act.movedAt == null && Math.hypot(a.dx, a.dy) > 10) act.movedAt = a.held;
-      const pushed = act.movedAt != null && act.movedAt > 0.3;
-      // a quick pull down on the mouse is the handle pulled back: it levers the earth up where the blade went in
-      if (!act.skim && !pushed && a.dy > 40 && a.dy > Math.abs(a.dx) * 1.2) { act.done = true; return shovel.lever(act.ox, act.oz); }
-      // pushing the blade along the ground (forward, sideways, or after a pause) slides it under the turf
-      if (!act.skim && Math.hypot(a.x - act.ox, a.z - act.oz) > 0.22 && (pushed || a.dy < 20 || Math.abs(a.dx) > Math.abs(a.dy))) act.skim = true;
+      if (act.kind !== 'shovel') return;
+      // dragged off along the ground before the blade went in: it slides under the turf instead
+      if (!act.skim && stroke.on && !stroke.bit && stroke.kind === 'dig' && Math.hypot(a.x - act.ox, a.z - act.oz) > 0.25) { stroke.on = false; act.skim = true; }
       if (!act.skim) return;
-      // skimming: the blade slides under the turf along the drag
       const len = Math.hypot(a.x - act.lx, a.z - act.lz), n = Math.max(1, Math.ceil(len / 0.08)), pts = [];
       for (let i = 1; i <= n; i++) { const x = act.lx + ((a.x - act.lx) * i) / n, z = act.lz + ((a.z - act.lz) * i) / n; if (!isWater(x, z)) pts.push([x, z]); }
       act.lx = a.x; act.lz = a.z;
@@ -652,43 +793,67 @@
       if (!res.ok) { if (!act.why) sayS(res.reason); act.why = res.reason; return; }
       if (res.m2 > 0) { act.n += res.m2; G.burst(a.x, surfaceAt(a.x, a.z) + 0.1, a.z, 5, 0x5e8a3a, 1.4, 2.2, 0.07, 0.6); G.burst(a.x, surfaceAt(a.x, a.z) + 0.06, a.z, 3, 0x5a4230, 1.2, 1.6, 0.05, 0.5); }
     },
-    lever(x, z) {
-      if (isWater(x, z)) return sayS('That is water.');
-      const res = cmd('landscape.dig', { x, z });
-      if (!res.ok) return sayS(res.reason);
-      const y = surfaceAt(x, z);
-      G.burst(x, y + 0.12, z, 12, res.s === 'soil' ? 0x5a4230 : matHex(res.s), 1.6, 2.8, 0.07, 0.6);
-      if (res.turf) G.burst(x, y + 0.12, z, 6, 0x5e8a3a, 1.6, 2.6, 0.07, 0.7);
-      G.cam.shake = Math.min(G.cam.shake + 0.06, 0.4);
-      if (res.liner) sayS('You cut into the pond liner: the water ran out. The liner is back in your stock.', 5);
-      setHeap(); tip('dug', res);
-    },
-    release(a) {
+    release() {
+      stroke.hold = false;
       if (act.kind !== 'shovel') return;
       act.kind = '';
-      if (act.throwing) {
-        act.throwing = false;
-        if (!loaded()) return;
-        // thrown: the load leaves the blade and flies to where you aimed
-        const c = L().carry, from = bladePos(), tx = a.x, tz = a.z, ty = surfaceAt(tx, tz), d = Math.hypot(tx - from.x, tz - from.z);
-        clump.material.color.setHex(matHex(c.s));
-        ITEM.shovel.heap.visible = false;
-        G.cam.shake = Math.min(G.cam.shake + 0.04, 0.4);
-        flights.push({ x0: from.x, y0: from.y, z0: from.z, x1: tx, y1: ty + 0.05, z1: tz, t: 0, dur: 0.22 + d * 0.09, arc: 0.25 + d * 0.18, land: () => {
-          const res = cmd('landscape.dump', { x: tx, z: tz });
-          if (!res.ok) { setHeap(); return sayS(res.reason); }
-          G.burst(tx, surfaceAt(tx, tz) + 0.12, tz, 14, matHex(res.s), 1.6, 1.4, 0.07, 0.6);
-          G.burst(tx, surfaceAt(tx, tz) + 0.04, tz, 8, matHex(res.s), 2.0, 0.6, 0.05, 0.45);
-          G.cam.shake = Math.min(G.cam.shake + 0.08, 0.4);
-          setHeap(); tip('tossed', res);
-        } });
-        return;
-      }
-      if (act.done) return;
-      if (act.skim) { if (act.n) { sayS('Skimmed ' + act.n.toFixed(1) + ' m² of turf off. Bare earth takes gravel, chips, sand, fabric or lawn seed.'); tip('skim'); } return; }
-      shovel.lever(act.ox, act.oz);      // a plain click: push in and lever up in one go
+      if (act.skim && act.n) { sayS('Skimmed ' + act.n.toFixed(1) + ' m² of turf off. Bare earth takes gravel, chips, sand, fabric or lawn seed.'); tip('skim'); }
+    },
+    // right-click: where the earth goes. On the marker again: back to beside the hole.
+    second(aim) {
+      if (!owns('shovel') && !owns('spade')) return;
+      const a = { x: aim.gx ?? aim.x, z: aim.gz ?? aim.z };         // a throw reaches past the arms
+      if (tossMark.set && Math.hypot(a.x - tossMark.x, a.z - tossMark.z) < 0.4) { tossMark.set = false; return sayS('The earth goes beside the hole again.'); }
+      if (isWater(a.x, a.z)) return sayS('That is water.');
+      const P = G.player;
+      if (Math.hypot(a.x - P.x, a.z - P.z) > 5.5) return sayS('Too far to throw to. Walk closer.');
+      tossMark.set = true; tossMark.x = a.x; tossMark.z = a.z;
+      G.burst(a.x, surfaceAt(a.x, a.z) + 0.05, a.z, 5, 0xffe08a, 0.8, 1.2, 0.035, 0.4);
+      sayS('Every scoop goes here now. Right-click it again to throw beside the hole.', 4);
     },
   };
+  // the marker: where the earth goes (a stake when you set it, a faint ring beside the hole otherwise), and the arc
+  const markMat = new T.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.85, depthWrite: false });
+  const markRing = new T.Mesh(new T.RingGeometry(0.2, 0.27, 28), markMat);
+  markRing.rotation.x = -Math.PI / 2; markRing.renderOrder = 3; markRing.visible = false; G.scene.add(markRing);
+  const stake = mesh([part(stick(0.55, 0.012, 5), 0xc9975a, 0, 0, 0), part(new T.BufferGeometry().setAttribute('position', new T.BufferAttribute(new Float32Array([0, 0.55, 0, 0, 0.42, 0, 0.17, 0.49, 0]), 3)), 0xf2c94c, 0, 0, 0)]);
+  stake.material = new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide }); stake.visible = false; G.scene.add(stake);
+  const DOTS = 9, dotMat = new T.MeshBasicMaterial({ color: 0xfff4d0, transparent: true, opacity: 0.55, depthWrite: false });
+  const dots = new T.InstancedMesh(new T.IcosahedronGeometry(0.025, 0), dotMat, DOTS);
+  dots.frustumCulled = false; dots.visible = false; dots.renderOrder = 3; G.scene.add(dots);
+  const _dm = new T.Matrix4();
+  let markT = 0;
+  function markTick(dt) {
+    const a = H.aim, out = H.isOpen && H.held === 'shovel' && (owns('shovel') || owns('spade'));
+    markT += dt;
+    if (!out) { markRing.visible = stake.visible = dots.visible = false; return; }
+    const set = markNear();
+    let tx, tz, from = null;
+    if (stroke.on && stroke.kind !== 'bag') { tx = stroke.tx; tz = stroke.tz; }
+    else if (a.valid) {
+      const bag = bagAt(a.x, a.z);
+      if (bag) { tx = bag.x; tz = bag.z; }                  // a bag under the blade: the ring says "break this"
+      else { tossSpot(a.x, a.z, _ts); tx = _ts[0]; tz = _ts[1]; from = [a.x, a.z]; }
+    } else if (set) { tx = tossMark.x; tz = tossMark.z; }
+    else { markRing.visible = stake.visible = dots.visible = false; return; }
+    const y = surfaceAt(tx, tz);
+    markRing.visible = true; markRing.position.set(tx, y + 0.03, tz);
+    const pulse = 1 + 0.08 * Math.sin(markT * 5);
+    markRing.scale.setScalar(pulse);
+    markMat.opacity = set ? 0.9 : 0.45;
+    stake.visible = set; if (set) stake.position.set(tossMark.x, surfaceAt(tossMark.x, tossMark.z), tossMark.z);
+    // the arc a scoop will fly, from where you aim to where it lands
+    dots.visible = !!from && !stroke.on;
+    if (dots.visible) {
+      const fy = surfaceAt(from[0], from[1]) + 0.35, d = Math.hypot(tx - from[0], tz - from[1]), arc = 0.3 + d * 0.16;
+      for (let i = 0; i < DOTS; i++) {
+        const k = (i + ((markT * 1.5) % 1)) / DOTS;
+        _dm.makeTranslation(from[0] + (tx - from[0]) * k, fy + (y - fy) * k + Math.sin(Math.PI * k) * arc, from[1] + (tz - from[1]) * k);
+        dots.setMatrixAt(i, _dm);
+      }
+      dots.instanceMatrix.needsUpdate = true;
+    }
+  }
   // the rake: drag over loose ground and it evens out
   function rakeFrame(a) {
     if (Math.hypot(a.x - act.lx, a.z - act.lz) < 0.1) return;
@@ -808,6 +973,18 @@
   function buy(id, qty) {
     const r = cmd('stock.buy', { id, qty });
     say(r.ok ? 'Bought ' + ITEMS[id].name.toLowerCase() + '.' : 'Not enough money.');
+    // loose material comes as a thing in the yard: bags set down beside you, or a load tipped in a heap
+    if (r.ok && (RC.BAGGED[id] || RC.BULK[id])) {
+      const P = G.player, f = P.face;
+      let x = P.x + Math.sin(f) * 1.5 + Math.cos(f) * 0.8, z = P.z + Math.cos(f) * 1.5 - Math.sin(f) * 0.8;
+      if (isWater(x, z)) { x = P.x - Math.sin(f) * 1.5; z = P.z - Math.cos(f) * 1.5; }
+      const d = cmd('landscape.deliver', { item: id, qty, x, z });
+      if (d.ok) {
+        G.burst(x, surfaceAt(x, z) + 0.2, z, 16, d.bags ? 0x56703a : matHex(RC.BULK[id]), 1.6, 1.2, 0.07, 0.6);
+        G.cam.shake = Math.min(G.cam.shake + 0.15, 0.45); dirty = true;
+        say(d.bags ? d.bags + ' bags of ' + ITEMS[id].name.toLowerCase() + ' set down beside you. Hit one with the shovel to rip it open, or drag it where you want it with your hands.' : 'A load of ' + ITEMS[id].name.replace(/ \(bulk\)/, '').toLowerCase() + ' tipped beside you. Right-click where it goes, then shovel it over.', 6);
+      }
+    }
     if (on) setSlots(); renderStore();
     return r.ok;
   }
@@ -815,8 +992,8 @@
   const AISLES = [
     ['tools', 'Tools', [['trowel', 1], ['rake', 1], ['tamper', 1], ['wheelbarrow', 1], ['watering_can', 1], ['garden_hose', 1]]],
     ['install', 'Base & fabric', [['landscape_fabric', 10, '10 m2 of weed barrier'], ['crushed_stone', 0.25, '250 L: a 10 cm base for 2.5 m2'], ['sand', 0.1, '100 L: a 3 cm bed for 3 m2']]],
-    ['boxes', 'Garden boxes', [['garden_box_kit', 1, 'A 1.2 x 2.4 m cedar box, 30 cm deep'], ['raised_bed_mix', 400, '400 L: about half a box']]],
-    ['chips', 'Wood chips & mulch', [['wood_chips', 300, '300 L: a 4 m path'], ['bark_mulch', 200, '200 L: 3 m2 of border'], ['grass_seed', 1, '1 kg sows 25 m2']]],
+    ['boxes', 'Garden boxes', [['garden_box_kit', 1, 'A 1.2 x 2.4 m cedar box, 30 cm deep'], ['raised_bed_mix', 7 * RC.BAG_L, '7 bags: about half a box']]],
+    ['chips', 'Wood chips & mulch', [['wood_chips', 5 * RC.BAG_L, '5 bags: a 4 m path'], ['bark_mulch', 4 * RC.BAG_L, '4 bags: 3 m2 of border'], ['grass_seed', 1, '1 kg sows 25 m2']]],
     ['gravel', 'Gravel & stone', [['gravel', 0.25, '250 L: a path 3 m long'], ['crushed_stone', 0.25, '250 L: a firm path'], ['decomposed_granite', 0.25, '250 L: a smooth path'], ['slate_chips', 0.1, '100 L'], ['marble_chips', 0.1, '100 L'], ['lava_rock', 0.1, '100 L'], ['river_rock', 0.25, '250 L: a dry creek bed'], ['sand', 0.1, '100 L: a bed for stones']]],
     ['paving', 'Paving', [['granite_sett', 100, '100 cobbles: about 1 m2'], ['flagstone_40', 2, '10 stepping stones'], ['paver_brick', 50, '50 bricks: 10 m of edging']]],
     ['walls', 'Walls & edging', [['stone', 40, '40 fieldstones: a low wall'], ['cut_stone', 30, '30 blocks: 4 m, three courses'], ['capstone', 8, '8 slabs to top a 4 m wall'], ['granite_curb', 6, '6 lengths: 5.4 m of edging'], ['landscape_timber', 10, '10 of 1.2 m: a raised bed'], ['boulder', 1, 'A feature rock']]],
@@ -859,7 +1036,7 @@
     else {
       const id = held();
       if (id === 'store') h = 'Pick what to buy. Things you own appear on the bar.';
-      else if (id === 'shovel') h = loaded() ? '<b>' + litres(L().carry.m3) + ' L</b> of ' + (L().carry.s === 'soil' ? 'earth' : esc(SURFACES[L().carry.s] ? SURFACES[L().carry.s].name.toLowerCase() : L().carry.s)) + ' on the shovel: <b>click</b> where to toss it.' : '<b>Click</b> to dig a scoop. <b>Drag</b> along the grass to skim the turf off.';
+      else if (id === 'shovel') h = loaded() ? '<b>' + litres(L().carry.m3) + ' L</b> on the shovel: <b>click</b> where to throw it.' : '<b>Click</b> to dig: each stroke throws a scoop to the <b>ring</b>. <b>Hold</b> to keep digging. <b>Right-click</b> to choose where it goes' + (markNear() ? ' (on the stake now)' : ' (beside the hole now)') + '. <b>Click a bag</b> to rip it open. <b>Drag</b> along grass to skim turf. <button type="button" class="go" data-mark="1">Set where it goes</button>';
       else if (id === 'barrow') h = L().barrow.m3 > 1e-6 ? '<b>' + litres(L().barrow.m3) + ' L</b> in the barrow. <b>Click</b> to shovel in more, <b>drag down</b> to tip it all out.' : '<b>Click</b> to shovel a scoop into the barrow. When it is full, walk it over and <b>drag down</b> to tip it out.';
       else if (id === 'can') h = '<b>Hold and drag down</b> to pour over new plants: water them in, and keep them moist for three weeks while they root. Fill the can at the pump or the stream.';
       else if (id === 'tamper') h = '<b>Click</b> to thump the ground, <b>hold and walk</b> to tamp a strip. Twice is firm. Tamp the dug-out earth, then again on the crushed-stone base.';
@@ -873,12 +1050,12 @@
       else if (LAYER_ITEM[id]) h = id === 'seed' ? '<b>Hold and sweep</b> over bare soil to sow lawn. It knits into turf in about three weeks.' : '<b>Hold and sweep</b> to lay ' + id + ' (' + amount(id) + ' left). Drag down to pour faster. It goes on bare soil: skim the turf first.';
       else if (THINGS[id]) h = '<b>Click</b> to set a ' + THINGS[id].name.toLowerCase() + ', <b>drag</b> to lay a line. <b>R</b> turns it.' + (THINGS[id].stack ? ' Set one on another for the next course.' : '');
       else if (id.startsWith('plant:')) { const p = PLANTS[id.slice(6)]; h = 'Dig a hole about <b>' + Math.round(p.holeM * 100) + ' cm</b> deep with the shovel, then <b>click</b> it with the ' + esc(p.name.toLowerCase()) + '.'; }
-      else h = '<b>Press</b> on a stone or a plant and <b>lift</b> (drag up) to pick it up. <b>Drag</b> over a weedy path to pull the weeds.';
+      else h = '<b>Drag</b> a bag to move it. <b>Press</b> on a stone or a plant and <b>lift</b> (drag up) to pick it up. <b>Drag</b> over a weedy path to pull the weeds.';
     }
     if (!force && h === hintSig) return;
     hintSig = h; hint.innerHTML = h;
   }
-  hint.addEventListener('click', (e) => { const b = e.target.closest('[data-buy]'); if (b) buy(b.dataset.buy, 1); });
+  hint.addEventListener('click', (e) => { const m = e.target.closest('[data-mark]'); if (m) { tossMark.arm = true; say('Tap where the earth should go.'); canvas.focus(); return; } const b = e.target.closest('[data-buy]'); if (b) buy(b.dataset.buy, 1); });
   function onHold(id) {
     storeEl.hidden = id !== 'store';
     if (id === 'store') renderStore();
@@ -891,7 +1068,8 @@
   function tip(what, res) {
     if (told[what]) return;
     told[what] = 1;
-    if (what === 'dug') sayS('A scoop of ' + (res.s === 'soil' ? 'earth' : res.s) + ' (' + litres(res.m3) + ' L) on the blade. Click where to throw it: a heap, a hill, a bank.', 5);
+    if (what === 'dug') sayS('Each stroke takes ' + litres(res.m3) + ' L and throws it to the ring. Right-click anywhere to heap it there instead: a hill, a bank, the far side of a bed.', 6);
+    else if (what === 'scooped') sayS('Scooping ' + (SURFACES[res.s] ? SURFACES[res.s].name.toLowerCase() : res.s) + ' off the heap. Right-click where it should go and keep clicking: it lands where the ring is. Rake it level after.', 6);
     else if (what === 'tossed') sayS('Loose earth slides down until it holds at its natural slope. Rake it level, or keep heaping.', 5);
     else if (what === 'skim') sayS('A path that lasts: dig it out 10 cm, tamp it, roll out fabric, lay crushed stone and tamp again, then the top.', 7);
     else if (what === 'loose') sayS('Set on loose ground, stones sink and tilt over the next weeks. To lay them to last: dig out, tamp, fabric, crushed stone, tamp again, then a bed of sand.', 8);
@@ -940,7 +1118,8 @@
       say('Planted. Water it in, and it fills out over ' + (PLANTS[k].years > 5 ? 'many years' : PLANTS[k].years + ' years') + '.');
       return;
     }
-    if (id === 'hands') { const t = nearestThing(a.x, a.z); if (t) act.grab = t; else { const q = RD.groundAt(G.sim.state, a.x, a.z); act.weeding = !!(q && q.weeds); } }
+    act.drag = null;
+    if (id === 'hands') { const t = nearestThing(a.x, a.z); if (t && t.o.k === 'bag') act.drag = t.o.id; else if (t) act.grab = t; else { const q = RD.groundAt(G.sim.state, a.x, a.z); act.weeding = !!(q && q.weeds); } }
   }
   function frame(a, dt) {
     const id = held();
@@ -972,6 +1151,15 @@
       act.acc += dt;
       if (act.acc >= 0.15) { act.acc = 0; const res = cmd('landscape.fabric', { x: a.x, z: a.z, r: 0.4 }); if (!res.ok) { if (act.why !== res.reason) say(res.reason, 4); act.why = res.reason; } else { act.n += res.m2; } }
     }
+    else if (k === 'hands' && act.drag) {
+      // a bag is dragged along the ground behind the hand
+      if (Math.hypot(a.x - act.lx, a.z - act.lz) < 0.12 || isWater(a.x, a.z)) return;
+      act.lx = a.x; act.lz = a.z;
+      const res = cmd('landscape.moveThing', { id: act.drag, x: a.x, z: a.z });
+      if (!res.ok) { if (act.why !== res.reason) say(res.reason); act.why = res.reason; act.drag = null; return; }
+      act.n++; dirty = true;
+      if (act.n % 3 === 0) G.burst(a.x, surfaceAt(a.x, a.z) + 0.04, a.z, 2, 0x8a7a5a, 0.6, 0.4, 0.03, 0.3);
+    }
     else if (k === 'hands' && !act.grab && act.weeding) {
       act.acc += dt;
       if (act.acc >= 0.15) { act.acc = 0; const res = cmd('landscape.weed', { x: a.x, z: a.z }); if (res.ok) { act.n++; G.burst(a.x, surfaceAt(a.x, a.z) + 0.1, a.z, 5, 0x5f8f36, 1.2, 1.8, 0.04, 0.5); } }
@@ -1001,6 +1189,7 @@
       setHeap();
       return say(res.full ? 'The barrow is full: ' + litres(res.load) + ' L. Walk it over and drag down to tip it out.' : 'In the barrow: ' + litres(res.load) + ' of ' + litres(RD.BARROW_M3) + ' L.');
     }
+    if (k === 'hands' && act.drag && !act.n) say('Drag the bag where you want it, then rip it open with the shovel.');
     if (k === 'hands' && act.grab) say('Lift it: drag up.');
     if (k === 'hands' && act.weeding && act.n) say('Pulled the weeds. Fabric under the next path keeps them from coming back.');
     if (k === 'fabric' && act.n) say('Rolled out ' + act.n.toFixed(1) + ' m² of fabric. Now the crushed stone base, or gravel or chips straight on top.', 5);
@@ -1057,7 +1246,7 @@
   function enter() {
     on = true; document.body.classList.add('gardening', 'yarding'); bar.hidden = false; shovelSay = null;
     mySlots = slotList();
-    H.open({ bar: toolsEl, reach: 2.0, camDist: 7.5, camPitch: 1.22, pace: 0.55, tipPx: 90, liftPx: 70, slots: mySlots, held: lastHeld, onHold, press, frame, release });
+    H.open({ bar: toolsEl, reach: 2.0, camDist: 7.5, camPitch: 1.22, pace: 0.55, tipPx: 90, liftPx: 70, slots: mySlots, held: lastHeld, onHold, press, frame, release, second: (a) => { if (held() === 'shovel') shovel.second(a); } });
     onHold(held()); setHeap();
   }
   function leave() {
@@ -1084,6 +1273,7 @@
     if (on) updateTag(H.aim);
     if (hoseMeshes.size) hoseSpray();
     if (flights.length) flyTick(dt);
+    strokeTick(dt); markTick(dt);
     slow += dt;
     if (slow > 0.25 || dirty) {
       slow = 0; dirty = false;
@@ -1104,6 +1294,6 @@
   window.__landscape = {
     relief, surfaceAt, tools: { shovel }, items: { shovel: ITEM.shovel }, setHeap, bindSay: (fn) => { shovelSay = fn; }, get rev() { return grid().rev; },
     maskAt: (x, z) => { const i = Math.floor(x / STEP) - maskI, j = Math.floor(z / STEP) - maskJ; return i >= 0 && j >= 0 && i < MN && j < MN ? maskData[j * MN + i] : -1; }, drawnAt: (x, z) => drawn.has(qKey(Math.floor(x / STEP), Math.floor(z / STEP))),
-    get on() { return on; }, get flying() { return flights.length > 0; }, hold: (id) => H.hold(id), refresh: () => { dirty = true; refreshGround(true); layoutStones(); layoutPlants(true); }, tiles: () => tileViews.size,
+    get on() { return on; }, get flying() { return flights.length > 0 || stroke.on; }, get stroke() { return stroke.on ? stroke.t : -1; }, get mark() { return tossMark.set ? { x: tossMark.x, z: tossMark.z } : null; }, hold: (id) => H.hold(id), refresh: () => { dirty = true; refreshGround(true); layoutStones(); layoutPlants(true); }, tiles: () => tileViews.size,
   };
 })();

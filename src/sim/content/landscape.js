@@ -52,7 +52,14 @@ export const INSTALL = Object.freeze({
   weedDaysBare: 18, weedDaysFabric: 160,   // days of growing weather for each step of weeds to come up (0..7 steps)
 });
 // The flag bits the landscape keeps on each point of the ground.
-export const FLAG = Object.freeze({ LINER: 1, FABRIC: 2, TAMP1: 4, TAMP2: 8, WEED: 16 * 7, WALL: 128 });   // WEED: bits 4-6 (0..7)
+export const FLAG = Object.freeze({ LINER: 1, FABRIC: 2, TAMP1: 4, TAMP2: 8, WEED: 16 * 7, WALL: 128, TURF: 256 });   // WEED: bits 4-6 (0..7); TURF: a layer lying on live grass
+
+// How materials arrive. Bagged: a 2 cu ft bag (56 L) of chips, bark, soil mix or sand, set down in the yard; you carry
+// it where it is wanted and break it open with the shovel, and it spills in a heap. Bulk: a load tipped off the truck
+// in a heap beside you, to be shovelled or barrowed where it goes. (Bag size: the common US garden-centre bag.)
+export const BAG_L = 56;
+export const BAGGED = Object.freeze({ wood_chips: 'woodchips', bark_mulch: 'bark', raised_bed_mix: 'bedmix' });
+export const BULK = Object.freeze({ gravel: 'gravel', crushed_stone: 'crushed', decomposed_granite: 'dg', slate_chips: 'slate', marble_chips: 'marble', lava_rock: 'lava', river_rock: 'riverrock', sand: 'sand' });
 
 // Surfaces. `item`: what laying it spends, and in what unit; m3 per unit for bulk. layer: laid on top, raking keeps it.
 export const SURFACES = Object.freeze({
@@ -90,6 +97,8 @@ export const THINGS = Object.freeze({
   timber: { id: 'timber', name: 'Timber', item: 'landscape_timber', qty: 1, dims: { w: 1.2, d: 0.14, h: 0.1 }, sink: 0.02, spacing: 1.21, line: 'tight', stack: true, blurb: 'Treated 4 x 6 timber, 1.2 m: raised beds, steps and edging' },
   // a cedar garden box: a frame that holds earth, so the soil you put in it stays in (no running out at the sides)
   gardenbox: { id: 'gardenbox', name: 'Garden box', item: 'garden_box_kit', qty: 1, dims: { w: 2.4, d: 1.2, h: 0.3 }, sink: 0, spacing: 2.5, line: 'step', box: true, blurb: 'A 1.2 x 2.4 m cedar raised bed, 30 cm deep: set it down, fill it with soil, then hoe it into a bed' },
+  // a bag of loose material lying in the yard (what is in it is kept on the bag: m, L)
+  bag: { id: 'bag', name: 'Bag', item: null, qty: 0, dims: { w: 0.55, d: 0.38, h: 0.16 }, sink: 0, spacing: 0.6, line: 'step', bag: true },
   pathlight: { id: 'pathlight', name: 'Path light', item: 'path_light', qty: 1, dims: { w: 0.12, d: 0.12, h: 0.42 }, sink: 0.1, spacing: 1.6, line: 'step', glow: true, blurb: 'A solar light on a stake: it charges by day and glows at dusk' },
 });
 

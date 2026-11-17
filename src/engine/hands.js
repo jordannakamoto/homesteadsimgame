@@ -120,6 +120,7 @@
     const hit = groundAt(ptr.ndcX, aim.down && cur && cur.freezeY ? ptr.pressNdcY : ptr.ndcY, gp);
     aim.valid = !!hit && ptr.inside;
     if (!hit) return;
+    aim.gx = gp.x; aim.gz = gp.z;                          // the ground under the pointer, before reach clamps it
     let dx = gp.x - P.x, dz = gp.z - P.z, d = Math.hypot(dx, dz);
     aim.far = d > R + 0.6;
     const min = 0.3;
@@ -143,7 +144,7 @@
     setPtr(e);
     if (e.button === 2) {
       if (aim.down) aim.second = true;                       // second button while working: tip all the way
-      else { ptr.turning = true; ptr.rx = e.clientX; ptr.ry = e.clientY; }
+      else { ptr.turning = true; ptr.rx = ptr.rx0 = e.clientX; ptr.ry = ptr.ry0 = e.clientY; }
       return;
     }
     if (e.button !== 0) return;
@@ -171,7 +172,13 @@
   const up = (e) => {
     if (!cfg) return;
     if (e.pointerType === 'touch') fingers.delete(e.pointerId);
-    if (e.button === 2) { ptr.turning = false; aim.second = false; e.stopImmediatePropagation(); return; }
+    if (e.button === 2) {
+      // a right-click that did not drag the view is a tap: the stance may use it (the yard sets where earth goes)
+      const tap = ptr.turning && Math.hypot(e.clientX - (ptr.rx0 ?? e.clientX), e.clientY - (ptr.ry0 ?? e.clientY)) < 6;
+      ptr.turning = false; aim.second = false; e.stopImmediatePropagation();
+      if (tap && cfg.second && e.target === canvas) { setPtr(e); locate(); if (aim.valid) cfg.second(aim, cur); }
+      return;
+    }
     if (!aim.down) return;
     e.stopImmediatePropagation();
     endPress();
@@ -238,6 +245,8 @@
     }
     if (!o || !it) { if (aim.down) { pm.armR.rotation.x = -1.15; pm.armL.rotation.x = -0.9; pm.body.rotation.x += 0.28; } return; }
     o.visible = true;
+    // an item with its own motion (a shovel stroke) poses the body and itself while that motion runs
+    if (it.anim && it.anim(o, pm, toLocal, dt)) return;
     const using = aim.down && it.use;
     if (!using) {
       place(o, moving && it.walk ? it.walk : it.still);
@@ -265,6 +274,13 @@
       place(o, it.reach || it.still);
       pm.armR.rotation.x = -1.3; pm.body.rotation.x += 0.2 + 0.25 * clamp(aim.dist / (cfg.reach || 1.5), 0, 1);
     }
+  }
+
+  // a world point in the character's own frame (+z ahead), for items that animate themselves
+  function toLocal(x, y, z, out = { x: 0, y: 0, z: 0 }) {
+    const P = G.player, wx = x - P.x, wz = z - P.z, c = Math.cos(P.face), s = Math.sin(P.face);
+    out.x = wx * c - wz * s; out.z = wx * s + wz * c; out.y = y - P.y;
+    return out;
   }
 
   /* ---------------- open and close ---------------- */

@@ -18,7 +18,7 @@
 // Ground flags (FLAG in the content): liner, fabric, tamped once / firm, weeds (0..7), inside a box's walls.
 
 import * as EW from './core/earthwork.js';
-import { SCOOP_M3, SCOOP_SCALES, LAWN, SURFACES, THINGS, PLANTS, BARROW_M3, ESTABLISH, POND, INSTALL, FLAG } from './content/landscape.js';
+import { SCOOP_M3, SCOOP_SCALES, LAWN, SURFACES, THINGS, PLANTS, BARROW_M3, ESTABLISH, POND, INSTALL, FLAG, BAG_L, BAGGED, BULK } from './content/landscape.js';
 import { ITEMS } from './items.js';
 import { DAY } from './time.js';
 
@@ -107,7 +107,7 @@ function dump(ctx, p = {}) {
   if (!finite(p)) return fail('Where?');
   if (!(s.carry.m3 > 1e-6)) return fail('The shovel is empty.');
   const m3 = s.carry.m3, surf = s.carry.s, layer = !!(SURFACES[surf] && SURFACES[surf].layer);
-  EW.fill(s.grid, +p.x, +p.z, m3, { r: 0.26, surface: surf, layer, t: hours(ctx) });
+  EW.fill(s.grid, +p.x, +p.z, m3, { r: 0.26, surface: surf, layer, t: hours(ctx), markF: FLAG.TURF });
   reseat(s);
   s.carry = { m3: 0, s: '' };
   s.totals.filledM3 = r4(s.totals.filledM3 + m3);
@@ -153,7 +153,7 @@ function tip(ctx, p = {}) {
   if (!(s.barrow.m3 > 1e-6)) return fail('The barrow is empty.');
   if (!finite(p)) return fail('Where?');
   const m3 = s.barrow.m3, surf = s.barrow.s, layer = !!(SURFACES[surf] && SURFACES[surf].layer);
-  EW.fill(s.grid, +p.x, +p.z, m3, { r: 0.45, surface: surf, layer, t: hours(ctx) });
+  EW.fill(s.grid, +p.x, +p.z, m3, { r: 0.45, surface: surf, layer, t: hours(ctx), markF: FLAG.TURF });
   reseat(s);
   s.barrow = { m3: 0, s: '' };
   s.totals.filledM3 = r4(s.totals.filledM3 + m3);
@@ -313,6 +313,7 @@ function take(ctx, p = {}) {
   if (!o) return fail('Nothing there.');
   for (const id in s.things) if (s.things[id].on === o.id) return fail('Lift the one on top first.');
   const th = THINGS[o.k];
+  if (th.bag) return fail('Carry the bag, or break it open with the shovel.');
   if (th.box && EW.reliefAt(s.grid, o.x, o.z) > 0.05) return fail('Empty the soil out of the box first.');
   if (th.box) cage(s, o, false);
   delete s.things[p.id];
@@ -502,6 +503,62 @@ function pondAt(s, x, z) {
   return null;
 }
 
+// ---------------------------------------------------------------------------------------- deliveries and bags
+// Turn bought material into things in the yard at (x, z): bagged material as bags set down in a row, bulk as a heap
+// tipped off the truck. p.item: the stock item; p.qty: how much of it (litres or m3, its own unit).
+function deliver(ctx, p = {}) {
+  const s = ensure(ctx);
+  if (!finite(p)) return fail('Where?');
+  const id = p.item, unit = ITEMS[id] && ITEMS[id].unit, x = +p.x, z = +p.z;
+  if (BAGGED[id] && unit === 'L') {
+    const n = Math.max(1, Math.floor(Math.min(+p.qty || BAG_L, haveQty(ctx, id)) / BAG_L + 1e-6));
+    if (haveQty(ctx, id) < BAG_L - 1e-6) return fail('You have no ' + nameOf(id) + ' to set out.');
+    if (spend(ctx, id, n * BAG_L) < n * BAG_L - 1e-6) return fail('You have no ' + nameOf(id) + ' to set out.');
+    const ids = [];
+    for (let k = 0; k < n; k++) {
+      const bid = 's' + s.nextId++, row = Math.floor(k / 3), col = k % 3;
+      const bx = r3(x + col * 0.42 - 0.42), bz = r3(z + row * 0.6);
+      s.things[bid] = { id: bid, k: 'bag', x: bx, z: bz, yaw: r3(0.15 * (k % 2 ? 1 : -1)), y: 0, ax: bx, az: bz, on: null, sag: 0, m: BAGGED[id], L: BAG_L };
+      ids.push(bid);
+    }
+    reseat(s);
+    ctx.emit('landscape.deliver', { item: id, bags: n });
+    return { ok: true, bags: n, ids };
+  }
+  if (BULK[id] && unit === 'm3') {
+    const m3 = spend(ctx, id, Math.min(+p.qty || 0.25, haveQty(ctx, id)));
+    if (!(m3 > 0)) return fail('You have no ' + nameOf(id) + ' to set out.');
+    EW.fill(s.grid, x, z, m3, { r: 0.55, surface: BULK[id], layer: true, t: hours(ctx), markF: FLAG.TURF });
+    reseat(s);
+    ctx.emit('landscape.deliver', { item: id, m3 });
+    return { ok: true, m3: r4(m3) };
+  }
+  return fail('That is not delivered loose.');
+}
+// Break a bag open where it lies: it spills in a heap.
+function open(ctx, p = {}) {
+  const s = ensure(ctx), o = s.things[p.id];
+  if (!o || o.k !== 'bag') return fail('That is not a bag.');
+  const m3 = (o.L || BAG_L) / 1000, sf = SURFACES[o.m];
+  delete s.things[p.id];
+  if (sf && sf.fillSoil) EW.fill(s.grid, o.x, o.z, m3, { r: 0.3, surface: 'soil', t: hours(ctx) });
+  else EW.fill(s.grid, o.x, o.z, m3, { r: 0.3, surface: o.m, layer: true, t: hours(ctx), markF: FLAG.TURF });
+  reseat(s);
+  ctx.emit('landscape.open', { m: o.m, m3 });
+  return { ok: true, m: o.m, m3 };
+}
+// Carry a bag (or a single loose stone) to (x, z) and set it down.
+function moveThing(ctx, p = {}) {
+  const s = ensure(ctx), o = s.things[p.id];
+  if (!o) return fail('Nothing there.');
+  if (!finite(p)) return fail('Where?');
+  if (o.on || THINGS[o.k].box) return fail('That stays where it is.');
+  for (const id in s.things) if (s.things[id].on === o.id) return fail('Lift the one on top first.');
+  o.x = o.ax = r3(+p.x); o.z = o.az = r3(+p.z); o.sag = 0;
+  reseat(s);
+  return { ok: true };
+}
+
 // ---------------------------------------------------------------------------------------- generic moves, settings
 function move(ctx, p = {}) {
   const s = ensure(ctx);
@@ -543,7 +600,8 @@ function step(ctx) {
       continue;
     }
     if (daily && warm && l > 0.002) {
-      const days = f & FLAG.FABRIC ? INSTALL.weedDaysFabric : INSTALL.weedDaysBare, wd = weedOf(f);
+      // the grass under a layer laid on turf comes straight up through it; fabric keeps nearly everything down
+      const days = f & FLAG.FABRIC ? INSTALL.weedDaysFabric : f & FLAG.TURF ? INSTALL.weedDaysBare / 3 : INSTALL.weedDaysBare, wd = weedOf(f);
       // each point comes up on its own day (offset by where it is), one step of weeds per `days` of growing weather
       const lifeDays = (lifeDt * 24) / DAY;
       if (wd < 7 && ((hr / 24 + (n * 7.31) % days) % days) < lifeDays) { tile.f[n] = (f & ~FLAG.WEED) | ((wd + 1) << WEED_SHIFT); changed = true; }
@@ -556,7 +614,7 @@ function step(ctx) {
     let moved = false;
     for (const id in s.things) {
       const o = s.things[id], th = THINGS[o.k];
-      if (o.on || th.box || th.glow || (o.sag || 0) >= INSTALL.sagM) continue;
+      if (o.on || th.box || th.glow || th.bag || (o.sag || 0) >= INSTALL.sagM) continue;
       if (tampOf(EW.fAt(g, pt(o.ax), pt(o.az))) >= INSTALL.tampPasses) continue;
       o.sag = r4(Math.min(INSTALL.sagM, (o.sag || 0) + (INSTALL.sagM * (lifeDt * 24)) / (INSTALL.sagDays * DAY)));
       moved = true;
@@ -604,6 +662,7 @@ export const landscape = {
     'landscape.fabric': fabric, 'landscape.seedLawn': seedLawn, 'landscape.weed': weed, 'landscape.place': place, 'landscape.take': take,
     'landscape.plant': plant, 'landscape.lift': lift, 'landscape.move': move, 'landscape.setScale': setScale,
     'landscape.load': load, 'landscape.tip': tip, 'landscape.water': water, 'landscape.line': line, 'landscape.hose': hose,
+    'landscape.deliver': deliver, 'landscape.open': open, 'landscape.moveThing': moveThing,
   },
 };
 
@@ -631,4 +690,4 @@ export function pondsOf(state) {
   if (!hasGrid(s)) return [];
   return ponds(s).list.map((pd) => ({ root: pd.root, pts: pd.pts, rim: pd.rim, cap: pd.cap, m3: s.ponds[pd.root] || 0, level: pd.level(s.ponds[pd.root] || 0), hose: !!s.hose[pd.root] }));
 }
-export const landscapeRead = { reliefAt, groundAt, plantSize, pondsOf, SURFACES, THINGS, PLANTS, SCOOP_M3, SCOOP_SCALES, LAWN, BARROW_M3, ESTABLISH, INSTALL, FLAG };
+export const landscapeRead = { reliefAt, groundAt, plantSize, pondsOf, SURFACES, THINGS, PLANTS, SCOOP_M3, SCOOP_SCALES, LAWN, BARROW_M3, ESTABLISH, INSTALL, FLAG, BAG_L, BAGGED, BULK };
