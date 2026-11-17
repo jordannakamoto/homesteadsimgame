@@ -25,7 +25,7 @@ const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
 function fresh() {
   // start in balance on an ordinary day: ground drainage = ordinary flow
-  return { soilMm: 0.55 * SOIL_CAP, quickMm: 0, groundMm: ORDINARY_MM_DAY * (TAU_GROUND / DAY), meltSeen: null, flowMmDay: ORDINARY_MM_DAY, wetness: 1, turbidity: 0.5 };
+  return { soilMm: 0.55 * SOIL_CAP, quickMm: 0, groundMm: ORDINARY_MM_DAY * (TAU_GROUND / DAY), meltSeen: null, flowMmDay: ORDINARY_MM_DAY, wetness: 1, turbidity: 0.6 };
 }
 
 export function stepStreams(s, w, dt) {
@@ -52,7 +52,7 @@ export function stepStreams(s, w, dt) {
   s.flowMmDay += (flow - s.flowMmDay) * (1 - Math.exp(-dt / (2 * HOUR)));        // smooth out the 10 minute steps
   s.wetness = clamp(s.flowMmDay / ORDINARY_MM_DAY, 0.05, 12);
   const storm = qOut / days / ORDINARY_MM_DAY;
-  s.turbidity += (clamp(0.35 + 0.6 * Math.sqrt(storm), 0.35, 3) - s.turbidity) * (1 - Math.exp(-dt / (storm > s.turbidity ? 1 * HOUR : 10 * HOUR)));
+  s.turbidity += (clamp(0.5 + 0.6 * Math.sqrt(storm), 0.5, 3) - s.turbidity) * (1 - Math.exp(-dt / (storm > s.turbidity ? 1 * HOUR : 10 * HOUR)));
   return s;
 }
 

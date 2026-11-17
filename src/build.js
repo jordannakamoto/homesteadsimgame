@@ -8745,6 +8745,7 @@
         if (!stickWall(g.cls, g.mat)) continue;
         const opens = [];
         for (const q of g.mods) opening(opens, q.s, q.len, q.type, S.segs[q.idx][7]);
+        for (const o of S.fopen) o.g === g && opens.push(OP.freeToFraming(o.f, o.off));
         desc.walls.push({ id: g.id, a: [g.x0, g.z0], b: [g.x1, g.z1], y0: 0, h: H, out: side(g.x0, g.z0, g.x1, g.z1), mat: g.mat, openings: opens, foot: desc.found === "plinth" ? 0.3 : undefined });
       }
       for (const r of S.roofs) {
