@@ -8,6 +8,7 @@ import { createRiverLive } from './water/rivers-live.js';
 import { createFalls } from './water/falls-render.js';
 import { createWaterFx } from './water/water-fx.js';
 import { createReflectProbe } from './water/reflect-probe.js';
+import { createReflectPlane } from './water/reflect-plane.js';
 import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -2719,6 +2720,8 @@ const riverFalls = createFalls({ river: riverWater, CS });
 const waterFx = createWaterFx({ scene, river: riverWater });
 // what the streams reflect near you: the real surroundings (src/water/reflect-probe.js)
 const reflectProbe = createReflectProbe({ renderer, scene, hide: [riverWater.material, riverLive.material, riverFalls.material, waterFx.points, water], uniforms: riverWater.uniforms });
+// and the mirror of the banks in the water at the level of the stream beside you (src/water/reflect-plane.js)
+const reflectPlane = createReflectPlane({ renderer, scene, hide: [riverWater.material, riverLive.material, riverFalls.material, waterFx.points, water], uniforms: riverWater.uniforms });
 let probeAt = null, probeAway = 0;
 riverWater.uniforms.uTPM.value = LOOK.waterTexel === 'ground' ? 6.4 : 12.8;
 riverWater.uniforms.uSnap.value = LOOK.waterTexel === 'smooth' ? 0 : 1;
@@ -2902,7 +2905,7 @@ function updateStreams(dt) {
   const near = LOOK.waterReflect === 'probe' ? nearStream() : null;
   if (near) { probeAt = near; probeAway = 0; } else probeAway += dt;
   if (probeAt && probeAway > 4) probeAt = null;
-  reflectProbe.setOn(!!probeAt);
+  reflectProbe.setOn(!!probeAt); reflectPlane.setOn(!!probeAt);
   if (probeAt) { reflectProbe.update(dt, probeAt.x, probeAt.y, probeAt.z); u.uEnvPos.value.set(player.x, probeAt.y, player.z, 1); } else u.uEnvPos.value.w = 0;
   // irrigation: garden cells under stream water (a trench dug from a brook, a flooded bed) soak it up
   irrigT += dt;
@@ -3171,7 +3174,7 @@ function setLook(key, value) {
   if (key === 'edgeBelts' && window.__nature) for (const c of world.chunks.values()) { c.litterItems = null; window.__nature.refresh(c); }
   if (key === 'taa') { applyGfx(); resize(); }
   if (key === 'riverWater') riverLive.setMode(value === 'baked' ? 'bed' : value);
-  if (key === 'waterReflect' && value !== 'probe') reflectProbe.setOn(false);
+  if (key === 'waterReflect' && value !== 'probe') { reflectProbe.setOn(false); reflectPlane.setOn(false); }
   if (key === 'bedStyle') U.bedVox.value = value === 'real' ? 0 : 1;
   if (key === 'waterTexel') { riverWater.uniforms.uTPM.value = value === 'ground' ? 6.4 : 12.8; riverWater.uniforms.uSnap.value = value === 'smooth' ? 0 : 1; }      // MSAA off or back on, and the resolve path
   if (key === 'toneMap') {
@@ -3308,7 +3311,7 @@ const gfxPanel = (() => {
       chk('skyShade', 'Shade under trees and in hollows', 'Ground and grass beneath tree crowns and down in dips see less sky, so forest floors darken. Baked, no frame cost.'),
       chk('ao', 'Extra ambient occlusion', 'A second, stronger occlusion on top of the Lighting pass (Ultra full, High and Medium half resolution).'),
       h('div', { className: 'row' }, h('span', {}, 'Stream water', h('span', { className: 'hint', textContent: 'Live simulates the water round you on the graphics card: it flows round what you put in it, fills what you dig and stirs as you wade. Baked is the still, cheaper version everywhere. Beyond the live window the baked water shows.' })), rw),
-      h('div', { className: 'row' }, h('span', {}, 'Stream reflections', h('span', { className: 'hint', textContent: 'Surroundings: streams near you reflect what is really round them (a small picture of the surroundings, one side redrawn a frame). Simple: a sky and a tree line worked out in the shader, cheaper.' })), wr),
+      h('div', { className: 'row' }, h('span', {}, 'Stream reflections', h('span', { className: 'hint', textContent: 'Surroundings: streams near you reflect what is really round them: the banks, grass and rocks mirrored in place where they meet the water (the scene drawn a second time, at half resolution), and a small picture of the surroundings further off. Simple: a sky and a tree line worked out in the shader, much cheaper.' })), wr),
       h('div', { className: 'row' }, h('span', {}, 'Stream beds', h('span', { className: 'hint', textContent: 'The stones under the stream water near you. Voxel draws them in small texels with a few tones, like the rest of the world; Realistic draws them smooth.' })), bs),
       h('div', { className: 'row' }, h('span', {}, 'Water style', h('span', { className: 'hint', textContent: 'Smooth draws the foam, flow and ripples of the streams at full detail. The pixel styles cut them into texels like the ground.' })), wt),
       h('div', { className: 'row' }, h('span', {}, 'Upscaler', h('span', { className: 'hint', textContent: 'How a below-full-size render is enlarged. Sharp pixels keeps each pixel a crisp block. FSR 1 is made for photoreal images and smears pixel textures.' })), up),
@@ -3892,26 +3895,35 @@ function updatePlayer(dt) {
     const ahead = heightAt(P.x + (vx / sp) * 0.6, P.z + (vz / sp) * 0.6) - heightAt(P.x, P.z);
     if (ahead > 0.25) { const k = clamp(1 - (ahead - 0.25) * 1.3, 0.25, 1); vx *= k; vz *= k; sp *= k; }
   }
-  // wading. Water only slows you once it is past the shins, and only a deep, fast current leans you downstream. The
-  // water is not moved round as a lump (a 25 cm simulation can only make a wobbling mound of a leg): what a leg
-  // makes is drawn instead, as on a real stream: a trail of rings spreading behind you that crowd into a V (a wake),
-  // white water churned at the legs, a splash at each step
+  // Wading, as it is in a real stream. Water slows you by how much of you it has to push through (little at the
+  // ankles, a lot at the thighs) and by how hard you are pushing into the current; a deep, fast current pushes you
+  // downstream (drag grows with depth and the square of its speed); in still water you hardly feel it at the knee.
+  // What it does to the water is drawn, not simulated as a lump: the water piles against your legs, leaves a hollow
+  // behind and trails a V wake downstream of you (in the frame of the water going past, so standing in a current
+  // makes one as walking through still water does), white water where it runs fast past you, a splash at each step,
+  // and rings spreading in still water.
   const sw = rivers && !P.air ? streamWaterAt(P.x, P.z) : null;
   P.wade = sw && sw.depth > 0.04 ? sw.depth : 0;
+  const wu = riverWater.uniforms;
   if (P.wade) {
-    const k = clamp(1 - Math.max(0, P.wade - 0.15) * 0.8, 0.55, 1); vx *= k; vz *= k; sp *= k;
-    const lean = 0.25 * clamp((P.wade - 0.3) * 2, 0, 1) * 7 * dt;
-    P.kvx += sw.vx * lean; P.kvz += sw.vz * lean;
-    riverLive.froth(0, P.x, P.z, 0.3, sp > 0.5 ? 0.6 : 0.12);
+    const d = P.wade, cur = Math.hypot(sw.vx, sw.vz);
+    const into = sp > 0.1 ? Math.max(0, -(vx * sw.vx + vz * sw.vz) / sp) : 0;           // walking against the current
+    const k = clamp(1 - 0.75 * smoothstep(0.12, 0.85, d) - 0.25 * into * smoothstep(0.2, 0.7, d) * Math.min(1, cur), 0.3, 1);
+    vx *= k; vz *= k; sp *= k;
+    const drag = 0.35 * smoothstep(0.3, 0.9, d) * Math.min(1.5, cur * cur) * 7 * dt;
+    P.kvx += sw.vx * drag; P.kvz += sw.vz * drag;
+    const rx = sw.vx - vx, rz = sw.vz - vz, rel = Math.hypot(rx, rz);
+    wu.uWake.value.set(P.x, P.z, rx, rz); wu.uWakeK.value.set(clamp(d / 0.35, 0.35, 1.6), 1);
+    riverLive.froth(0, P.x, P.z, 0.3, 0.6 * smoothstep(0.3, 1.2, rel));
     P.ringT = (P.ringT || 0) - dt;
-    if (P.ringT <= 0) { P.ringT = sp > 0.5 ? 0.11 : 0.7; waterFx.ripple(P.x, P.z, sp > 0.5 ? 0.45 : 0.3); }
+    if (P.ringT <= 0 && cur < 0.25) { P.ringT = sp > 0.5 ? 0.3 : 0.9; waterFx.ripple(P.x, P.z, sp > 0.5 ? 0.4 : 0.25); }
     P.splashT = (P.splashT || 0) - dt;
     if (P.splashT <= 0 && sp > 0.5) {
-      const wy = heightAt(P.x, P.z) + P.wade, side = (P.stepSide = -(P.stepSide || 1)) * 0.12;
+      const wy = heightAt(P.x, P.z) + d, side = (P.stepSide = -(P.stepSide || 1)) * 0.12;
       P.splashT = clamp(0.62 / sp, 0.12, 0.4) * 1.6;
-      waterFx.splash(P.x + Math.cos(P.face) * side, wy, P.z - Math.sin(P.face) * side, sp * Math.min(1, P.wade * 3), vx, vz);
+      waterFx.splash(P.x + Math.cos(P.face) * side, wy, P.z - Math.sin(P.face) * side, sp * Math.min(1, d * 3), vx, vz);
     }
-  }
+  } else wu.uWakeK.value.y = 0;
   if (P.climbY != null) { vx = vz = 0; P.kvx = P.kvz = 0; }       // on a ladder (set by the construction add-on): it places the player
   P.x += (vx + P.kvx) * dt; P.z += (vz + P.kvz) * dt;
   P.kvx *= Math.exp(-7 * dt); P.kvz *= Math.exp(-7 * dt);
@@ -4206,6 +4218,8 @@ function autoResolution(now) {
 }
 function render() {
   processShade();
+  // the stream mirror, drawn from the camera as it is for this frame
+  if (probeAt && reflectPlane.on) reflectPlane.update(camera, probeAt.y - 0.25, player.x, player.z);
   if (viaComposer()) {
     const useTaa = LOOK.taa;
     if (useTaa) taa.begin(composer.renderTarget1.width, composer.renderTarget1.height);

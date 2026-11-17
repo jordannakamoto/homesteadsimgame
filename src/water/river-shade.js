@@ -19,7 +19,9 @@ export const RIVER_SHADE = /* glsl */ `
   uniform float uTime, uTurbid, uSkyK, uTPM, uSnap; uniform sampler2D uTex, uSkyMap, uFoamTex;
   uniform vec3 uSunDir, uSunCol, uAmb, uSky, uZenith;
   uniform vec4 uWin;                       // the live simulation's window (x0, z0, x1, z1); x1 < x0 when there is none
-  uniform samplerCube uEnv, uEnv2; uniform vec4 uEnvPos; uniform float uEnvMix;          // the reflection probe (reflect-probe.js): where, and w on/off
+  uniform samplerCube uEnv, uEnv2; uniform vec4 uEnvPos; uniform float uEnvMix;
+  uniform sampler2D uRefl; uniform mat4 uReflMat; uniform vec4 uReflOn;   // the mirror (reflect-plane.js)
+  uniform vec4 uWake; uniform vec2 uWakeK;   // someone wading: where, the current past their legs (x, z); how deep, on          // the reflection probe (reflect-probe.js): where, and w on/off
   uniform vec4 uRip[24];                   // ripples: x, z, start time, strength
   const mat4 BAYER = mat4(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
   float bayer4(vec2 c) { ivec2 i = ivec2(mod(c, 4.0)); return (BAYER[i.y][i.x] + 0.5) / 16.0; }
@@ -51,14 +53,46 @@ export const RIVER_SHADE = /* glsl */ `
     vec4 m = max(0.6 - vec4(dot(x0, x0), dot(x1, x1), dot(x2, x2), dot(x3, x3)), 0.0); m = m * m;
     return 42.0 * dot(m * m, vec4(dot(p0, x0), dot(p1, x1), dot(p2, x2), dot(p3, x3)));
   }
-  // the stream's surface height (m) at a: (along the current, across it), carried downstream at speed sp
-  float flowH(vec2 a, float sp, float rough) {
+  // the stream's surface height (m) at p, a point already carried back along the current (flow-mapped by the
+  // caller, so the shapes follow the water round every bend and outcrop): slow swells, and a finer chop where it runs
+  float flowH(vec2 p, float rough) {
     float t = uTime;
-    vec2 ad = vec2(a.x - t * (0.15 + sp), a.y);
-    float patchy = smoothstep(-0.25, 0.65, snoise(vec3(ad * vec2(0.3, 0.45), t * 0.06)));
-    float h = snoise(vec3(ad * vec2(0.5, 0.7), t * 0.2)) * 0.4;                             // slow swells
-    h += snoise(vec3(ad * vec2(0.8, 2.0), t * 0.4)) * 0.35 * rough * (0.5 + 0.5 * patchy);  // broad ridges along the current
-    return h * (0.006 + 0.024 * rough);
+    float patchy = smoothstep(-0.25, 0.65, snoise(vec3(p * 0.18, t * 0.05)));
+    float h = snoise(vec3(p * 0.6, t * 0.18)) * 0.4;
+    h += snoise(vec3(p * 1.7, t * 0.45)) * 0.3 * (0.3 + 0.7 * rough) * (0.5 + 0.5 * patchy);
+    return h * (0.008 + 0.022 * rough);
+  }
+  // wind on the water, not carried by it: faint ripples in patches drifting across, so still pools are not glass
+  float windH(vec2 q) {
+    float t = uTime;
+    float patchy = smoothstep(0.1, 0.8, snoise(vec3(q * 0.12 + t * vec2(0.05, 0.03), t * 0.04)));
+    return snoise(vec3(q * 2.6 + t * vec2(0.35, 0.2), t * 0.9)) * 0.0022 * patchy;
+  }
+  // The water round legs standing in a current, in the frame of the water going past them (u downstream, w across):
+  // it piles up against the upstream side (a bow wave), leaves a hollow just behind, and trails two arms in a V
+  // (narrower the faster it goes past) with short transverse waves between them, as on a real wading leg or a post in
+  // a stream. Stands still relative to the legs, so walking and current both make it; grows with depth and speed.
+  float wakeH(vec2 q, out float foam) {
+    foam = 0.0;
+    if (uWakeK.y < 0.5) return 0.0;
+    vec2 dq = q - uWake.xy;
+    if (dot(dq, dq) > 30.0) return 0.0;
+    vec2 rel = uWake.zw; float s = length(rel);
+    vec2 dir = s > 0.02 ? rel / s : vec2(1.0, 0.0);
+    float u = dot(dq, dir), w = dot(dq, vec2(-dir.y, dir.x));
+    float k = smoothstep(0.03, 0.45, s) * uWakeK.x;
+    float bow = exp(-((u + 0.2) * (u + 0.2) + w * w * 1.6) / 0.022);
+    float hollow = exp(-((u - 0.28) * (u - 0.28) + w * w * 1.3) / 0.03);
+    float spread = mix(0.62, 0.34, smoothstep(0.2, 1.3, s));
+    float arm = u > 0.0 ? exp(-pow(abs(w) - u * spread, 2.0) / (0.002 + u * 0.004)) * exp(-u * 0.5) : 0.0;
+    float inside = u > 0.0 ? smoothstep(u * spread, u * spread * 0.6, abs(w)) : 0.0;
+    float trans = sin(u * 9.81 / max(s * s, 0.12)) * inside * exp(-u * 1.1);
+    foam = k * (exp(-w * w / (0.006 + u * 0.03)) * exp(-u * 0.9) * step(0.0, u) * smoothstep(0.25, 0.9, s) + bow * 0.6 * smoothstep(0.35, 1.0, s));
+    return k * (0.035 * bow - 0.03 * hollow + 0.014 * arm + 0.007 * trans);
+  }
+  // the whole surface at q: two flow-mapped layers half a cycle apart (Vlachos), plus the wind
+  float surfH(vec2 q, vec2 v, float rough, float f0, float f1, float wv) {
+    return mix(flowH(q - v * f0, rough), flowH(q - v * f1 + 7.3, rough), wv) + windH(q);
   }
   // q: where to shade (the texel centre when pixel-snapped); v: velocity (m/s); d: depth (m); foamIn: white water (0-1)
   vec4 shadeRiver(vec2 q, vec2 cell, vec3 world, vec2 v, float d, float foamIn) {
@@ -75,17 +109,23 @@ export const RIVER_SHADE = /* glsl */ `
     //  - wavelets and capillaries, in patches: some water glassy, some broken, wandering with the flow
     // Its slope, from small differences of that height, gives the normal.
     float rough = 0.25 + 0.75 * smoothstep(0.05, 1.2, sp);
-    vec2 a = vec2(dot(q, fd), dot(q, fn));
+    // surface layers on a 1.2 s cycle, carried at the water's own speed
+    float sph = uTime / 1.2 + snoise(vec3(q * 0.15, 0.0)) * 0.5, s0 = fract(sph), s1 = fract(sph + 0.5), sw = abs(1.0 - 2.0 * s0);
     float e = 0.14;                                    // wide differences: a soft slope, no thin bright lines
-    float h0 = flowH(a, sp, rough), hx = flowH(a + vec2(e, 0.0), sp, rough), hy = flowH(a + vec2(0.0, e), sp, rough);
-    vec2 ga = vec2(hx - h0, hy - h0) / e;
-    vec2 g = fd * ga.x + fn * ga.y;
+    float h0 = surfH(q, v, rough, s0 * 1.2, s1 * 1.2, sw);
+    vec2 g = vec2(surfH(q + vec2(e, 0.0), v, rough, s0 * 1.2, s1 * 1.2, sw) - h0, surfH(q + vec2(0.0, e), v, rough, s0 * 1.2, s1 * 1.2, sw) - h0) / e;
+    // the water round wading legs, with fine differences (its shapes are small)
+    float wkFoam, wf1, wf2;
+    float wk0 = wakeH(q, wkFoam);
+    g += vec2(wakeH(q + vec2(0.03, 0.0), wf1) - wk0, wakeH(q + vec2(0.0, 0.03), wf2) - wk0) / 0.03;
+    foamIn = max(foamIn, clamp(wkFoam, 0.0, 1.0));
+
     // and the earlier look's flowed ripple texture, at a lighter hand, each layer turned so its tiling never lines up
     mat2 r1 = mat2(0.799, 0.602, -0.602, 0.799), r2 = mat2(0.326, -0.946, 0.946, 0.326);
     vec2 uvA = r1 * q * 0.22 - v * t0 * 0.4, uvB = r2 * q * 0.22 - v * t1 * 0.4 + 0.37;
     g += (mix(texture2D(uTex, uvA).rg, texture2D(uTex, uvB).rg, wb) - 0.5) * 0.12 * (0.25 + rough);
     // the finest ruffle, too small to take differences of: tilts each spot a little at random
-    vec3 rq = vec3(q * 9.0 - v * uTime * 9.0, uTime * 1.7);
+    vec3 rq = vec3((q - v * s0 * 1.2) * 9.0, uTime * 1.7);
     g += vec2(snoise(rq), snoise(rq + 31.7)) * 0.006 * rough;
     // ripples spreading where the water was touched: a travelling ring in the slope
     for (int i = 0; i < 24; i++) {
@@ -118,12 +158,23 @@ export const RIVER_SHADE = /* glsl */ `
     float envK = uEnvPos.w * (1.0 - smoothstep(25.0, 50.0, distance(q, uEnvPos.xz)));
     float lod = 2.0 + 2.5 * rough;
     if (envK > 0.0) sky = mix(sky, mix(textureLod(uEnv, R, lod).rgb, textureLod(uEnv2, R, lod).rgb, uEnvMix), envK);
+    // and where this water lies at the mirror's level, the mirror: the banks and what hangs over them, in place,
+    // wavering with the ripples
+    if (uReflOn.x > 0.5) {
+      float kp = (1.0 - smoothstep(0.12, 0.5, abs(world.y - uReflOn.y))) * (1.0 - smoothstep(22.0, 34.0, distance(q, uReflOn.zw)));
+      if (kp > 0.0) {
+        vec4 pr = uReflMat * vec4(world.x, uReflOn.y, world.z, 1.0);
+        vec2 ruv = pr.xy / pr.w + g * (0.05 + 0.08 * rough);
+        kp *= smoothstep(0.0, 0.03, min(min(ruv.x, 1.0 - ruv.x), min(ruv.y, 1.0 - ruv.y)));
+        sky = mix(sky, texture2D(uRefl, clamp(ruv, 0.001, 0.999)).rgb, kp);
+      }
+    }
     float sd = max(dot(R, uSunDir), 0.0);
     // the sun on the water: a soft sheen over the rippled surface (a mirror-sharp glint on smooth noise would draw
     // rings like a fingerprint), broken into sparkles by the smallest wavelets, more where the water is rough
     vec3 H = normalize(V + uSunDir);
     float nh = max(dot(N, H), 0.0);
-    float sparkle = step(0.9, snoise(vec3(q * 9.0 - v * uTime * 9.0, uTime * 2.0)) * 0.5 + 0.5) * smoothstep(0.4, 1.0, rough);   // only on broken water
+    float sparkle = step(0.9, snoise(vec3((q - v * s0 * 1.2) * 9.0, uTime * 2.0)) * 0.5 + 0.5) * smoothstep(0.4, 1.0, rough);   // only on broken water
     vec3 glint = uSunCol * (pow(nh, 160.0) * 0.4 + pow(sd, 400.0) * 0.5) * sparkle * skyVis * step(line, R.y);   // only glints on broken water, no wide sheen; none where the reflection is trees
     float path = d * (1.0 + 1.0 / max(V.y, 0.25));
     // loss a metre: stream water carries fine sediment and dissolved organic matter even on a fair day (red lost
