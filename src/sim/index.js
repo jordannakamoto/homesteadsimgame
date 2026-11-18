@@ -51,6 +51,8 @@ export * as supply from './core/supply.js';
 export { structure, solveStructure, environment as structureEnvironment, overlayData as structureOverlayData, swayNow, designValues, analyseBeam, joistCheck, maxSpan, columnCapacity, designSnowKPa, SOILS as GROUND_SOILS } from './structure.js';
 export * from './fixtures.js';
 export { createPartsSystem, ROTATIONS as PART_ROTATIONS, rotationTo } from './core/parts.js';
+export { compileLinks } from './core/links.js';
+export { createRoutesSystem, runState as routeRunState, toNeutral as routesToNeutral, worldOf as routeWorldOf, pathLength } from './core/routes.js';
 export { plumbingSystem, compilePlumbing } from './plumbing.js';
 export * from './content/plumbing-parts.js';
 

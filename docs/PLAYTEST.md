@@ -501,3 +501,18 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 **What's weak**
 
 - The cord is invisible and its 30 m is a fixed number; no extension cords yet.
+
+## Services S1 — one connection compiler, and a store for runs in buildings
+
+**What is new**
+
+- Nothing to see yet: this is groundwork for in-wall wiring and plumbing. First Water (the kit pipes in the yard) now compiles through the new generic `src/sim/core/links.js` and must play exactly as before; its output was checked identical on 400 random pipe networks.
+- `src/sim/core/routes.js`: a generic store of runs on frames (a building), with nodes, bores, pulling, joins and segments as work steps. Not registered in the game yet (that is S2, with the content).
+
+**Try this**
+
+1. First Water: pump, fit kit parts from the barrel to the tap, open the valve, leave an end open. Flow, leaks and the valve should behave as before.
+
+**What's weak**
+
+- No player-facing change; routes become visible with S2/S3.
