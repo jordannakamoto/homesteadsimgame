@@ -4,19 +4,33 @@ How the game is put together, what each part may and may not do, and the contrac
 
 See [Steam and co-op foundations](docs/FOUNDATIONS.md) for the implementation sequence, compatibility boundaries and benchmark results.
 
-## What exists (audit, November 2026)
+## What exists (audit, November 2026; sizes refreshed 18 Nov 2026)
 
 The game is one self-contained HTML page built by `build.sh`: `src/engine.js` is bundled with three.js into one script, and the add-ons are minified into a second.
 
 | File | Lines | What it holds | Verdict |
 |---|---|---|---|
-| `src/engine.js` | ~2,900 | Terrain (chunked heightfield, 32 m chunks, seeded noise, height edits as deltas), trees and felling, grass, water, sky and light, player movement, tools, HUD, the frame loop, and the switched-off combat | Keep. Rendering and world generation are good. It mixed world truth with drawing; simulation truth now lives in `src/sim/`. Combat stays dormant and is not built on. |
-| `src/build.js` | ~4,600 | Build mode: structures made of grid floors, grid walls, free-angle wall segments, roofs, towers, stairs, pillars, paths, furniture; undo, copy, save | Keep the capabilities and geometry code. The interface is redesigned in iteration 2a. Its data model is the starting point for the piece interface below. |
-| `src/nature.js` | ~1,200 | Ground cover, insects, animals, foliage lighting, pine level of detail | Keep. Purely visual. |
-| `src/fxpost.js` | ~250 | The single post-processing pass (High quality only) | Keep. No new full-screen passes. |
+| `src/engine.js` | ~4,500 | Terrain (chunked heightfield, 32 m chunks, seeded noise, height edits as deltas), trees and felling, grass, water, light, player movement, tools, HUD, the frame loop, and the switched-off combat | Keep. Rendering and world generation are good. It mixed world truth with drawing; simulation truth now lives in `src/sim/`. Combat stays dormant and is not built on. |
+| `src/build.js` | ~11,300 | Build mode: structures made of grid floors, grid walls, free-angle wall segments, roofs, towers, stairs, pillars, paths, fixtures, furniture; undo, copy, save. One closure; see "Adding to build mode" | Keep the capabilities and geometry code. Do not reorganise it. |
+| `src/buildui.js` | ~650 | Build mode's interface: tool palette, options strip and property inspector, live dimensions | Draws only what `__build.view()` describes. |
+| `src/framing.js` | ~815 | Real construction as data: from the walls, floors and roofs of a building, every member a builder would put in (piers, joists, sheets, plates, studs, headers, rafters, batts, boards), with its section, length, place, build stage and what it is bought as. Also the `STAGES` order | Pure arithmetic, no DOM or three.js. Read as `window.__framing`; tested headlessly. |
+| `src/construct-view.js` | ~2,000 | Construction view: the Build panel, deliveries as stacks, carrying, and raising a building by hand, stage by stage | Draws and drives the `construction` system; build mode keeps the building's shape and draws what is finished. |
+| `src/garden-view.js` | ~1,200 | Garden view (key 5): hotbar of hoe, can, seed and so on, one gesture per job, plus the plants and beds, inspector card, almanac and first-salad cards | Draws `sys.garden`, owns no truth. |
+| `src/landscape-view.js` | ~1,500 | Landscape view, the Yard (key 6): shovel, rake, gravel, bark, sand, lawn seed, stones and nursery plants; draws the hand-shaped ground, the stones and the plants | Draws `sys.landscape`, owns no truth. Shared with the garden: the shovel gesture and the shape of the ground. |
+| `src/water-hands.js`, `src/opening-hands.js` | ~440 | Water by hand (the starting yard, well, pump, barrel, tap, kit parts); doors and windows operated by hand in Hands mode | Content on top of the generic hands layers. |
+| `src/chickens-view.js`, `src/weather-view.js`, `src/stock-view.js`, `src/utilities-view.js` | ~1,230 | The chickens and their panel; rain, snow and the weather readout; the Inventory, Supplier and Projects panel; the Home panel (power, water, room temperatures) | Add-ons that read simulation state. |
+| `src/sky.js`, `src/openings-global.js` | ~70 | The sky dome with clouds; the doors and windows catalog exposed as `window.__openings` | |
+| `src/nature.js` | ~1,250 | Ground cover, insects, animals, foliage lighting, pine level of detail | Keep. Purely visual. |
+| `src/fxpost.js` | ~270 | The single post-processing pass (High quality only) | Keep. No new full-screen passes. |
 | `src/fx.js`, `src/fxhost.js` | ~840 | Fires, smoke, tree variety, procedural characters | Keep. Purely visual. |
-| `src/touch.js` | ~280 | Dual-stick touch controls | Keep. |
-| `src/buildui.js` | ~330 | Build mode's interface (2a): tool palette, options strip and property inspector, live dimensions | Draws only what `__build.view()` describes. |
+| `src/touch.js` | ~240 | Dual-stick touch controls | Keep. |
+| `src/engine/*.js` | ~1,780 | Generic page-side mechanisms, no homestead words: `assembly.js` (putting a ghost together piece by piece), `carry.js` (stacks on the ground and a load in the arms), `cutstation.js` (sawhorses, saw, offcut), `hands.js` (hotbar, reach-limited aiming, gestures), `parts.js` (kit parts that click together), `reach.js` (the smaller pointer-and-reach layer `hands.js` is to replace), `roofwalk.js` (walking on sloped planes), `scaffold.js` (platform on frames, climbed by walking into the ladder) | Each takes content as data. |
+| `src/sim/*.js` | ~10,800 | The simulation systems, one per file, registered in `src/sim/index.js`: `construction`, `structure`, `thermal`, `rooms`, `electrical`, `water`, `plumbing`, `streams`, `weather`, `calendar`, `garden`, `landscape`, `chickens`, `animals`, `cooking`, `physical-kitchen`, `materials`, `items`, `stock`, `site`, `save` and others | Pure JavaScript, deterministic, run in Node and in the page. |
+| `src/sim/core/*.js` | ~1,100 | Generic simulation mechanisms: `cellfield.js` (square cells in beds), `earthwork.js` (ground as a 10 cm heightfield: cut, fill, settle, cover), `growth.js` (thermal-time plant growth), `parts.js` (kit parts on a 3D lattice), `soilwater.js` (bucket soil-water model), `supply.js` (orders, deliveries, stacks, carried load) | No homestead words; content registers with them. |
+| `src/sim/content/*.js` | ~1,100 | Homestead content as data: `construction.js` (stages and their wording, shed steps), `crops.js` (twelve crops), `garden-items.js`, `landscape.js` (surfaces, stones, plants, tools), `openings.js` (doors and windows), `plumbing-parts.js` (the starter kit), `soils.js` | May be replaced wholesale. |
+| `src/water/*.js` | ~2,060 | Streams and sea on screen: baked and live (GPU shallow-water) river tiers, the shared water look, reflections (mirror plane and probe), the wake simulation round the player, falls and spray, and the sea | Rendering only; channel generation in `rivers-gen.js` is pure and tested in Node. |
+| `src/cooking/*.js` | ~900 | The kitchen's models and view (key K) | Reads `sim/physical-kitchen.js`. |
+| `src/world/chunk-stream.js` | ~50 | Nearest-first chunk streaming with a retention margin | |
 
 Findings that shaped the plan:
 
@@ -68,7 +82,7 @@ Rules:
 - A generic module does not import a content module. Content registers itself with the mechanism.
 - New generic modules are named for what they are (`vehicles.js`, `carry.js`, `assembly.js`, `networks.js`), not for their first use.
 - Vehicles in particular: one drive model and controller for any wheeled or tracked body; a vehicle is a data record (dimensions, mass, speed, turning, seats, attachment points); an implement is a data record plus a work function (dig, grade, lift, drill). An excavator is content. A cart, a tractor, a truck or a boat in another game should need only new records.
-- File layout: today everything sits in `src/` and `src/sim/`. New generic modules go in `src/engine/` (page side) and `src/sim/core/` (simulation side); new content goes in `src/game/` and `src/sim/content/`. Existing files move into that layout in a dedicated tidy-up after wave C merges, not while agents are editing them.
+- File layout: `src/engine/`, `src/sim/core/` and `src/sim/content/` exist; `src/game/` does not, and most older files still sit in `src/` and `src/sim/`. New generic modules go in `src/engine/` (page side) and `src/sim/core/` (simulation side); new content goes in `src/game/` and `src/sim/content/`. The tidy-up that moves existing files into that layout was promised for after wave C. It has not happened and is deferred to a quiet window, when no other session is editing those files; until then, do not move files to match the layout.
 - Definition of done for any iteration now includes: the mechanism and the content are in separate files, and the mechanism passes its tests with a non-homestead test fixture.
 
 ## Simulation core
@@ -117,8 +131,8 @@ piece = {
                // "p3.s4" a tower side, "p3.f0" a tower floor, "p3.r" its roof, "p3.st" its stair, "p5.fd" the footing under floor p5, "p7+p9" the beam between two pillars.
   struct,      // the structure it belongs to (persistent number); storey: its storey there (-1 cellar, 0 ground, 1..)
   kind,        // "wall" | "floor" | "roof" | "door" | "window" | "post" | "beam" | "stair" | "tower" | "foundation" | "path" | "fixture"
-  type,        // build mode's own name: wall "wall" | "rail" | "parapet" | "rampart" | "gable"; roof "gable" | "hip" | "shed" | "flat" | "cone" | "dome" | "pyramid";
-               // door "door" | "door2" | "gate" | "railgate"; window "window".."window4"; post "pillar" | "chimney"; stair "straight" | "spiral"; fixture: the furniture name
+  type,        // build mode's own name: wall "wall" | "rail" | "gable"; roof "gable" | "hip" | "shed" | "flat" | "cone" | "dome" | "pyramid";
+               // door "door" | "door2" | "railgate"; window "window" | "window2" | "window4"; post "pillar" | "chimney"; stair "straight" | "spiral"; fixture: the furniture name
   material,    // build mode's appearance name until the orchestrator maps it through APPEARANCE_MATERIAL
   a, b,        // world metres { x, z }: wall and beam ends, a roof plane's eave edge, a stair's foot and head, opposite corners of a floor; a point piece has a = b
   y0, y1,      // bottom and top in world metres (right for upper storeys, stretched storeys, raised floors and turned structures)
@@ -295,13 +309,19 @@ Add-ons and tests reach the game only through these. Add a name here rather than
 - `window.__game.garden` (F1): the garden's pure read-outs from `src/sim/garden.js` (`gardenRead`: `cellInfo`, `plantInfo`, `plantStatus`, `bedSummary`, `almanac`, `frostTonight`, `sowAdvice`, `stageOf`, `dateOf`). `window.__gardenView`: the garden add-on's test hooks. The garden system (`garden`, after water in `GAME_SYSTEMS`) is built on three generic mechanisms in `src/sim/core/` (`cellfield.js`, `soilwater.js`, `growth.js`) with content in `src/sim/content/` (`crops.js`, `soils.js`, `garden-items.js`); garden items join `ITEMS` through `src/sim/items.js`.
 - `window.__game.calendar` (iteration 1): the pure calendar and sun functions of `src/sim/calendar.js`, for add-ons. `window.__weatherView`: the weather add-on's test hooks (`info`, `bench`, `settle`, `open`).
 
+## Adding to build mode
+
+`src/build.js` is one large closure (about 11,300 lines) that several sessions edit at once. Do not split it or reorganise it. New building elements (foundations, decks, chimneys, skylights, lofts, services) go in new files and register with build mode through a `window.__build` extension point. That extension point is being designed now and does not exist yet; until it does, keep edits to `build.js` small and additive (a new line or a short block, no moving or renaming existing code) and say so in the commit message.
+
+The file-layout tidy-up promised "after wave C" (see "Engine and game") has not happened. It is deferred to a quiet window.
+
 ## Module layout and ownership for the waves
 
 New simulation code goes in `src/sim/<system>.js`, one system per file, registered in `src/sim/index.js`. New interface code goes in its own add-on file under `src/` and is added to the module list in `build.sh`. Parallel iterations each own their files and touch shared files (`index.js`, `build.sh`, `template/head.html`, `ARCHITECTURE.md`) only to add their own line, so merges stay mechanical.
 
 ## Testing
 
-- `npm test`: headless simulation tests under `test/*.test.mjs` (Node's test runner, no browser). Runs in seconds.
+- `npm test`: headless simulation tests under `test/*.test.mjs` (Node's test runner, no browser). Takes about 3 minutes now. While iterating, run one file: `node --test test/<name>.test.mjs`.
 - `node test/page.smoke.mjs`: loads the built page in a headless browser and checks that it loads without errors, Low and High quality render, build mode opens, time controls work, a save survives a reload, and the simulation's frame cost is in budget.
 - `node test/build.smoke.mjs`: builds a house in build mode through pointer events and checks the piece list, typed sizes, selection and remodeling, undo, the save round trip, and the bar on a phone.
 - Frame rate itself can only be judged on a real GPU; the smoke test measures the simulation's cost per frame instead.

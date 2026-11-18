@@ -22,7 +22,7 @@ const TAU = Math.PI * 2;
 const TOL = 0.03;        // m: lines closer than this are one line (walls snap to floor edges)
 const EPS = 1e-7;
 const GAP_M = 0.1;       // m: an unwalled run of edge longer than this is a hole, shorter is a crack
-const MIN_WALL = 1.6;    // m above the floor a wall must reach to close a room (rails and parapets do not)
+const MIN_WALL = 1.6;    // m above the floor a wall must reach to close a room (rails do not)
 const VERT_TOL = 0.75;   // m: allowed between a wall top and the roof line (roof thickness, eave detail)
 const HOLE_M2 = 0.5;     // m2: an unfilled opening this big leaves the room open; smaller ones are draughts
 const HEADROOM = 1.8;    // m: a floor or another building's roof must be this far up to be a ceiling
@@ -165,7 +165,7 @@ function prepare(pieces) {
       const ax = p.a.x, az = p.a.z, bx = p.b.x, bz = p.b.z, len = Math.hypot(bx - ax, bz - az);
       if (!(len > 1e-6)) continue;
       const y0 = num(p.y0, 0);
-      (p.type === 'rail' || p.type === 'parapet' ? low : walls).push({ p, id: p.id, ax, az, bx, bz, len, y0, y1: num(p.y1, y0 + num(p.height, 0)), gable: p.type === 'gable' });
+      (p.type === 'rail' ? low : walls).push({ p, id: p.id, ax, az, bx, bz, len, y0, y1: num(p.y1, y0 + num(p.height, 0)), gable: p.type === 'gable' });
     } else if (p.kind === 'roof' && Array.isArray(p.footprint) && p.footprint.length >= 3) roofs.push(roofRec(p));
     else if (p.kind === 'foundation' && p.floor != null) founds.set(p.floor, p);
   }
@@ -366,7 +366,7 @@ export function findRooms(pieces, opts = {}) {
         if (gap > 0) {
           const s0 = open[0], dir = compassName(bearing(s0.ox, s0.oz));
           const lowWall = P.low.find((w) => Math.abs((w.ax - s0.mx) * s0.ox + (w.az - s0.mz) * s0.oz) < TOL * 2 && Math.abs((w.bx - s0.mx) * s0.ox + (w.bz - s0.mz) * s0.oz) < TOL * 2 && ((s0.mx - w.ax) * (w.bx - w.ax) + (s0.mz - w.az) * (w.bz - w.az)) / (w.len * w.len) > 0 && ((s0.mx - w.ax) * (w.bx - w.ax) + (s0.mz - w.az) * (w.bz - w.az)) / (w.len * w.len) < 1);
-          leaks.add(lowWall ? 'The ' + dir + ' side has only a low ' + (lowWall.p.type === 'rail' ? 'rail' : 'parapet') + ', not a wall.'
+          leaks.add(lowWall ? 'The ' + dir + ' side has only a low rail, not a wall.'
             : gap >= total - 2 * GAP_M ? 'The ' + dir + ' wall is missing.' : 'There is a ' + gap.toFixed(1) + ' m gap in the ' + dir + ' wall.');
         }
         run = [];

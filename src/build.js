@@ -139,10 +139,9 @@
   /* ---------- small helpers ---------- */
   const isWin = (t) => !!t && t.startsWith("window");
   const isArch = (t) => !!t && t.startsWith("arch");
-  const isLow = (t) => t === "rail" || t === "parapet" || t === "railgate";
-  const isDoor = (t) => t === "door" || t === "door2" || t === "gate" || t === "railgate";
-  const isThick = (t) => t === "rampart" || t === "gate";
-  const blocks = (t, isPlayer, low) => t === "wall" || t === "rampart" || t === "parapet" || t === "rail" || isWin(t) || (isDoor(t) && (!isPlayer || low));
+  const isLow = (t) => t === "rail" || t === "railgate";
+  const isDoor = (t) => t === "door" || t === "door2" || t === "railgate";
+  const blocks = (t, isPlayer, low) => t === "wall" || t === "rail" || isWin(t) || (isDoor(t) && (!isPlayer || low));
   const append = (a, b) => {
     for (let n = 0; n < b.length; n++) a.push(b[n]);
   };
@@ -269,13 +268,10 @@
     fence: Object.freeze([LY("softwood-rails", 0.07, "fence")]),
     leaf: Object.freeze([LY("softwood-boards", 0.045, "leaf")]),
     glazing: Object.freeze([LY("glass", 0.004, "glazing")]),
-    grille: Object.freeze([LY("wrought-iron", 0.03, "grille")]),
   };
   const sumT = (layers) => layers.reduce((a, l) => a + l.thickness, 0);
   function wallLayers(cls, mat) {
     if (cls === "rail") return ASSEMBLIES.fence;
-    if (cls === "rampart") return solid(MASONRY[mat] || "fieldstone", 1);
-    if (cls === "parapet") return solid(MASONRY[mat] || "fieldstone", 0.26);
     return ASSEMBLIES.wall[mat] || FRAME_WALL;
   }
 
@@ -618,60 +614,9 @@
     const sc = PAL.courses ? PAL.plank : PAL.stone;
     const foot = () => ebox(g, i, j, d, 0, 1, -depth, 0.3, 0.13, shade(PAL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
     const cap = () => ebox(g, i, j, d, 0, 1, WALL_H, EAVE, 0.095, PAL.beam);
-    if (type === "parapet") {
-      ebox(g, i, j, d, 0, 1, -depth, 0.06, 0.16, shade(sc, 0.78));
-      for (let r = 0; r < 3; r++) {
-        const jt = r % 2 ? 0.38 : 0.62;
-        ebox(g, i, j, d, 0, jt, 0.06 + r * 0.3, 0.36 + r * 0.3, 0.13, shade(sc, hs(r * 2)));
-        ebox(g, i, j, d, jt, 1, 0.06 + r * 0.3, 0.36 + r * 0.3, 0.124, shade(sc, hs(r * 2 + 1)));
-      }
-      ebox(g, i, j, d, 0.25, 0.75, 0.96, 1.5, 0.13, shade(sc, hs(7)));
-      return;
-    }
-    if (type === "rampart" || type === "gate") {
-      const gate = type === "gate",
-        rows = 6,
-        hh = (EAVE - 0.4) / rows;
-      if (gate) {
-        ob(0, 0.1, -depth, 0.4, 0, 0.52, shade(sc, 0.74));
-        ob(0.9, 1, -depth, 0.4, 0, 0.52, shade(sc, 0.74));
-        ob(0, 1, -depth, 0.03, 0, 0.52, shade(sc, 0.6));
-        ob(0.1, 0.22, 1.72, 2.03, 0, 0.5, shade(sc, 0.8));
-        ob(0.78, 0.9, 1.72, 2.03, 0, 0.5, shade(sc, 0.8));
-      } else ob(0, 1, -depth, 0.4, 0, 0.52, shade(sc, 0.74));
-      for (let r = 0; r < rows; r++) {
-        const ya = 0.4 + r * hh,
-          yb = ya + hh,
-          jt = r % 2 ? 0.36 : 0.64;
-        if (gate && yb < 2.35) {
-          ob(0, 0.1, ya, yb, 0, 0.5, shade(sc, hs(r * 2)));
-          ob(0.9, 1, ya, yb, 0, 0.5, shade(sc, hs(r * 2 + 1)));
-        } else {
-          ob(0, jt, ya, yb, 0, 0.5 - (r % 2) * 0.008, shade(sc, hs(r * 2)));
-          ob(jt, 1, ya, yb, 0, 0.492 + (r % 2) * 0.008, shade(sc, hs(r * 2 + 1)));
-        }
-      }
-      ob(0, 1, EAVE - 0.02, EAVE + 0.03, 0, 0.5, shade(sc, 0.7));
-      for (const off of [-0.43, 0.43]) {
-        ob(0, 1, EAVE + 0.03, EAVE + 0.5, off, 0.08, shade(sc, hs(11)));
-        ob(0.25, 0.75, EAVE + 0.5, EAVE + 1.0, off, 0.08, shade(sc, hs(12)));
-      }
-      return;
-    }
     if (type === "railgate") {
       ebox(g, i, j, d, 0, 1, -depth, 0.04, 0.1, PAL.stone);
       for (const t of [0.045, 0.955]) ebox(g, i, j, d, t - 0.045, t + 0.045, 0.04, 1.14, 0.05, PAL.beam);
-      return;
-    }
-    if (type === "window3") {
-      foot();
-      planks(0.3, 0.95);
-      planks(2.15, WALL_H);
-      ebox(g, i, j, d, 0, 0.43, 0.95, 2.15, 0.07, shade(PAL.plank, hs(0)));
-      ebox(g, i, j, d, 0.57, 1, 0.95, 2.15, 0.07, shade(PAL.plank, hs(2)));
-      ebox(g, i, j, d, 0.39, 0.61, 0.89, 0.96, 0.09, PAL.beam);
-      ebox(g, i, j, d, 0.39, 0.61, 2.14, 2.21, 0.09, PAL.beam);
-      cap();
       return;
     }
     if (type === "window4") {
@@ -1257,7 +1202,7 @@
       } else if (q.part === "gutter") gutterPiece(g, q, foot);
     });
   }
-  const TOP_NAME = { cone: "Pointed roof", dome: "Dome", crenel: "Battlements" };
+  const TOP_NAME = { cone: "Pointed roof", dome: "Dome" };
 
   // a wall piece between two arbitrary points, drawn by mapping the unit wall onto it
   function freePiece(g, x0, z0, x1, z1, type, depth, seed, oy) {
@@ -1275,11 +1220,8 @@
   const ringInner = (r) => r.r * Math.cos(Math.PI / r.n);
   // towers wide enough for a spiral stair can be climbed, one turn per storey
   const inRings = (D, x, z) => !!D.rings && D.rings.some((r) => Math.hypot(x - r.cx, z - r.cz) < ringInner(r) - 0.05);
-  const climbLevels = (r) => (ringInner(r) >= 1.7 ? (r.roof === "crenel" ? r.h : r.h - 1) : 0);
-  // the spiral is turned so that it passes the first wall-walk doorway at exactly that height
-  const ringPhase = (r, portals) => (portals && portals.size ? ([...portals][0] + 0.5) / r.n : 0);
-  function ringPieces(g, rg, r, depth, portals) {
-    const ph = ringPhase(r, portals);
+  const climbLevels = (r) => (ringInner(r) >= 1.7 ? r.h - 1 : 0);
+  function ringPieces(g, rg, r, depth) {
     const top = r.h * EAVE,
       ri = ringInner(r),
       climb = r.floor !== false ? climbLevels(r) : 0,
@@ -1291,7 +1233,7 @@
       if (r.floor !== false) g.tri([r.cx, FLOOR_T, r.cz], [a[0], FLOOR_T, a[1]], [b[0], FLOOR_T, b[1]], [0, 1, 0], shade(fc, 0.9 + 0.16 * hash(k, r.n, 2)));
       const ty = r.sides[k];
       if (ty) {
-        for (let l = 0; l < r.h; l++) freePiece(g, a[0], a[1], b[0], b[1], l === 0 ? ty : l === 1 && portals && portals.has(k) ? "arch" : k % 3 === 1 ? (PAL.courses ? "window3" : "window") : "wall", l === 0 ? depth : 0, k * 5 + l, l * EAVE);
+        for (let l = 0; l < r.h; l++) freePiece(g, a[0], a[1], b[0], b[1], l === 0 ? ty : k % 3 === 1 ? "window" : "wall", l === 0 ? depth : 0, k * 5 + l, l * EAVE);
         g.abox(a[0] - 0.12, -depth, a[1] - 0.12, a[0] + 0.12, top + 0.03, a[1] + 0.12, PAL.beam);
         g.abox(b[0] - 0.12, -depth, b[1] - 0.12, b[0] + 0.12, top + 0.03, b[1] + 0.12, PAL.beam);
       }
@@ -1304,9 +1246,9 @@
           ib = [r.cx + Math.cos(a1) * rd, y, r.cz + Math.sin(a1) * rd],
           cc = shade(colr, 0.88 + 0.14 * hash(k, Math.round(y * 3), 2));
         G2.tri([r.cx, y, r.cz], ia, ib, [0, 1, 0], cc);
-        const tk = (k + 0.5) / r.n - ph;
+        const tk = (k + 0.5) / r.n;
         const tf = tk - Math.floor(tk);
-        if (band === true ? tf < 0.4 : band === "gallery" && tf >= 0.2 && tf < 0.75) {
+        if (band === true && tf < 0.4) {
           const a = ringVert(r, k),
             b = ringVert(r, k + 1);
           G2.tri(ia, [a[0], y, a[1]], [b[0], y, b[1]], [0, 1, 0], cc);
@@ -1319,25 +1261,16 @@
         rm = ri - 0.55,
         hw = (rm * Math.PI) / m + 0.04;
       for (let s = 0; s < climb * m; s++) {
-        const ang = r.rot + (ph + (s + 0.5) / m) * TAU,
+        const ang = r.rot + ((s + 0.5) / m) * TAU,
           cs = Math.cos(ang),
           sn = Math.sin(ang),
           y = ((s + 1) / m) * EAVE + FLOOR_T;
         g.obox([r.cx + cs * rm, y - 0.05, r.cz + sn * rm], [cs * 0.46, 0, sn * 0.46], [0, 0.05, 0], [-sn * hw, 0, cs * hw], shade(fc, 0.78 + 0.2 * hash(s, r.n, 9)));
       }
-      for (let l = 1; l < r.h; l++) disc(g, l * EAVE + FLOOR_T, ri - 1.05, fc, l === climb ? true : l === 1 && portals && portals.size ? "gallery" : null);
+      for (let l = 1; l < r.h; l++) disc(g, l * EAVE + FLOOR_T, ri - 1.05, fc, l === climb ? true : null);
     }
     const shape = r.roof === true ? "cone" : r.roof;
-    if (shape === "crenel") {
-      const sc = shade(PAL.courses ? PAL.plank : PAL.stone, 0.74);
-      if (climb) disc(rg, top + FLOOR_T, ri - 1.05, sc, true);
-      else disc(rg, top + 0.02, r.r, sc, false);
-      for (let k = 0; k < r.n; k++) {
-        const a = ringVert(r, k),
-          b = ringVert(r, k + 1);
-        freePiece(rg, a[0], a[1], b[0], b[1], "parapet", 0, k * 3, top);
-      }
-    } else if (shape === "dome") {
+    if (shape === "dome") {
       const re = r.r + 0.3,
         rise = r.r * 0.95,
         y0 = top - 0.1,
@@ -1381,34 +1314,13 @@
       }
     }
   }
-  // walkable tops: castle walls, and the stairs and floors inside towers
+  // walkable tops: the stairs and floors inside towers
   function topWalk(S, lx, lz, y) {
     let best = null;
     const H = EAVE * S.hs,
       ok = (hh) => {
         if (y >= S.y0 + hh - 0.65 && (best === null || hh > best)) best = hh;
       };
-    if (S.thick) {
-      const fi = Math.floor(lx),
-        fj = Math.floor(lz);
-      let on = false;
-      for (let j = fj - 1; j <= fj + 2 && !on; j++)
-        for (let i = fi - 1; i <= fi + 2 && !on; i++)
-          for (let d = 0; d < 2; d++) {
-            if (!isThick(S.walls.get(ek(i, j, d))) || S.hid.has(ek(i, j, d))) continue;
-            const u = d === 0 ? lx - i : lz - j,
-              w = d === 0 ? lz - j : lx - i;
-            if (Math.abs(w) < 0.52 && u > -0.52 && u < 1.52) on = true;
-          }
-      for (const sg of S.colSegs) {
-        if (on || !isThick(sg[4])) continue;
-        const dx = sg[2] - sg[0],
-          dz = sg[3] - sg[1],
-          t = clamp(((lx - sg[0]) * dx + (lz - sg[1]) * dz) / (dx * dx + dz * dz), 0, 1);
-        if (Math.hypot(lx - sg[0] - dx * t, lz - sg[1] - dz * t) < 0.55) on = true;
-      }
-      on && ok(H);
-    }
     for (let n = 0; n < S.rings.length; n++) {
       const r = S.rings[n],
         L = climbLevels(r);
@@ -1420,15 +1332,12 @@
       if (rad > ri + 0.1) continue;
       if (rad < ri - 1.05) {
         for (let l = 1; l < r.h; l++) ok(l * H + FLOOR_T);
-        r.roof === "crenel" && ok(r.h * H + FLOOR_T);
       } else {
         let raw = (Math.atan2(dz, dx) - r.rot) / (Math.PI * 2);
         raw -= Math.floor(raw);
-        let th = raw - ringPhase(r, S.portals[n]);
-        th -= Math.floor(th);
+        let th = raw - Math.floor(raw);
         for (let k = 0; k < L; k++) ok(stretchY((th + k) * EAVE + FLOOR_T, S.hs));
         th < 0.4 && ok(L * H + FLOOR_T);
-        S.portals[n].size && th >= 0.2 && th < 0.75 && ok(H + FLOOR_T);
       }
     }
     return best === null ? null : S.y0 + best;
@@ -1447,12 +1356,6 @@
         ri = ringInner(rg),
         pad = r + 0.14;
       if (rad < ri - pad || rad > ri + pad) continue;
-      if (S.portals[n].size && e.y < S.y0 + 2 * H - 0.5) {
-        // a castle wall meets the tower here: the doorway onto it is open
-        let th = (Math.atan2(dz, dx) - rg.rot) / (Math.PI * 2);
-        th -= Math.floor(th);
-        if (S.portals[n].has(Math.floor(th * rg.n))) continue;
-      }
       const to = rad < ri ? ri - pad : ri + pad;
       [e.x, e.z] = toWorld(S, rg.cx + (dx / rad) * to, rg.cz + (dz / rad) * to);
     }
@@ -1483,12 +1386,9 @@
     counter: { name: "Counter", cat: 0, col: [[-0.7, 0, 0.7, 0]] },
     rug: { name: "Rug", cat: 0, cosy: 1 },
     plant: { name: "Potted plant", cat: 0, cosy: 1 },
-    throne: { name: "Throne", cat: 0, col: PT },
     fireplace: { name: "Fireplace", cat: 1, cosy: 3, wall: 0.38, light: [0.7, 1.3], col: [[-0.5, 0, 0.5, 0]] },
     campfire: { name: "Campfire", cat: 1, light: [0.5, 1.2], col: PT },
     brazier: { name: "Brazier", cat: 1, cosy: 1, light: [1.1, 1], col: PT },
-    torch: { name: "Standing torch", cat: 1, light: [1.8, 0.9] },
-    sconce: { name: "Wall torch", cat: 1, cosy: 1, wall: 0.15, light: [1.8, 0.8] },
     candles: { name: "Candle stand", cat: 1, cosy: 1, light: [1.5, 0.6] },
     chandelier: { name: "Chandelier", cat: 1, cosy: 1, light: [-1.1, 1.1] },
     lamppost: { name: "Lamp post", cat: 1, light: [2.2, 1.2], col: PT },
@@ -1496,8 +1396,6 @@
     barrel: { name: "Barrel", cat: 2, col: PT },
     crate: { name: "Crate", cat: 2, col: PT },
     sacks: { name: "Sacks", cat: 2, col: PT },
-    anvil: { name: "Anvil", cat: 2, col: PT },
-    rack: { name: "Weapon rack", cat: 2, col: [[-0.4, 0, 0.4, 0]] },
     haybale: { name: "Hay bale", cat: 2, col: [[-0.3, 0, 0.3, 0]] },
     woodpile: { name: "Wood pile", cat: 2, col: [[-0.45, 0, 0.45, 0]] },
     trough: { name: "Water trough", cat: 2, col: [[-0.5, 0, 0.5, 0]] },
@@ -1508,7 +1406,6 @@
     signpost: { name: "Signpost", cat: 3, col: PT },
     statue: { name: "Statue", cat: 3, col: PT },
     scarecrow: { name: "Scarecrow", cat: 3, col: PT },
-    banner: { name: "Banner", cat: 3, wall: 0.1 },
     flag: { name: "Flag pole", cat: 3, col: PT },
     tent: { name: "Tent", cat: 3 },
     flowerbed: { name: "Flower bed", cat: 3 },
@@ -1738,21 +1635,6 @@
         m.surf(3, 2, (u, v) => [0.5 + 0.3 * u, 0.985 + 0.01 * Math.sin(u * 5), -0.12 + 0.2 * v], () => shade(LIN, 0.9));
         break;
       }
-      case "throne": {
-        m.abox(-0.55, 0, -0.45, 0.55, 0.14, 0.5, shade(ST, 0.85));
-        m.frust(0, 0, 0.14, 0.55, 0.42, 0.36, 0.4, 0.34, shade(DKW, 1.1));
-        [1.55, 1.85, 2.15, 1.85, 1.55].forEach((hh, k) => bm([-0.34 + k * 0.17, 0.5, -0.3], [-0.34 + k * 0.17, hh, -0.33], 0.07, 0.165, j(DKW, k)));
-        m.cyl([0, 2.15, -0.33], [0, 2.4, -0.34], 0.07, 0, 4, gold, gold);
-        bm([-0.42, 1.2, -0.36], [0.42, 1.2, -0.36], 0.04, 0.09, gold);
-        for (const sx of [-0.42, 0.42]) {
-          lg([sx, 0.14, 0.3], [sx, 0.86, 0.3], 0.06, 0.05, DKW);
-          lg([sx, 0.82, -0.32], [sx, 0.82, 0.34], 0.055, 0.055, DKW);
-          m.ball([sx, 0.84, 0.36], 0.08, 0.08, 0.08, gold, { lat: 3, lon: 6 });
-        }
-        m.surf(5, 5, (u, v) => [-0.34 + 0.68 * u, 0.56 + 0.04 * Math.sin(Math.PI * u) + (v > 0.85 ? -(v - 0.85) * 1.4 : 0), -0.26 + 0.62 * v], () => dye);
-        m.surf(4, 5, (u, v) => [-0.3 + 0.6 * u, 0.6 + 0.85 * v, -0.265 - 0.01 * v + 0.02 * Math.sin(Math.PI * u)], (u, v) => shade(dye, 0.85 + 0.1 * v));
-        break;
-      }
       case "rug": {
         m.surf(26, 18, (u, v) => [-1 + 2 * u, 0.018 + 0.008 * Math.sin(u * 13 + v * 5) * Math.sin(v * 9), -0.7 + 1.4 * v], (u, v) => {
           const e = Math.min(u, 1 - u) * 2,
@@ -1831,23 +1713,6 @@
         ringBand([0, 0.88, 0], 0.31, 0.035, shade(IRON, 1.3), 9);
         for (let k = 0; k < 5; k++) gl.ball([Math.cos(k * 1.3) * 0.13, 0.86, Math.sin(k * 1.3) * 0.13], 0.08, 0.05, 0.08, k % 2 ? DC.ember : [0.5, 0.12, 0.05], { lat: 2, lon: 5 });
         flame(0, 0.88, 0, 0.85);
-        break;
-      }
-      case "torch": {
-        for (let k = 0; k < 4; k++) rock([Math.cos(k * 1.6) * 0.13, 0.06, Math.sin(k * 1.6) * 0.13], 0.11, 0.08, 0.1, k);
-        lg([0, 0, 0], [0.03, 1.55, 0], 0.045, 0.03, BARK, 6);
-        m.cyl([0.03, 1.5, 0], [0.035, 1.72, 0], 0.045, 0.065, 7, shade(FUR, 0.5), shade(FUR, 0.7));
-        rod([0.03, 1.56, 0], [0.03, 1.6, 0], 0.062, IRON, 7);
-        flame(0.035, 1.72, 0, 0.6);
-        break;
-      }
-      case "sconce": {
-        m.abox(-0.05, 1.3, -0.15, 0.05, 1.5, -0.12, IRON);
-        rod([0, 1.4, -0.13], [0, 1.36, 0.02], 0.016, IRON);
-        ringBand([0, 1.33, 0.04], 0.045, 0.05, IRON, 6);
-        lg([0, 1.22, 0.0], [0, 1.74, 0.09], 0.03, 0.035, BARK, 6);
-        m.cyl([0, 1.7, 0.083], [0, 1.84, 0.107], 0.04, 0.055, 6, shade(FUR, 0.5), shade(FUR, 0.7));
-        flame(0, 1.85, 0.11, 0.5);
         break;
       }
       case "candles": {
@@ -1955,38 +1820,6 @@
         sack(0.24, 0, -0.06, 0.22, 0.2, 0.22, 2, 0.15);
         m.ball([0.02, 0.5, 0.03], 0.3, 0.13, 0.2, j(SK, 3), { lat: 4, lon: 8 });
         m.ball([0.08, 0.14, 0.32], 0.2, 0.13, 0.15, j(SK, 4), { lat: 3, lon: 7 });
-        break;
-      }
-      case "anvil": {
-        m.cyl([0, 0, 0], [0, 0.5, 0], 0.29, 0.26, 10, shade(BARK, 0.8), BARK, END);
-        ringBand([0, 0.36, 0], 0.275, 0.05, IRON, 10);
-        m.frust(0, 0, 0.5, 0.6, 0.2, 0.13, 0.13, 0.09, IRON);
-        m.frust(0, 0, 0.6, 0.72, 0.1, 0.07, 0.13, 0.09, shade(IRON, 0.9));
-        bm([-0.26, 0.79, 0], [0.24, 0.79, 0], 0.2, 0.14, shade(IRON, 1.15), 0.15);
-        m.cyl([0.24, 0.79, 0], [0.52, 0.83, 0], 0.07, 0.012, 7, shade(IRON, 1.1), shade(IRON, 1.3));
-        lg([-0.2, 0.89, -0.03], [0.14, 0.89, 0.07], 0.018, 0.018, OAK, 5);
-        bm([-0.25, 0.9, -0.09], [-0.2, 0.9, 0.03], 0.07, 0.07, shade(IRON, 0.8));
-        break;
-      }
-      case "rack": {
-        for (const sx of [-0.55, 0.55]) {
-          bm([sx, 0, -0.16], [sx, 1.4, 0], 0.07, 0.07, DKW);
-          bm([sx, 0, 0.16], [sx, 1.4, 0], 0.07, 0.07, DKW);
-        }
-        lg([-0.62, 1.38, 0], [0.62, 1.38, 0], 0.04, 0.04, BARK, 6);
-        lg([-0.6, 0.42, 0.1], [0.6, 0.42, 0.1], 0.03, 0.03, BARK, 6);
-        // spear, axe, sword, round shield
-        lg([-0.38, 0.02, 0.2], [-0.4, 2.0, 0.03], 0.02, 0.018, PINE, 5);
-        m.cyl([-0.4, 2.0, 0.03], [-0.403, 2.28, 0.006], 0.045, 0, 4, shade(IRON, 1.5), shade(IRON, 1.9), undefined, 0.3);
-        lg([-0.14, 0.02, 0.2], [-0.15, 1.5, 0.04], 0.022, 0.02, OAK, 5);
-        m.surf(1, 2, (u, v) => [-0.15 + (u ? 0.2 : 0.02), 1.42 + (u ? (v - 0.5) * 0.34 : (v - 0.5) * 0.12), 0.05], () => shade(IRON, 1.6));
-        m.abox(0.07, 0.5, 0.11, 0.11, 1.32, 0.125, shade(IRON, 1.8));
-        m.abox(0.0, 1.32, 0.105, 0.18, 1.35, 0.13, gold);
-        lg([0.09, 1.35, 0.118], [0.09, 1.52, 0.118], 0.018, 0.018, DKW, 5);
-        m.cyl([0.38, 0.8, 0.12], [0.38, 0.8, 0.16], 0.27, 0.27, 12, dye, dye, shade(dye, 1.05));
-        m.cyl([0.38, 0.8, 0.115], [0.38, 0.8, 0.165], 0.285, 0.285, 12, IRON, IRON, false);
-        m.ball([0.38, 0.8, 0.17], 0.07, 0.07, 0.04, shade(IRON, 1.6), { lat: 3, lon: 7 });
-        m.abox(0.36, 0.56, 0.16, 0.4, 1.04, 0.165, shade(dye, 0.6));
         break;
       }
       case "haybale": {
@@ -2177,18 +2010,6 @@
         m.abox(0.04, 1.69, 0.135, 0.08, 1.72, 0.15, DKW);
         disc([0.01, 1.79, 0], 0.3, 0.015, shade(DC.straw, 0.85), 10);
         m.cyl([0.01, 1.8, 0], [0.03, 2.06, 0], 0.15, 0.04, 8, shade(DC.straw, 0.8), DC.straw);
-        break;
-      }
-      case "banner": {
-        lg([0, 0, 0], [0, 2.55, 0], 0.03, 0.024, DKW, 6);
-        m.ball([0, 2.6, 0], 0.05, 0.06, 0.05, gold, { lat: 3, lon: 6 });
-        lg([-0.42, 2.38, 0.02], [0.42, 2.38, 0.02], 0.02, 0.02, DKW, 5);
-        for (const sx of [-0.42, 0.42]) m.ball([sx, 2.38, 0.02], 0.03, 0.03, 0.03, gold, { lat: 2, lon: 5 });
-        m.surf(12, 14, (u, v) => [-0.36 + 0.72 * u, 2.37 - v * (1.1 + 0.32 * Math.abs(2 * u - 1)), 0.035 + 0.05 * v * Math.sin(v * 5 + u * 3)], (u, v) => {
-          const e = Math.min(u, 1 - u),
-            dia = Math.abs(u - 0.5) * 2.4 + Math.abs(v - 0.42) * 2.2;
-          return e < 0.07 || v < 0.05 ? gold : dia < 0.3 ? gold : dia < 0.42 ? shade(dye, 0.6) : shade(dye, 0.9 + 0.12 * Math.sin(v * 9));
-        }, true);
         break;
       }
       case "flag": {
@@ -3504,7 +3325,6 @@
       verts.get(k).push(d);
     };
     const late = new Geo(),
-      thick = new Set(),
       tall = new Set(),
       vmat = new Map();
     for (const [k, type] of D.walls) {
@@ -3517,7 +3337,6 @@
       if (cuts.length) holedWall(g, i, j, d, depth, cuts, PAL);
       else wallPieces(isLow(type) ? late : g, i, j, d, type, depth);
       EK = 1;
-      if (isThick(type)) (thick.add(ck(i, j)), thick.add(d === 0 ? ck(i + 1, j) : ck(i, j + 1)));
       for (const vk of [ck(i, j), d === 0 ? ck(i + 1, j) : ck(i, j + 1)]) vmat.has(vk) || vmat.set(vk, wm);
       touch(i, j, d);
       if (d === 0) touch(i + 1, j, d);
@@ -3533,17 +3352,7 @@
       const [i, j] = parse(k);
       const vp = WALLS[vmat.get(k) || "timber"],
         pb = vp.beam;
-      if (thick.has(k)) {
-        const sc = shade(vp.courses ? vp.plank : vp.stone, 0.82);
-        g.abox(i - 0.5, -depth, j - 0.5, i + 0.5, EAVE + 0.03, j + 0.5, sc);
-        for (const [sx, sz] of [
-          [-1, -1],
-          [1, -1],
-          [1, 1],
-          [-1, 1],
-        ])
-          g.abox(i + sx * 0.43 - 0.09, EAVE, j + sz * 0.43 - 0.09, i + sx * 0.43 + 0.09, EAVE + 1.0, j + sz * 0.43 + 0.09, sc);
-      } else if (!tall.has(k)) late.abox(i - 0.08, -depth, j - 0.08, i + 0.08, 1.1, j + 0.08, pb);
+      if (!tall.has(k)) late.abox(i - 0.08, -depth, j - 0.08, i + 0.08, 1.1, j + 0.08, pb);
       else if (!(ds.length === 2 && ds[0] === ds[1])) { const h = stickWall("wall", vmat.get(k) || "timber") ? 0.06 : 0.12; g.abox(i - h, -depth, j - h, i + h, EAVE + 0.03, j + h, pb); }   // a sided corner hides its post inside the trim
     }
     rg.yo = (hs - 1) * EAVE;
@@ -3575,17 +3384,16 @@
         const k = Math.round(x * 20) + "," + Math.round(z * 20) + (low ? "r" : "");
         if (ends.has(k)) continue;
         ends.add(k);
-        if (isThick(sg[4])) g.abox(x - 0.5, -depth, z - 0.5, x + 0.5, EAVE + 0.03, z + 0.5, shade(PAL.courses ? PAL.plank : PAL.stone, 0.82));
-        else if (low) late.abox(x - 0.08, -depth, z - 0.08, x + 0.08, 1.1, z + 0.08, PAL.beam);
+        if (low) late.abox(x - 0.08, -depth, z - 0.08, x + 0.08, 1.1, z + 0.08, PAL.beam);
         else if (clad) g.abox(x - 0.06, -depth, z - 0.06, x + 0.06, EAVE + 0.03, z + 0.06, PAL.beam);    // inside the siding's corner trim
         else g.abox(x - 0.12, -depth, z - 0.12, x + 0.12, EAVE + 0.03, z + 0.12, PAL.beam);
       }
     });
-    for (const [n, r] of (D.rings || []).entries()) {
+    for (const r of D.rings || []) {
       rg.yo = r.h * EAVE * (hs - 1);
       PAL = WALLS[r.mat || "timber"];
       RPAL = (ROOFS[r.rmat || "thatch"] || ROOFS.thatch).c;
-      ringPieces(g, rg, r, full, D.portals && D.portals[n]);
+      ringPieces(g, rg, r, full);
     }
     rg.yo = (hs - 1) * EAVE;
     for (const p of D.polys || []) {
@@ -3709,13 +3517,6 @@
     G.scene.add(l);
     return l;
   });
-  const gateMat = new T.MeshLambertMaterial({ color: 0x2c2823 });
-  const gateGeo = (() => {
-    const g = new Geo();
-    for (let t = 0.14; t < 0.9; t += 0.145) g.abox(t - 0.022, 0, -0.03, t + 0.022, 2.05, 0.03, [1, 1, 1]);
-    for (const y of [0.25, 0.85, 1.45, 2.0]) g.abox(0.1, y - 0.025, -0.02, 0.9, y + 0.025, 0.02, [1, 1, 1]);
-    return g.build();
-  })();
   function makeRoofMat() {
     const m = new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide, alphaHash: true });
     fadeB(m);
@@ -3825,7 +3626,6 @@
       paths: [],
       po: !!F.po,
       hid: new Set(),
-      portals: [],
       decor: [],
       lights: [],
       beds: [],
@@ -3833,7 +3633,6 @@
       ringCosy: [],
       glow: null,
       glowMat: new T.MeshBasicMaterial({ vertexColors: true }),
-      thick: false,
       wmat: new Map(),
       fmat: new Map(),
       group: new T.Group(),
@@ -4021,35 +3820,6 @@
         inRings(S, d === 0 ? i + 0.5 : i, d === 0 ? j : j + 0.5) && S.hid.add(k);
       }
     S.colSegs = S.segs.filter((sg) => !inRings(S, (sg[0] + sg[2]) / 2, (sg[1] + sg[3]) / 2)).map((sg) => sg.slice(0, 5));
-    S.thick = S.colSegs.some((sg) => isThick(sg[4]));
-    const thickSegs = S.colSegs.filter((sg) => isThick(sg[4])).map((sg) => sg.slice(0, 4));
-    for (const [k, ty] of S.walls) {
-      if (!isThick(ty) || S.hid.has(k)) continue;
-      const [i, j, d] = parse(k);
-      thickSegs.push(d === 0 ? [i, j, i + 1, j] : [i, j, i, j + 1]);
-      S.thick = true;
-    }
-    // where a castle wall meets a climbable tower, the tower gets a doorway onto the wall walk
-    S.portals = S.rings.map((r) => {
-      const set = new Set();
-      if (!thickSegs.length || r.h < 2 || !climbLevels(r)) return set;
-      for (let k = 0; k < r.n; k++) {
-        const a = ringVert(r, k),
-          b = ringVert(r, k + 1),
-          mx = (a[0] + b[0]) / 2,
-          mz = (a[1] + b[1]) / 2;
-        for (const sg of thickSegs) {
-          const dx = sg[2] - sg[0],
-            dz = sg[3] - sg[1],
-            t = clamp(((mx - sg[0]) * dx + (mz - sg[1]) * dz) / (dx * dx + dz * dz), 0, 1);
-          if (Math.hypot(mx - sg[0] - dx * t, mz - sg[1] - dz * t) < 0.8) {
-            set.add(k);
-            break;
-          }
-        }
-      }
-      return set;
-    });
     for (const p of S.pillars) {
       S.colSegs.push([p[0] - 0.02, p[1], p[0] + 0.02, p[1], "wall"]);
       ext(Math.floor(p[0]), Math.floor(p[1]));
@@ -4198,15 +3968,6 @@
         len = Math.hypot(dx, dz) || 1,
         base = Math.atan2(-dz, dx),
         rec = { base, mx: (x0 + x1) / 2, mz: (z0 + z1) / 2, nx: -dz / len, nz: dx / len, open: 0, dir: 1, sign: 1, kind, reach: 1.7 };
-      if (kind === "gate") {
-        const mesh = new T.Mesh(gateGeo, gateMat);
-        mesh.position.set(x0, 0.04, z0);
-        mesh.rotation.y = base;
-        mesh.scale.set(len, (0.3 + 1.75 * kk) / 2.05, 1);
-        S.group.add(mesh);
-        S.doors.push({ ...rec, mesh, lift: 1.85 * kk, reach: 3 });
-        continue;
-      }
       const leaves = kind === "door2" ? 2 : 1,
         jamb = kind === "door" ? 0.09 : 0.05;
       for (let n = 0; n < leaves; n++) {
@@ -4397,9 +4158,9 @@
     }
     return op;
   }
-  const STYLE_NAME = { wall: "Wall", arch: "Round arches", arch2: "Pointed arches", arch3: "Braced openings", rail: "Fence", parapet: "Battlement", rampart: "Castle wall" };
-  const WIN_NAME = { window: "Square window", window2: "Arched window", window4: "Shuttered window", window3: "Arrow slit" };
-  const DOOR_NAME = { door: "Door", door2: "Double door", gate: "Castle gate" };
+  const STYLE_NAME = { wall: "Wall", arch: "Round arches", arch2: "Pointed arches", arch3: "Braced openings", rail: "Fence" };
+  const WIN_NAME = { window: "Square window", window2: "Arched window", window4: "Shuttered window" };
+  const DOOR_NAME = { door: "Door", door2: "Double door" };
   const blankOp = (F) => ({ F, addFloors: [], addWalls: [], setTypes: [], setMats: [], setFmats: [], setSegMats: [], setPillars: [], addRoofs: [], delFloors: [], delWalls: [], delRoofs: [], revert: [], addSegs: [], addRings: [], delSegs: [], delRings: [], setSegs: [], setSides: [], ringRoofs: [], addStairs: [], delStairs: [], addPillars: [], delPillars: [], addPolyRoofs: [], delPolyRoofs: [], addPaths: [], delPaths: [], addDecor: [], delDecor: [], addFree: [], delFree: [], label: "", marker: null, dims: [], guides: [] });
 
   function rectOps(op, S, i0, j0, i1, j1, withFloor, withWalls) {
@@ -4480,7 +4241,7 @@
   const tidy = (v) => (Math.abs(v * 2 - Math.round(v * 2)) < 1e-6 ? Math.round(v * 2) / 2 : v);
   const isInt = Number.isInteger;
   const plural = (n, one, many) => n + " " + (n === 1 ? one : many || one + "s");
-  const baseType = (cls) => (cls === "rail" ? "rail" : cls === "parapet" ? "parapet" : cls === "rampart" ? "rampart" : "wall");
+  const baseType = (cls) => (cls === "rail" ? "rail" : "wall");
   // a live dimension shown on the ghost; field says which typed value it stands for
   const dim = (op, lx, lz, text, field, val, unit) => op.dims.push({ lx, lz, text, field: field || "", val: val === undefined ? null : val, unit: unit || "" });
   // the wall under the cursor, found on the face you point at, else by its foot
@@ -4913,8 +4674,7 @@
       const one = (cur, put, id) => {
         const tt = fit(cur);
         if (tt === "railgate") op.label = "Gate";
-        if (cur === "parapet" || (isThick(cur) && t === "window")) op.note = "It does not fit this wall";
-        else if (cur !== tt) put(tt);
+        if (cur !== tt) put(tt);
         else if (!op.rowN) ((op.note = "Click to select this " + t), (op.pick = id));
       };
       const st = d && d.hit && d.hit.S === S ? d.hit : null;
@@ -4952,9 +4712,9 @@
         const ri = ringAt(S, h.lx, h.lz),
           r = S.rings[ri];
         if (B.alt) r.roof && op.ringRoofs.push([ri, false]);
-        else if ((r.roof === true ? "cone" : r.roof) === B.tshape && (B.tshape === "crenel" || (r.rmat || "thatch") === B.rmat)) op.note = "It already has this top";
+        else if ((r.roof === true ? "cone" : r.roof) === B.tshape && (r.rmat || "thatch") === B.rmat) op.note = "It already has this top";
         else op.ringRoofs.push([ri, B.tshape]);
-        op.label = TOP_NAME[B.tshape] + (B.tshape === "crenel" && climbLevels({ ...r, roof: "crenel" }) ? " · you can climb up to them" : "");
+        op.label = TOP_NAME[B.tshape];
         return finishOp(op);
       }
       if (!dragging && S && polyAt(S, h.lx, h.lz) >= 0) {
@@ -5034,7 +4794,7 @@
       else if (isDoor(pk.type) || isWin(pk.type)) op.setSides.push([pk.ri, pk.side, "wall"]);
       else op.setSides.push([pk.ri, pk.side, null]);
     } else if (pk.kind === "wall" && pk.free) {
-      if (isDoor(pk.type) || isWin(pk.type)) op.setSegs.push([pk.idx, pk.type === "railgate" ? "rail" : pk.type === "gate" ? "rampart" : "wall"]);
+      if (isDoor(pk.type) || isWin(pk.type)) op.setSegs.push([pk.idx, pk.type === "railgate" ? "rail" : "wall"]);
       else op.delSegs.push(pk.idx);
     } else if (pk.kind === "wall") {
       isDoor(pk.type) || isWin(pk.type) ? op.revert.push([pk.i, pk.j, pk.d]) : op.delWalls.push([pk.i, pk.j, pk.d]);
@@ -5067,12 +4827,15 @@
     S.ser = { ver: S.ver, data };
     return data;
   }
+  // pieces of the old castle kit that no longer exist load as their ordinary equivalents
+  const OLD_TYPE = { rampart: "wall", parapet: "rail", gate: "door", window3: "window" };
+  const modern = (t) => OLD_TYPE[t] || t;
   // fresh: the data is being copied, so every piece in it gets a new id
   function fill(S, d, fresh) {
     S.floors = new Set(d.floors);
-    S.walls = new Map(d.walls);
+    S.walls = new Map(d.walls.map(([k, t]) => [k, modern(t)]));
     S.roofs = d.roofs.map((r) => ({ ...r }));
-    S.segs = (d.segs || []).map((x) => x.slice());
+    S.segs = (d.segs || []).map((x) => Object.assign(x.slice(), { 4: modern(x[4]) }));
     S.stairs = (d.stairs || []).map((x) => ({ ...x }));
     S.pillars = (d.pillars || []).map((x) => x.slice());
     S.paths = (d.paths || []).map((x) => x.slice());
@@ -5080,7 +4843,7 @@
     S.wmat = new Map(Array.isArray(d.wmat) ? d.wmat : []);
     S.fmat = new Map(Array.isArray(d.fmat) ? d.fmat : []);
     S.polyRoofs = (d.polyRoofs || []).map((x) => x.slice());
-    S.rings = (d.rings || []).map((r) => ({ ...r, sides: r.sides.slice() }));
+    S.rings = (d.rings || []).map((r) => ({ ...r, sides: r.sides.map((t) => (t ? modern(t) : t)), roof: r.roof === "crenel" ? "cone" : r.roof }));
     S.free = (d.free || []).filter((f) => OP.openingType(f.typeId)).map((f) => ({ ...f, id: fresh ? null : f.id }));
     const ids = d.ids || {};
     S.wid = new Map(ids.walls || []);
@@ -5389,7 +5152,7 @@
     for (const [i, j, d] of op.revert) {
       refund += COST[S.walls.get(ek(i, j, d))] || 0;
       const was = S.walls.get(ek(i, j, d));
-      S.walls.set(ek(i, j, d), was === "railgate" ? "rail" : was === "gate" ? "rampart" : "wall");
+      S.walls.set(ek(i, j, d), was === "railgate" ? "rail" : "wall");
     }
     // a door or window that changes kind is a new piece
     for (const [idx, ty] of op.setSegs) {
@@ -5832,14 +5595,14 @@
         H = EAVE * S.hs;
       for (const g of S.runs) {
         const x = g.d === 0,
-          t = x ? hitWall(R, g.t0, g.line, g.t1, g.line, -0.4, g.cls === "rail" ? 1.1 : g.cls === "parapet" ? 1.5 : H) : hitWall(R, g.line, g.t0, g.line, g.t1, -0.4, g.cls === "rail" ? 1.1 : g.cls === "parapet" ? 1.5 : H);
+          t = x ? hitWall(R, g.t0, g.line, g.t1, g.line, -0.4, g.cls === "rail" ? 1.1 : H) : hitWall(R, g.line, g.t0, g.line, g.t1, -0.4, g.cls === "rail" ? 1.1 : H);
         if (t < 0 || t >= bt) continue;
         const e = g.m[Math.min(g.m.length - 1, Math.floor(HIT.u * g.m.length))];
         bt = t;
         best = { S, kind: "wall", i: e.i, j: e.j, d: e.d, type: e.type, id: g.id, oid: S.oid.get(e.k) || null, run: g, u: HIT.u, y: HIT.y };
       }
       for (const g of S.fruns) {
-        const t = hitWall(R, g.x0, g.z0, g.x1, g.z1, -0.4, g.cls === "rail" ? 1.1 : g.cls === "parapet" ? 1.5 : H);
+        const t = hitWall(R, g.x0, g.z0, g.x1, g.z1, -0.4, g.cls === "rail" ? 1.1 : H);
         if (t < 0 || t >= bt) continue;
         const along = HIT.u * g.len;
         let q = g.mods[g.mods.length - 1];
@@ -6139,10 +5902,10 @@
       else return false;
     });
   }
-  // restyle whole walls: doors stay doors (as a gate in a fence or a castle wall), windows are walled up where they cannot stay
+  // restyle whole walls: doors stay doors (as a gate in a fence), windows are walled up where they cannot stay
   function selStyle(v) {
     const cls = wallClass(v);
-    const conv = (cur) => (isDoor(cur) ? (cls === "rail" ? "railgate" : cls === "rampart" ? "gate" : cls === "parapet" ? "parapet" : cur === "railgate" || cur === "gate" ? "door" : cur) : isWin(cur) ? (cls === "wall" ? cur : baseType(cls)) : v);
+    const conv = (cur) => (isDoor(cur) ? (cls === "rail" ? "railgate" : cur === "railgate" ? "door" : cur) : isWin(cur) ? (cls === "wall" ? cur : baseType(cls)) : v);
     selEdit((q) => {
       if (q.kind === "run")
         for (const e of q.g.m) {
@@ -6533,7 +6296,7 @@
         k = ek(i + di, j + dj, d),
         cur = S.walls.get(k);
       if (!cur || isDoor(cur) || isWin(cur) || isLow(cur)) continue;
-      if (!copy) (S.walls.set(o[0], isThick(o[1]) ? "rampart" : "wall"), S.oid.delete(o[0]), S.oid.set(k, o[2]));
+      if (!copy) (S.walls.set(o[0], "wall"), S.oid.delete(o[0]), S.oid.set(k, o[2]));
       S.walls.set(k, o[1]);
     }
     const moved = (arr, q, shift) => {
@@ -7753,10 +7516,10 @@
     });
   const SW = { wall: swatches(WALLS, "wall"), floor: swatches(FLOORS, "floor"), roof: swatches(ROOFS, "roof"), path: swatches(PATHS, "path"), dye: DYES.map((d, n) => ({ v: n, name: d[0], sw: ["dye", hexOf(d[1]), hexOf(d[1])] })) };
   const tiles = (names, pre) => Object.keys(names).map((k) => ({ v: k, name: names[k], icon: pre + k }));
-  const STYLE_SHORT = { wall: "Wall", arch: "Arch", arch2: "Pointed", arch3: "Braced", rail: "Fence", parapet: "Battlement", rampart: "Castle" };
-  const WIN_SHORT = { window: "Square", window2: "Arched", window4: "Shuttered", window3: "Arrow slit" };
-  const DOOR_SHORT = { door: "Door", door2: "Double", gate: "Castle gate" };
-  const TOP_SHORT = { cone: "Pointed", dome: "Dome", crenel: "Battlements" };
+  const STYLE_SHORT = { wall: "Wall", arch: "Arch", arch2: "Pointed", arch3: "Braced", rail: "Fence" };
+  const WIN_SHORT = { window: "Square", window2: "Arched", window4: "Shuttered" };
+  const DOOR_SHORT = { door: "Door", door2: "Double" };
+  const TOP_SHORT = { cone: "Pointed", dome: "Dome" };
   const G_ = {
     sw: (id, label, items, value, key) => ({ type: "swatches", id, label, items, value, key }),
     tiles: (id, label, items, value, key) => ({ type: "tiles", id, label, items, value, key }),
@@ -7865,7 +7628,7 @@
       g.push(G_.chips("s:levels", "Storeys", [1, 2, 3, 4].map((v) => ({ v, name: String(v) })), one.r.h));
       g.push(G_.tiles("s:top", "Top", [{ v: "", name: "Open", icon: "t-none" }, ...tiles(TOP_SHORT, "t-")], one.r.roof === true ? "cone" : one.r.roof || ""));
     }
-    if (has("roof", "polyroof") || (one && one.kind === "ring" && one.r.roof && one.r.roof !== "crenel")) roofSwatches(g, "s:rmat", common(refs.filter((q) => /roof|ring/.test(q.kind)).map((q) => (q.kind === "roof" ? q.r.mat || "thatch" : q.kind === "ring" ? q.r.rmat || "thatch" : q.p.rmat || "thatch"))));
+    if (has("roof", "polyroof") || (one && one.kind === "ring" && one.r.roof)) roofSwatches(g, "s:rmat", common(refs.filter((q) => /roof|ring/.test(q.kind)).map((q) => (q.kind === "roof" ? q.r.mat || "thatch" : q.kind === "ring" ? q.r.rmat || "thatch" : q.p.rmat || "thatch"))));
     if (one && one.kind === "pillar") g.push(G_.tiles("s:pkind", "Kind", [{ v: "pillar", name: "Pillar", icon: "p-pillar" }, { v: "chimney", name: "Chimney", icon: "p-chimney" }], one.p[3] || "pillar"));
     if (has("path")) {
       g.push(G_.chips("s:pwidth", "Width", [1, 2, 3].map((v) => ({ v, name: v + " m" })), common(refs.filter((q) => q.kind === "path").map((q) => q.p[4]))));
@@ -7880,7 +7643,7 @@
       if (one.kind === "run") g.push(G_.field("s:len", "Length", fmt(one.g.m.length), "m", "Whole metres on the grid"));
       else if (one.kind === "frun") g.push(G_.field("s:len", "Length", fmt(one.g.len), "m", "Any length"));
       if (one.kind === "ring") g.push(G_.field("s:width", "Width", fmt(one.r.r * 2), "m"));
-      if (/^(run|frun|floor|ring|pillar)$/.test(one.kind) && !(one.g && (one.g.cls === "rail" || one.g.cls === "parapet"))) g.push(G_.field("s:hs", "Ceiling", fmt(EAVE * S.hs), "m", "The height of this whole storey"));
+      if (/^(run|frun|floor|ring|pillar)$/.test(one.kind) && !(one.g && one.g.cls === "rail")) g.push(G_.field("s:hs", "Ceiling", fmt(EAVE * S.hs), "m", "The height of this whole storey"));
       if (one.kind === "decor" || one.kind === "pillar" || one.kind === "ring") {
         const at = one.kind === "decor" ? one.it : one.kind === "pillar" ? one.p : [one.r.cx, one.r.cz];
         g.push(G_.field("s:x", "Across", fmt(at[0]), "m", "Position on the building's grid"));
@@ -8760,8 +8523,7 @@
     const prev = e.__bp && e.__bp.id === S.id ? e.__bp : null;
     const ey = e.y === undefined ? 1e9 : e.y;
     const low = ey < S.y0 + FLOOR_T - 0.65;
-    const R0 = r + HALF_T,
-      wallTop = S.y0 + EAVE * S.hs - 0.65;
+    const R0 = r + HALF_T;
     const fx = Math.floor(lx),
       fz = Math.floor(lz),
       px = prev ? Math.floor(prev.lx) : fx,
@@ -8773,9 +8535,9 @@
         for (let d = 0; d < 2; d++) {
           const wk = ek(i, j, d),
             ty = S.walls.get(wk);
-          if (ty && ((S.hid.size && S.hid.has(wk)) || (isThick(ty) && ey > wallTop) || (S.ghostW && S.ghostW.has(wk)) || (isPlayer && S.studW && S.studW.has(wk)))) continue;
+          if (ty && ((S.hid.size && S.hid.has(wk)) || (S.ghostW && S.ghostW.has(wk)) || (isPlayer && S.studW && S.studW.has(wk)))) continue;
           let block = blocks(ty, isPlayer, low);
-          const R = isThick(ty) ? r + 0.52 : R0;
+          const R = R0;
           if (!block && !ty && low && !S.deckGhost) {
             const a = d === 0 ? S.floors.has(ck(i, j - 1)) : S.floors.has(ck(i - 1, j)),
               b = S.floors.has(ck(i, j));
@@ -8825,9 +8587,9 @@
         }
     for (const sg of S.colSegs) {
       const ty = sg[4];
-      if (!blocks(ty, isPlayer, low) || (isThick(ty) && ey > wallTop)) continue;
+      if (!blocks(ty, isPlayer, low)) continue;
       if (isPlayer && S.studSegs && S.studSegs.size && S.studSegs.has(sg[0] + "," + sg[1] + "," + sg[2] + "," + sg[3])) continue;
-      const R = isThick(ty) ? r + 0.52 : R0;
+      const R = R0;
       const ax = sg[0],
         az = sg[1],
         dx = sg[2] - ax,
@@ -8869,7 +8631,7 @@
   // split off gets a new one.
   const newPid = () => "p" + B.nextPid++;
   const pidNum = (id) => +String(id).slice(1) || 0;
-  const wallClass = (t) => (t === "rail" || t === "railgate" ? "rail" : t === "parapet" ? "parapet" : isThick(t) ? "rampart" : "wall");
+  const wallClass = (t) => (t === "rail" || t === "railgate" ? "rail" : "wall");
   // straight runs of grid wall edges, in a fixed order
   function gridRuns(S) {
     const lines = new Map();
@@ -9426,8 +9188,8 @@
       kids = (id) => mem.byParent.get(id),
       fin = (id, tail) => (kids(id) ? (tail === ".cl" ? !kids(id).some((m) => m.kind === "cladding" && P(m.id)) : !P(id + tail)) : !P(id)),
       bare = (id) => (kids(id) ? kids(id).every((m) => P(m.id)) : true),
-      Db = { ...S, floors: new Set(), walls: new Map(), segs: [], polys: [], roofs: [], rings: [], portals: [], stairs: [], pillars: [], free: [] },
-      Ds = { ...Db, floors: new Set(), walls: new Map(), segs: [], polys: [], roofs: [], rings: [], portals: [], stairs: [], pillars: [], decor: [], paths: [], polyRoofs: [], free: [] };
+      Db = { ...S, floors: new Set(), walls: new Map(), segs: [], polys: [], roofs: [], rings: [], stairs: [], pillars: [], free: [] },
+      Ds = { ...Db, floors: new Set(), walls: new Map(), segs: [], polys: [], roofs: [], rings: [], stairs: [], pillars: [], decor: [], paths: [], polyRoofs: [], free: [] };
     st.finRun = new Set();
     st.finFloor = new Set();
     st.finRoof = new Set();
@@ -9481,10 +9243,9 @@
       if (f) Db.roofs.push(r);
       else if (pl.every(bare) && !mem.list.some((m) => m.roof === r.id && !P(m.id))) Ds.roofs.push(r);
     }
-    S.rings.forEach((r, n) => {
+    S.rings.forEach((r) => {
       const D = P(r.id) ? Ds : Db;
       D.rings.push(r);
-      D.portals.push(S.portals[n]);
     });
     for (const q of S.stairs) (P(q.id) ? Ds : Db).stairs.push(q);
     for (const q of S.pillars) (P(q[4]) ? Ds : Db).pillars.push(q);
@@ -9565,7 +9326,8 @@
     }
     S.memMeshes = [];
   }
-  const GHOST_LATER = new Set(["insulation"]);
+  const GHOST_LATER = new Set(["insulation"]),
+    ZERO4 = new T.Matrix4().makeScale(0, 0, 0);
   function drawMembers(S, st) {
     dropMembers(S);
     const mem = st.mem,
@@ -9584,6 +9346,7 @@
       ghosts = {}, // "level|top|poly" -> members
       ghostAdd = (m, top) => {
         const idx = STAGES.indexOf(m.stage);
+        if (S.ghostOff && S.ghostOff.has(m.id)) return; // just fitted by hand: its blueprint is gone even before it is handed back
         if (m.kind === "site" || idx < gi || (idx > gi && GHOST_LATER.has(m.kind))) return;
         if (idx > gi && hideLater) return;
         const need = sk[m.kind],
@@ -9718,6 +9481,7 @@
         add(mesh, top === "1", false);
       } else {
         const mesh = new T.InstancedMesh(boxGeo, GHOST[level], list.length);
+        mesh.userData.gids = list.map((m) => m.id);
         place(mesh, list, 0, false);
         mesh.instanceMatrix.needsUpdate = true;
         add(mesh, top === "1", false);
@@ -9797,6 +9561,7 @@
   function markBuilt(S, ids, on) {
     const wasSite = S.sitePlanned;
     for (const id of ids) on ? S.plan.delete(id) : S.plan.add(id);
+    if (S.ghostOff) for (const id of ids) S.ghostOff.delete(id);
     if (S.known) for (const id of ids) S.known.add(id);
     S.ver++;
     S.pc = null;
@@ -10385,11 +10150,9 @@
   const OPEN = {
     door: { kind: "door", t0: 0.09, t1: 0.91, y0: 0.05, y1: 2.04, fill: "leaf" },
     door2: { kind: "door", t0: 0.05, t1: 0.95, y0: 0.05, y1: 2.24, fill: "leaf" },
-    gate: { kind: "door", t0: 0.1, t1: 0.9, y0: 0.03, y1: 2.35, fill: "grille" },
     railgate: { kind: "door", t0: 0.09, t1: 0.91, y0: 0.04, y1: 1.14, fill: "leaf" },
     window: { kind: "window", t0: 0.1, t1: 0.9, y0: 1.11, y1: 1.89, fill: "glazing" },
     window2: { kind: "window", t0: 0.26, t1: 0.74, y0: 0.86, top: (u) => 1.71 + 0.42 * Math.sin(Math.PI * u), fill: "glazing" },
-    window3: { kind: "window", t0: 0.43, t1: 0.57, y0: 0.96, y1: 2.14, fill: "none" },
     window4: { kind: "window", t0: 0.33, t1: 0.67, y0: 1.11, y1: 1.89, fill: "shutters" },
     arch: { kind: "opening", t0: 0.11, t1: 0.89, y0: 0.05, top: (u) => 1.63 + 0.62 * Math.sin(Math.PI * u), fill: "none" },
     arch2: { kind: "opening", t0: 0.11, t1: 0.89, y0: 0.05, top: (u) => 1.41 + (1 - Math.abs(2 * u - 1)) ** 0.8, fill: "none" },
@@ -10533,7 +10296,7 @@
         area = w * (up(sp.mean, lvl, fixed) - b0);
       list.push({ id: sp.kind === "opening" ? null : id, kind: sp.kind, type, offset: off, width: w, sill: b0, height: b1 - b0, y0: y0 + b0, y1: y0 + b1, area, fill: sp.fill });
       if (sp.kind === "opening") return;
-      const L = sp.fill === "leaf" ? ASSEMBLIES.leaf : sp.fill === "grille" ? ASSEMBLIES.grille : sp.fill === "none" ? [] : ASSEMBLIES.glazing;
+      const L = sp.fill === "leaf" ? ASSEMBLIES.leaf : sp.fill === "none" ? [] : ASSEMBLIES.glazing;
       pend.push({ ...head(id, sp.kind, type, mat), a: W2(ax + ux * off, az + uz * off), b: W2(ax + ux * (off + w), az + uz * (off + w)), y0: y0 + b0, y1: y0 + b1, length: w, height: b1 - b0, thickness: sumT(L), area, layers: L, fill: sp.fill, wall: wallId });
     };
     // a free door or window: the unit in its rough opening, like the module ones
@@ -10550,7 +10313,7 @@
       }
     };
     const wall = (id, cls, mat, ax, az, bx, bz, len, opens, storeys, extra) => {
-      const hgt = cls === "rail" ? 1.02 : cls === "parapet" ? 1.5 : H * (storeys || 1),
+      const hgt = cls === "rail" ? 1.02 : H * (storeys || 1),
         L = S.asm[id] || (kids(id) ? builtWallLayers(S, id, mat, kids(id)) : wallLayers(cls, mat)),
         gross = len * hgt;
       let cut = 0;
@@ -10641,20 +10404,17 @@
         } // the ridge is one of the roof's members
       }
     }
-    S.rings.forEach((r, ni) => {
-      const portals = S.portals[ni],
-        ri = ringInner(r),
+    S.rings.forEach((r) => {
+      const ri = ringInner(r),
         climb = r.floor !== false ? climbLevels(r) : 0,
         side = 2 * r.r * Math.sin(Math.PI / r.n),
         top = r.h * H,
         mat = r.mat || "timber",
         fm = r.fmat || "planks",
-        courses = !!(WALLS[mat] || WALLS.timber).courses,
         c = W2(r.cx, r.cz),
         ngon = (rad) => 0.5 * r.n * rad * rad * Math.sin((2 * Math.PI) / r.n),
         ringLoop = (rad) => loop(Array.from({ length: r.n }, (_, k) => ringVert({ ...r, r: rad }, k))),
-        parts = [],
-        ph = ringPhase(r, portals);
+        parts = [];
       out.push({ ...head(r.id, "tower", "round", mat), a: c, b: c, radius: r.r, sides: r.n, storeys: r.h, y0, y1: y0 + top, height: top, area: ngon(r.r), parts });
       for (let k = 0; k < r.n; k++) {
         const ty = r.sides[k];
@@ -10666,7 +10426,7 @@
           id = r.id + ".s" + k,
           opens = [];
         for (let l = 0; l < r.h; l++) {
-          const t = l === 0 ? ty : l === 1 && portals && portals.has(k) ? "arch" : k % 3 === 1 ? (courses ? "window3" : "window") : "wall";
+          const t = l === 0 ? ty : k % 3 === 1 ? "window" : "wall";
           opening(opens, id, mat, a[0], a[1], ux, uz, 0, side, t, id + ".o" + l, l, false);
         }
         wall(id, "wall", mat, a[0], a[1], b[0], b[1], side, opens, r.h, { more: { tower: r.id } });
@@ -10676,9 +10436,9 @@
       const landing = (band) => {
         let nb = 0;
         for (let k = 0; k < r.n; k++) {
-          const tk = (k + 0.5) / r.n - ph,
+          const tk = (k + 0.5) / r.n,
             tf = tk - Math.floor(tk);
-          if (band === true ? tf < 0.4 : band === "gallery" && tf >= 0.2 && tf < 0.75) nb++;
+          if (band === true && tf < 0.4) nb++;
         }
         return (nb * (ngon(r.r) - ngon(ri - 1.05))) / r.n;
       };
@@ -10692,30 +10452,13 @@
         footing(r.id + ".f0", c, c, ngon(r.r), ringLoop(r.r), []);
       }
       if (climb) {
-        for (let l = 1; l < r.h; l++) deck(r.id + ".f" + l, l, ri - 1.05, landing(l === climb ? true : l === 1 && portals && portals.size ? "gallery" : null), fm);
+        for (let l = 1; l < r.h; l++) deck(r.id + ".f" + l, l, ri - 1.05, landing(l === climb ? true : null), fm);
         const rm = ri - 0.55;
         out.push({ ...head(r.id + ".st", "stair", "spiral", fm), tower: r.id, a: c, b: c, radius: rm, width: 0.92, turns: climb, steps: climb * 16, y0: y0 + FLOOR_T, y1: y0 + climb * H + FLOOR_T, height: climb * H, length: climb * 2 * Math.PI * rm });
         parts.push(r.id + ".st");
       }
       const shape = r.roof === true ? "cone" : r.roof;
       if (!shape) return;
-      if (shape === "crenel") {
-        // battlements: a deck you can stand on where the tower can be climbed, and a parapet on every side
-        const id = r.id + ".r",
-          stone = MASONRY[mat] ? mat : "stone",
-          rad = climb ? ri - 1.05 : r.r,
-          extra = climb ? landing(true) : 0,
-          L = lay(id, solid(MASONRY[mat] || "fieldstone", FLOOR_T));
-        out.push({ ...head(id, "roof", "flat", stone), tower: r.id, a: c, b: c, radius: rad, y0: y0 + top, y1: y0 + top + FLOOR_T, eaveY: y0 + top + FLOOR_T, ridgeY: y0 + top + FLOOR_T, pitchDeg: 0, area: ngon(rad) + extra, planArea: ngon(rad) + extra, thickness: sumT(L), footprint: ringLoop(rad), layers: L });
-        parts.push(id);
-        for (let k = 0; k < r.n; k++) {
-          const a = ringVert(r, k),
-            b = ringVert(r, k + 1);
-          wall(r.id + ".p" + k, "parapet", mat, a[0], a[1], b[0], b[1], side, [], 1, { base: top, more: { tower: r.id } });
-          parts.push(r.id + ".p" + k);
-        }
-        return;
-      }
       const dome = shape === "dome",
         re = r.r + (dome ? 0.3 : 0.55),
         rise = dome ? r.r * 0.95 : clamp(r.r * 1.35, 1.6, 6),
@@ -10897,6 +10640,22 @@
       return B.cmode;
     },
     setBuilt,
+    // by-hand building: a piece that fits loses its own blueprint at once, without waiting for the batch to be handed back
+    hideGhost(structId, ids) {
+      const S = B.structs.find((q) => q.id === structId);
+      if (!S) return;
+      const set = S.ghostOff || (S.ghostOff = new Set()),
+        gone = new Set();
+      for (const id of ids) S.plan.has(id) && (set.add(id), gone.add(id));
+      if (!gone.size) return;
+      for (const mesh of S.memMeshes) {
+        const g = mesh.userData.gids;
+        if (!g) continue;
+        let hit = false;
+        for (let n = 0; n < g.length; n++) if (gone.has(g[n])) (mesh.setMatrixAt(n, ZERO4), (hit = true));
+        if (hit) mesh.instanceMatrix.needsUpdate = true;
+      }
+    },
     setStageBuilt,
     setSupportKinds(t) {
       B.supportKinds = t;
@@ -11015,7 +10774,7 @@
           const top = S.y0 + FLOOR_T;
           if (y >= top - 0.65) g = Math.max(g, top);
         }
-        if (S.thick || S.rings.length) {
+        if (S.rings.length) {
           const tw = topWalk(S, lx, lz, y);
           if (tw !== null) g = Math.max(g, tw);
         }
@@ -11153,8 +10912,7 @@
           if (want && dr.open < 0.05) dr.dir = (lx - dr.mx) * dr.nx + (lz - dr.mz) * dr.nz > 0 ? 1 : -1;
           dr.open = clamp(dr.open + (want ? 1 : -1) * dt * 4.5, 0, 1);
           const ease = dr.open * dr.open * (3 - 2 * dr.open);
-          if (dr.kind === "gate") dr.mesh.position.y = 0.04 + ease * dr.lift;
-          else dr.mesh.rotation.y = dr.base + dr.sign * dr.dir * ease * 1.75;
+          dr.mesh.rotation.y = dr.base + dr.sign * dr.dir * ease * 1.75;
         }
       }
       const home = sheltered && cosy >= 5;

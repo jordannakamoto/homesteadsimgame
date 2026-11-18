@@ -18,7 +18,7 @@ See `ARCHITECTURE.md` for how the simulation, world and rendering fit together, 
 
 - `src/engine.js`: the world engine, as ordinary readable source (about 2,800 lines, imports three.js r187; `build.sh` bundles it). It is the main prototype's source as of the build the Build Mode page was taken from, with every engine patch made for build mode, nature and lighting ported in. It replaces the earlier `src/engine.js`, which was that build's minified bundle prettified and patched in place; the port was checked token for token against it. Four functions that the patches rewrote wholesale (`makeAtlas`, `buildPine`, `tubeTiled`, `groundTint`) still carry short local names from the bundle.
 - `src/sim/`: the deterministic simulation (clock, saving, and each simulated system as it lands). Runs in the page and headlessly: `npm test`.
-- `src/build.js`: build mode (walls, roofs, castle kit, paths, copy, save, furniture).
+- `src/build.js`: build mode (walls, roofs, towers, paths, copy, save, furniture).
 - `src/touch.js`: mobile dual-stick controls and build buttons.
 - `src/nature.js`: ground cover, ivy, fallen logs, insects, animals, unified soft lighting, pine level of detail.
 - `src/fxpost.js`: the one post pass (High quality only): half-resolution ambient occlusion with bounce light (formerly `relight.js`, joined back with a depth-aware upsample), depth of field, sun shafts, distance haze, glow, colour grade, saturation and vignette.
