@@ -887,3 +887,9 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - **New:** `src/game/keymap.js` is one table of every key by context; the Controls sheet is drawn from it (combat rows only with `localStorage.combat`), and `__keymap.chip('E')` gives key chips for prompts. The sheet opens on `?` or F1 (H is the Hens'). Unhitching a trailer is now hold R while stopped (a prompt shows; X is overlays everywhere). The 2/3/4 terrain brush needs `localStorage.sandbox = '1'` (its buttons are hidden otherwise). Site and Foundation notes name "Site (7)" for slab, stem wall and pier foundations. Esc also leaves the terrain brush.
 - **Try:** `?` in the world; drive the ATV with a trailer, stop, hold R; `localStorage.sandbox='1'` then reload for keys 2-4.
 - **Weak:** the table is hand-kept (no test ties it to the real handlers); `by` was not set on site/foundation stages (it would make another system tally them), only `hint`.
+## Interior walls and services, reconciled (branch `reconcile`)
+
+- Electrical boxes are set proud of the studs by the wall's lining (13 mm drywall, 19 mm boards), so after hanging and taping they sit flush with the finished wall and the outlets fitted at Trim-out are on the surface, not buried behind the drywall. Boxes placed before this change keep where they are.
+- Order inside a building: rough-in, insulation, lining (hang), tape and mud, trim-out (devices and fixtures). Trim-out waits for the taping.
+- Opening a wall to get at a run takes off every sheet or board of it, its taped seams and the batts; the hints say so.
+- The planned interior "trim" slice (casings, baseboard) is renamed finish carpentry, apart from services' Trim-out. See `docs/design/interior-walls.md` and the design README.

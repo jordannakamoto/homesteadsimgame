@@ -9,7 +9,8 @@
              Staples tick in behind it and nail plates go on over holes near a stud face, by themselves.
      Crimp   hold on an end until the ring closes (PEX) or the cable is clamped in its box: a green flash.
      Open    a run inside a wall that is lined: hold on the marker to take the wall's lining (and the batts behind it) off,
-             through services.openWall. The whole wall face comes off: lining is one piece per wall for now.
+             through services.openWall. The whole wall comes off: every sheet or board of its lining (both faces of a
+             partition) and any taped seams, then the batts. A cut-out patch is later work.
    All of it goes through routes.work and routes.setNode: this file owns no truth. Drains (fitted in lengths) are S11.
    Material: a box, the metres pulled with their staples and nail plates, and a crimp ring are drawn from the Build panel's
    rough-in lines (construction.use): from the arms when you carry that spool or coil, else the stacks. Short: the gesture
@@ -290,7 +291,7 @@
       const w = WORDS[h.obj.cls] || WORDS.cable, n = h.obj.items.length;
       return '<b>Hold</b> to ' + w.join + (n > 1 ? ' (' + n + ' ends here)' : '');
     }
-    if (h.sv === 'open') return 'This run is inside a closed wall.  <b>Hold</b> to open the wall: its lining and batts come off (the whole face)';
+    if (h.sv === 'open') return 'This run is inside a closed wall.  <b>Hold</b> to open the wall: its drywall or boards and the batts come off';
     return '';
   }
 
@@ -493,7 +494,7 @@
         G.burst(o.w[0], o.w[1], o.w[2], 14, 0xe8e4dc, 1.4, 1.4, 0.05, 0.6);
         G.cam.shake = Math.min(G.cam.shake + 0.08, 0.3);
         G.markStockDirty && G.markStockDirty();
-        R.say('Wall opened: the lining and batts are off. Finish the run, then insulate and line it again.', 3.5);
+        R.say('Wall opened: the lining and batts are off. Finish the run, then insulate, hang and tape it again.', 3.5);
       } else R.say(r.reason === 'something stands on it' ? 'Take off what is fixed to this wall first.' : 'Cannot open it: ' + r.reason, 2.5);
     }
   }

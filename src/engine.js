@@ -2807,7 +2807,7 @@ const farLand = createFarLand({ scene, baseHeight, forestAt, chunks: world.chunk
 skyDome.setHorizon(farLand.horizon);
 // the real stars (src/night-sky.js), and the sky's frame and moon for the date and hour
 const nightSky = createNightSky({ scene, camera, sky: skyDome });
-const SKYF = { eq: new THREE.Matrix3(), eqInv: new THREE.Matrix3(), moon: new THREE.Vector4(0, -1, 0, 0), age: 0 };
+const SKYF = { eq: new THREE.Matrix3(), eqNow: new THREE.Matrix3(), eqInv: new THREE.Matrix3(), moon: new THREE.Vector4(0, -1, 0, 0), age: 0 };
 const HAZE = { light: 1.7, normal: 1, heavy: 0.5 };
 function applySkyLook() {
   skyDome.setOptions({ model: LOOK.skyModel, clouds: LOOK.skyClouds, night: LOOK.nightSky, cloudStyle: LOOK.cloudStyle });
@@ -3162,6 +3162,18 @@ const SKYK = { day: 1, night: 0 };   // how much day and night there is now, for
 // haze at the horizon (an average round the compass; the fog of every material warms it toward the sun), the blue
 // overhead, and the colour of the sunlight at the ground, at the height of the heaped clouds and of the cirrus
 const ATM = { t: -1, sx: 9, sy: 9, sz: 9, hor: new THREE.Color(), zen: new THREE.Color(), lo: new THREE.Color(), hi: new THREE.Color(), ci: new THREE.Color(), sun: new THREE.Vector3() };
+const _sl = [0, 0, 0];
+let noonLum = 0;
+function cloudLight(sv, hk, lift, outC) {
+  if (!noonLum) { sunColor([0, 1, 0], hk, _sl); noonLum = 0.2126 * _sl[0] + 0.7152 * _sl[1] + 0.0722 * _sl[2]; }
+  const hor = Math.hypot(sv[0], sv[2]) || 1, el = Math.asin(Math.max(-1, Math.min(1, sv[1]))) + lift;
+  const ce = Math.cos(el);
+  sunColor([sv[0] / hor * ce, Math.sin(el), sv[2] / hor * ce], hk, _sl);
+  const lum = 0.2126 * _sl[0] + 0.7152 * _sl[1] + 0.0722 * _sl[2];
+  const boost = Math.min(6, Math.max(1, Math.pow(noonLum / Math.max(lum, 1e-4), 0.55)));
+  const fade = smoothstep(-0.105, -0.03, sv[1]);
+  outC.setRGB(_sl[0] * boost * fade, _sl[1] * boost * fade, _sl[2] * boost * fade);
+}
 function updateAtmosphere(s) {
   const now = performance.now();
   if (now - ATM.t < 250 && (s.x - ATM.sx) ** 2 + (s.y - ATM.sy) ** 2 + (s.z - ATM.sz) ** 2 < 1e-5) return;
@@ -3173,8 +3185,13 @@ function updateAtmosphere(s) {
   ATM.hor.setRGB(r / 8, g / 8, b / 8);
   skyRadiance([0, 1, 0], sv, o); ATM.zen.setRGB(o[0], o[1], o[2]);
   sunColor(sv, 0.25, o); ATM.lo.setRGB(o[0], o[1], o[2]);
-  sunColor(sv, 1.5, o); ATM.hi.setRGB(o[0], o[1], o[2]);
-  sunColor(sv, 8, o); ATM.ci.setRGB(o[0], o[1], o[2]);
+  // the light on the clouds. They are kilometres up and tens of kilometres off toward the sun, so they keep it
+  // after the ground has lost it (and the air bends it round a little more): their light is taken from a little
+  // above where they are, and they glow on after sunset until the sun is some 6 degrees down. As the light dims
+  // the eye adapts, so the low sun's deep gold and red light is lifted rather than left muddy: what makes a sunset's
+  // clouds burn orange, rose and magenta against the blue-violet sky.
+  cloudLight(sv, 3.0, 1.0 * Math.PI / 180, ATM.hi);
+  cloudLight(sv, 9.0, 1.6 * Math.PI / 180, ATM.ci);
 }
 function updateSky() {
   if (window.__game && !window.__game.calendar) window.__game.calendar = calendar;
@@ -3185,7 +3202,7 @@ function updateSky() {
   const goldF = clamp(1 - dayF - nightF, 0, 1);
   SKYK.day = dayF; SKYK.night = nightF;
   // the real night: as dark as the moon allows (a moonless night is starlight only; a full moon lights the land)
-  skyFrame(sim.calendarT(), site.latitudeDeg, SKYF);
+  skyFrame(sim.calendarT(), site.latitudeDeg, SKYF, performance.now() / 1000);
   const moonK = SKYF.moon.w * smoothstep(0.02, 0.2, SKYF.moon.y);
   const nightDark = LOOK.nightSky === 'real' ? lerp(1, lerp(0.3, 1.05, moonK), nightF) : 1;
   const mix3 = (k) => SKY.day[k] * dayF + SKY.gold[k] * goldF + SKY.night[k] * nightF;
