@@ -33,7 +33,8 @@ export const SKY_NOISE_GLSL = /* glsl */ `
   float fbm4(vec2 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { s += a * vnoise(p); p = mat2(1.6, 1.2, -1.2, 1.6) * p + 7.3; a *= 0.5; } return s / 0.9375; }
   float fbm2(vec2 p) { return (vnoise(p) * 0.66 + vnoise(p * 2.1 + 3.1) * 0.34); }
   // distance (km) along a ray rising dy to a layer hk km up, on the curved Earth: clouds crowd down to the horizon
-  float layerT(float dy, float hk) { float r = 6360.0; return sqrt(r * r * dy * dy + 2.0 * r * hk + hk * hk) - r * dy; }
+  // (written so no two Earth-sized numbers are subtracted: phones that work at lower precision lose nothing)
+  float layerT(float dy, float hk) { float r = 6360.0, c = 2.0 * r * hk + hk * hk; return c / (sqrt(r * r * dy * dy + c) + r * max(dy, 0.0)); }
   float cumulus(vec2 p, float cover) {
     vec2 w = vec2(fbm2(p * 0.35 + 3.0), fbm2(p * 0.35 - 5.0)) - 0.5;
     float n = fbm4(p * 0.55 + w * 1.4);
@@ -46,7 +47,7 @@ export const SKY_NOISE_GLSL = /* glsl */ `
   const float C_BASE = 1.3, C_TOP = 3.3;
   float remap(float v, float a, float b, float c, float d) { return c + (v - a) / (b - a) * (d - c); }
   float cloudCov(vec2 p, float cover) {
-    float wm = textureLod(uCloudNoise, p * 0.011 + vec2(0.31, 0.77), 2.0).r;
+    float wm = textureLod(uCloudNoise, p * 0.018 + vec2(0.31, 0.77), 2.0).r;
     return clamp(0.1 + cover * 1.1 * (0.3 + 1.0 * wm) - 0.06 + 0.35 * smoothstep(0.7, 1.0, cover), 0.0, 1.0);
   }
   // density at p (km, on the ground plan) and h (0 at the base .. 1 at the top), coverage cov; fine: erode the edges
@@ -57,22 +58,22 @@ export const SKY_NOISE_GLSL = /* glsl */ `
     if (h < 0.0 || h > 1.0 || cov <= 0.0) return 0.0;
     // the outline changes with height (a second noise blended in going up, both leaning), so a cloud swells and
     // narrows into domes and towers rather than standing as one shape cut out and stood on end
-    float lod = clamp(log2(cloud_t * 0.0142), 0.0, 7.0);
-    float s1 = textureLod(uCloudNoise, p * 0.085 + h * vec2(0.12, 0.07), lod).r;
-    float s2 = textureLod(uCloudNoise, p * 0.14 + vec2(0.37, 0.61) - h * vec2(0.09, 0.05), lod).r;
+    float lod = clamp(log2(cloud_t * 0.027), 0.0, 7.0);
+    float s1 = textureLod(uCloudNoise, p * 0.16 + h * vec2(0.12, 0.07), lod).r;
+    float s2 = textureLod(uCloudNoise, p * 0.26 + vec2(0.37, 0.61) - h * vec2(0.09, 0.05), lod).r;
     float shape = mix(s1, s1 * 0.55 + s2 * 0.45, smoothstep(0.15, 0.85, h));
     // flat bases, rounded tops; under a heavy cover they build higher
     float prof = smoothstep(0.0, 0.07, h) * smoothstep(1.0, 0.2 - 0.1 * cov, h);
     float d = remap(shape * prof, 1.0 - cov * 0.62, 1.0, 0.0, 1.0);
     if (d <= 0.0 || !fine) return clamp(d, 0.0, 1.0) * cov;
-    vec4 e = textureLod(uCloudNoise, p * 0.24 + h * vec2(0.07, -0.05) + vec2(0.5, 0.2) + t * 0.0015, clamp(log2(cloud_t * 0.04), 0.0, 7.0));
+    vec4 e = textureLod(uCloudNoise, p * 0.4 + h * vec2(0.07, -0.05) + vec2(0.5, 0.2) + t * 0.0015, clamp(log2(cloud_t * 0.068), 0.0, 7.0));
     float wf = e.g * 0.8 + e.b * 0.2;
     float det = mix(1.0 - wf, wf, clamp(h * 3.0, 0.0, 1.0));     // wispy at the base, billowed above
     d = remap(d, det * 0.42 * fine_k, 1.0, 0.0, 1.0);
     return clamp(d, 0.0, 1.0) * cov;
   }
   // distance to height hk along a ray rising dy, and the height at distance t (curved Earth)
-  float altAt(float t, float dy) { float r = 6360.0; return sqrt(r * r + t * t + 2.0 * r * t * dy) - r; }
+  float altAt(float t, float dy) { float r = 6360.0, c = t * t + 2.0 * r * t * dy; return c / (sqrt(r * r + c) + r); }
   // how much cloud stands in front of direction d (0 clear .. 1 hidden)
   float cloudCover(vec3 d, float cover, vec2 wind, float on) {
     if (on < 0.5 || d.y <= 0.0) return 0.0;
@@ -182,9 +183,9 @@ const SKY_COMMON = /* glsl */ `
             od *= 52.0;
             // powder: the thin, outer parts facing the light scatter less of it back, so the billows stand out
             float powder = 1.0 - exp(-den * 16.0);
-            float sunL = (exp(-od) * pf + 0.55 * exp(-od * 0.25) * pb + 0.35 * exp(-od * 0.07) * pc) * mix(0.4, 1.0, powder);
-            vec3 amb = mix(ambLo, ambHi, smoothstep(0.0, 1.0, h)) * mix(0.45, 1.0, h) * (0.6 + 0.4 * powder);
-            vec3 S = uSunHi * sunL * 0.5 + amb;
+            float sunL = (exp(-od) * pf + 0.4 * exp(-od * 0.25) * pb + 0.18 * exp(-od * 0.07) * pc) * mix(0.4, 1.0, powder);
+            vec3 amb = mix(ambLo, ambHi, smoothstep(0.0, 1.0, h)) * mix(0.3, 1.0, h) * (0.6 + 0.4 * powder);
+            vec3 S = uSunHi * sunL * 0.58 + amb;
             float st = exp(-den * 48.0 * dt);
             L += T * S * (1.0 - st);
             tw += t * T * (1.0 - st); tws += T * (1.0 - st);
@@ -205,7 +206,7 @@ export function createSkyDome({ scene, camera, renderer, water, U, SEA = 0 }) {
   const uniforms = {
     uSunDir: water.uSunDir, uSunCol: water.uSunCol, uAmb: water.uAmb, uSky: water.uSky, uZenith: water.uZenith, uDeep: water.uDeep, uTime: U.time,
     uView: { value: view.texture }, uHz: { value: null }, uMW: { value: mwTex }, uCloudNoise: { value: cloudNoise },
-    uCloudTex: { value: null }, uScreen: { value: new THREE.Vector2(1, 1) }, uMainCam: { value: 0 }, uInvVP: { value: new THREE.Matrix4() }, uCamPos: { value: new THREE.Vector3() },
+    uCloudTex: { value: null }, uScreen: { value: new THREE.Vector2(1, 1) }, uMainCam: { value: 0 }, uDust: { value: 1024 }, uInvVP: { value: new THREE.Matrix4() }, uCamPos: { value: new THREE.Vector3() },
     uTrueSun: { value: new THREE.Vector3(0, 1, 0) }, uSunLo: { value: new THREE.Color() }, uSunHi: { value: new THREE.Color() }, uSunCi: { value: new THREE.Color() },
     uCloud: { value: 0.3 }, uGrey: { value: 0 }, uNight: { value: 0 }, uDay: { value: 1 }, uWind: { value: new THREE.Vector2() }, uWindOff: { value: new THREE.Vector2() },
     uFogC: { value: new THREE.Color() }, uFog: { value: new THREE.Vector3(60, 1000, 1) }, uCamY: { value: 10 }, uSea: { value: SEA },
@@ -224,7 +225,7 @@ export function createSkyDome({ scene, camera, renderer, water, U, SEA = 0 }) {
       }`,
     fragmentShader: ATMOS_GLSL + SKY_NOISE_GLSL + /* glsl */ `
       varying vec3 vDir;
-      uniform sampler2D uCloudTex; uniform vec2 uScreen; uniform float uMainCam;
+      uniform sampler2D uCloudTex; uniform vec2 uScreen; uniform float uMainCam, uDust;
 ${SKY_COMMON}      void main() {
         vec3 d = normalize(vDir);
         float mu = dot(d, uTrueSun);
@@ -272,13 +273,16 @@ ${SKY_COMMON}      void main() {
             vec3 band = mix(vec3(0.55, 0.62, 0.85), vec3(1.0, 0.88, 0.72), smoothstep(0.45, 0.95, mw));
             col += band * glow * 0.32 * clear * dark;
             // the faint stars past what the catalogue holds: a dust of them, many times thicker along the band
-            vec3 q = e * 1100.0, c = floor(q);
+            // (each faint star about a pixel and a half across whatever the screen: finer, they would shimmer as the
+            // view moves; the scale steps in powers of two, so it holds still)
+            vec3 q = e * uDust, c = floor(q);
             float hs = h3(c);
-            float pr = 0.035 + 0.22 * mw;
+            float pr = (0.02 + 0.24 * mw) * clamp(1100.0 / uDust, 0.6, 3.0);
+            float res = 1.0;
             if (hs < pr) {
               vec3 sp = c + 0.5 + (vec3(h3(c + 1.7), h3(c + 4.1), h3(c + 9.3)) - 0.5) * 0.6;
               float b = smoothstep(0.5, 0.0, length(q - sp)) * (0.05 + 0.2 * h3(c + 6.0));
-              col += b * mix(vec3(0.75, 0.82, 1.0), vec3(1.0, 0.9, 0.78), h3(c + 2.0)) * clear * dark * 1.6;
+              col += b * mix(vec3(0.75, 0.82, 1.0), vec3(1.0, 0.9, 0.78), h3(c + 2.0)) * clear * dark * 1.6 * res;
             }
             // airglow: the faint green-gold light of the high air itself, low round the horizon on the darkest nights
             col += vec3(0.010, 0.016, 0.008) * exp(-max(d.y, 0.0) * 9.0) * dark * (1.0 - uMoon.w * 0.8);
@@ -295,9 +299,12 @@ ${SKY_COMMON}      void main() {
         // ---- the moon: its disc lit on the side toward the sun, earthshine on the rest; pale by day
         vec3 md = uMoon.xyz;
         float mc = dot(d, md);
-        if (md.y > -0.02 && mc > 0.9998 - 0.0003 && uOpt.z > 0.5) {
+        if (md.y > -0.02 && mc > 0.9997 - 0.0003 && uOpt.z > 0.5) {
           vec3 tx = normalize(cross(md, vec3(1e-4, 1.0, 0.0))), ty = cross(tx, md);
-          vec2 o = vec2(dot(d, tx), dot(d, ty)) / 0.012;       // disc radius 0.7 degrees: twice the real moon, as games draw it, so it reads on screen
+          // disc radius 0.7 degrees (twice the real moon, as games draw it, so it reads on screen), and larger still low down:
+          // the moon illusion, the low moon looking huge against the far horizon
+          float mR = 0.012 * mix(1.45, 1.0, smoothstep(0.0, 0.45, md.y));
+          vec2 o = vec2(dot(d, tx), dot(d, ty)) / mR;
           float r2 = dot(o, o);
           if (r2 < 1.0) {
             vec3 n = normalize(tx * o.x + ty * o.y + md * sqrt(1.0 - r2));
@@ -335,7 +342,7 @@ ${SKY_COMMON}      void main() {
         if (uOpt.y > 1.5 && uMainCam > 0.5) {
           vec4 cl = texture2D(uCloudTex, gl_FragCoord.xy / uScreen);
           sunDisc *= 1.0 - cl.a;
-          col = mix(col, cl.rgb, cl.a);
+          col = mix(col, cl.rgb * 2.0, cl.a);
         }
         // flat clouds: heaps low down, self-shadowed toward the sun
         else if (uOpt.y > 0.5) {
@@ -376,12 +383,16 @@ ${SKY_COMMON}      void main() {
     uniforms.uMainCam.value = cam === camera && cloudsDrawn ? 1 : 0;
     const rt = r.getRenderTarget();
     if (rt) uniforms.uScreen.value.set(rt.width, rt.height); else uniforms.uScreen.value.copy(r.getDrawingBufferSize(_rs));
+    // the faint stars' cell: a pixel and a half of this view, in a power of two
+    if (cam.isPerspectiveCamera) { const px = (cam.fov * Math.PI / 180) / uniforms.uScreen.value.y; uniforms.uDust.value = Math.pow(2, Math.floor(Math.log2(1 / (px * 1.5)))); }
     material.uniformsNeedUpdate = true;
   };
 
   // ---- the cloud pass: the volumetric clouds for the main view, at a fraction of its resolution (soft things lose
   // nothing by it), worked out just before the frame so they sit exactly where the frame looks
-  const cloudRT = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
+  // plain 8-bit colour (every phone can draw into it; half-floats are not everywhere), the colour halved to keep
+  // the brightest sunlit edges
+  const cloudRT = new THREE.WebGLRenderTarget(4, 4, { depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
   uniforms.uCloudTex.value = cloudRT.texture;
   const cloudMat = new THREE.ShaderMaterial({
     uniforms, depthTest: false, depthWrite: false,
@@ -396,14 +407,17 @@ ${SKY_COMMON}      void main() {
         float mu = dot(d, uTrueSun), cover = clamp(uCloud, 0.0, 1.0);
         vec3 zen = airAt(vec3(0.0, 1.0, 0.0));
         vec3 ambHi = zen * 0.85 + mix(uSky, uZenith, 0.5) * uNight * (0.25 + 0.5 * uMoon.w);
-        vec3 ambLo = airAt(normalize(vec3(d.x, 0.06, d.z))) * 0.42 + uAmb * 0.06;
+        // under the clouds: the sky low down, and light thrown up off the land (warm and green near, cooler far off,
+        // as landscape painters give cloud bases)
+        float near = exp(-layerT(d.y, C_BASE) / 6.0);
+        vec3 ambLo = airAt(normalize(vec3(d.x, 0.06, d.z))) * 0.32 + uSunCol * vec3(0.36, 0.38, 0.22) * 0.06 * near + uAmb * 0.05;
         float tMid;
         vec4 cl = marchClouds(d, cover, uWindOff, mu, ambHi, ambLo, tMid);
         if (cl.a < 0.001) { gl_FragColor = vec4(0.0); return; }
         vec3 cc = cl.rgb / cl.a;
         cc = mix(cc, mix(uSky, uZenith, 0.25) * 0.9, uGrey * 0.6);
         cc = mix(cc, skyAbove(d), 1.0 - exp(-tMid / 45.0));    // far clouds fade into the haze
-        gl_FragColor = vec4(cc, cl.a * smoothstep(0.0, 0.07, d.y));
+        gl_FragColor = vec4(min(cc * 0.5, vec3(1.0)), cl.a * smoothstep(0.0, 0.07, d.y));
       }`,
   });
   const cloudQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), cloudMat); cloudQuad.frustumCulled = false;
