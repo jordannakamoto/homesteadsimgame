@@ -36,7 +36,7 @@
   const V = {
     sim: null, rev: 1, bv: -1, sel: null, structs: new Map(), geom: new Map(), plans: new Map(), planVer: new Map(), fresh: new Map(), flushing: [],
     working: null, auto: null, raise: null, ctx: null, fWas: false, idleT: 0, placing: null, pendingPlan: null, book: false, expand: null, quotes: {},
-    blows: {}, named: {}, cool: 0, sawing: new Set(), swingIn: null, mDown: false, poseT: 0, poseKind: '',
+    blows: {}, named: {}, cool: 0, sawing: new Set(), swingIn: null, flights: new Map(), blow: null, handT: 9, mDown: false, poseT: 0, poseKind: '',
     uiSig: '', nextSig: '', promptSig: '', glowSig: '', stackSig: '', loadSig: '', braceSig: '', cardStage: null, sayT: 0, bannerT: 0, target: null, lastLand: 0, hint: null, hintT: 0, pct: -1,
   };
   const cmd = (name, payload) => { const r = G.sim.commandNow('construction.' + name, payload || {}); V.rev++; G.markStockDirty && G.markStockDirty(); return r; };
@@ -216,6 +216,7 @@
       asm.setSolid(id, cur, list, 48);
     }
     for (const [layer, mid] of loose) liftTo(id, layer, mid, proud(mid));
+    if (V.flights.size) tickFlights(0);       // a piece in the air stays in the air
     dotsFor(id);
     V.glowSig = '';
     B.setShell(id, !Object.values(pr.tally).some((t) => t[0] > 0));
@@ -367,7 +368,8 @@
     const m = geom(id) && geom(id).byId.get(mid);
     if (m && m.kind === 'cladding' && m.out) asm.lift(id, layer, mid, h * 0.5, m.out); else asm.lift(id, layer, mid, h);
   }
-  const proud = (mid) => { if (V.sheetMids && V.sheetMids.has(mid)) return 0; const sw = V.swingIn; if (sw && sw.mid === mid) return 0.045 + 0.55 * (1 - Math.min(1, sw.t / 0.2)) ** 2; const b = V.blows[mid]; return 0.045 * (1 - (b ? b.n / b.of : 0)); };
+  const PROUD = 0.085;     // how far a set piece stands proud before its first blow: enough to read at play distance
+  const proud = (mid) => { if (V.sheetMids && V.sheetMids.has(mid)) return 0; const sw = V.swingIn; if (sw && sw.mid === mid) return PROUD + 0.55 * (1 - Math.min(1, sw.t / 0.2)) ** 2; const b = V.blows[mid]; return PROUD * (1 - (b ? b.n / b.of : 0)); };
   const qTmp = new T.Quaternion(), aTmp = new T.Vector3(), wA = new T.Vector3(), wB = new T.Vector3(), wM = new T.Vector3();
   // a point of a member in the world, wherever its frame lies just now
   function worldPt(g, hw, p, out) {
@@ -426,13 +428,13 @@
     const by = new Map();
     for (const mid in pr.members) {
       const pm = pr.members[mid];
-      if ((!pm.built && !(pm.need > 0 && pm.got >= pm.need - 1e-6)) || V.sawing.has(mid)) continue;
+      if ((!pm.built && !(pm.need > 0 && pm.got >= pm.need - 1e-6)) || V.sawing.has(mid) || V.flights.has(mid)) continue;
       const pts = nailLocal(g, mid);
       if (!pts) continue;
       const cv = COVER[pm.stage];
       if (pm.built && cv && pr.tally[cv] && api.stageComplete(pr, cv)) continue;
       if (pm.built && pm.kind === 'roofing') continue;      // a course's nails are under the course above
-      const b = V.blows[mid], flat = C.STAGE[pm.stage].flat && g.walls.has(pm.parent) && !pr.raised[pm.parent], layer = flat ? pm.parent : 'main', h = pm.built ? 0 : 0.045 * (1 - (b ? b.n / b.of : 0));
+      const b = V.blows[mid], flat = C.STAGE[pm.stage].flat && g.walls.has(pm.parent) && !pr.raised[pm.parent], layer = flat ? pm.parent : 'main', h = pm.built ? 0 : PROUD * (1 - (b ? b.n / b.of : 0));
       let list = by.get(layer);
       if (!list) by.set(layer, (list = []));
       pts.forEach((p, i) => list.push({ p, h, k: pm.built || (b && b.d[i]) ? 1 : 0 }));
@@ -828,6 +830,44 @@
     for (const w of V.rolls) if (w.t >= w.dur) { w.mesh.visible = false; const pm = S().progress[w.id] && S().progress[w.id].members[w.mid]; liftTo(w.id, w.layer, w.mid, pm && !pm.built ? proud(w.mid) : 0); }
     V.rolls = V.rolls.filter((w) => w.t < w.dur);
   }
+  // a world point in a member's own frame (the inverse of worldPt)
+  function toLocal(g, hw, out) {
+    out.applyMatrix4(g.inv || (g.inv = g.matrix.clone().invert()));
+    if (hw) { const ang = V.raise && V.raise.hw === hw ? V.raise.angle : hw.flat; out.x -= hw.pivot[0]; out.y -= hw.pivot[1]; out.z -= hw.pivot[2]; out.applyQuaternion(qTmp.setFromAxisAngle(aTmp.set(hw.axis[0], 0, hw.axis[2]), -ang)); out.x += hw.pivot[0]; out.y += hw.pivot[1]; out.z += hw.pivot[2]; }
+    return out;
+  }
+  // a piece set from the arms leaves the shoulder, arcs over and drops onto its seat, then rocks to rest (tickFlights)
+  const FLY_S = 0.26;
+  function flyIn(id, layer, mid) {
+    const g = geom(id), m = g && g.byId.get(mid), P = G.player;
+    if (!m) return;
+    const hw = layer !== 'main' ? g.walls.get(layer) : null, f = P.face;
+    const sx = P.x + Math.cos(f) * 0.27 + Math.sin(f) * 0.15, sy = P.y + 1.34, sz = P.z - Math.sin(f) * 0.27 + Math.cos(f) * 0.15;
+    toLocal(g, hw, wA.set(sx, sy, sz)); toLocal(g, hw, wB.set(sx, sy + 1, sz));
+    const mx = (m.a[0] + m.b[0]) / 2, my = (m.a[1] + m.b[1]) / 2, mz = (m.a[2] + m.b[2]) / 2;
+    V.flights.set(mid, { id, layer, mid, t: 0, D: [wA.x - mx, wA.y - my, wA.z - mz], U: [wB.x - wA.x, wB.y - wA.y, wB.z - wA.z], dist: Math.hypot(wA.x - mx, wA.y - my, wA.z - mz) });
+    asm.lift(id, layer, mid, 1, V.flights.get(mid).D);
+  }
+  const ease = (x) => (x < 0.5 ? 2 * x * x : 1 - (-2 * x + 2) ** 2 / 2);
+  function tickFlights(dt) {
+    for (const [mid, w] of V.flights) {
+      w.t += dt;
+      const p = Math.min(1, w.t / FLY_S), e = ease(p), arc = Math.min(0.6, 0.25 + w.dist * 0.12) * 4 * p * (1 - p), k = 1 - e;
+      const pr = S().progress[w.id];
+      if (!pr || !pr.members[mid] || pr.members[mid].built) { V.flights.delete(mid); continue; }
+      // in its own frame: back toward the shoulder by k, up by the arc, and proud of its seat at the end
+      const off = [w.D[0] * k + w.U[0] * (arc + PROUD * e), w.D[1] * k + w.U[1] * (arc + PROUD * e), w.D[2] * k + w.U[2] * (arc + PROUD * e)];
+      asm.lift(w.id, w.layer, mid, 1, off);
+      if (p >= 1) {
+        V.flights.delete(mid);
+        V.jolt = { id: w.id, layer: w.layer, mid, t: 0, built: false };
+        G.cam.shake = Math.min(G.cam.shake + 0.03 * feel().shake, 0.3);
+        const g = geom(w.id), m = g && g.byId.get(mid);
+        if (m) { const hw = w.layer !== 'main' ? g.walls.get(w.layer) : null; worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); wM.lerpVectors(wA, wB, 0.5); G.burst(wM.x, wM.y, wM.z, 4, 0xe8d9b0, 0.7, 0.6, 0.05, 0.35); }
+        dotsFor(w.id);
+      }
+    }
+  }
   // set one piece in place with its small moment; returns the install result, or null when it did not work
   function setPiece(id, mid, pm, layer, m, at, swp, quiet) {
     const pr = S().progress[id], r = cmd('install', { structId: id, memberIds: [mid], hold: true });
@@ -835,7 +875,7 @@
     const sawn = r.cuts && r.cuts.find((q) => q.stick);
     if (sawn) { sawPiece(id, mid, layer, sawn, at, quiet); if (!quiet) flash(cutWords(sawn)); }
     else if (r.cuts && r.cuts.length && !quiet) flash(r.cuts[0].how === 'offcut' ? 'Cut from an offcut' : 'Cut to fit; offcut kept');
-    if (r.set.length) { if (swp) V.stick = { id, mid }; if (sawn) { /* it swings in when the saw is through */ } else if (pm.kind === 'cladding') slideIn(id, layer, mid); else if (V.sheetMids && V.sheetMids.has(mid)) wrapRoll(id, layer, mid); else if (!quiet) V.swingIn = { mid, id, layer, t: 0 }; sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
+    if (r.set.length) { if (swp) V.stick = { id, mid }; if (sawn) { /* it swings in when the saw is through */ } else if (pm.kind === 'cladding') slideIn(id, layer, mid); else if (V.sheetMids && V.sheetMids.has(mid)) wrapRoll(id, layer, mid); else flyIn(id, layer, mid); sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
     else if (!quiet) { const q = r.partial[0]; sounds.play('rustle'); flash(plain(lineOf(pr, mid).label) + ': ' + Math.round((100 * q.got) / q.need) + '% there. Fetch more.'); }
     return r;
   }
@@ -926,6 +966,35 @@
       if (sc < nbest) { nbest = sc; ni = i; }
     }
     if (ni >= 0 && ctx.repeat && !swp && nbest > 150) { V.cool = 0.03; return; }     // holding only drives the nails the pointer passes over
+    V.handT = 0;
+    if (pm.kind === 'site' || !m) { strikeNow(ctx, ni); return; }      // a shovel stroke lands at once
+    // the hammer winds up and comes down; the blow lands at contact (tickBlow). One still in the air lands first.
+    if (V.blow && !V.blow.hit) strikeNow(V.blow.ctx, V.blow.ni);
+    V.blow = { ctx, ni, t: 0, hit: false };
+  }
+  const CONTACT_S = 0.1, BLOW_S = 0.26;
+  function tickBlow(dt) {
+    const bl = V.blow;
+    if (!bl) return;
+    bl.t += dt;
+    if (!bl.hit && bl.t >= CONTACT_S) { bl.hit = true; strikeNow(bl.ctx, bl.ni); }
+    if (bl.t >= BLOW_S) V.blow = null;
+  }
+  // the arm through a blow: k 1 is the hammer down. A wind-up behind the head, a snap down, a short recoil
+  function blowK(t) {
+    if (t < 0.07) return 0.35 - 0.6 * ease(t / 0.07);
+    if (t < CONTACT_S) return -0.25 + 1.35 * ((t - 0.07) / (CONTACT_S - 0.07));
+    return 1.1 - 0.45 * ease(Math.min(1, (t - CONTACT_S) / (BLOW_S - CONTACT_S)));
+  }
+  function strikeNow(ctx, ni) {
+    const pr = S().progress[ctx.id];
+    if (!pr) return;
+    const g = geom(ctx.id), pm = pr.members[ctx.mid];
+    if (!g || !pm || pm.built) return;
+    const m = g.byId.get(ctx.mid), hw = m && C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null, layer = hw ? pm.parent : 'main', P = G.player;
+    const swp = sweepable(pr, ctx.mid, g), pts = m ? nailLocal(g, ctx.mid) : null, b = blowsOf(g, pm, ctx.mid), of = b.of;
+    if (pts && ni >= 0 && b.d[ni]) ni = pts.findIndex((_, i) => !b.d[i]);     // another blow drove it meanwhile: the next one
+    if (m) { worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); wM.lerpVectors(wA, wB, 0.5); } else wM.set(reach.x, P.y, reach.z);
     if (ni >= 0) { worldPt(g, hw, pts[ni], wM); b.d[ni] = 1; }
     if (pm.kind !== 'site' && feel().nails !== 1) {   // nails per strike: 2 drives the next one too, 0 drives them all
       let extra = feel().nails === 0 ? 1e9 : feel().nails - 1;
@@ -934,7 +1003,6 @@
       b.n = Math.min(of - 1, b.n);
     }
     b.n++;
-    V.poseT = 0.24; V.poseKind = 'hammer';
     const snd = pm.kind === 'pier' ? 'thud' : C.WORK.sound[pm.kind] === 'dig' ? 'dig' : 'knock', last = b.n >= of;
     sounds.play(last && snd === 'knock' ? 'seat' : snd, 0.94 + 0.12 * Math.random());
     if (pm.kind === 'site') G.burst(reach.x, G.heightAt(reach.x, reach.z) + 0.15, reach.z, 5, 0x6b4f35, 1.4, 2.2, 0.11, 0.6);
@@ -942,6 +1010,7 @@
     G.cam.shake = Math.min(G.cam.shake + (last ? 0.07 : 0.035) * feel().shake, 0.3);
     if (G.juice) G.juice.hitStop = (last ? 0.07 : 0.035) * feel().hitStop;
     V.jolt = m ? { id: ctx.id, layer, mid: ctx.mid, t: 0, built: last } : null;
+    if (last && m) { G.burst(wM.x, wM.y + 0.04, wM.z, 6, 0xfff1c4, 1.1, 1.4, 0.035, 0.25); G.burst(wM.x, wM.y, wM.z, 5, 0xd9c49a, 0.9, 0.5, 0.06, 0.5); }
     if (!last) { if (m) liftTo(ctx.id, layer, ctx.mid, proud(ctx.mid)); if (pts) dotsFor(ctx.id); return; }
     delete V.blows[ctx.mid];
     if (V.stick && V.stick.mid === ctx.mid) V.stick = null;
@@ -1331,7 +1400,8 @@
   function tickWork(dt) {
     const ctx = V.ctx, held = !!G.keys.KeyE || V.mDown, s = S();
     V.cool -= dt * (C.workSpeed(G.sim.state.sys.stock.tools, G.powerAvailable && G.powerAvailable()));
-    if (V.jolt) { const j = V.jolt; j.t += dt; liftTo(j.id, j.layer, j.mid, Math.max(-0.02, (j.built ? 0 : proud(j.mid)) - 0.03 * Math.exp(-j.t * 16) * Math.cos(j.t * 46))); if (j.t > 0.28) { asm.lift(j.id, j.layer, j.mid, j.built ? 0 : proud(j.mid)); V.jolt = null; } }
+    V.handT += dt; tickBlow(dt); tickFlights(dt);
+    if (V.jolt) { const j = V.jolt; j.t += dt; liftTo(j.id, j.layer, j.mid, Math.max(-0.025, (j.built ? 0 : proud(j.mid)) - 0.045 * Math.exp(-j.t * 16) * Math.cos(j.t * 46))); if (j.t > 0.28) { asm.lift(j.id, j.layer, j.mid, j.built ? 0 : proud(j.mid)); V.jolt = null; } }
     tickSlides(dt); tickRolls(dt);
     if (V.swingIn) { V.swingIn.t += dt; const w = V.swingIn; asm.lift(w.id, w.layer, w.mid, proud(w.mid)); if (w.t > 0.2) V.swingIn = null; }
     const speed = C.workSpeed(G.sim.state.sys.stock.tools, G.powerAvailable && G.powerAvailable());
@@ -1371,10 +1441,13 @@
     const P = G.player, pose = V.pose || (V.pose = { kind: '', k: 0 });
     if (V.cutNow) { pose.kind = 'saw'; pose.k = V.cutNow.k; P.faceTarget = Math.atan2(V.cutNow.x - P.x, V.cutNow.z - P.z); }
     else if (V.raise && !V.raise.landed) pose.kind = 'lift';
-    else if (W.job) { pose.kind = 'hammer'; const ph = Math.min(1, W.t / C.WORK.beatS); pose.k = ph < 0.75 ? 0 : (ph - 0.75) * 4; }
+    else if (V.blow) { pose.kind = 'hammer'; pose.k = blowK(V.blow.t); }
+    else if (W.job) { pose.kind = 'hammer'; const ph = Math.min(1, W.t / C.WORK.beatS); pose.k = ph < 0.2 ? 1.05 - 0.6 * ease(ph / 0.2) : ph < 0.8 ? 0.45 - 0.7 * ease((ph - 0.2) / 0.6) : -0.25 + 1.3 * ((ph - 0.8) / 0.2); }
     else if (V.poseT > 0) { V.poseT -= dt; pose.kind = V.poseKind; pose.k = Math.min(1, 1 - V.poseT / 0.24 + 0.35); }
     else pose.kind = s.carried ? 'carry' : '';
     P.work = pose.kind ? pose : null;
+    // the hammer is in the hand while there is nailing to do here, the hatchet otherwise
+    P.hammer = pose.kind === 'hammer' || (!!ctx && ctx.kind === 'hands' && (ctx.act === 'nail' || V.handT < 1.5));
     // hand finished pieces back to build mode once the hammer rests
     V.idleT = W.job ? 0 : V.idleT + dt;
     if (V.idleT > 0.45) for (const [id, f] of V.fresh) if (f.size && !V.flushing.some((q) => q.id === id)) flush(id);
@@ -1775,18 +1848,18 @@
       const pr = current(), flatNow = pr && !pr.done && C.STAGE[pr.stage] && C.STAGE[pr.stage].flat ? '-' : null;
       if (flatNow !== V.gstage) { V.gstage = flatNow; B.showStage(flatNow); }
       // come in closer while the hammer is going, and drift back out afterwards
-      const cam = G.cam, busy = !!(W.job || V.raise);
+      const cam = G.cam, hands = V.handT < 2.5 && !!V.ctx && V.ctx.kind === 'hands' && !(RW && RW.on()), busy = !!(W.job || V.raise || hands);
       if (V.camSet !== undefined && Math.abs(cam.dist - V.camSet) > 0.05) V.camHome = V.camSet = V.pitchHome = undefined;      // the player moved the camera: leave it be
-      if (busy) { V.camIdle = 0; if (V.camHome === undefined && cam.dist > 15.5) V.camHome = cam.dist; }
+      if (busy) { V.camIdle = 0; if (V.camHome === undefined && cam.dist > (hands ? 11.5 : 15.5)) V.camHome = cam.dist; }
       else V.camIdle = (V.camIdle || 0) + dt;
       if (V.camHome !== undefined) {
-        const want = busy || V.camIdle < 2.2 ? 15 : V.camHome;
+        const want = hands && !W.job && !V.raise ? 10.5 : busy || V.camIdle < 2.2 ? 15 : V.camHome;
         cam.dist += (want - cam.dist) * (1 - Math.exp(-(busy ? 2.2 : 1.4) * dt));
         V.camSet = cam.dist;
         // lower the view while a wall goes up, so that it is seen rising
-        if (V.raise && !V.raise.landed) { if (V.pitchHome === undefined && cam.pitch > 0.7) V.pitchHome = cam.pitch; }
+        if ((V.raise && !V.raise.landed) || hands) { if (V.pitchHome === undefined && cam.pitch > 0.82) V.pitchHome = cam.pitch; }
         if (V.pitchHome !== undefined) {
-          const wp = V.raise || V.camIdle < 1.2 ? 0.62 : V.pitchHome;
+          const wp = V.raise ? 0.62 : hands ? 0.78 : V.camIdle < 1.2 ? 0.62 : V.pitchHome;
           cam.pitch += (wp - cam.pitch) * (1 - Math.exp(-1.8 * dt));
           if (!V.raise && V.camIdle >= 1.2 && Math.abs(cam.pitch - V.pitchHome) < 0.01) { cam.pitch = V.pitchHome; V.pitchHome = undefined; }
         }
@@ -1862,5 +1935,5 @@
     for (const mid of pl.inst) { const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid), set = !ln || pm.need - pm.got < 1e-6; if (!set && !(c && c.itemId === ln.itemId)) continue; if (!m) return { mid, x: V.structs.get(pr.id).x, z: V.structs.get(pr.id).z, site: true }; const hw = C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null; worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); wM.lerpVectors(wA, wB, 0.5); const w = { x: wM.x, y: wM.y, z: wM.z }; wM.project(G.camera); return { mid, ...w, sx: (wM.x * 0.5 + 0.5) * reach.w, sy: (-wM.y * 0.5 + 0.5) * reach.h, set }; }
     return null;
   }
-  window.__construct = { roof: RW, syncRoof, tryHop, ladderTop, ladderSpot, chalkLines: (id) => chalkLines(S().progress[id], geom(id)), scaffoldSpot, scaffold: SC, station: CS, press: (c) => press(c || V.ctx), beaconAt, finishPlace, nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };
+  window.__construct = { asm, roof: RW, syncRoof, tryHop, ladderTop, ladderSpot, chalkLines: (id) => chalkLines(S().progress[id], geom(id)), scaffoldSpot, scaffold: SC, station: CS, press: (c) => press(c || V.ctx), beaconAt, finishPlace, nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };
 })();
