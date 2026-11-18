@@ -867,3 +867,9 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - Its tongue rests at ball height on the jack whether hitched or not (no crank). Loads longer than the bed pass through the open tailgate's line rather than over it.
 - The pieces flying onto the bed are drawn by the trailer's own instanced load (a short arc), not by construction's member fly-in, which is tied to building members.
 - The trailer pushes no sideways force into the ATV through the ball (the tow model is kinematic: the trailer's mass slows and lengthens stops, its tongue load moves the ATV's grip, and it binds at the jackknife stop, but it cannot shove the ATV's tail out on a downhill turn).
+
+## Shed by hand again: the barrow, the sawhorses and the last pieces stop getting in the way
+- **New:** the wheelbarrow arrives beside the stacks on the far side from the building, no longer on its footprint (it used to take E from "Work until done" and from the pier blocks). Pointing at a pile nearer than the barrow picks up the pile. A wall frame ready to tilt up, or a glowing place right under the pointer, comes before cutting at or grabbing the sawhorses that stand by the wall. With empty hands (or a load too short for the next stick), the note sends you to the stacks even when only a few places are left; the view no longer offers to set a piece the arms hold too little lumber for.
+- **Try:** a new world, the tool shed by hand (L, place, order, level). Stand by the east wall near the sawhorses and nail, cut, raise: E does what the note says.
+- **Test:** `node test/shed.e2e.mjs` passes again (it aims at the foot of a pile, cuts at the sawhorses, and expects bare framing to let the player through).
+- **Weak:** the sawhorses still stand close to the building when the delivery spot is near it; pointing at the top of a pile on a steep slope can still pick the pile behind it (the ring shows where the pointer lands).
