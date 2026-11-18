@@ -109,6 +109,13 @@ export const RIVER_SHADE = /* glsl */ `
     float rough = 0.25 + 0.75 * smoothstep(0.05, 1.2, sp);
     // surface layers on a 1.2 s cycle, carried at the water's own speed
     float sph = uTime / 1.2 + snoise(vec3(q * 0.15, 0.0)) * 0.5, s0 = fract(sph), s1 = fract(sph + 0.5), sw = abs(1.0 - 2.0 * s0);
+    // The surface is not equally glossy everywhere: patches of glassy water and patches ruffled by the wind and the
+    // current drift along with it, and slow water carries a film (pollen, fine silt, bits of leaf) in streaks that
+    // dull it. Large, slow, carried by the flow.
+    vec2 cpA = q - v * s0 * 1.2, cpB = q - v * s1 * 1.2 + 5.1;
+    float ruffle = smoothstep(-0.25, 0.55, mix(snoise(vec3(cpA * 0.2, uTime * 0.035)), snoise(vec3(cpB * 0.2, uTime * 0.035)), sw));
+    rough = clamp(rough + 0.3 * ruffle - 0.12, 0.08, 1.0);
+    float film = (1.0 - smoothstep(0.08, 0.45, sp)) * smoothstep(0.35, 0.75, mix(snoise(vec3(cpA * vec2(0.7, 0.7), uTime * 0.02 + 3.0)), snoise(vec3(cpB * vec2(0.7, 0.7), uTime * 0.02 + 3.0)), sw));
     float e = 0.14;                                    // wide differences: a soft slope, no thin bright lines
     float h0 = surfH(q, v, rough, s0 * 1.2, s1 * 1.2, sw);
     vec2 g = vec2(surfH(q + vec2(e, 0.0), v, rough, s0 * 1.2, s1 * 1.2, sw) - h0, surfH(q + vec2(0.0, e), v, rough, s0 * 1.2, s1 * 1.2, sw) - h0) / e;
@@ -179,7 +186,7 @@ export const RIVER_SHADE = /* glsl */ `
     // the shallow fringe by the banks: stirred-up silt, bits of leaf and scum, a film on the water; dull rather than
     // glossy, and cloudier
     float fringe = 1.0 - smoothstep(0.03, 0.2, d);
-    fres *= mix(1.0, 0.4, fringe);
+    fres *= mix(1.0, 0.4, fringe) * (1.0 - 0.45 * film);
     float skyVis = mix(1.0, texture2D(uSkyMap, (q + 0.5) / 512.0).r, uSkyK);
     vec3 R = reflect(-V, N); R.y = abs(R.y);
     // What the water reflects is mostly its surroundings, not an empty sky (an even sky on a wavy surface is what
@@ -202,7 +209,8 @@ export const RIVER_SHADE = /* glsl */ `
     // and where this water lies at the mirror's level, the mirror: the banks and what hangs over them, in place,
     // wavering with the ripples
     if (uReflOn.x > 0.5) {
-      float kp = (1.0 - smoothstep(0.12, 0.5, abs(world.y - uReflOn.y))) * (1.0 - smoothstep(22.0, 34.0, distance(q, uReflOn.zw)));
+      // only water at the mirror's own level: a pool on a step above or below would show it misplaced
+      float kp = (1.0 - smoothstep(0.04, 0.12, abs(world.y - uReflOn.y))) * (1.0 - smoothstep(22.0, 34.0, distance(q, uReflOn.zw)));
       if (kp > 0.0) {
         vec4 pr = uReflMat * vec4(world.x, uReflOn.y, world.z, 1.0);
         vec2 ruv = pr.xy / pr.w + g * (0.05 + 0.08 * rough);
@@ -222,8 +230,10 @@ export const RIVER_SHADE = /* glsl */ `
     // rings like a fingerprint), broken into sparkles by the smallest wavelets, more where the water is rough
     vec3 H = normalize(V + uSunDir);
     float nh = max(dot(N, H), 0.0);
-    float sparkle = step(0.9, snoise(vec3((q - v * s0 * 1.2) * 9.0, uTime * 2.0)) * 0.5 + 0.5) * smoothstep(0.4, 1.0, rough);   // only on broken water
-    vec3 glint = uSunCol * (pow(nh, 160.0) * 0.4 + pow(sd, 400.0) * 0.5) * sparkle * skyVis * step(line, R.y) * (1.0 - fringe);   // only glints on broken water, no wide sheen; none where the reflection is trees
+    // glints: the sun caught on the crests of the ripples, so they ride along with the water and swell and fade
+    // with the waves rather than winking at random; a slow, flow-carried field picks which crests catch it
+    float sparkle = smoothstep(0.5, 0.85, snoise(vec3((q - v * s0 * 1.2) * 4.0, uTime * 0.6)) * 0.5 + 0.5) * smoothstep(0.3, 0.9, rough);
+    vec3 glint = uSunCol * (pow(nh, 160.0) * 0.4 + pow(sd, 400.0) * 0.5) * sparkle * skyVis * step(line, R.y) * (1.0 - fringe) * (1.0 - film);   // only glints on broken water, no wide sheen; none where the reflection is trees
     float path = d * (1.0 + 1.0 / max(V.y, 0.25));
     // loss a metre: stream water carries fine sediment and dissolved organic matter even on a fair day (red lost
     // first, then blue: the olive-green to tea-brown of a real brook), much more when it runs muddy. Shallows show

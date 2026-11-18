@@ -20,10 +20,17 @@
 export const UNTOUCHED = '';
 const STEP = 0.1, TS = 32, N = TS * TS;
 const OFF4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+// eight neighbours with their distance, so loose earth slides into round cones rather than square pyramids
+const OFF8 = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, Math.SQRT2], [-1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, -1, Math.SQRT2]];
 export const REPOSE = 0.7;   // tan 35 degrees
 // Two neighbouring points whose flags differ in this bit have a wall between them (a box's side): loose ground
 // does not run across it.
 export const WALL_BIT = 128;
+// Loose material: anything put down (filled, thrown, slid off a heap) is loose and runs down to its angle of repose.
+// Ground that was only cut is firm: undisturbed earth holds a steep wall (a spade-dug hole keeps its sides), giving
+// way only where a wall is steeper than FIRM. Packing (a tamper) makes loose ground firm again.
+export const LOOSE_BIT = 512;
+export const FIRM = 1.8;                 // a firm wall holds up to 1.8 m rise per metre (about 60 degrees); steeper, its lip crumbles in
 
 export function makeGrid() { return { step: STEP, T: TS, codes: [UNTOUCHED], tiles: {}, rev: 0 }; }
 export const tileKey = (tx, tz) => tx + ',' + tz;
@@ -104,7 +111,7 @@ export function cut(g, x, z, m3, { r = 0.17, bare = 'soil', maxDepth = 1.2, t = 
       if (d > 0) {
         tile.h[n] = Math.round((h - d) * 1000);
         if (layer) { tile.l[n] = Math.max(0, tile.l[n] - Math.round(d * 1000)); if (tile.l[n] <= 1) { tile.l[n] = 0; tile.s[n] = code(g, bare); tile.t[n] = t; } }
-        else { if (tile.s[n] === 0 || tile.l[n]) { tile.s[n] = code(g, bare); tile.t[n] = t; } tile.l[n] = 0; tile.f[n] &= ~clearF; }   // `clearF`: flags that digging undoes (the caller's: how firm it was)
+        else { if (tile.s[n] === 0 || tile.l[n]) { tile.s[n] = code(g, bare); tile.t[n] = t; } tile.l[n] = 0; tile.f[n] &= ~clearF; if (tile.h[n] <= 0) tile.f[n] &= ~LOOSE_BIT; }   // cut down to native ground: firm   // `clearF`: flags that digging undoes (the caller's: how firm it was)
         got += d * A; want -= d * A;
       }
       if (d >= room - 1e-6) p[2] = 0; else w2 += p[2];
@@ -127,6 +134,7 @@ export function fill(g, x, z, m3, { r = 0.22, surface = 'soil', layer = false, o
   for (const [i, j, w] of fp) {
     const [tile, n] = tileOf(g, i, j, true), d = Math.round(((m3 * w) / wsum / A) * 1000);
     tile.h[n] += d;
+    if (d > 0) tile.f[n] |= LOOSE_BIT;
     if (layer && markF && tile.s[n] === 0) tile.f[n] |= markF;   // `markF`: flags for a layer laid straight on untouched ground (the caller's)
     if (layer) { if (tile.s[n] !== c) tile.l[n] = 0; tile.l[n] += d; }
     else if (d > 1) tile.l[n] = 0;
@@ -140,22 +148,24 @@ export function fill(g, x, z, m3, { r = 0.22, surface = 'soil', layer = false, o
 // Untouched turf never gives soil, and takes it only as a cover (it becomes loose soil). Volume is conserved.
 export function settle(g, x, z, r = 0.8, slope = REPOSE, iters = 40) {
   const s = g.step, i0 = Math.floor((x - r) / s), i1 = Math.ceil((x + r) / s), j0 = Math.floor((z - r) / s), j1 = Math.ceil((z + r) / s);
-  const lim = slope * s * 1000, soil = code(g, 'soil');
+  const lim = slope * s * 1000, limFirm = Math.max(slope, FIRM) * s * 1000, soil = code(g, 'soil');
   for (let it = 0; it < iters; it++) {
     let moved = 0;
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
       const a = tileOf(g, i, j, false);
       if (!a || a[0].s[a[1]] === 0) continue;
-      for (const [di, dj] of OFF4) {
-        const ha = a[0].h[a[1]], b = tileOf(g, i + di, j + dj, false), hb = b ? b[0].h[b[1]] : 0, d = ha - hb;
+      const loose = (a[0].f[a[1]] & LOOSE_BIT) || a[0].l[a[1]] > 0, la = loose ? lim : limFirm;
+      for (const [di, dj, dl] of OFF8) {
+        const ha = a[0].h[a[1]], b = tileOf(g, i + di, j + dj, false), hb = b ? b[0].h[b[1]] : 0, d = ha - hb, lm = la * dl;
         if ((a[0].f[a[1]] ^ (b ? b[0].f[b[1]] : 0)) & WALL_BIT) continue;
-        if (d <= lim + 1) continue;
-        const mv = Math.round((d - lim) * 0.25);
+        if (d <= lm + 1) continue;
+        const mv = Math.round((d - lm) * 0.15);
         if (mv < 1) continue;
         const bb = b || tileOf(g, i + di, j + dj, true);
         a[0].h[a[1]] -= mv; bb[0].h[bb[1]] += mv;
         if (a[0].l[a[1]]) a[0].l[a[1]] = Math.max(0, a[0].l[a[1]] - mv);
         if (bb[0].s[bb[1]] === 0) bb[0].s[bb[1]] = a[0].l[a[1]] ? a[0].s[a[1]] : soil;
+        bb[0].f[bb[1]] |= LOOSE_BIT;                       // what slid down is loose where it lands
         moved += mv;
       }
     }
