@@ -9,6 +9,8 @@
 //     unlocked: [...], tutorial: { card, shed, seen: { [stage]: true }, done }, options: { sandbox, instant, cards, auto, mute }, finished }
 //   progress[..].lines[key]   = { stage, itemId, qty, unit, label, why, count, supply, ordered, used }
 //   progress[..].members[id]  = { stage, kind, parent, line, need, got, built }
+//   progress[..].ext[stage]   = [built, total]: work another system tallies (services: rough-in, trim-out), added to the tally
+//   progress[..].extLines[source] = { sig, lines }: that system's shopping lines, merged into lines (marked `ext`)
 // Build mode owns the shape of a building; the page hands its members and shopping lines to construction.setPlan.
 // Commands return { ok, reason? ... } and change nothing when they fail.
 
@@ -370,6 +372,7 @@ function ensureCard(ctx, s) {
 function retally(pr) {
   pr.tally = {};
   for (const id in pr.members) { const m = pr.members[id]; const t = pr.tally[m.stage] || (pr.tally[m.stage] = [0, 0]); t[1]++; if (m.built) t[0]++; }
+  for (const st in pr.ext || {}) { const e = pr.ext[st]; if (!e || !(e[1] > 0)) continue; const t = pr.tally[st] || (pr.tally[st] = [0, 0]); t[0] += e[0]; t[1] += e[1]; }
 }
 function refresh(ctx, s, pr) {
   const was = pr.done;
@@ -523,6 +526,8 @@ function setPlan(ctx, p) {
   if (!s.waste) s.waste = {};
   requote(s, pr);
   if (old) for (const k in old.raised) pr.raised[k] = true;
+  if (old && old.ext) pr.ext = JSON.parse(JSON.stringify(old.ext));               // work another system tallies stays with the building
+  if (old && old.extLines) pr.extLines = JSON.parse(JSON.stringify(old.extLines));
   if (!old) for (const st of C.STAGES) if (st.flat) for (const par of flatParents(pr, st.id)) if (frameReady(pr, st.id, par)) pr.raised[par] = true;
   retally(pr);
   if (!pr.lines[LADDER_KEY] && C.LADDER.with.some((st) => pr.tally[st] && pr.tally[st][1]) && item(C.LADDER.itemId)) {   // work at height is done from a ladder: it comes with the order
@@ -530,6 +535,7 @@ function setPlan(ctx, p) {
     pr.lines[LADDER_KEY] = { stage: C.LADDER.stage, itemId: C.LADDER.itemId, qty: 1, unit: 'each', label: 'Ladder', why: C.LADDER.why, count: 1, supply: false, ordered: o ? o.ordered : 0, used: o ? o.used : 0 };
   }
   for (const key in pr.lines) { const ln = pr.lines[key]; if (ln.supply) { const t = pr.tally[ln.stage]; ln.used = old && old.lines[key] ? Math.min(old.lines[key].used, ln.qty) : 0; if (!old && t && t[1]) ln.used = round6((ln.qty * t[0]) / t[1]); } }
+  if (old && old.extLines) applyExtLines(s, pr, old.lines);
   s.progress[p.structId] = pr;
   if (p.tutorial && s.tutorial.shed === null && !s.tutorial.done) s.tutorial.shed = p.structId;
   const was = old ? old.done : false;
@@ -824,10 +830,12 @@ function dismantle(ctx, p) {
   const at = dropOf(s, pr);
   const standsOn = (stage) => C.STAGES.filter((q) => q.needs.includes(stage) || (q.parentFirst || []).includes(stage)).map((q) => q.id);
   const anyBuilt = (stage, seen = {}) => { if (seen[stage]) return false; seen[stage] = 1; const t = pr.tally[stage]; return (t && t[0] > 0) || standsOn(stage).some((q) => anyBuilt(q, seen)); };
+  // local: only what stands on this wall (or floor, or roof plane) counts: opening one wall to get at what is inside it
+  const builtOn = (stage, parent, seen = {}) => { if (seen[stage]) return false; seen[stage] = 1; for (const o in pr.members) { const q = pr.members[o]; if (q.built && q.stage === stage && q.parent === parent) return true; } return standsOn(stage).some((q) => builtOn(q, parent, seen)); };
   for (const id of p.memberIds || []) {
     const m = pr.members[id];
     if (!m || !(m.built || m.got > 0)) { out.refused.push({ id, reason: 'not built' }); continue; }
-    if (standsOn(m.stage).some((q) => anyBuilt(q))) { out.refused.push({ id, reason: 'something stands on it' }); continue; }
+    if (p.local ? standsOn(m.stage).some((q) => builtOn(q, m.parent)) : standsOn(m.stage).some((q) => anyBuilt(q))) { out.refused.push({ id, reason: 'something stands on it' }); continue; }
     const ln = m.line ? pr.lines[m.line] : null;
     if (ln && ln.stick && m.got > 0) {       // sawn pieces come off as offcuts of their own length
       for (const q of piecesOf(pr, id)) keepOrScrap(ln, q.len);
@@ -853,6 +861,74 @@ function dismantle(ctx, p) {
   refresh(ctx, s, pr);
   ctx.emit('construction.dismantled', { structId: pr.id, ids: out.removed });
   return out;
+}
+
+// ---- work another system tallies and buys through the Build panel (services: rough-in, trim-out; docs/design services S8).
+// Its lines are ordinary lines (ordered, delivered as stacks, carried), marked `ext`; it uses them up through construction.use.
+function setExternal(ctx, p) {
+  const s = ctx.s, pr = s.progress[p && p.structId];
+  if (!pr) return { ok: false, reason: 'unknown building' };
+  if (!C.STAGE[p.stage]) return { ok: false, reason: 'unknown stage' };
+  const total = Math.max(0, Math.round(+p.total || 0)), built = Math.max(0, Math.min(total, Math.round(+p.built || 0)));
+  if (!pr.ext) pr.ext = {};
+  const was = pr.ext[p.stage] || [0, 0];
+  if (was[0] === built && was[1] === total) return { ok: true, changed: false };
+  if (total > 0) pr.ext[p.stage] = [built, total]; else delete pr.ext[p.stage];
+  const before = stageComplete(pr, p.stage);
+  retally(pr);
+  refresh(ctx, s, pr);
+  ctx.emit('construction.external', { structId: pr.id, stage: p.stage, built, total, done: !before && stageComplete(pr, p.stage) });
+  return { ok: true, changed: true, stage: pr.stage, done: pr.done };
+}
+// the lines of every source, merged into pr.lines; what was ordered and used of a line is kept (prev: where to read it),
+// and a line no longer wanted stays while any of it was ordered or used (at what was used, so nothing more is ordered)
+function applyExtLines(s, pr, prev) {
+  const keep = {};
+  for (const key in prev) if (prev[key].ext) keep[key] = { ordered: prev[key].ordered, used: prev[key].used, stage: prev[key].stage, itemId: prev[key].itemId, label: prev[key].label, why: prev[key].why, ext: prev[key].ext };
+  for (const key of Object.keys(pr.lines)) if (pr.lines[key].ext) delete pr.lines[key];
+  const want = {};
+  for (const src in pr.extLines || {}) for (const l of pr.extLines[src].lines) want[l.key] = { ...l, ext: src };
+  for (const key of new Set([...Object.keys(keep), ...Object.keys(want)])) {
+    const o = keep[key], w = want[key] || { ...o, qty: 0, count: 0 }, it = item(w.itemId);
+    const used = o ? o.used : 0, ordered = o ? o.ordered : 0, qty = round6(Math.max(+w.qty || 0, used));
+    if (!it || !C.STAGE[w.stage] || (qty <= 1e-9 && ordered <= 1e-9)) continue;
+    pr.lines[key] = { stage: w.stage, itemId: w.itemId, qty, unit: it.unit, label: w.label || it.name, why: w.why || '', count: w.count || 0, supply: isSupply(w.itemId), ordered, used, ext: w.ext };
+  }
+}
+function setExtLines(ctx, p) {
+  const s = ctx.s, pr = s.progress[p && p.structId];
+  if (!pr) return { ok: false, reason: 'unknown building' };
+  if (!p.source || !Array.isArray(p.lines)) return { ok: false, reason: 'bad lines' };
+  const lines = [];
+  for (const l of p.lines) {
+    if (!l || !C.STAGE[l.stage] || !item(l.itemId) || !(+l.qty >= 0)) return { ok: false, reason: 'bad line', itemId: l && l.itemId };
+    lines.push({ key: String(l.key || l.stage + '|' + p.source + ':' + l.itemId), stage: l.stage, itemId: l.itemId, qty: round6(+l.qty), label: l.label || '', why: l.why || '', count: Math.max(0, Math.round(+l.count || 0)) });
+  }
+  if (!pr.extLines) pr.extLines = {};
+  pr.extLines[p.source] = { sig: p.sig === undefined ? null : p.sig, lines };
+  applyExtLines(s, pr, pr.lines);
+  ctx.emit('construction.extLines', { structId: pr.id, source: p.source });
+  return { ok: true, lines: lines.length };
+}
+// use up some of an outside line: from the arms, or from the stacks (small supplies: the stacks, then the inventory).
+// check: only say whether there is enough. Sandbox, or a building not under construction: free, nothing is drawn.
+function useExt(ctx, p) {
+  const s = ctx.s, pr = s.progress[p && p.structId];
+  if (s.options.sandbox || !pr) return { ok: true, used: 0, free: true };
+  const qty = round6(+(p && p.qty));
+  if (!(qty > 0)) return { ok: false, reason: 'nothing to use' };
+  const key = p.key && pr.lines[p.key] ? p.key : Object.keys(pr.lines).find((k) => pr.lines[k].ext && pr.lines[k].itemId === p.itemId);
+  const ln = key ? pr.lines[key] : null;
+  if (!ln) return { ok: false, reason: 'not in the plan', itemId: p.itemId };
+  const stock = ctx.get('stock'), fromArms = p.from === 'carried';
+  const have = fromArms ? (s.carried && s.carried.itemId === ln.itemId ? s.carried.qty : 0) : ln.supply ? haveSupply(s, stock, ln.itemId) : SUP.stackQty(s, ln.itemId);
+  if (have + 1e-6 < qty) return { ok: false, reason: 'no material', itemId: ln.itemId, have: round6(have), key };
+  if (p.check) return { ok: true, used: 0, have: round6(have), key, itemId: ln.itemId };
+  const used = round6(fromArms ? SUP.useCarried(s, ln.itemId, qty) : ln.supply ? drawSupply(s, stock, ln.itemId, qty, pr.x, pr.z) : SUP.useFromStacks(s, ln.itemId, qty, pr.x, pr.z, { partial: true }));
+  ln.used = round6(ln.used + used);
+  if (ln.used > ln.qty) ln.qty = ln.used;              // more went in than planned: the line is what went in
+  ctx.emit('construction.used', { structId: pr.id, key, itemId: ln.itemId, qty: used });
+  return { ok: true, used, key, itemId: ln.itemId };
 }
 
 export const constructionSystem = () => ({
@@ -931,6 +1007,10 @@ export const constructionSystem = () => ({
       return { ok: true, feel: C.feelOf(c.s) };
     },
     'construction.seeCard': (c, p) => { c.s.tutorial.seen[p.stage] = true; return { ok: true }; },
+    // work another system puts in (services: cable and pipe): its tally of a stage, its shopping lines, and what it uses up
+    'construction.setExternal': setExternal,
+    'construction.setExtLines': setExtLines,
+    'construction.use': useExt,
   },
   api: { content: C, wantItem, nextCut, feelOf: (s) => C.feelOf(s), knows: (s, kind) => !!(s.learn && s.learn.known[C.learnGroup(kind)]), sheetSource, needsStock, stockNeed, stickSource, stickImbalance, cutList, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance },
 });

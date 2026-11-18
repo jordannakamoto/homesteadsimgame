@@ -155,3 +155,101 @@ export function routeRule(specId, opts = {}) {
     },
   };
 }
+
+// ------------------------------------------------------------------------------------------- materials (S8)
+// What rough-in uses, as the store sells it (2026 US retail, rounded; masses from the makers' sheets). Cable and PEX
+// by the metre (a spool or coil at the stacks serves a whole circuit); boxes one each; staples, nail plates and crimp
+// rings are small supplies that sit by the stacks and are used up (src/sim/content/construction.js SITE_SUPPLY).
+export const SERVICE_ITEM_CATEGORIES = Object.freeze([
+  { id: 'electrical', name: 'Electrical', blurb: 'Cable, boxes and what holds them' },
+  { id: 'plumbing', name: 'Plumbing', blurb: 'PEX, rings and fittings' },
+]);
+export const ITEMS_SERVICES = Object.freeze([
+  { id: 'nm_cable_14_2', name: '14/2 NM cable with ground', category: 'electrical', unit: 'm', massKg: 0.063, priceUsd: 1.3, blurb: 'Sheathed house cable for 15 A circuits: lights and outlets. Comes on a 76 m (250 ft) spool' },
+  { id: 'nm_cable_12_2', name: '12/2 NM cable with ground', category: 'electrical', unit: 'm', massKg: 0.096, priceUsd: 2, blurb: 'Heavier cable for 20 A circuits: kitchen counters, bathrooms' },
+  { id: 'nm_cable_10_3', name: '10/3 NM cable with ground', category: 'electrical', unit: 'm', massKg: 0.2, priceUsd: 6, blurb: 'For 30 A, 240 V loads: a dryer, a water heater' },
+  { id: 'pex_coil_12_blue', name: '1/2 in PEX, blue (cold)', category: 'plumbing', unit: 'm', massKg: 0.06, priceUsd: 0.75, blurb: 'Flexible water pipe, pulled through the studs like cable. Comes in a 30 m (100 ft) coil' },
+  { id: 'pex_coil_12_red', name: '1/2 in PEX, red (hot)', category: 'plumbing', unit: 'm', massKg: 0.06, priceUsd: 0.75, blurb: 'The same pipe in red, so hot is never mistaken for cold' },
+  { id: 'pex_coil_20', name: '20 mm PEX', category: 'plumbing', unit: 'm', massKg: 0.11, priceUsd: 1.2, blurb: 'A size up, for a main line' },
+  { id: 'elec_box_wall', name: 'Nail-on wall box, single', category: 'electrical', unit: 'each', massKg: 0.06, priceUsd: 0.75, blurb: 'Nailed to the side of a stud; an outlet or a switch goes in it at trim-out' },
+  { id: 'elec_box_ceiling', name: 'Nail-on ceiling box, round', category: 'electrical', unit: 'each', massKg: 0.12, priceUsd: 2.5, blurb: 'Holds a ceiling light' },
+  { id: 'cable_staple', name: 'Insulated cable staples', category: 'fasteners', unit: 'each', massKg: 0.002, priceUsd: 0.05, blurb: 'Hold cable to the side of a stud' },
+  { id: 'pex_staple', name: 'PEX staples', category: 'fasteners', unit: 'each', massKg: 0.003, priceUsd: 0.08, blurb: 'Plastic straps that hold PEX to a stud or joist' },
+  { id: 'nail_plate', name: 'Steel nail plate', category: 'fasteners', unit: 'each', massKg: 0.03, priceUsd: 0.6, blurb: 'Over a hole near the face of a stud, so a drywall screw cannot reach the cable or pipe' },
+  { id: 'crimp_ring_12', name: 'Copper crimp rings, 1/2 in', category: 'plumbing', unit: 'each', massKg: 0.004, priceUsd: 0.25, blurb: 'Squeezed over PEX on a fitting with the crimp tool' },
+  { id: 'crimp_ring_20', name: 'Copper crimp rings, 20 mm', category: 'plumbing', unit: 'each', massKg: 0.006, priceUsd: 0.35, blurb: 'The same for 20 mm PEX' },
+]);
+// used up by the stacks, never carried
+export const SERVICE_SUPPLY = Object.freeze(['cable_staple', 'pex_staple', 'nail_plate', 'crimp_ring_12', 'crimp_ring_20']);
+// what a run of each spec is bought as, and the ring that closes each end of it
+export const SPEC_ITEM = Object.freeze({ cable_nm_14_2: 'nm_cable_14_2', cable_nm_12_2: 'nm_cable_12_2', cable_nm_10_3: 'nm_cable_10_3', pex_12_blue: 'pex_coil_12_blue', pex_12_red: 'pex_coil_12_red', pex_20: 'pex_coil_20' });
+export const SPEC_RING = Object.freeze({ pex_12_blue: 'crimp_ring_12', pex_12_red: 'crimp_ring_12', pex_20: 'crimp_ring_20' });
+export const NODE_ITEM = Object.freeze({ box: 'elec_box_wall', box_ceiling: 'elec_box_ceiling' });
+// Fastening (NEC 334.30: NM cable stapled within 12 in of a box and every 4-1/2 ft; IRC table P2605.1: PEX supported
+// every 32 in run horizontally). A hole through a stud holds the run, so no staple right beside one. Each end leaves
+// some over to work with (NEC 300.14: at least 6 in of free conductor at a box), so a run takes a little more than its
+// length. A hole near the face gets a plate on each face (the hole is centred in the stud).
+export const FIXINGS = Object.freeze({ stapleM: Object.freeze({ cable: 1.2, supply: 0.8 }), staple: Object.freeze({ cable: 'cable_staple', supply: 'pex_staple' }), endM: 0.2, clearM: 0.12, slackM: Object.freeze({ cable: 0.3, supply: 0.2 }), platesPerHole: 2 });
+// The Build panel's lines for rough-in: label and why, by item
+export const SERVICE_LINES = Object.freeze({
+  nm_cable_14_2: { label: '14/2 cable', why: 'House cable from the panel to each box: 15 A circuits.' },
+  nm_cable_12_2: { label: '12/2 cable', why: 'Heavier cable for 20 A circuits.' },
+  nm_cable_10_3: { label: '10/3 cable', why: 'For a 30 A circuit.' },
+  pex_coil_12_blue: { label: 'Blue PEX', why: 'Cold water from the supply to each stub-out.' },
+  pex_coil_12_red: { label: 'Red PEX', why: 'Hot water from the heater to each stub-out.' },
+  pex_coil_20: { label: '20 mm PEX', why: 'The main water line.' },
+  elec_box_wall: { label: 'Wall boxes', why: 'An outlet or switch goes in each one at trim-out.' },
+  elec_box_ceiling: { label: 'Ceiling boxes', why: 'A light hangs from each one.' },
+  cable_staple: { label: 'Cable staples', why: 'Hold the cable to the studs.' },
+  pex_staple: { label: 'PEX staples', why: 'Hold the pipe to the studs and joists.' },
+  nail_plate: { label: 'Nail plates', why: 'Guard holes near the face of a stud from the screws of the wall boards.' },
+  crimp_ring_12: { label: 'Crimp rings', why: 'One at each end of a PEX run.' },
+  crimp_ring_20: { label: 'Crimp rings, 20 mm', why: 'One at each end of a 20 mm run.' },
+});
+
+// a path's running lengths, and how far along it the point nearest q is
+function cumOf(path) { const c = [0]; for (let i = 1; i < path.length; i++) c.push(c[i - 1] + Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1], path[i][2] - path[i - 1][2])); return c; }
+function sAlong(path, cum, q) {
+  let best = 0, bd = Infinity;
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1], b = path[i], d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], L2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2] || 1e-9;
+    const k = Math.max(0, Math.min(1, ((q[0] - a[0]) * d[0] + (q[1] - a[1]) * d[1] + (q[2] - a[2]) * d[2]) / L2));
+    const e = Math.hypot(a[0] + d[0] * k - q[0], a[1] + d[1] * k - q[1], a[2] + d[2] * k - q[2]);
+    if (e < bd) { bd = e; best = cum[i - 1] + k * Math.sqrt(L2); }
+  }
+  return best;
+}
+// where the staples go along a run of length L (metres from its start a); the page draws them at the same places
+export function stapleMarks(L, cls, boreS = []) {
+  const every = FIXINGS.stapleM[cls], e = FIXINGS.endM, out = [];
+  if (!every || !(L > 2 * e)) return out;
+  out.push(e);
+  for (let s = e + every; s < L - e - 0.3; s += every) out.push(s);
+  out.push(L - e);
+  return out.filter((s) => !boreS.some((bs) => Math.abs(bs - s) < FIXINGS.clearM));
+}
+const add = (o, id, q) => { if (id && q > 1e-9) o[id] = Math.round(((o[id] || 0) + q) * 1e6) / 1e6; };
+// Material a step of work on a run takes: { [itemId]: qty }. what: 'pull' (from, to: 0..1 of the run) or 'join' (end).
+export function workCost(run, what, opts = {}) {
+  const out = {}, cls = run.cls, itemId = SPEC_ITEM[run.spec || DEFAULT_SPEC[cls]];
+  if (what === 'pull' && itemId) {
+    const path = run.path && run.path.length >= 2 ? run.path : null, cum = path ? cumOf(path) : null, L = path ? cum[cum.length - 1] : run.lengthM || 0;
+    const f0 = Math.max(0, +opts.from || 0), f1 = Math.min(1, +opts.to || 0);
+    if (!(f1 > f0)) return out;
+    const s0 = f0 * L, s1 = f1 * L, slack = FIXINGS.slackM[cls] || 0, bs = path ? (run.bores || []).map((b) => sAlong(path, cum, b.at)) : [];
+    add(out, itemId, s1 - s0 + (f0 <= 1e-9 ? slack : 0) + (f1 >= 1 - 1e-9 ? slack : 0));
+    add(out, FIXINGS.staple[cls], stapleMarks(L, cls, bs).filter((s) => s > s0 + 1e-9 && s <= s1 + 1e-9).length);
+    add(out, 'nail_plate', FIXINGS.platesPerHole * (run.bores || []).filter((b, i) => b.plate && bs[i] > s0 - 1e-9 && bs[i] <= s1 + 1e-9 && !(f0 > 0 && bs[i] <= s0 + 1e-9)).length);
+  }
+  if (what === 'join') add(out, SPEC_RING[run.spec], 1);
+  return out;
+}
+// what is still to go into a run (all of it for one not started): pull what is left, join the ends still open
+export function runCostLeft(run) {
+  const out = {};
+  if ((SERVICE_CLASSES[run.cls] || {}).steps && SERVICE_CLASSES[run.cls].steps.includes('pull') && run.pulled < 1) for (const [k, q] of Object.entries(workCost(run, 'pull', { from: run.pulled || 0, to: 1 }))) add(out, k, q);
+  if ((SERVICE_CLASSES[run.cls] || {}).steps && SERVICE_CLASSES[run.cls].steps.includes('join')) for (const e of ['a', 'b']) if (!run.joined || !run.joined[e]) for (const [k, q] of Object.entries(workCost(run, 'join', { end: e }))) add(out, k, q);
+  return out;
+}
+export const runCostAll = (run) => runCostLeft({ ...run, pulled: 0, joined: { a: 0, b: 0 } });
+export const nodeCost = (node) => (NODE_ITEM[node.kind] ? { [NODE_ITEM[node.kind]]: 1 } : {});
