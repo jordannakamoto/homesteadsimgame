@@ -12,10 +12,12 @@
 // water, spray or particles; only while there is stream water near.
 import * as THREE from 'three';
 
-export function createReflectPlane({ renderer, scene, hide = [], uniforms }) {
+export function createReflectPlane({ renderer, scene, hide = [], uniforms, names = ['uRefl', 'uReflMat', 'uReflOn'], second = false }) {
+  // second: the mirror for another step of the stream in view (a pool above or below yours), drawn half as often
+  const [nTex, nMat, nOn] = names;
   // detail: how often, how sharp and how far (setDetail). The cheap one draws it every other frame (the last one
   // still maps onto the world correctly in between: it carries its own camera), at a sixth of the pixels, to 40 m
-  let every = 2, scale = 0.4, far = 40, frame = 0;
+  let every = second ? 4 : 2, scale = 0.4, far = 40, frame = second ? 1 : 0;
   const target = new THREE.WebGLRenderTarget(16, 16, { type: THREE.HalfFloatType, samples: 0 });
   target.texture.generateMipmaps = false;
   const cam = new THREE.PerspectiveCamera();
@@ -24,8 +26,8 @@ export function createReflectPlane({ renderer, scene, hide = [], uniforms }) {
   const N = new THREE.Vector3(0, 1, 0), P = new THREE.Vector3(), plane = new THREE.Plane(), clip = new THREE.Vector4(), q = new THREE.Vector4();
   let on = false, level = 0;
   // (the uniforms are declared with the water's: uRefl, uReflMat, uReflOn = on, the plane's level, where it was centred)
-  uniforms.uRefl.value = target.texture;
-  uniforms.uReflMat.value = texMat;
+  uniforms[nTex].value = target.texture;
+  uniforms[nMat].value = texMat;
   function update(camera, y, cx, cz) {
     if (!on) return;
     if (frame++ % every && Math.abs(y - level) < 0.05) return;
@@ -35,7 +37,7 @@ export function createReflectPlane({ renderer, scene, hide = [], uniforms }) {
     if (target.width !== w || target.height !== h) target.setSize(w, h);
     camera.updateMatrixWorld();
     camPos.setFromMatrixPosition(camera.matrixWorld);
-    if (camPos.y <= level + 0.02) { uniforms.uReflOn.value.x = 0; return; }   // under the water: no mirror
+    if (camPos.y <= level + 0.02) { uniforms[nOn].value.x = 0; return; }   // under the water: no mirror
     P.set(camPos.x, level, camPos.z);
     // mirror the camera's position and what it looks at through the plane
     view.subVectors(P, camPos).reflect(N).negate().add(P);
@@ -80,12 +82,12 @@ export function createReflectPlane({ renderer, scene, hide = [], uniforms }) {
     hide.forEach((m, i) => { m.visible = vis[i]; });
     for (const o of extra) o.visible = true;
     renderer.setRenderTarget(prevRT); renderer.shadowMap.autoUpdate = prevAuto; renderer.xr.enabled = prevXr;
-    uniforms.uReflOn.value.set(1, level, cx, cz);
+    uniforms[nOn].value.set(1, level, cx, cz);
   }
   return {
     update,
-    setOn(v) { on = v; if (!v) uniforms.uReflOn.value.x = 0; },
-    setDetail(full) { every = full ? 1 : 2; scale = full ? 0.5 : 0.4; far = full ? 1e9 : 40; frame = 0; },
+    setOn(v) { on = v; if (!v) uniforms[nOn].value.x = 0; },
+    setDetail(full) { every = (full ? 1 : 2) * (second ? 2 : 1); scale = full ? 0.5 : 0.4; far = full ? 1e9 : 40; frame = second ? 1 : 0; },
     get on() { return on; },
   };
 }
