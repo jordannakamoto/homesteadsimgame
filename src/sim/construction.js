@@ -205,6 +205,7 @@ export function stageSatisfied(pr, stage, seen = {}) {
 export function stageOpen(pr, stage) {
   const def = C.STAGE[stage];
   if (!def) return false;
+  if (pr.hold && pr.hold[stage]) return false;      // held by another system (green concrete: construction.setHold)
   const seen = {};
   return def.needs.every((n) => stageSatisfied(pr, n, seen));
 }
@@ -232,6 +233,7 @@ export function blocked(pr, id) {
   if (m.built) return 'already built';
   const def = C.STAGE[m.stage];
   if (!def) return 'not part of the build';
+  if (pr.hold && pr.hold[m.stage]) return pr.hold[m.stage];
   if (!stageOpen(pr, m.stage)) return 'stage not open';
   if (def.parentFirst) for (const o in pr.members) { const q = pr.members[o]; if (!q.built && q.parent === m.parent && def.parentFirst.includes(q.stage)) return 'frame not finished'; }
   if (def.flat && flatCurrent(pr, m.stage) !== m.parent) return 'one frame at a time';
@@ -703,7 +705,7 @@ function install(ctx, p) {
   for (const id of p.memberIds || []) {
     const m = pr.members[id];
     const why = blocked(pr, id);
-    if (why) { out.refused.push({ id, reason: why, missing: why === 'support missing' ? supportMissing(pr, id) : undefined }); break; }
+    if (why) { out.refused.push({ id, reason: why, missing: why === 'support missing' ? supportMissing(pr, id) : undefined, held: m && pr.hold && pr.hold[m.stage] ? 1 : undefined }); break; }
     const ln = m.line ? pr.lines[m.line] : null;
     let need = round6(m.need - m.got), give = 0, cut = null, saw = null;
     let prep = false;
@@ -918,6 +920,17 @@ export const constructionSystem = () => ({
       for (const id of p.memberIds || []) { const m = pr.members[id]; if (!m || m.built || m.kind === 'site') continue; m.got = m.need; m.built = 1; pr.tally[m.stage][0]++; done.push(id); }
       if (done.length) refresh(c, c.s, pr);
       return { ok: done.length > 0, settled: done };
+    },
+    // another system holds stages of a building (green concrete holds framing): { structId, stage | stages, reason | null }
+    'construction.setHold': (c, p) => {
+      const pr = c.s.progress[p && p.structId], stages = p && (Array.isArray(p.stages) ? p.stages : [p.stage]);
+      if (!pr) return { ok: false, reason: 'unknown building' };
+      if (!stages.length || !stages.every((st) => C.STAGE[st])) return { ok: false, reason: 'unknown stage' };
+      if (!pr.hold) pr.hold = {};
+      for (const st of stages) if (p.reason) pr.hold[st] = String(p.reason); else delete pr.hold[st];
+      refresh(c, c.s, pr);
+      c.emit('construction.hold', { structId: pr.id, stages, reason: p.reason || null });
+      return { ok: true };
     },
     'construction.dismantle': dismantle,
     'construction.setLevel': (c, p) => { if (!LEVELS.includes(p.level)) return { ok: false, reason: 'unknown level' }; const pr = c.s.progress[p.structId]; if (pr) pr.level = p.level; else c.s.level = p.level; return { ok: true }; },
