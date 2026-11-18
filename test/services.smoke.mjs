@@ -63,7 +63,7 @@ check('the Build panel lists rough-in after the gutters; ordering it brings the 
 await page.mouse.move(box.screen.x, box.screen.y); await frames(3);
 await page.mouse.down(); await page.mouse.up(); await frames(2);
 await page.mouse.down(); await page.mouse.up(); await frames(2);
-check('two clicks nail the box', await G((id) => __game.sim.state.sys.routes.nodes[id].state === 'set', box.node));
+check('two clicks nail the box', await G((id) => __game.sim.state.sys.routes.nodes[id].state === 'set', box.node), JSON.stringify(await G((id) => { const sim = __game.sim, n = sim.state.sys.routes.nodes[id], sv = sim.systems.find((q) => q.name === 'services').api; return { state: n.state, frame: n.frame, cost: sv.nodeCost(n), use: sim.commandNow('construction.use', { structId: n.frame, itemId: 'elec_box_wall', qty: 1, from: 'stacks', check: true }), say: (document.getElementById('reachsay') || {}).textContent, hint: document.getElementById('reachhint').textContent }; }, box.node)));
 const box2 = await G(() => __servicesHands.where('box'));
 if (box2) { await page.mouse.move(box2.screen.x, box2.screen.y); await frames(3); for (let i = 0; i < 2; i++) { await page.mouse.down(); await page.mouse.up(); await frames(2); } }
 check('and the other box', !(await G(() => __servicesHands.where('box'))));
