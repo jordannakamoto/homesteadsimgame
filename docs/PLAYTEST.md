@@ -603,3 +603,13 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 
 - Macro (1 m) cuts and fills are blocky next to the 10 cm hand-dug ground, and a machine-sized cut wipes hand-dug detail under it (by design: it absorbs it).
 - Build mode's site cut still goes through the old path (slice A3 routes it through `ground.grade`).
+
+## Interior walls: hang, tape and mud (branch `interior`, design in `docs/design/interior-walls.md`)
+
+- Lining is hung piece by piece. Drywall: sheets 1.2 m tall laid flat, the top row first, end joints on the studs and staggered between rows, cut round windows and doors; each sheet set and screwed. Pine boards: a course at a time from the floor up, blind-nailed.
+- Partition walls (floor on both sides) are lined on both faces.
+- New stage after lining for drywall, **Tape and mud**: every seam (between rows, the end joints, the inside corners) takes tape and a first coat, a fill coat and a finish coat, each on dry compound (about 90 game minutes), then a sanding pass. With joint compound in your arms (or by the stack), point at a seam and press E; hold to go round the room. The seam widens coat by coat, dark while wet, light when dry, and vanishes when sanded. The guide says how long until the next coat.
+- A finished room shows its drywall or boards, not the old plank-and-post faces; no screws or nails show once the walls are finished.
+- To try it: in plan options choose Inside: Drywall (the cabin defaults to pine boards). `__build.placePlan('cabin', x, z, yaw, { lining: 'gypsum' })` does it from the console.
+- Old saves: a wall lined in one piece before this change counts its new sheets and seams as in, so finished buildings stay finished.
+- Known: `test/shed.e2e.mjs` still fails at the foundation (the pointer picks a neighbouring stack and puts it back), as noted above; not from this branch.

@@ -92,6 +92,7 @@ add({ id: 'plywood_12', name: 'Plywood 12 mm (1220 x 2440)', category: 'sheet', 
 add({ id: 'plywood_18', name: 'Plywood 18 mm (1220 x 2440)', category: 'sheet', unit: 'each', material: 'plywood', dims: { ...SHEET, thicknessM: 0.018 }, priceUsd: 64 });
 add({ id: 'osb_11', name: 'OSB 11 mm (1220 x 2440)', category: 'sheet', unit: 'each', material: 'osb', dims: { ...SHEET, thicknessM: 0.011 }, priceUsd: 19 });
 add({ id: 'osb_18', name: 'OSB 18 mm (1220 x 2440)', category: 'sheet', unit: 'each', material: 'osb', dims: { ...SHEET, thicknessM: 0.018 }, priceUsd: 31 });
+add({ id: 'joint_compound', name: 'Joint compound and tape', category: 'sheet', unit: 'kg', material: 'gypsum_board', priceUsd: 1.2, blurb: 'Setting-type compound with paper tape, for drywall seams' });
 add({ id: 'gypsum_13', name: 'Gypsum board 12.7 mm (1220 x 2440)', category: 'sheet', unit: 'each', material: 'gypsum_board', dims: { ...SHEET, thicknessM: 0.0127 }, priceUsd: 15 });
 add({ id: 'housewrap', name: 'Housewrap', category: 'sheet', unit: 'm2', material: 'housewrap', dims: { thicknessM: 0.00018 }, priceUsd: 1.9 });
 add({ id: 'vapour_barrier', name: 'Polyethylene vapour barrier 0.15 mm', category: 'sheet', unit: 'm2', material: 'poly_vapour_barrier', dims: { thicknessM: 0.00015 }, priceUsd: 0.65 });

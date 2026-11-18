@@ -24,8 +24,13 @@ export const STAGES = Object.freeze([
   { id: 'cladding', name: 'Cladding', needs: ['openings'], verb: 'Put on the siding', what: 'Nail siding boards over the wrap.', why: 'Protects the wall from weather and sun.' },
   { id: 'gutters', name: 'Gutters', needs: ['roofing', 'cladding'], verb: 'Hang the gutters', what: 'From the ladder or scaffold: gutters along the eaves, falling a little toward a downspout at one end.', why: 'They catch the rain off the roof and carry it away from the foundation, or into a rain barrel.' },
   { id: 'insulation', name: 'Insulation', needs: ['roofing', 'sheathing'], verb: 'Insulate', what: 'Fill the spaces between studs and rafters with batts.', why: 'Slows heat leaving in winter and coming in during summer.' },
-  { id: 'lining', name: 'Lining', needs: ['insulation'], verb: 'Finish the inside', what: 'Fix boards or panels inside, and lay the floor boards.', why: 'Covers the insulation and makes a finished room.' },
+  { id: 'lining', name: 'Lining', needs: ['insulation'], verb: 'Hang the walls', what: 'Hang drywall sheet by sheet, top row first, or put up pine boards from the floor up; lay the floor boards.', why: 'Covers the insulation and makes a finished room.' },
+  { id: 'finish', name: 'Tape and mud', needs: ['lining'], verb: 'Tape and mud', what: 'Tape every drywall seam, give it three coats of compound, letting each dry, then sand it smooth.', why: 'Hides the joints so the walls read as one surface. Board walls need none of this.' },
 ]);
+// ---- taping drywall (docs/design/interior-walls.md). Each seam takes the tape and a first coat, then a fill coat and a
+// finish coat, each laid on dry compound, then a light sanding. Setting compound can take the next coat in about an hour
+// and a half; the passes are refused on wet mud. Coat widths are what the view draws.
+export const FINISH = Object.freeze({ coats: 3, dryS: 5400, widthsM: Object.freeze([0.06, 0.16, 0.26]), kgPerM: 0.3 });
 export const STAGE = Object.freeze(Object.fromEntries(STAGES.map((s) => [s.id, s])));
 export const STAGE_ORDER = Object.freeze(STAGES.map((s) => s.id));
 

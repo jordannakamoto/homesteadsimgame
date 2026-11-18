@@ -280,6 +280,52 @@
     }
   }
 
+  // ---- drywall seams, drawn here (they have no box of their own): a faint line until taped, then a strip that widens coat
+  // by coat, darker while the mud is wet, light once it is dry. Sanded, a seam is gone: the wall is one surface. One
+  // instanced mesh per building, in its own (dollhouse-cut) material
+  const MUD_W = [0.012, ...C.FINISH.widthsM], mudMeshes = new Map(), mx4 = new T.Matrix4(), mxu = new T.Vector3(), mxn = new T.Vector3(), mxz = new T.Vector3(), mxc = new T.Color();
+  function drawMud() {
+    const s = S(), t = G.sim.state.t;
+    if (V.mudRev === V.rev && !(V.mudNext && t >= V.mudNext)) return;
+    V.mudRev = V.rev; V.mudNext = 0;
+    const live = new Set();
+    for (const pr of inProgress()) {
+      if (!api.stageOpen(pr, 'finish')) continue;
+      const g = geom(pr.id), list = [];
+      if (!g) continue;
+      for (const mid in pr.members) { const pm = pr.members[mid]; if (pm.kind === 'joint' && !pm.built && g.byId.get(mid)) list.push(mid); }
+      if (!list.length) continue;
+      live.add(pr.id);
+      let mesh = mudMeshes.get(pr.id);
+      if (!mesh || mesh.instanceMatrix.count < list.length) {
+        if (mesh) { G.scene.remove(mesh); mesh.material.dispose(); mesh.dispose(); }
+        const mats = look.matsFor && look.matsFor(pr.id), planes = mats && mats.mat && mats.mat.clippingPlanes;
+        // plain solid compound, cut by the building's dollhouse planes like its walls
+        mesh = new T.InstancedMesh(look.geo, new T.MeshLambertMaterial({ color: 0xffffff, clippingPlanes: planes || null, clipIntersection: !!planes, clipShadows: !!planes }), list.length + 8);
+        mesh.frustumCulled = false; mesh.receiveShadow = true;
+        G.scene.add(mesh); mudMeshes.set(pr.id, mesh);
+      }
+      list.forEach((mid, i) => {
+        const pm = pr.members[mid], m = g.byId.get(mid), coat = Math.min(3, pm.coat || 0), wet = pm.dryAt && t < pm.dryAt;
+        if (wet && (!V.mudNext || pm.dryAt < V.mudNext)) V.mudNext = pm.dryAt;
+        worldPt(g, null, m.a, wA); worldPt(g, null, m.b, wB);
+        const len = wA.distanceTo(wB);
+        mxu.subVectors(wB, wA).normalize();
+        worldPt(g, null, [m.a[0] + m.n[0], m.a[1] + m.n[1], m.a[2] + m.n[2]], wM); mxn.subVectors(wM, wA).normalize();
+        mxz.crossVectors(mxu, mxn).normalize();
+        const w = MUD_W[coat], th = 0.0015 + 0.0008 * coat;
+        mx4.makeBasis(mxu.multiplyScalar(len + (coat ? 0.02 : 0)), mxn.multiplyScalar(w), mxz.multiplyScalar(th));
+        wM.lerpVectors(wA, wB, 0.5); mx4.setPosition(wM);
+        mesh.setMatrixAt(i, mx4);
+        mesh.setColorAt(i, mxc.setHex(coat === 0 ? 0xb3aea3 : wet ? (coat === 1 ? 0xcabd9f : 0x9d988e) : coat === 1 ? 0xe6dcc4 : 0xefe9de));
+      });
+      mesh.count = list.length;
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
+    for (const [id, mesh] of mudMeshes) if (!live.has(id)) { G.scene.remove(mesh); mesh.material.dispose(); mesh.dispose(); mudMeshes.delete(id); }
+  }
+
   // the building reads from anywhere: every piece that can go in now breathes faintly, pale where you can reach it
   // from where you stand, amber where it is above you (a ladder, scaffold or the roof first)
   const FAR_OK = [0.78, 0.94, 1], FAR_HIGH = [1, 0.7, 0.28], farLayers = new Map();
@@ -436,6 +482,7 @@
       const pm = pr.members[mid];
       if ((!pm.built && !(pm.need > 0 && pm.got >= pm.need - 1e-6)) || V.sawing.has(mid) || V.flights.has(mid)) continue;
       if (pm.built && pm.kind === 'cladding') continue;          // siding is blind-nailed: the next course covers the nails
+      if (pm.built && pm.kind === 'lining' && (pm.stage !== 'lining' || !geom(id).byId.get(mid) || geom(id).byId.get(mid).type !== 'gypsum' || api.stageComplete(pr, 'finish'))) continue;   // boards are blind-nailed; drywall screws are mudded over
       const pts = nailLocal(g, mid);
       if (!pts) continue;
       const cv = COVER[pm.stage];
@@ -746,6 +793,22 @@
       if (V.sawing.has(mid)) continue;
       const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid);
       if (m && courseOf(pm, m) && pm.need - pm.got > 1e-6 && m.row > low0.get(pm.parent + pm.kind)) continue;
+      if (pm.kind === 'joint') {       // a drywall seam: mud while there is compound in the arms or at hand, sand after the last coat; wet mud waits
+        const wet = pm.dryAt && G.sim.state.t < pm.dryAt;
+        if (wet) { if (!V.wetNext || pm.dryAt < V.wetNext) V.wetNext = pm.dryAt; continue; }
+        const sand = (pm.coat || 0) >= C.FINISH.coats, ok = sand || holds(c, pr, mid) || stackWithin(ln.itemId, takeM());
+        if (!ok) { want = want || mid; continue; }
+        if (!m) continue;
+        worldPt(g, null, m.a, wA); worldPt(g, null, m.b, wB);
+        if (segDist(P.x, P.z, wA, wB) > REACH) continue;
+        const dy = Math.min(wA.y, wB.y) - P.y;
+        if (dy > LAD.reachUpM) { high = true; continue; }
+        let score = segDist(reach.x, reach.z, wA, wB) * 100;
+        if (reach.free) { score = 1e9; for (const t of [0.5, 0.15, 0.85]) { wM.lerpVectors(wA, wB, t).project(G.camera); score = Math.min(score, Math.hypot((wM.x * 0.5 + 0.5) * reach.w - reach.px, (-wM.y * 0.5 + 0.5) * reach.h - reach.py)); } }
+        V.aimed.add(mid); q.push(mid);
+        if (score < bs) { bs = score; best = { mid, act: sand ? 'sand' : 'mud' }; }
+        continue;
+      }
       const wi = !set0(pm, ln) && wantOf(pr, mid), set = set0(pm, ln), act = pm.kind === 'site' ? 'dig' : set ? 'nail' : pm.site && !pm.prep ? 'tocut' : pm.prep || holds(c, pr, mid) || (!pm.site && !api.needsStock(S(), pr, mid)) || (wi && stackWithin(wi, takeM())) ? 'set' : 'want';
       if (act === 'tocut') { if (!tocut) tocut = mid; continue; }
       let score;
@@ -769,6 +832,8 @@
     const sk = V.stick;
     if (sk && sk.id === pr.id) { const pm = pr.members[sk.mid]; if (pm && !pm.built && pm.need > 0 && pm.got >= pm.need - 1e-6 && q.includes(sk.mid)) best = { mid: sk.mid, act: 'nail' }; else V.stick = null; }
     if (best) return { kind: 'hands', id: pr.id, act: best.act, mid: best.mid, q };
+    if (!want && V.wetNext) { const m2 = Math.ceil((V.wetNext - G.sim.state.t) / 60); V.wetNext = 0; return { kind: 'hint', text: 'The mud is drying: the next coat in ' + (m2 >= 60 ? Math.floor(m2 / 60) + ' h ' + (m2 % 60) + ' min' : m2 + ' min'), id: pr.id }; }
+    V.wetNext = 0;
     if (want) return { kind: 'hint', text: 'Needs ' + low(plain(lineOf(pr, want).label)), id: pr.id };
     if (tocut) return { kind: 'hint', text: cutLabel(pr, tocut) + ': cut at the sawhorses first', id: pr.id };
     if (high && RW && !RW.on() && ['dry-in', 'roofing'].includes(pr.stage)) { V.needLadder = 0.5; return { kind: 'hint', text: S().ladder ? 'Roofing is done from on the roof: climb the ladder and keep going onto the deck' : 'Roofing is done from on the roof: lean the ladder at the eave, climb it and step onto the deck', id: pr.id }; }
@@ -933,7 +998,30 @@
     }
   }
   // one press with the hands: set the piece aimed at, or strike it once
+  // ---- tape and mud: one pass of the knife along a seam (tape and the first coat, the fill coat, the finish coat), then a
+  // sanding pass once the last coat is dry. The seam widens and goes wet; sanded, it is gone
+  const COAT_WORD = ['Tape and first coat', 'Fill coat', 'Finish coat', 'Sand it smooth'];
+  function mudAct(ctx) {
+    const s = S(), pr = s.progress[ctx.id], g = geom(ctx.id), pm = pr.members[ctx.mid], m = g.byId.get(ctx.mid), P = G.player, ln = lineOf(pr, ctx.mid);
+    const coat = pm.coat || 0, sand = coat >= C.FINISH.coats;
+    let from;
+    if (!sand && !holds(s.carried, pr, ctx.mid)) { const st = stackWithin(ln.itemId, takeM()); if (st) from = 'stacks'; }
+    V.cool = sand ? 0.3 : 0.45;
+    const r = cmd('install', { structId: ctx.id, memberIds: [ctx.mid], from });
+    if (!r.ok || (r.refused && r.refused.length && !r.set.length && !r.installed.length)) { flash(r.refused && r.refused[0] && r.refused[0].reason === 'wet' ? 'Still wet: let it dry first' : reason(r.refused && r.refused[0] ? r.refused[0] : r)); return; }
+    worldPt(g, null, m.a, wA); worldPt(g, null, m.b, wB);
+    P.faceTarget = Math.atan2((wA.x + wB.x) / 2 - P.x, (wA.z + wB.z) / 2 - P.z);
+    // the knife runs the length of the seam: compound (or dust) along it
+    const n = Math.max(3, Math.min(9, Math.round(wA.distanceTo(wB) / 0.3)));
+    for (let i = 0; i <= n; i++) { wM.lerpVectors(wA, wB, i / n); G.burst(wM.x, wM.y, wM.z, sand ? 3 : 2, sand ? 0xf4f1ea : 0xdedbd2, sand ? 0.6 : 0.35, sand ? 0.25 : 0.4, sand ? 0.035 : 0.025, sand ? 0.6 : 0.3); }
+    G.cam.shake = Math.min(G.cam.shake + 0.02 * feel().shake, 0.2);
+    V.poseT = 0.32; V.poseKind = 'lift'; V.handT = 0;
+    flash(sand ? 'Sanded: the seam is gone' : COAT_WORD[coat] + (s.options.instant ? '' : '. It dries in about ' + Math.round(C.FINISH.dryS / 60) + ' min: work the other seams meanwhile'));
+    V.rev++; V.mudRev = -1;
+    if (r.installed && r.installed.length) finishInstall(ctx.id, ctx.mid, 'main', pm.kind, r);
+  }
   function handAct(ctx) {
+    if (ctx.act === 'mud' || ctx.act === 'sand') { mudAct(ctx); return; }
     const pr = S().progress[ctx.id], g = geom(ctx.id), pm = pr.members[ctx.mid], m = g.byId.get(ctx.mid), P = G.player;
     const hw = m && C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null, layer = hw ? pm.parent : 'main';
     if (m) { worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); wM.lerpVectors(wA, wB, 0.5); P.faceTarget = Math.atan2(wM.x - P.x, wM.z - P.z); } else wM.set(reach.x, P.y, reach.z);
@@ -1546,6 +1634,7 @@
       const A = V.auto, w = V.working && workLabel(pr, V.working.memberId), v = plan(A.id).view.stages.find((q) => q.id === A.stage);
       setPrompt('E', 'Stop · ' + (V.raise ? 'raising the wall' : w ? low(w.text) : A.wait > 0 ? 'fetching more' : low(C.STAGE[A.stage].name)), v ? v.built + ' of ' + v.total : '', V.raise ? Math.min(1, V.raise.p) : W.job ? W.progress() : null);
     } else if (ctx.kind === 'raise') setPrompt('E', 'Hold and push up to raise the wall', '', V.raise ? Math.min(1, V.raise.p) : 0);
+    else if (ctx.kind === 'hands' && (ctx.act === 'mud' || ctx.act === 'sand')) { const pm = pr.members[ctx.mid], left = Object.values(pr.members).filter((m) => m.kind === 'joint' && !m.built).length; setPrompt('E', COAT_WORD[Math.min(3, pm.coat || 0)] + (ctx.act === 'mud' ? ' along this seam' : ''), left + ' seams to finish · hold to keep going', null); }
     else if (ctx.kind === 'hands') { const w = workLabel(pr, ctx.mid), pm = pr.members[ctx.mid], b = V.blows[ctx.mid], of = b ? b.of : nailCount(geom(ctx.id), pm, ctx.mid); setPrompt('E', ctx.act === 'set' ? (api.knows(S(), pm.kind) && sweepable(pr, ctx.mid, geom(ctx.id)) ? 'Hold and drag along the run: ' + low(w.text).replace(/s$/, '') : 'Set the ' + low(w.text)) + (pm.line && pr.lines[pm.line].sheet && !api.needsStock(S(), pr, ctx.mid) ? ' (from an offcut)' : '') : ctx.act === 'dig' ? 'Dig and level' : pm.kind === 'pier' ? 'Stamp it level: ' + (b ? b.n : 0) + ' of ' + of : 'Nail them: ' + (b ? b.n : 0) + ' of ' + of, ctx.act === 'set' ? w.count : '', ctx.act === 'set' ? null : (b ? b.n : 0) / of); }
     else if (ctx.kind === 'lean') setPrompt('E', 'Lean the ladder here', '', null);
     else if (ctx.kind === 'anchor') setPrompt('E', 'Fix a roof anchor at the ridge and clip in', '', null);
@@ -1605,6 +1694,15 @@
     if (looseOne) return { ...out, line: 'A piece is set but loose. ' + (pr.members[looseOne].kind === 'pier' ? 'Point at it and click to stamp it level.' : 'Strike it once to drive all its nails, or hold and drag across the pieces.'), target: at };
     if (['top-plates', 'roof-frame', 'roof-deck', 'dry-in', 'roofing', 'gutters'].includes(v.id) && !s.ladder && !V.climb && !s.options.auto && pr.level !== 'guided' && ((s.carried && s.carried.itemId === LAD.itemId) || s.stacks.some((k) => k.itemId === LAD.itemId))) return { ...out, line: 'This is out of reach from the ground. Carry the ladder to a wall and click to lean it. Walk onto the ladder to climb.', target: at };
     const c = s.carried;
+    if (v.id === 'finish' && !s.options.auto) {     // taping: round the room coat by coat, waiting on the mud
+      const js = Object.values(pr.members).filter((m) => m.kind === 'joint' && !m.built), t = G.sim.state.t;
+      if (js.length && js.every((m) => m.dryAt && t < m.dryAt)) {
+        const mins = Math.ceil((Math.min(...js.map((m) => m.dryAt)) - t) / 60);
+        return { ...out, line: 'Every seam is wet. The next coat can go on in about ' + mins + ' min: wait, or do something else meanwhile.', target: at };
+      }
+      const sanding = js.some((m) => (m.coat || 0) >= C.FINISH.coats && !(m.dryAt && t < m.dryAt));
+      return { ...out, line: sanding ? 'Dry seams with three coats are ready to sand: point at one and press <kbd>E</kbd>. Sanded, the joint vanishes.' : 'Tape and mud the seams: with joint compound in your arms (or by the stack), point at a seam and press <kbd>E</kbd> to run the knife along it. Hold to go round the room. Each coat has to dry before the next; three coats, then sanding.', target: at };
+    }
     {   // only pieces cut on site are left in this stage: to the sawhorses, or in with the ones already cut
       const here = pl.inst.filter((id) => pr.members[id].stage === v.id && pr.members[id].need - pr.members[id].got > 1e-6);
       const tocut = here.filter((id) => pr.members[id].site && !pr.members[id].prep);
@@ -1904,7 +2002,7 @@
     if (V.fTap) { V.fTap = false; if (!OFF[G.player.tool]) { press(V.ctx); V.ctx = context(); V.ctxSig = -1; } }   // what the press changed is read at once: a stale 'put down' with empty arms threw
     tickBHold(dt); tickLadder(dt); tickScaffold(dt); tickRoof(dt); drawLadder(); tickMark(dt); drawBeacons(dt); drawBarrow(dt); tickStation(dt);
     if (!s.options.sandbox) tickWork(dt);
-    glow(V.ctx); farGlow();
+    glow(V.ctx); farGlow(); drawMud();
     {
       const pr = current(), flatNow = pr && !pr.done && C.STAGE[pr.stage] && C.STAGE[pr.stage].flat ? '-' : null;
       if (flatNow !== V.gstage) { V.gstage = flatNow; B.showStage(flatNow); }

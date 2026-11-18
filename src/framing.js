@@ -4,8 +4,8 @@
    Pure arithmetic: no DOM, no three.js. The page reads it as window.__framing; tests read globalThis.__framing. */
 (() => {
   // the order a building is raised in (docs/CONSTRUCTION.md)
-  const STAGES = ["site", "foundation", "floor-frame", "subfloor", "wall-frame", "top-plates", "roof-frame", "roof-deck", "dry-in", "roofing", "sheathing", "wrap", "openings", "cladding", "gutters", "insulation", "lining", "services"];
-  const STAGE_NAME = { site: "Site", foundation: "Foundation", "floor-frame": "Floor frame", subfloor: "Subfloor", "wall-frame": "Wall frames", "top-plates": "Top plates", "roof-frame": "Roof frame", "roof-deck": "Roof deck", "dry-in": "Dry-in", roofing: "Roofing", sheathing: "Sheathing", wrap: "Wrap", openings: "Windows and doors", cladding: "Cladding", gutters: "Gutters", insulation: "Insulation", lining: "Lining", services: "Services" };
+  const STAGES = ["site", "foundation", "floor-frame", "subfloor", "wall-frame", "top-plates", "roof-frame", "roof-deck", "dry-in", "roofing", "sheathing", "wrap", "openings", "cladding", "gutters", "insulation", "lining", "finish", "services"];
+  const STAGE_NAME = { site: "Site", foundation: "Foundation", "floor-frame": "Floor frame", subfloor: "Subfloor", "wall-frame": "Wall frames", "top-plates": "Top plates", "roof-frame": "Roof frame", "roof-deck": "Roof deck", "dry-in": "Dry-in", roofing: "Roofing", sheathing: "Sheathing", wrap: "Wrap", openings: "Windows and doors", cladding: "Cladding", gutters: "Gutters", insulation: "Insulation", lining: "Lining", finish: "Tape and mud", services: "Services" };
   // actual (not nominal) sizes of North American lumber, metres: [breadth, depth]
   const LUMBER = { "2x4": [0.038, 0.089], "2x6": [0.038, 0.14], "2x8": [0.038, 0.184], "2x10": [0.038, 0.235], "2x12": [0.038, 0.286], glulam: [0.09, 0.225], "4x4": [0.089, 0.089], "6x6": [0.14, 0.14] };
   const SHEET = { w: 1.22, l: 2.44 };
@@ -404,7 +404,66 @@
         }
       }
     }
-    if (spec.lining) M(out, w.id + ".ln", "lining", spec.lining, "lining", w.id, spec.lining === "gypsum" ? "gypsum_board" : "timber", spec.lining === "gypsum" ? T.gyp : T.lining, yt - yb, at(0, (yb + yt) / 2, -(o || 1) * (face + 0.01)), at(L, (yb + yt) / 2, -(o || 1) * (face + 0.01)), UP, { area: r3(net * (o ? 1 : 2)), thickness: spec.lining === "gypsum" ? T.gyp : T.lining, draw: 0 });
+    // ---- lining, the inside skin (docs/design/interior-walls.md). Drywall hangs in sheets 1.2 m tall laid flat, the top
+    // row first and the bottom row under it with a small gap at the floor; end joints fall on studs and are staggered
+    // between rows like brickwork, and a sheet crossing an opening is cut round it. Pine boards go on a course at a time
+    // from the floor up instead, their end joints staggered too. A partition (floor on both sides) is lined on both faces.
+    if (spec.lining) {
+      const gyp = spec.lining === "gypsum", th = gyp ? T.gyp : T.lining, sp2 = spec.studs || 0.4,
+        bandFree = (y0, y1) => {
+          // the spans of a band clear of the openings, split where an opening's top or bottom crosses the band
+          const ys = [y0, y1];
+          for (const q of opens) for (const v of [q.y0, q.y1]) v > y0 + 1e-3 && v < y1 - 1e-3 && ys.push(v);
+          ys.sort((p, q) => p - q);
+          const out2 = [];
+          for (let i = 0; i + 1 < ys.length; i++) {
+            const ya = ys[i], yb2 = ys[i + 1], cov = opens.filter((q) => q.y0 < yb2 - 1e-4 && q.y1 > ya + 1e-4).sort((p, q) => p.s0 - q.s0);
+            let x = 0;
+            for (const q of cov) (q.s0 - x > 0.02 && out2.push([x, Math.min(q.s0, L), ya, yb2]), (x = Math.max(x, q.s1)));
+            L - x > 0.02 && out2.push([x, L, ya, yb2]);
+          }
+          return out2;
+        };
+      const faces = o ? [[-o, "i"]] : [[1, "a"], [-1, "b"]];
+      for (const [sg, fc] of faces) {
+        const off = sg * (face + th / 2 + 0.002);
+        let k = 0;
+        const piece = (x0, x1, y0, y1, row, type) => x1 - x0 > 0.04 && y1 - y0 > 0.02 &&
+          M(out, w.id + ".ln" + fc + "." + k++, "lining", type, "lining", w.id, gyp ? "gypsum_board" : "timber", th, y1 - y0, at(x0, (y0 + y1) / 2, off), at(x1, (y0 + y1) / 2, off), UP,
+            { area: r3((x1 - x0) * (y1 - y0)), thickness: th, row, face: fc, col: gyp ? "gypsum" : "pine" });
+        // where a row's pieces end: on the stud lines, every stock length, the odd rows starting half a length along
+        const cuts = (row, len) => { const r = [], first = row % 2 ? Math.round(len / 2 / sp2) * sp2 : len; for (let x = first; x < L - 0.05; x += len) r.push(x); return r; };
+        const lay = (y0, y1, row, len, type) => {
+          const br = cuts(row, len);
+          for (const [x0, x1, ya, yb2] of bandFree(y0, y1)) { let x = x0; for (const c of br) if (c > x + 0.05 && c < x1 - 0.05) (piece(x, c, ya, yb2, row, type), (x = c)); piece(x, x1, ya, yb2, row, type); }
+        };
+        if (gyp) {
+          let row = 0;
+          const rows = [];
+          for (let y = yt; y > yb + 0.05; y -= 1.2, row++) (lay(Math.max(yb + 0.012, y - 1.2), y, row, 2.4, "gypsum"), rows.push([Math.max(yb + 0.012, y - 1.2), y]));
+          // the seams to tape (stage "finish"): the flat seam between rows, each end joint, and the inside corners. The view
+          // draws them coat by coat (they carry no box of their own: draw 0); joffs sits them on the face of the board
+          let j = 0;
+          const joff = sg * (face + th + 0.003), jid = () => w.id + ".jt" + fc + "." + j++,
+            joint = (type, a, b, n, len) => len > 0.08 && M(out, jid(), "joint", type, "finish", w.id, "joint_compound", 0.002, 0.26, a, b, n, { draw: 0, len: r3(len), face: fc });
+          for (let r = 0; r + 1 < rows.length; r++) {
+            const y = rows[r][0];
+            for (const [x0, x1] of bandFree(y - 0.005, y + 0.005).filter((q) => q[2] < y && q[3] > y).map((q) => [q[0], q[1]])) joint("flat", at(x0, y, joff), at(x1, y, joff), UP, x1 - x0);
+          }
+          rows.forEach(([y0, y1], r) => {
+            for (const x of cuts(r, 2.4)) {
+              const hit = opens.filter((q) => q.s0 < x + 0.01 && q.s1 > x - 0.01);
+              let ys = [[y0, y1]];
+              for (const q of hit) ys = ys.flatMap(([a, b]) => [[a, Math.min(b, q.y0)], [Math.max(a, q.y1), b]].filter(([p2, q2]) => q2 - p2 > 0.05));
+              for (const [a, b] of ys) joint("butt", at(x, a, joff), at(x, b, joff), [ux, 0, uz], b - a);
+            }
+          });
+          // inside corners: where this face meets the next wall (both ends of a partition, the start of an outside wall)
+          for (const x of o ? [0.02] : [0.02, L - 0.02]) joint("corner", at(x, yb + 0.012, joff), at(x, yt, joff), [ux, 0, uz], yt - yb - 0.012);
+        }
+        else { let row = 0; for (let y = yb + 0.01; y < yt - 0.03; y += 0.14, row++) lay(y, Math.min(yt, y + 0.14), row, 3.6, "boards"); }
+      }
+    }
   }
 
   /* ---------- roofs ---------- */
@@ -739,6 +798,7 @@
       const f = FLOOR_ITEM[m.material];
       return ["floor" + m.material, f ? f[0] : null, f ? f[1] : "m2", f && f[1] === "m" ? m.area / 0.14 : m.area, "Flooring", "The finished floor you walk on.", f ? undefined : "flooring: " + m.material];
     }
+    if (k === "joint") return ["mud", "joint_compound", "kg", (m.len || m.length) * 0.3, "Joint compound and tape", "Tape over every drywall seam and three coats of compound, sanded smooth, so the joints vanish."];
     if (k === "lining") return t === "gypsum" ? ["gyp", "gypsum_13", "sheet", m.area, "Wall panels", "Panels on the inside of the walls. They cover the insulation and finish the room."] : ["lin", "board_pine_1x6", "m", m.area / 0.14, "Lining boards", "Boards on the inside of the walls and ceiling. They cover the insulation and finish the room."];
     if ((k === "door" || k === "window") && m.unit) return ["u" + m.unit, m.unit, "each", 1, m.unitName || (k === "door" ? "Door" : "Window"), "A ready-made " + k + " in its frame. It is carried in, set into its rough opening and nailed through the frame."];
     if (k === "door") return ["door", null, "each", 1, "Doors", "A way in that closes. Without it the room is not enclosed.", "a door"];

@@ -500,3 +500,50 @@ test('scaffolding is rented by the day, set up along a wall, taken down, and col
   sim.runTicks(Math.ceil((3 * 86400) / 60) + 2);
   assert.equal(s.scaffold, null);
 });
+
+test('tape and mud: each drywall seam takes three coats, each on dry compound, then sanding; the stage completes when all are sanded', async () => {
+  await import('../src/framing.js');
+  const F = globalThis.__framing;
+  const desc = { found: 'pier-blocks', spec: { ins: 'fibreglass_batt', lining: 'gypsum' }, floors: [{ id: 'f', outline: [[0, 0], [3, 0], [3, 3], [0, 3]], y0: 0, ground: true }],
+    walls: [{ id: 'w1', a: [0, 0], b: [3, 0], y0: 0, h: 2.6, out: -1, mat: 'timber', openings: [] }, { id: 'w2', a: [0, 1.5], b: [3, 1.5], y0: 0, h: 2.6, out: 0, mat: 'timber', openings: [] }], roofs: [] };
+  const mem = F.generate(desc).map((m) => ({ ...m, struct: 's1', built: m.stage !== 'finish' }));
+  const sim = createGameSim(3);
+  sim.state.sys.stock.money = 5000;
+  assert.ok(sim.commandNow('construction.setPlan', K.planFromPieces('s1', mem, F.materialsList(mem), { name: 'Room', x: 40, z: 40, r: 2 })).ok);
+  const pr = cs(sim).progress.s1, joints = Object.keys(pr.members).filter((id) => pr.members[id].kind === 'joint');
+  assert.ok(joints.length >= 4, joints.length + ' seams');
+  assert.ok(K.liningCovered(pr, 'w2') && !pr.done, 'the partition is hung on both faces and the room is not finished');
+  assert.ok(sim.commandNow('construction.order', { structId: 's1', stage: 'finish' }).ok);
+  sim.commandNow('construction.deliverNow', {});
+  const id = joints[0], pass = () => sim.commandNow('construction.install', { structId: 's1', memberIds: [id], from: 'stacks' });
+  let r = pass();
+  assert.ok(r.ok && pr.members[id].coat === 1 && !pr.members[id].built, 'tape and the first coat');
+  r = pass();
+  assert.equal(r.refused[0].reason, 'wet');
+  assert.ok(r.refused[0].waitS > 0 && r.refused[0].waitS <= C.FINISH.dryS);
+  for (let k = 0; k < 2; k++) { sim.state.t += C.FINISH.dryS + 1; assert.ok(pass().ok); }
+  assert.equal(pr.members[id].coat, 3);
+  assert.equal(pass().refused[0].reason, 'wet', 'no sanding wet mud');
+  sim.state.t += C.FINISH.dryS + 1;
+  r = pass();
+  assert.ok(r.ok && r.installed.includes(id) && pr.members[id].built && near(pr.members[id].got, pr.members[id].need), 'sanded: done');
+  // the rest, all the way: the stage, and the building, finish
+  for (const j of joints.slice(1)) for (let k = 0; k < 4; k++) { sim.state.t += C.FINISH.dryS + 1; assert.ok(sim.commandNow('construction.install', { structId: 's1', memberIds: [j], from: 'stacks' }).ok, j); }
+  assert.ok(K.stageComplete(pr, 'finish') && pr.done);
+});
+
+test('an old save whose walls were lined in one piece stays finished: its new sheets and seams count as in', async () => {
+  await import('../src/framing.js');
+  const F = globalThis.__framing;
+  const desc = { found: 'pier-blocks', spec: { ins: 'fibreglass_batt', lining: 'gypsum' }, floors: [{ id: 'f', outline: [[0, 0], [3, 0], [3, 3], [0, 3]], y0: 0, ground: true }],
+    walls: [{ id: 'w1', a: [0, 0], b: [3, 0], y0: 0, h: 2.6, out: -1, mat: 'timber', openings: [] }], roofs: [] };
+  const now = F.generate(desc).map((m) => ({ ...m, struct: 's2' }));
+  const before = now.filter((m) => m.kind !== 'lining' && m.kind !== 'joint').map((m) => ({ ...m, built: true }));
+  before.push({ id: 'w1.ln', kind: 'lining', type: 'gypsum', stage: 'lining', parent: 'w1', struct: 's2', length: 3, built: true });
+  const sim = createGameSim(4);
+  assert.ok(sim.commandNow('construction.setPlan', K.planFromPieces('s2', before, F.materialsList(before), { name: 'Old room', x: 40, z: 40, r: 2 })).ok);
+  assert.ok(cs(sim).progress.s2.done, 'finished in the old save');
+  assert.ok(sim.commandNow('construction.setPlan', K.planFromPieces('s2', now, F.materialsList(now), { x: 40, z: 40, r: 2 })).ok);
+  const pr = cs(sim).progress.s2;
+  assert.ok(Object.values(pr.members).some((m) => m.kind === 'joint') && pr.done && K.liningCovered(pr, 'w1'), 'still finished after the change');
+});

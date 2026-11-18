@@ -33,7 +33,7 @@ test('a 5 m stick-framed wall with a window: plates, studs at 0.4 m, kings, jack
   const sh = of('sheathing');
   assert.ok(sh.length >= 5 && sh.every((m) => m.stage === 'sheathing' && near(m.section.b, 0.011)));
   const wr = of('membrane'), cl = of('cladding');
-  assert.ok(wr.length >= 1 && cl.length > 10 && of('lining').length === 1);
+  assert.ok(wr.length >= 1 && cl.length > 10 && of('lining').length > 10 && of('lining').every((m) => m.type === 'boards' && m.face === 'i'));   // pine boards inside, a course at a time
   // every layer leaves the window open: no wrap or board piece crosses the opening (checked by its area against the wall's net area)
   const box = (m) => (m.type === 'boards' ? [m.a[0], m.b[0], m.a[1] - m.section.d / 2, m.a[1] + m.section.d / 2] : [m.a[0] - m.section.d / 2, m.a[0] + m.section.d / 2, m.a[1], m.b[1]]);
   for (const m of [...sh, ...wr, ...cl]) { const [x0, x1, y0, y1] = box(m); assert.ok(x1 <= 2.1 + 1e-6 || x0 >= 2.9 - 1e-6 || y1 <= 1.11 + 1e-6 || y0 >= 1.89 - 1e-6, m.id + ' covers the window opening'); }
@@ -132,4 +132,32 @@ test('lumber is bought in stock lengths: the shopping list is whole sticks, shor
   const lines = F.materialsList([{ id: 'a', kind: 'stud', type: 'stud', stage: 'wall-frame', section: { b: 0.038, d: 0.089 }, length: 2.606 }, { id: 'b', kind: 'stud', type: 'cripple', stage: 'wall-frame', section: { b: 0.038, d: 0.089 }, length: 0.35 }]);
   const studs = lines.find((l) => /Studs/.test(l.key));
   assert.equal(studs.qty, 3.0); assert.ok(near(studs.lengthM, 2.956, 1e-6));   // the cripple comes out of the stud's offcut
+});
+
+test('drywall hangs sheet by sheet: rows of 1.2 m, joints on studs and staggered, cut round the window, seams to tape; a partition is lined both sides', () => {
+  const wall = (out, o) => F.wallMembers(out, { id: 'w', a: [0, 0], b: [5, 0], y0: 0, h: 2.84, out: o, mat: 'timber', openings: [{ id: 'o', kind: 'window', offset: 2.1, width: 0.8, sill: 1.11, height: 0.78 }] }, { studs: 0.4, ins: 'fibreglass_batt', lining: 'gypsum' });
+  const out = [];
+  wall(out, 1);
+  const sheets = out.filter((m) => m.kind === 'lining'), joints = out.filter((m) => m.kind === 'joint');
+  assert.ok(sheets.length >= 6 && sheets.every((m) => m.type === 'gypsum' && m.stage === 'lining' && m.length <= 2.4 + 1e-6 && m.section.d <= 1.2 + 1e-6), sheets.length + ' sheets');
+  // the top row is hung first (row 0 at the top), the bottom row under it
+  const top = sheets.filter((m) => m.row === 0), bottom = sheets.filter((m) => m.row === 1);
+  assert.ok(top.length && bottom.length && Math.min(...top.map((m) => m.a[1])) > Math.max(...bottom.map((m) => m.a[1])));
+  // end joints (not at an opening) land on the 0.4 m stud grid, and the two rows' joints do not line up
+  const ends = (row) => sheets.filter((m) => m.row === row).flatMap((m) => [m.a[0], m.b[0]]).filter((x) => x > 0.05 && x < 4.95 && !(x > 2.05 && x < 2.95));
+  for (const x of [...ends(0), ...ends(1)]) assert.ok(near((x / 0.4) % 1, 0, 1e-6) || near((x / 0.4) % 1, 1, 1e-6), 'a joint off the studs at ' + x);
+  assert.ok(!ends(0).some((x) => ends(1).some((y) => near(x, y, 0.01))), 'joints staggered: ' + ends(0) + ' / ' + ends(1));
+  // no sheet covers the window
+  for (const m of sheets) { const x0 = Math.min(m.a[0], m.b[0]), x1 = Math.max(m.a[0], m.b[0]), y0 = m.a[1] - m.section.d / 2, y1 = m.a[1] + m.section.d / 2; assert.ok(x1 <= 2.1 + 1e-6 || x0 >= 2.9 - 1e-6 || y1 <= 1.11 + 1e-6 || y0 >= 1.89 - 1e-6, m.id + ' covers the window'); }
+  // the sheets add up to the wall less the window
+  assert.ok(near(sheets.reduce((t, m) => t + m.area, 0), 5 * (2.84 - 0.012 - 0.12) - 0.8 * 0.78, 0.3), 'sheet area ' + sheets.reduce((t, m) => t + m.area, 0));
+  // seams to tape: the flat seam between rows, end joints, the corner; drawn by the view, not as boxes
+  assert.ok(joints.some((m) => m.type === 'flat') && joints.some((m) => m.type === 'butt') && joints.some((m) => m.type === 'corner'));
+  assert.ok(joints.every((m) => m.stage === 'finish' && m.draw === 0 && m.len > 0.08));
+  // a partition (floor both sides) is lined on both faces
+  const part = [];
+  wall(part, 0);
+  const faces = new Set(part.filter((m) => m.kind === 'lining').map((m) => m.face));
+  assert.deepEqual([...faces].sort(), ['a', 'b']);
+  assert.ok(part.filter((m) => m.kind === 'joint' && m.type === 'corner').length === 4, 'both ends, both faces');
 });

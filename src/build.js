@@ -3353,7 +3353,7 @@
       const vp = WALLS[vmat.get(k) || "timber"],
         pb = vp.beam;
       if (!tall.has(k)) late.abox(i - 0.08, -depth, j - 0.08, i + 0.08, 1.1, j + 0.08, pb);
-      else if (!(ds.length === 2 && ds[0] === ds[1])) { const h = stickWall("wall", vmat.get(k) || "timber") ? 0.06 : 0.12; g.abox(i - h, -depth, j - h, i + h, EAVE + 0.03, j + h, pb); }   // a sided corner hides its post inside the trim
+      else if (!(ds.length === 2 && ds[0] === ds[1])) { const h = stickWall("wall", vmat.get(k) || "timber") ? 0.042 : 0.12; g.abox(i - h, -depth, j - h, i + h, EAVE + 0.03, j + h, pb); }   // a sided corner hides its post inside the trim
     }
     rg.yo = (hs - 1) * EAVE;
     for (const r of D.roofs) {
@@ -3385,7 +3385,7 @@
         if (ends.has(k)) continue;
         ends.add(k);
         if (low) late.abox(x - 0.08, -depth, z - 0.08, x + 0.08, 1.1, z + 0.08, PAL.beam);
-        else if (clad) g.abox(x - 0.06, -depth, z - 0.06, x + 0.06, EAVE + 0.03, z + 0.06, PAL.beam);    // inside the siding's corner trim
+        else if (clad) g.abox(x - 0.042, -depth, z - 0.042, x + 0.042, EAVE + 0.03, z + 0.042, PAL.beam);    // inside the siding's corner trim
         else g.abox(x - 0.12, -depth, z - 0.12, x + 0.12, EAVE + 0.03, z + 0.12, PAL.beam);
       }
     });
@@ -7533,7 +7533,7 @@
   };
   const FOUND_ITEMS = ["pier-blocks", "skids", "piers", "stemwall", "slab", "plinth"].map((v) => ({ v, name: window.__framing.FOUNDATIONS[v].name })),
     INS_ITEMS = [{ v: null, name: "None" }, { v: "fibreglass_batt", name: "Fibreglass batts" }, { v: "mineral_wool", name: "Mineral wool" }, { v: "sheep_wool", name: "Sheep's wool" }],
-    LIN_ITEMS = [{ v: null, name: "None" }, { v: "boards", name: "Boards" }, { v: "gypsum", name: "Panels" }];
+    LIN_ITEMS = [{ v: null, name: "None" }, { v: "boards", name: "Pine boards" }, { v: "gypsum", name: "Drywall" }];
   const makeUp = (g, pre, f, i, l) => {
     g.push(G_.select(pre + "found", "Stands on", FOUND_ITEMS, f, (window.__framing.FOUNDATIONS[f] || {}).note));
     g.push(G_.select(pre + "ins", "Insulation", INS_ITEMS, i, "What fills the spaces between studs, joists and rafters"));
@@ -9323,7 +9323,7 @@
   };
   const memberMats = (planes) => ({ mem: capped(Object.assign(memMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })), lap: capped(makeLapMat(planes)), wrap: capped(Object.assign(wrapMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })) });
   const isLap = (m) => /^siding/.test(m.col || "") && m.type === "boards";
-  const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), siding: col(0xb8beb1), sidingDark: col(0x5d4a3b), trim: col(0xefece4), concrete: CONCRETE, gravel: col(0x8f8b82) };
+  const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), siding: col(0xb8beb1), sidingDark: col(0x5d4a3b), trim: col(0xefece4), gypsum: col(0xe3e3de), pine: col(0xd8b583), concrete: CONCRETE, gravel: col(0x8f8b82) };
   for (const [k, h] of Object.entries(FR.ROOF_COLORS || {})) MCOL[k] = col(h); // the roofing layers while they go on (src/framing.js)
   const _m4 = new T.Matrix4(),
     _c = new T.Color();
@@ -9375,7 +9375,7 @@
       if (m.stage === "foundation" || m.stage === "floor-frame") sets[0].push(m);
       else if (roofId) (st.all || st.finRoof.has(roofId)) || sets[1].push(m);
       else if (m.stage === "subfloor" || m.type === "floor-batt") (st.all || st.finFloor.has(m.parent)) || sets[0].push(m);
-      else if (m.kind === "cladding") sets[0].push(m); // siding stays drawn as boards, even once the wall is finished
+      else if (m.kind === "cladding" || (m.kind === "lining" && (m.type === "gypsum" || m.type === "boards"))) sets[0].push(m); // siding outside and drywall or boards inside stay drawn, even once the wall is finished
       else (st.all || st.finRun.has(m.parent)) || sets[0].push(m);
     }
     for (const m of mem.opens) P(m.id) && ghostAdd(m, 0);
@@ -9620,8 +9620,9 @@
   };
   const planList = () => Object.values(PLANS).map((p) => ({ id: p.id, name: p.name, size: p.size, widthM: p.w, lengthM: p.l, note: p.note, foundation: p.found }));
   // door and windows are [side, module]: side 0 the back (z = 0), 1 the right, 2 the front, 3 the left
-  function placePlan(id, x, z, yawRad) {
-    const pl = PLANS[id];
+  // over: choices made for this copy of the plan, e.g. { lining: 'gypsum' } for drywall inside
+  function placePlan(id, x, z, yawRad, over) {
+    const pl = PLANS[id] && over ? { ...PLANS[id], ...over } : PLANS[id];
     if (!pl) return null;
     pushUndo();
     const S = newStruct({ ox: x, oz: z, yaw: yawRad || 0, y0: G.heightAt(x, z) + FOUNDATIONS[pl.found].drop - 0.05, level: 0, hs: 1, found: pl.found, ins: pl.ins, lining: pl.lining, fresh: true }),

@@ -72,6 +72,13 @@ export function wantItem(pr, id) {
   if (ln.stick && m.site && !placed(m)) return m.prep ? '' : null;   // '': cut and waiting at the sawhorses, nothing to carry
   return ln.itemId;
 }
+// whether a wall (or partition) is covered on the inside: every lining piece hung on it is in. Services asks this before
+// reopening or reworking a run (docs/design/interior-walls.md); a wall with no lining is never covered.
+export function liningCovered(pr, wallId) {
+  let any = false;
+  for (const id in pr.members) { const m = pr.members[id]; if (m.parent !== wallId || m.kind !== 'lining') continue; any = true; if (!m.built) return false; }
+  return any;
+}
 // the next piece to cut at the sawhorses: of a stage open now, not yet cut or set, in the order of the stages
 export function nextCut(pr) {
   let best = null, bi = Infinity;
@@ -476,6 +483,10 @@ function setPlan(ctx, p) {
     const o = old && old.members[m.id];
     pr.members[m.id] = { stage: m.stage, kind: m.kind, parent: m.parent || null, line: null, need: 0, got: o ? o.got : 0, built: o ? o.built : m.built ? 1 : 0 };
     if (o && o.prep && !o.built) pr.members[m.id].prep = 1;      // already cut at the sawhorses
+    // a save from before walls were hung sheet by sheet: one lining piece per wall. If that was in, the wall's sheets (or
+    // boards) and its seams are in too, so a finished room stays finished
+    if (!o && old && (m.kind === 'lining' || m.kind === 'joint') && m.parent && old.members[m.parent + '.ln'] && old.members[m.parent + '.ln'].built) { pr.members[m.id].built = 1; if (m.kind === 'joint') pr.members[m.id].coat = C.FINISH.coats + 1; }
+    if (o && o.coat) { pr.members[m.id].coat = o.coat; if (o.dryAt) pr.members[m.id].dryAt = o.dryAt; }
     if (m.len > 0) { pr.members[m.id].len = round6(m.len); pr.members[m.id].pcs = m.pcs > 1 ? m.pcs : 1; }
   }
   for (const ln of p.lines) {
@@ -692,6 +703,25 @@ function putDownCmd(ctx, p) {
   return r;
 }
 
+// one pass on a drywall seam: the coats need compound (the arms, or the stacks when working from them) and dry mud
+// under them; the sanding pass after the last coat needs neither material nor anything but dry mud
+function mudPass(ctx, s, pr, m, ln, fromStacks) {
+  const t = ctx.state.t, F = C.FINISH, coat = m.coat || 0;
+  if (m.dryAt && t + 1e-6 < m.dryAt) return { reason: 'wet', waitS: round6(m.dryAt - t) };
+  if (coat < F.coats) {
+    const per = ln ? round6(m.need / F.coats) : 0;
+    if (ln && per > 0) {
+      const have = fromStacks ? SUP.stackQty(s, ln.itemId) : s.carried && s.carried.itemId === ln.itemId ? s.carried.qty : 0;
+      if (have + 1e-6 < per) return { reason: !fromStacks && s.carried && s.carried.itemId !== ln.itemId ? 'wrong material' : 'no material', itemId: ln.itemId };
+      const used = fromStacks ? SUP.useFromStacks(s, ln.itemId, per, pr.x, pr.z) : SUP.useCarried(s, ln.itemId, per);
+      m.got = round6(Math.min(m.need, m.got + used)); ln.used = round6(ln.used + used);
+    }
+    m.coat = coat + 1; m.dryAt = round6(t + (s.options.instant ? 0 : F.dryS));
+    return { ok: true, built: false };
+  }
+  m.coat = F.coats + 1; m.got = m.need; m.built = 1; m.builtAt = round6(t); delete m.dryAt;    // sanded smooth
+  return { ok: true, built: true };
+}
 function install(ctx, p) {
   const s = ctx.s, pr = s.progress[p && p.structId];
   if (!pr) return { ok: false, reason: 'unknown building' };
@@ -705,6 +735,13 @@ function install(ctx, p) {
     const why = blocked(pr, id);
     if (why) { out.refused.push({ id, reason: why, missing: why === 'support missing' ? supportMissing(pr, id) : undefined }); break; }
     const ln = m.line ? pr.lines[m.line] : null;
+    if (m.kind === 'joint') {      // a drywall seam: one pass per call (tape and first coat, fill, finish, then sanding)
+      const r = mudPass(ctx, s, pr, m, ln, fromStacks);
+      if (!r.ok) { out.refused.push({ id, ...r }); break; }
+      if (r.built) { pr.tally[m.stage][0]++; out.installed.push(id); } else out.set.push(id);
+      out.coat = { id, coat: m.coat, dryAt: m.dryAt };
+      continue;
+    }
     let need = round6(m.need - m.got), give = 0, cut = null, saw = null;
     let prep = false;
     if (ln && ln.stick && need > 1e-6 && m.prep) {      // cut at the sawhorses already: it is fetched from there, whatever is in the arms
@@ -777,7 +814,7 @@ function install(ctx, p) {
       m.got = round6(m.got + used); ln.used = round6(ln.used + used);
     }
     if (completes) {
-      m.got = m.need; m.built = 1; pr.tally[m.stage][0]++;
+      m.got = m.need; m.built = 1; m.builtAt = round6(ctx.state.t); pr.tally[m.stage][0]++;
       supplies(s, pr, m.stage, pr.tally[m.stage][0], false, ctx.get('stock'));
       out.installed.push(id);
     } else { out.partial.push({ id, got: m.got, need: m.need }); break; }
@@ -915,7 +952,7 @@ export const constructionSystem = () => ({
       const pr = c.s.progress[p && p.structId];
       if (!pr) return { ok: false, reason: 'unknown building' };
       const done = [];
-      for (const id of p.memberIds || []) { const m = pr.members[id]; if (!m || m.built || m.kind === 'site') continue; m.got = m.need; m.built = 1; pr.tally[m.stage][0]++; done.push(id); }
+      for (const id of p.memberIds || []) { const m = pr.members[id]; if (!m || m.built || m.kind === 'site') continue; m.got = m.need; m.built = 1; m.builtAt = round6(ctx.state.t); pr.tally[m.stage][0]++; done.push(id); }
       if (done.length) refresh(c, c.s, pr);
       return { ok: done.length > 0, settled: done };
     },
@@ -932,5 +969,5 @@ export const constructionSystem = () => ({
     },
     'construction.seeCard': (c, p) => { c.s.tutorial.seen[p.stage] = true; return { ok: true }; },
   },
-  api: { content: C, wantItem, nextCut, feelOf: (s) => C.feelOf(s), knows: (s, kind) => !!(s.learn && s.learn.known[C.learnGroup(kind)]), sheetSource, needsStock, stockNeed, stickSource, stickImbalance, cutList, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance },
+  api: { content: C, wantItem, nextCut, liningCovered, feelOf: (s) => C.feelOf(s), knows: (s, kind) => !!(s.learn && s.learn.known[C.learnGroup(kind)]), sheetSource, needsStock, stockNeed, stickSource, stickImbalance, cutList, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance },
 });
