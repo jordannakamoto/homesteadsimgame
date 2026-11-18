@@ -3,19 +3,27 @@
 // Bump SAVE_VERSION and add a step to MIGRATIONS whenever the shape changes; old saves must keep loading.
 
 import { STATE_VERSION } from './sim.js';
+import { packReplacer, unpackReviver, unpackAll } from './core/earthwork-codec.js';
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 export const FORMAT = 'homestead-save';
 
 // MIGRATIONS[n] upgrades a save from version n to n + 1.
-const MIGRATIONS = {};
+const MIGRATIONS = {
+  // v2 packs earthwork grids (core/earthwork-codec.js). The shape in memory is unchanged and readSave unpacks either
+  // form, so a v1 save needs nothing more.
+  1: (save) => save,
+};
 
 export function makeSave(simState, world = {}) {
   return { format: FORMAT, v: SAVE_VERSION, sim: simState, world };
 }
 
+// The text a save is stored as: every earthwork grid in it packed (about 17 KB to about 1 KB a tile).
+export function stringifySave(save) { return JSON.stringify(save, packReplacer); }
+
 export function readSave(raw) {
-  let save = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  let save = typeof raw === 'string' ? JSON.parse(raw, unpackReviver) : unpackAll(raw);
   if (!save || save.format !== FORMAT) throw new Error('not a homestead save');
   if (save.v > SAVE_VERSION) throw new Error('save is from a newer version of the game');
   while (save.v < SAVE_VERSION) {

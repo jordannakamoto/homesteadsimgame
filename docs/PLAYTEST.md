@@ -542,3 +542,18 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 - What exists: an ATV and a small trailer as records (`VEHICLE_KINDS`), gasoline, a 20 L fuel can and the trailer in the catalog (new "Vehicles and fuel" category), and a `vehicles` sim system: parked poses, fuel, seats, hitches, rentals.
 - Try from the console: `__game.sim.commandNow('vehicles.add', { kind: 'atv', x: __game.player.x + 3, z: __game.player.z })`, then look at `__game.sim.state.sys.vehicles`. `__game.vehicleCore` has the drive model (`createBody`, `stepBody`, `headingControl`).
 - Weak: no feel tuning yet (the numbers are from the design, checked only headless); towing a trailer while reversing is purely kinematic; no damage, no rollover by design.
+
+## Ground A1 — smaller saves (branch `ground-a1a2`)
+
+**What is new**
+
+- Dug and shaped ground (the Yard, key 6) is stored packed in the save: about 1-2 KB per 3.2 m patch instead of about 17 KB. A big dug yard no longer runs into the browser's storage limit. Old saves load as before (save version 2).
+- Autosave no longer copies the whole simulation first, so the 20 s autosave hitch is smaller.
+
+**Try this**
+
+1. Console: `__game.saveSize()` gives `{ bytes, plainBytes }` (stored size versus plain JSON). Dig a large area in the Yard, check again, reload: everything is where you left it.
+
+**What's weak**
+
+- Packing a very large dug area (300 patches) takes about 30 ms once per autosave.
