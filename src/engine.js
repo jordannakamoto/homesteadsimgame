@@ -1022,6 +1022,9 @@ float bedCaustic = 0.0;
   if (uWin.z > uWin.x && lc.x > 1.0 && lc.y > 1.0 && lc.x < float(uLiveN) - 1.0 && lc.y < float(uLiveN) - 1.0) {
     float dep = liveAt(lc, 0);
     float uw = smoothstep(0.0, 0.04, dep);
+    // fade the stone bed out toward the window's edge over the same 10 m the water hands over in, so its edge
+    // creeps unseen as the window follows you
+    uw *= clamp((min(min(lc.x, lc.y), min(float(uLiveN) - lc.x, float(uLiveN) - lc.y)) * uLiveCell - 2.0) / 10.0, 0.0, 1.0);
     if (uw > 0.0) {
       vec2 v = vec2(liveAt(lc, 1), liveAt(lc, 2));
       // what lies on the bed follows the channel's settled current (the baked flow), not the moment's water, so
@@ -2888,14 +2891,33 @@ function refreshRiverRocks(ch) {
 function nearStream() {
   for (const r of [0, 3, 6, 9, 12]) for (let a = 0; a < (r ? 8 : 1); a++) {
     const x = player.x + Math.cos(a * 0.785) * r, z = player.z + Math.sin(a * 0.785) * r, w = streamWaterAt(x, z);
-    if (w && w.depth > 0.03) return { x, y: heightAt(x, z) + w.depth + 0.25, z };
+    if (w && w.depth > 0.03) { const lv = bakedLevelAt(x, z); return { x, y: (lv ?? heightAt(x, z) + w.depth) + 0.25, z, level: lv ?? heightAt(x, z) + w.depth }; }
   }
   return null;
+}
+// the settled surface level of the stream at a point (the baked water of the day: steady, unlike the simulation's
+// moving surface), or null
+function bakedLevelAt(x, z) {
+  const ch = world.chunks.get(ckey(Math.floor(x / CS), Math.floor(z / CS))), D = ch && ch.riverData;
+  if (!D) return null;
+  const k = Math.round(z - D.oz) * (CS + 1) + Math.round(x - D.ox);
+  if (!(k >= 0 && k < D.surf.length) || isNaN(D.surf[k])) return null;
+  return D.bed[k] + (D.surf[k] - D.bed[k]) * riverWater.uniforms.uWetDepth.value;
+}
+// the mirror's level glides to the level of the water by you instead of jumping, and only moves on when that has
+// really changed (a step down to the next pool), so the mirror does not flicker between pools as you walk
+let mirrorLevel = null, mirrorWant = null, mirrorHold = 0, lastDt = 1 / 60;
+function updateMirrorLevel(dt, target) {
+  if (mirrorLevel === null) { mirrorLevel = mirrorWant = target; return mirrorLevel; }
+  if (Math.abs(target - mirrorWant) > 0.08) { mirrorHold += dt; if (mirrorHold > 0.4) { mirrorWant = target; mirrorHold = 0; } } else mirrorHold = 0;
+  mirrorLevel += (mirrorWant - mirrorLevel) * (1 - Math.exp(-dt * 5));
+  return mirrorLevel;
 }
 // the streams follow the weather (src/sim/streams.js): depth and speed with the day's flow, mud with the storm flow;
 // eased, so a change shows over a few seconds rather than in a jump
 let irrigT = 0;
 function updateStreams(dt) {
+  lastDt = dt;
   if (!rivers) return;
   const sw = sim.state.sys.streams, u = riverWater.uniforms;
   if (sw) {
@@ -4245,7 +4267,7 @@ function autoResolution(now) {
 function render() {
   processShade();
   // the stream mirror, drawn from the camera as it is for this frame
-  if (probeAt && reflectPlane.on) reflectPlane.update(camera, probeAt.y - 0.25, player.x, player.z);
+  if (probeAt && reflectPlane.on) reflectPlane.update(camera, updateMirrorLevel(lastDt, probeAt.level), player.x, player.z);
   if (viaComposer()) {
     const useTaa = LOOK.taa;
     if (useTaa) taa.begin(composer.renderTarget1.width, composer.renderTarget1.height);

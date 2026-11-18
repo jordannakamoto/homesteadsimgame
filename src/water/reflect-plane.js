@@ -19,7 +19,7 @@ export function createReflectPlane({ renderer, scene, hide = [], uniforms }) {
   const target = new THREE.WebGLRenderTarget(16, 16, { type: THREE.HalfFloatType, samples: 0 });
   target.texture.generateMipmaps = false;
   const cam = new THREE.PerspectiveCamera();
-  const texMat = new THREE.Matrix4(), size = new THREE.Vector2();
+  const texMat = new THREE.Matrix4(), size = new THREE.Vector2(), _cc = new THREE.Color();
   const camPos = new THREE.Vector3(), look = new THREE.Vector3(), rot = new THREE.Matrix4(), tgt = new THREE.Vector3(), view = new THREE.Vector3();
   const N = new THREE.Vector3(0, 1, 0), P = new THREE.Vector3(), plane = new THREE.Plane(), clip = new THREE.Vector4(), q = new THREE.Vector4();
   let on = false, level = 0;
@@ -65,8 +65,13 @@ export function createReflectPlane({ renderer, scene, hide = [], uniforms }) {
     renderer.shadowMap.autoUpdate = false; renderer.xr.enabled = false;
     const vis = hide.map((m) => m.visible);
     for (const m of hide) m.visible = false;
+    // cleared to nothing (alpha 0): where the mirror drew nothing (past its far plane, the sky) the water shader
+    // falls back to its other reflection instead of showing the clear colour
     renderer.setRenderTarget(target);
+    const cc = renderer.getClearColor(_cc), ca = renderer.getClearAlpha();
+    renderer.setClearColor(0x000000, 0);
     renderer.clear();
+    renderer.setClearColor(cc, ca);
     renderer.render(scene, cam);
     hide.forEach((m, i) => { m.visible = vis[i]; });
     renderer.setRenderTarget(prevRT); renderer.shadowMap.autoUpdate = prevAuto; renderer.xr.enabled = prevXr;

@@ -27,7 +27,7 @@
 import * as THREE from 'three';
 import { RIVER_SHADE } from './river-shade.js';
 
-const CELL = 0.25, STEP_DT = 1 / 120, MAX_STEPS = 3, SHIFT_M = 8, G = 9.81;
+const CELL = 0.25, STEP_DT = 1 / 120, MAX_STEPS = 3, SHIFT_M = 2, G = 9.81;   // the window follows in 2 m steps, so its edge creeps rather than jumps
 const NOFEED = -1e4;
 
 export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt }) {

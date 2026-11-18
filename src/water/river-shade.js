@@ -31,7 +31,7 @@ export const RIVER_SHADE = /* glsl */ `
   float liveShare(vec2 p) {
     if (uWin.z < uWin.x) return 0.0;
     float e = min(min(p.x - uWin.x, uWin.z - p.x), min(p.y - uWin.y, uWin.w - p.y));
-    return clamp((e - 1.0) / 4.0, 0.0, 1.0);
+    return clamp((e - 2.0) / 10.0, 0.0, 1.0);          // over 10 m, so the hand-over is gradual
   }
   vec2 waterCell(vec2 p) { return floor(p * uTPM); }
   vec2 waterTexel(vec2 p) { return uSnap > 0.5 ? (floor(p * uTPM) + 0.5) / uTPM : p; }
@@ -210,15 +210,18 @@ export const RIVER_SHADE = /* glsl */ `
     // wavering with the ripples
     if (uReflOn.x > 0.5) {
       // only water at the mirror's own level: a pool on a step above or below would show it misplaced
-      float kp = (1.0 - smoothstep(0.04, 0.12, abs(world.y - uReflOn.y))) * (1.0 - smoothstep(22.0, 34.0, distance(q, uReflOn.zw)));
+      float kp = (1.0 - smoothstep(0.08, 0.25, abs(world.y - uReflOn.y))) * (1.0 - smoothstep(22.0, 34.0, distance(q, uReflOn.zw)));
       if (kp > 0.0) {
         vec4 pr = uReflMat * vec4(world.x, uReflOn.y, world.z, 1.0);
         vec2 ruv = pr.xy / pr.w + g * (0.05 + 0.08 * rough);
         float smear = (0.003 + 0.012 * rough) * (1.0 + 3.0 * smoothstep(0.6, 0.98, graze));
         kp *= smoothstep(0.0, 0.03, min(min(ruv.x, 1.0 - ruv.x), min(ruv.y, 1.0 - ruv.y)));
-        vec3 mir = texture2D(uRefl, clamp(ruv, 0.001, 0.999)).rgb * 0.36;
-        mir += texture2D(uRefl, clamp(ruv + vec2(0.0, smear), 0.001, 0.999)).rgb * 0.22 + texture2D(uRefl, clamp(ruv - vec2(0.0, smear), 0.001, 0.999)).rgb * 0.22;
-        mir += texture2D(uRefl, clamp(ruv + vec2(0.0, smear * 2.2), 0.001, 0.999)).rgb * 0.1 + texture2D(uRefl, clamp(ruv - vec2(0.0, smear * 2.2), 0.001, 0.999)).rgb * 0.1;
+        // (alpha: whether the mirror drew anything there; where it did not, the sky and far surroundings above stand)
+        vec4 m4 = texture2D(uRefl, clamp(ruv, 0.001, 0.999)) * 0.36;
+        m4 += texture2D(uRefl, clamp(ruv + vec2(0.0, smear), 0.001, 0.999)) * 0.22 + texture2D(uRefl, clamp(ruv - vec2(0.0, smear), 0.001, 0.999)) * 0.22;
+        m4 += texture2D(uRefl, clamp(ruv + vec2(0.0, smear * 2.2), 0.001, 0.999)) * 0.1 + texture2D(uRefl, clamp(ruv - vec2(0.0, smear * 2.2), 0.001, 0.999)) * 0.1;
+        vec3 mir = m4.a > 0.01 ? m4.rgb / m4.a : sky;
+        kp *= clamp(m4.a, 0.0, 1.0);
         // a reflection is a little darker and greyer than what it shows (some light goes into the water, the surface
         // is never quite clean), more so in the silty shallows by the banks
         mir = mix(mir, vec3(dot(mir, vec3(0.3, 0.5, 0.2))), 0.2 + 0.3 * fringe) * mix(0.82, 0.6, fringe);
