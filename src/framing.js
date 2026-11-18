@@ -4,8 +4,8 @@
    Pure arithmetic: no DOM, no three.js. The page reads it as window.__framing; tests read globalThis.__framing. */
 (() => {
   // the order a building is raised in (docs/CONSTRUCTION.md)
-  const STAGES = ["site", "foundation", "floor-frame", "subfloor", "wall-frame", "top-plates", "roof-frame", "roof-deck", "dry-in", "roofing", "sheathing", "wrap", "openings", "cladding", "gutters", "insulation", "lining", "flooring", "services"];
-  const STAGE_NAME = { site: "Site", foundation: "Foundation", "floor-frame": "Floor frame", subfloor: "Subfloor", "wall-frame": "Wall frames", "top-plates": "Top plates", "roof-frame": "Roof frame", "roof-deck": "Roof deck", "dry-in": "Dry-in", roofing: "Roofing", sheathing: "Sheathing", wrap: "Wrap", openings: "Windows and doors", cladding: "Cladding", gutters: "Gutters", insulation: "Insulation", lining: "Lining", flooring: "Flooring", services: "Services" };
+  const STAGES = ["site", "foundation", "floor-frame", "subfloor", "wall-frame", "top-plates", "roof-frame", "roof-deck", "dry-in", "roofing", "sheathing", "wrap", "openings", "cladding", "gutters", "insulation", "lining", "flooring", "trim", "services"];
+  const STAGE_NAME = { site: "Site", foundation: "Foundation", "floor-frame": "Floor frame", subfloor: "Subfloor", "wall-frame": "Wall frames", "top-plates": "Top plates", "roof-frame": "Roof frame", "roof-deck": "Roof deck", "dry-in": "Dry-in", roofing: "Roofing", sheathing: "Sheathing", wrap: "Wrap", openings: "Windows and doors", cladding: "Cladding", gutters: "Gutters", insulation: "Insulation", lining: "Lining", flooring: "Flooring", trim: "Trim", services: "Services" };
   // actual (not nominal) sizes of North American lumber, metres: [breadth, depth]
   const LUMBER = { "2x4": [0.038, 0.089], "2x6": [0.038, 0.14], "2x8": [0.038, 0.184], "2x10": [0.038, 0.235], "2x12": [0.038, 0.286], glulam: [0.09, 0.225], "4x4": [0.089, 0.089], "6x6": [0.14, 0.14] };
   const SHEET = { w: 1.22, l: 2.44 };
@@ -204,6 +204,9 @@
     const FL = globalThis.__flooring, mat = f.mat || "planks";
     if (FL && FL.lays(mat)) FL.members(out, { ...f, mat }, { M, longX, top: FLOOR_T, base: framed ? "wood" : slab ? "slab" : "plinth" });
     else if (mat !== "subfloor") M(out, f.id + ".fl", "paving", mat, "flooring", f.id, mat, T.lining, b1 - b0, P(a0, FLOOR_T, (b0 + b1) / 2), P(a1, FLOOR_T, (b0 + b1) / 2), dirB, { area: r3(area), thickness: T.lining, draw: 0 });
+    // and the trim round the finished room, in the building's style, once there is a lining to put it on (src/trim.js)
+    const TR = globalThis.__trim;
+    if (TR && spec && spec.trim && spec.lining) TR.members(out, { ...f, mat }, { M, top: FLOOR_T, base: framed ? "wood" : slab ? "slab" : "plinth", style: spec.trim });
   }
 
   /* ---------- walls ---------- */
@@ -710,7 +713,7 @@
   const FLOOR_ITEM = { planks: ["board_pine_1x6", "m"], dark: ["board_oak_1x6", "m"], flags: ["flagstone_40", "m2"], cobble: ["flagstone_40", "m2"] };
   // what a member is bought as: [key, itemId, unit, quantity, label, why]
   function buyAs(m) {
-    const FL = globalThis.__flooring, fq = FL && m.stage === "flooring" ? FL.buyAs(m) : undefined;
+    const FL = globalThis.__flooring, TR = globalThis.__trim, fq = FL && m.stage === "flooring" ? FL.buyAs(m) : TR && m.stage === "trim" ? TR.buyAs(m) : undefined;
     if (fq !== undefined) return fq;
     const k = m.kind,
       t = m.type,
@@ -802,12 +805,12 @@
       if (q[2] === "m" && /^lumber_/.test(q[1] || "")) nails.set(m.stage + "|nails_framing", (nails.get(m.stage + "|nails_framing") || 0) + m.length * 0.025);
       else if (q[2] === "sheet") nails.set(m.stage + "|screws_wood", (nails.get(m.stage + "|screws_wood") || 0) + m.area * 0.06);
       // flooring uses up cleats, thinset and finish nails as it goes down
-      const sp = m.stage === "flooring" && globalThis.__flooring && globalThis.__flooring.supplies(m);
+      const sp = m.stage === "flooring" ? globalThis.__flooring && globalThis.__flooring.supplies(m) : m.stage === "trim" ? globalThis.__trim && globalThis.__trim.supplies(m) : null;
       if (sp) nails.set(m.stage + "|" + sp[0], (nails.get(m.stage + "|" + sp[0]) || 0) + sp[1]);
     }
     for (const [key, kg] of nails) {
       const [stage, item] = key.split("|");
-      const fw = globalThis.__flooring && globalThis.__flooring.SUPPLY_WORDS[item];
+      const fw = (globalThis.__flooring && globalThis.__flooring.SUPPLY_WORDS[item]) || (globalThis.__trim && globalThis.__trim.SUPPLY_WORDS[item]);
       lines.set(key, { key, members: [], stage, itemId: item, qty: kg, unit: "kg", label: fw ? fw[0] : item === "nails_framing" ? "Framing nails" : "Screws", why: fw ? fw[1] : item === "nails_framing" ? "Hold the frame together. Bought by weight and used up as you build." : "Fix the sheets down. Bought by weight and used up as you build.", count: 0 });
     }
     const out = [...lines.values()];

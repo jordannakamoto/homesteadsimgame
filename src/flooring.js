@@ -39,7 +39,7 @@
     flPine: 0xb99063, flOakDark: 0x6e4c30, flOak: 0xb4864f, flEng: 0x9c7348, flLam: 0xb59c7c, flLvp: 0x958a7a,
     flTerra: 0xb0613f, flPorc: 0xcfcbc2, flMarble: 0xe2dfd8, flGroutDark: 0x6a645e, flGroutLight: 0xb3aea4,
     flCarpetRed: 0x8a2e2b, flBerber: 0xc4b89e, flPad: 0x7f8ea3, flRosin: 0xb4513a, flFoam: 0xcfdde4, flPoly: 0xe6ecee,
-    flBacker: 0x969895, flTack: 0x9b7b4f, flBase: 0xeeece5, flThresh: 0xb4864f,
+    flBacker: 0x969895, flTack: 0x9b7b4f, flThresh: 0xb4864f,
   };
   const BACKER = { w: 0.915, l: 1.525, t: 0.0127, area: 0.915 * 1.525 };
   const SEAM = 0,               // rows butt tight: each board reads by its own shade (a hairline gap aliases into dots)
@@ -58,11 +58,24 @@
   const signedArea = (pts) => { let a = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; };
   // walls: [{ a: [x, z], b: [x, z], half, gaps: [{ s0, s1, door }] }] (gaps measured from a). Returns the room outline and,
   // for each of its edges, whether a wall stands along it and where the doorways are on it (metres from its first corner).
+  // an outline drawn on the grid has a corner at every cell; a wall's run is one straight side, so points in a line go
+  const straighten = (outline) => {
+    let pts = outline.slice();
+    for (let changed = true; changed && pts.length > 3; ) {
+      changed = false;
+      for (let i = 0; i < pts.length && pts.length > 3; i++) {
+        const a = pts[(i + pts.length - 1) % pts.length], p = pts[i], b = pts[(i + 1) % pts.length];
+        const cr = (p[0] - a[0]) * (b[1] - p[1]) - (p[1] - a[1]) * (b[0] - p[0]), dt = (p[0] - a[0]) * (b[0] - p[0]) + (p[1] - a[1]) * (b[1] - p[1]);
+        if ((Math.abs(cr) < 1e-6 && dt > 0) || Math.hypot(p[0] - a[0], p[1] - a[1]) < 1e-6) { pts.splice(i, 1); changed = true; i--; }
+      }
+    }
+    return pts;
+  };
   function roomOf(outline, walls = []) {
-    const pts = outline.slice(), n = pts.length, sg = signedArea(pts) >= 0 ? 1 : -1, info = [];
+    const pts = straighten(outline), n = pts.length, sg = signedArea(pts) >= 0 ? 1 : -1, info = [];
     for (let i = 0; i < n; i++) {
       const p = pts[i], q = pts[(i + 1) % n], L = hyp(q[0] - p[0], q[1] - p[1]) || 1, u = [(q[0] - p[0]) / L, (q[1] - p[1]) / L], nIn = sg > 0 ? [-u[1], u[0]] : [u[1], -u[0]];
-      let d = 0, gaps = [], cover = 0;
+      let d = 0, gaps = [], opens = [], cover = 0, h = 0;
       for (const w of walls) {
         const WL = hyp(w.b[0] - w.a[0], w.b[1] - w.a[1]) || 1, wu = [(w.b[0] - w.a[0]) / WL, (w.b[1] - w.a[1]) / WL];
         if (Math.abs(u[0] * wu[1] - u[1] * wu[0]) > 0.02) continue;                        // not parallel
@@ -73,14 +86,13 @@
         if (hi - lo < 0.05) continue;
         cover += hi - lo;
         d = Math.max(d, w.half || 0);
-        const dir = t1 >= t0 ? 1 : -1;
-        for (const g of w.gaps || []) {
-          const a = t0 + dir * g.s0, b = t0 + dir * g.s1;
-          gaps.push({ s0: Math.max(0, Math.min(a, b)), s1: Math.min(L, Math.max(a, b)), door: !!g.door });
-        }
+        h = Math.max(h, w.h || 0);
+        const dir = t1 >= t0 ? 1 : -1, map = (g) => { const a = t0 + dir * g.s0, b = t0 + dir * g.s1; return { ...g, s0: Math.max(0, Math.min(a, b)), s1: Math.min(L, Math.max(a, b)) }; };
+        for (const g of w.gaps || []) gaps.push({ ...map(g), door: !!g.door });
+        for (const g of w.opens || []) opens.push(map(g));
       }
       const walled = cover > 0.3 * L;
-      info.push({ walled, d: walled ? d : 0, gaps: walled ? gaps.filter((g) => g.s1 - g.s0 > 0.05) : [], u, nIn });
+      info.push({ walled, d: walled ? d : 0, gaps: walled ? gaps.filter((g) => g.s1 - g.s0 > 0.05) : [], opens: walled ? opens : [], h, u, nIn });
     }
     // each edge moved in to the face of its wall; a corner is where two moved edges meet
     const room = [];
@@ -95,7 +107,8 @@
     // the gaps measured from the moved edge's own corner
     const edges = room.map((p, i) => {
       const q = room[(i + 1) % n], L = hyp(q[0] - p[0], q[1] - p[1]), o = pts[i], s = (p[0] - o[0]) * info[i].u[0] + (p[1] - o[1]) * info[i].u[1];
-      return { p, q, L, u: info[i].u, nIn: info[i].nIn, walled: info[i].walled, gaps: info[i].gaps.map((g) => ({ s0: Math.max(0, g.s0 - s), s1: Math.min(L, g.s1 - s), door: g.door })).filter((g) => g.s1 - g.s0 > 0.05) };
+      const shift = (g) => ({ ...g, s0: Math.max(0, g.s0 - s), s1: Math.min(L, g.s1 - s) });
+      return { p, q, L, u: info[i].u, nIn: info[i].nIn, walled: info[i].walled, h: info[i].h, gaps: info[i].gaps.map(shift).filter((g) => g.s1 - g.s0 > 0.05), opens: info[i].opens.map(shift).filter((g) => g.s1 - g.s0 > 0.05) };
     });
     return { room, edges };
   }
@@ -310,20 +323,9 @@
       finish = top0 + U.t + spec.t - 0.003;
     }
 
-    // baseboard round the walls over the gap, broken at doorways; a threshold across each door
+    // a threshold across each door (the baseboard round the walls is trim: src/trim.js)
     for (const e of edges) {
       if (!e.walled) continue;
-      for (const [s0, s1] of openRuns(e)) {
-        const L = s1 - s0, k = Math.max(1, Math.ceil(L / BASE.max - 1e-6));
-        for (let i = 0; i < k; i++) {
-          const a = s0 + (L * i) / k, b = s0 + (L * (i + 1)) / k, o = BASE.t / 2 + 0.001, yy = y + finish + BASE.h / 2;
-          const at = (s, h = 0, oo = o) => [e.p[0] + e.u[0] * s + e.nIn[0] * oo, yy + h, e.p[1] + e.u[1] * s + e.nIn[1] * oo];
-          const pts = [];
-          for (let s = a + 0.12; s < b - 0.05; s += 0.4) pts.push(at(s, 0.01, BASE.t + 0.004));
-          if (!pts.length) pts.push(at((a + b) / 2, 0.01, BASE.t + 0.004));
-          M(out, id("fr"), "baseboard", "base", "flooring", f.id, "pine_seasoned", BASE.t, BASE.h, at(a), at(b), [0, 1, 0], { length: r3(b - a), col: "flBase", pts, tone: 0.5, vary: 0.015, out: [e.nIn[0], 0.25, e.nIn[1]] });
-        }
-      }
       for (const gp of e.gaps) {
         if (!gp.door) continue;
         const yy = y + finish + 0.006, at = (s) => [e.p[0] + e.u[0] * s - e.nIn[0] * 0.04, yy, e.p[1] + e.u[1] * s - e.nIn[1] * 0.04];
@@ -331,6 +333,14 @@
           { length: r3(gp.s1 - gp.s0), col: "flThresh", pts: [at(gp.s0 + 0.12), at(gp.s1 - 0.12)].map((q) => [q[0], q[1] + 0.011, q[2]]), tone: 0.4, vary: 0.05, out: [0, 1, 0] });
       }
     }
+  }
+  // where the top of a finished floor is, above the floor's base (top: the subfloor's top): the trim stands on it
+  function finishTop(mat, base, top) {
+    const s = FLOORINGS[mat];
+    if (!s) return top;
+    if (s.how === "nail" || s.how === "click") { const u = s.how === "nail" ? (base === "wood" ? "rosin" : "poly") : s.under; return top + (u ? UNDER[u].t + 0.003 : 0) + s.t; }
+    if (s.how === "tile") return top + (base === "wood" ? BACKER.t : 0) + 0.004 + s.t;
+    return top + UNDER.pad.t + s.t - 0.003;
   }
   // the stretches of a wall's foot with no doorway in them
   function openRuns(e) {
@@ -357,7 +367,6 @@
     if (k === "grout") return ["grout", "grout_sanded", "kg", Math.max(0.05, m.kg || 0), "Grout", "Floated into the joints between tiles: it locks them together and keeps dirt and water out of the gaps."];
     if (k === "carpet") { const s = FLOORINGS[m.material]; return ["carpet" + m.material, s.item[0], "m2", m.area * 1.05, s.name, "Cut from a 3.66 m (12 ft) roll and stretched tight over the pad: it is held only at the walls."]; }
     if (k === "tackstrip") return ["tack", "tack_strip", "m", m.length || 0, "Tack strip", "Thin strips of wood with angled pins, nailed round the walls: the carpet is stretched onto them and held."];
-    if (k === "baseboard") return ["base", "baseboard_primed", "m", (m.length || 0) * EXTRA, "Baseboard", "Covers the gap left at the walls (a wood floor swells and shrinks with the seasons) and takes the knocks of brooms and chairs."];
     if (k === "threshold") return ["thresh", "threshold_oak", "each", 1, "Thresholds", "A low saddle under each door: it covers the edge of the floor where it meets the next one."];
     return undefined;
   }
@@ -366,7 +375,6 @@
     if (m.kind === "plank" && m.type === "nail") return ["nails_floor", m.area * 0.18];
     if (m.kind === "tile") return ["thinset_mortar", m.area * 4.5];
     if (m.kind === "backer") return ["thinset_mortar", m.area * 3];
-    if (m.kind === "baseboard") return ["nails_framing", (m.length || 0) * 0.012];
     return null;
   }
   const SUPPLY_WORDS = {
@@ -374,5 +382,5 @@
     thinset_mortar: ["Thinset mortar", "Combed onto the floor with a notched trowel; the cement board and each tile are pressed into it. Used up as you go."],
   };
 
-  globalThis.__flooring = { FLOORINGS, UNDER, FLOOR_COLORS, BACKER, lays, roomOf, crossA, rowsOf, gridOrigin, members, buyAs, supplies, SUPPLY_WORDS };
+  globalThis.__flooring = { FLOORINGS, UNDER, FLOOR_COLORS, BACKER, lays, finishTop, roomOf, crossA, rowsOf, gridOrigin, members, buyAs, supplies, SUPPLY_WORDS };
 })();

@@ -15,6 +15,7 @@ import { INGREDIENTS, foodId } from './food-catalog.js';
 import { ITEMS_GARDEN, GARDEN_CATEGORIES } from './content/garden-items.js';
 import { ITEMS_LANDSCAPE, LANDSCAPE_CATEGORIES } from './content/landscape.js';
 import { ITEMS_FLOORING, FLOORING_CATEGORIES } from './content/flooring.js';
+import { ITEMS_TRIM, TRIM_CATEGORIES } from './content/trim.js';
 import { openingItems, openingItemFromId } from './content/openings.js';
 
 export const ITEM_UNITS = Object.freeze(['each', 'm', 'm2', 'm3', 'kg', 'L']);
@@ -35,6 +36,7 @@ export const ITEM_CATEGORIES = Object.freeze([
   { id: 'tools_hand', name: 'Hand tools', blurb: 'Work anywhere, no power needed' },
   { id: 'tools_power', name: 'Power tools', blurb: 'Need electricity' },
   ...FLOORING_CATEGORIES,
+  ...TRIM_CATEGORIES,
   ...GARDEN_CATEGORIES,
   ...LANDSCAPE_CATEGORIES,
 ]);
@@ -165,6 +167,7 @@ for (const { dims, massKgPerUnit, ...o } of Object.values(openingItems())) add({
 
 // ---- flooring: boards, plank, tile, carpet, what goes under them and the trim (src/sim/content/flooring.js)
 for (const f of ITEMS_FLOORING) add(f);
+for (const t of ITEMS_TRIM) add(t);
 
 // ---- the garden: seeds, garden tools, amendments and produce (src/sim/content/garden-items.js)
 for (const g of ITEMS_GARDEN) add(g);

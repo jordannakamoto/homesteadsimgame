@@ -113,13 +113,11 @@ test('carpet: tack strip round the walls (not across the door), pad inside it, c
   assert.ok(cp[0].roll && cp[0].kicks && cp[0].pts.length >= 8);
 });
 
-test('every floor gets baseboard round its walls, broken at the door, and a threshold there', () => {
+test('every floor gets a threshold under its door (the baseboard is trim: test/trim.test.mjs)', () => {
   for (const mat of ['planks', 'hardwood', 'lvp', 'tile', 'carpet']) {
-    const list = room(mat), base = of(list, 'baseboard'), th = of(list, 'threshold');
-    const run = base.reduce((s, m) => s + m.length, 0);
-    assert.ok(near(run, 2 * (4.6 + 3.4) - 0.9 - 0.04, 0.03), mat + ' ' + run);
-    assert.equal(th.length, 1, mat);
-    assert.ok(base.every((m) => m.length <= 3.6 + 1e-6 && m.pts.length >= 1));
+    const list = room(mat);
+    assert.equal(of(list, 'threshold').length, 1, mat);
+    assert.equal(of(list, 'baseboard').length, 0, mat);
   }
   // a bare subfloor is the floor (the tool shed): nothing goes down
   assert.equal(room('subfloor').length, 0);
@@ -195,14 +193,15 @@ test('learning a floor: after a couple of boards by hand, the rest are laid as y
   assert.equal(C.LEARN.says.floorboard, 'lay a floor');
 });
 
-test('changing a laid floor to another in the plan makes it a new floor to order and lay, nails and baseboard included', () => {
+test('changing a laid floor to another in the plan makes it a new floor to order and lay, what was spent ordered again', () => {
   const { sim, P } = start('hardwood');
   for (let g = 0; g < 50 && !K.stageComplete(P, 'flooring'); g++) install(sim, K.installable(P));
   assert.ok(K.stageComplete(P, 'flooring'));
   const lvp = room('lvp'), pieces = lvp.map((m) => ({ id: m.id, struct: 1, stage: m.stage, parent: m.parent, kind: m.kind, length: m.length, area: m.area, built: false }));
   assert.ok(sim.commandNow('construction.setPlan', K.planFromPieces(1, pieces, F.materialsList(lvp), { name: 'Room', x: 2.4, z: 1.8, r: 3 })).ok);
   const Q = sim.state.sys.construction.progress[1], q = K.quoteStage(Q, 'flooring');
-  assert.ok(q.ok && q.costUsd > 0 && q.keys.some((k) => /\|base$/.test(k)) && q.keys.some((k) => /nails_framing/.test(k)), JSON.stringify(q.keys));
+  // the threshold line keeps its key from the oak floor: its oak was spent under the old floor, so it is ordered again
+  assert.ok(q.ok && q.costUsd > 0 && q.keys.some((k) => /\|thresh$/.test(k)) && q.keys.some((k) => /floor_lvp|fllvp/.test(k)), JSON.stringify(q.keys));
   assert.ok(sim.commandNow('construction.order', { structId: 1, stage: 'flooring' }).ok);
   for (let g = 0; g < 50 && !K.stageComplete(Q, 'flooring'); g++) { const out = install(sim, K.installable(Q)); assert.ok(out.ok, out.reason + ' ' + (out.itemId || '')); }
   assert.ok(K.stageComplete(Q, 'flooring'));

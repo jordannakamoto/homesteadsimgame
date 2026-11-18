@@ -128,6 +128,7 @@
     found: "pier-blocks",
     ins: null,
     lining: "boards",
+    trim: "craftsman",
     cmode: false,
     gstage: null,
     dirty: new Set(),
@@ -3849,6 +3850,7 @@
       found: F.found || "plinth",
       ins: F.ins || null,
       lining: F.lining === undefined ? "boards" : F.lining,
+      trim: F.trim === undefined ? "craftsman" : F.trim,
       plan: new Set(),
       known: F.fresh ? new Set() : null,
       sitePlanned: !!F.fresh && B.cmode,
@@ -5060,6 +5062,7 @@
     if (S.found !== "plinth") data.found = S.found;
     if (S.ins) data.ins = S.ins;
     if (S.lining !== "boards") data.lining = S.lining;
+    if (S.trim !== "craftsman") data.trim = S.trim;
     if (S.plan.size) data.plan = [...S.plan].sort();
     S.ser = { ver: S.ver, data };
     return data;
@@ -5089,6 +5092,7 @@
     S.found = d.found || "plinth";
     S.ins = d.ins || null;
     S.lining = d.lining === undefined ? "boards" : d.lining;
+    S.trim = d.trim === undefined ? "craftsman" : d.trim;
     // a copy is a new plan: unbuilt where plans start unbuilt, built otherwise
     S.plan = new Set(fresh ? [] : d.plan || []);
     S.known = fresh ? new Set() : null;
@@ -5357,7 +5361,7 @@
   function applyOp(op, noUndo) {
     if (!op || !op.valid) return null;
     noUndo || pushUndo();
-    let S = op.F.isNew ? newStruct({ ox: op.F.ox, oz: op.F.oz, yaw: op.F.yaw, y0: op.y0, level: op.F.level || 0, hs: op.F.hs || B.hs, lift: op.F.lift || 0, po: op.addPaths.length > 0 || op.addDecor.length > 0, found: B.found, ins: B.ins, lining: B.lining, fresh: true }) : op.F;
+    let S = op.F.isNew ? newStruct({ ox: op.F.ox, oz: op.F.oz, yaw: op.F.yaw, y0: op.y0, level: op.F.level || 0, hs: op.F.hs || B.hs, lift: op.F.lift || 0, po: op.addPaths.length > 0 || op.addDecor.length > 0, found: B.found, ins: B.ins, lining: B.lining, trim: B.trim, fresh: true }) : op.F;
     let refund = 0;
     if (op.delFree.length) S.free = S.free.filter((f) => !op.delFree.includes(f.id));
     if (op.moveFree) for (const f of S.free) if (f.d === op.moveFree.d && f.line === op.moveFree.from && f.pos >= op.moveFree.t0 - 1e-6 && f.pos <= op.moveFree.t1 + 1e-6) f.line = op.moveFree.to;
@@ -7767,11 +7771,13 @@
   };
   const FOUND_ITEMS = ["pier-blocks", "skids", "piers", "stemwall", "slab", "plinth"].map((v) => ({ v, name: window.__framing.FOUNDATIONS[v].name })),
     INS_ITEMS = [{ v: null, name: "None" }, { v: "fibreglass_batt", name: "Fibreglass batts" }, { v: "mineral_wool", name: "Mineral wool" }, { v: "sheep_wool", name: "Sheep's wool" }],
-    LIN_ITEMS = [{ v: null, name: "None" }, { v: "boards", name: "Boards" }, { v: "gypsum", name: "Panels" }];
-  const makeUp = (g, pre, f, i, l) => {
+    LIN_ITEMS = [{ v: null, name: "None" }, { v: "boards", name: "Boards" }, { v: "gypsum", name: "Panels" }],
+    TRIM_ITEMS = [{ v: null, name: "None" }, ...Object.entries((window.__trim && window.__trim.TRIMS) || {}).map(([v, t]) => ({ v, name: t.name }))];
+  const makeUp = (g, pre, f, i, l, t) => {
     g.push(G_.select(pre + "found", "Stands on", FOUND_ITEMS, f, (window.__framing.FOUNDATIONS[f] || {}).note));
     g.push(G_.select(pre + "ins", "Insulation", INS_ITEMS, i, "What fills the spaces between studs, joists and rafters"));
     g.push(G_.select(pre + "lining", "Inside", LIN_ITEMS, l, "What covers the inside of the walls"));
+    l && g.push(G_.select(pre + "trim", "Trim", TRIM_ITEMS, t === undefined ? "craftsman" : t, "The casing round doors and windows, the baseboard, and how it is finished"));
   };
   // the shopping list as the Schedule panel shows it: by stage, with what each line costs and how far along it is
   function schedule() {
@@ -7888,7 +7894,7 @@
       const S0 = groupOf(refs[0].S).find((O) => O.level === 0) || refs[0].S,
         left = groupOf(S0).reduce((a, O) => a + O.plan.size, 0);
       if (left) g.push(G_.info("Being built", plural(left, "piece") + " still to build"));
-      makeUp(g, "s:", S0.found, S0.ins, S0.lining);
+      makeUp(g, "s:", S0.found, S0.ins, S0.lining, S0.trim);
     }
     g.push(G_.act("s:all", "Whole building", "building"));
     if (one) g.push(G_.act("s:pick", "More like this", "pick", "I"));
@@ -7954,7 +7960,7 @@
       ceil();
       lift();
       t === "room" && wing();
-      t === "room" && makeUp(g, "", B.found, B.ins, B.lining);
+      t === "room" && makeUp(g, "", B.found, B.ins, B.lining, B.trim);
     } else if (t === "wall") {
       g.push(G_.tiles("style", "Style", tiles(STYLE_SHORT, "w-"), B.style, "Shift wheel"));
       g.push(G_.sw("wmat", "Material", SW.wall, B.wmat, "M"));
@@ -7967,7 +7973,7 @@
       g.push(...PAINT());
       lift();
       wing();
-      makeUp(g, "", B.found, B.ins, B.lining);
+      makeUp(g, "", B.found, B.ins, B.lining, B.trim);
     } else if (t === "roof") {
       g.push(G_.tiles("rshape", "Shape", tiles(ROOF_SHAPES, "r-"), B.rsh, "Shift wheel"));
       if (TURNS[B.rsh]) g.push(G_.act("rturn", "Turn", "turn"));
@@ -8557,12 +8563,12 @@
     if (id === "roofall") return roofBuilding();
     if (/^(s:)?(rshape|rturn|pitch|pitchn|eave|rake|gutters|rcolor)$/.test(id)) return roofChoose(id, v);
     if (id.startsWith("fx:")) fxChoose(id, v);
-    else if (id === "found" || id === "ins" || id === "lining") B[id] = v;
+    else if (id === "found" || id === "ins" || id === "lining" || id === "trim") B[id] = v;
     else if (id === "sched") B.sched = !B.sched;
     else if (id === "s:found") {
       const q = selRefs()[0];
       q && setFound(q.S, v);
-    } else if (id === "s:ins" || id === "s:lining") {
+    } else if (id === "s:ins" || id === "s:lining" || id === "s:trim") {
       const q = selRefs()[0];
       if (q) {
         pushUndo();
@@ -9218,7 +9224,7 @@
     FOUNDATIONS = FR.FOUNDATIONS,
     STAGES = FR.STAGES,
     CONCRETE = col(0xb5b2aa),
-    MEMBER_EXTRA = ["area", "thickness", "volume", "size", "plies", "roof", "opening", "height"];
+    MEMBER_EXTRA = ["area", "thickness", "volume", "size", "plies", "roof", "opening", "height", "kg"];
   const Lz = (material, thickness, role) => Object.freeze({ material, thickness, role });
   const footPal = new Map();
   function woodFoot(wm) {
@@ -9235,7 +9241,7 @@
       kS = (H - 0.3) / (EAVE - 0.3),
       up = (y) => (y <= 0.3 ? y : 0.3 + (y - 0.3) * kS),
       yo = (S.hs - 1) * EAVE,
-      desc = { found: S.level === 0 ? S.found : S.found === "plinth" ? "plinth" : "upper", spec: { ins: S.ins, lining: S.lining }, floors: [], walls: [], roofs: [] },
+      desc = { found: S.level === 0 ? S.found : S.found === "plinth" ? "plinth" : "upper", spec: { ins: S.ins, lining: S.lining, trim: S.trim }, floors: [], walls: [], roofs: [] },
       groundY = (x, z) => {
         const [wx, wz] = toWorld(S, x, z);
         return G.heightAt(wx, wz) - S.y0;
@@ -9257,20 +9263,21 @@
       };
     if (!S.po) {
       desc.edges = [];
-      const doorGaps = (opens) => opens.filter((q) => (q.sill || 0) < 0.2).map((q) => ({ s0: q.offset, s1: q.offset + q.width, door: q.kind === "door" }));
+      const doorGaps = (opens) => opens.filter((q) => (q.sill || 0) < 0.2).map((q) => ({ s0: q.offset, s1: q.offset + q.width, door: q.kind === "door" })),
+        allOpens = (opens) => opens.map((q) => ({ s0: q.offset, s1: q.offset + q.width, sill: q.sill || 0, height: q.height || 2, kind: q.kind }));
       for (const g of S.runs) {
         if (g.cls !== "wall") continue;
         const x = g.d === 0, opens = [];
         for (const e of g.m) opening(opens, e.t - g.t0, 1, e.type, S.oid.get(e.k));
         for (const o of S.fopen) o.g === g && opens.push(OP.freeToFraming(o.f, o.off));
-        desc.edges.push({ a: x ? [g.t0, g.line] : [g.line, g.t0], b: x ? [g.t1, g.line] : [g.line, g.t1], half: HALF_T, gaps: doorGaps(opens) });
+        desc.edges.push({ a: x ? [g.t0, g.line] : [g.line, g.t0], b: x ? [g.t1, g.line] : [g.line, g.t1], half: HALF_T, h: H, gaps: doorGaps(opens), opens: allOpens(opens) });
       }
       for (const g of S.fruns) {
         if (g.cls !== "wall") continue;
         const opens = [];
         for (const q of g.mods) opening(opens, q.s, q.len, q.type, S.segs[q.idx][7]);
         for (const o of S.fopen) o.g === g && opens.push(OP.freeToFraming(o.f, o.off));
-        desc.edges.push({ a: [g.x0, g.z0], b: [g.x1, g.z1], half: HALF_T, gaps: doorGaps(opens) });
+        desc.edges.push({ a: [g.x0, g.z0], b: [g.x1, g.z1], half: HALF_T, h: H, gaps: doorGaps(opens), opens: allOpens(opens) });
       }
       for (const g of S.regs) desc.floors.push({ id: g.id, outline: outlineOf(g.m)[0], y0: 0, ground: S.level === 0, groundY, mat: g.mat });
       for (const p of S.polys) desc.floors.push({ id: p.id, outline: p.pts, y0: 0, ground: S.level === 0, groundY, mat: p.fmat });
@@ -9561,6 +9568,7 @@
   const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), siding: col(0xc7b79b), sidingDark: col(0x6f5a47), concrete: CONCRETE, gravel: col(0x8f8b82) };
   for (const [k, h] of Object.entries(FR.ROOF_COLORS || {})) MCOL[k] = col(h); // the roofing layers while they go on (src/framing.js)
   for (const [k, h] of Object.entries((window.__flooring && window.__flooring.FLOOR_COLORS) || {})) MCOL[k] = col(h); // boards, tile, carpet and what goes under (src/flooring.js)
+  for (const [k, h] of Object.entries((window.__trim && window.__trim.TRIM_COLORS) || {})) MCOL[k] = col(h); // trim, primed or raw and then finished (src/trim.js)
   const _m4 = new T.Matrix4(),
     _c = new T.Color();
   function dropMembers(S) {
@@ -9572,6 +9580,11 @@
     S.memMeshes = [];
   }
   const GHOST_LATER = new Set(["insulation"]);
+  // whether a room's trim has been caulked and painted (its "paint" member built)
+  function painted(S, mem, parent) {
+    const p = (mem.byParent.get(parent) || []).find((m) => m.kind === "paint");
+    return !!p && !S.plan.has(p.id);
+  }
   function drawMembers(S, st) {
     dropMembers(S);
     const mem = st.mem,
@@ -9610,7 +9623,7 @@
       else if (roofId) (st.all || st.finRoof.has(roofId)) || sets[1].push(m);
       else if (m.stage === "subfloor" || m.type === "floor-batt") (st.all || st.finFloor.has(m.parent)) || sets[0].push(m);
       else if (m.kind === "cladding") sets[0].push(m); // siding stays drawn as boards, even once the wall is finished
-      else if (m.stage === "flooring") sets[0].push(m); // so do floorboards, tiles and carpet (the floor surface under them shows in the seams)
+      else if (m.stage === "flooring" || m.stage === "trim") sets[0].push(m); // so do floorboards, tiles and carpet (the floor surface under them shows in the seams), and the trim
       else (st.all || st.finRun.has(m.parent)) || sets[0].push(m);
     }
     for (const m of mem.opens) P(m.id) && ghostAdd(m, 0);
@@ -9646,7 +9659,8 @@
         _m4.set(ax, nx * d, (ay * nz - az * ny) * b, (m.a[0] + m.b[0]) / 2, ay, ny * d, (az * nx - ax * nz) * b, (m.a[1] + m.b[1]) / 2, az, nz * d, (ax * ny - ay * nx) * b, (m.a[2] + m.b[2]) / 2, 0, 0, 0, 1);
         mesh.setMatrixAt(n, _m4);
         if (solid) {
-          const c = MCOL[m.col || "timber"],
+          // trim shows primed (or raw wood) until its room has had its caulk-and-paint pass, then its finished colour
+          const c = MCOL[(m.paintCol && (st.all || painted(S, st.mem, m.parent)) ? m.paintCol : m.col) || "timber"],
             v = m.tone !== undefined ? 1 - (m.vary ?? 0.1) + 2 * (m.vary ?? 0.1) * m.tone : /^siding/.test(m.col || "") ? 0.975 + 0.05 * hash(n, list.length, 7) : 0.9 + 0.2 * hash(n, list.length, 7);
           mesh.setColorAt(n, _c.setRGB(c[0] * v, c[1] * v, c[2] * v));
         }
@@ -9848,7 +9862,7 @@
   }
   /* ready-made plans: small buildings in real framing sizes, set down whole */
   const PLANS = {
-    shed: { id: "shed", name: "Tool shed", size: "2.4 x 3.0 m", w: 2.4, l: 3.0, note: "A single-pitch roof, one door and one window, on six pier blocks.", roof: { shape: "shed", dir: 0, axis: "x", pitch12: 4, eave: 0.3, rake: 0.25, mat: "shingle", gutters: true }, door: [2, 0], windows: [[1, 1]], found: "pier-blocks", ins: null, lining: null, fmat: "subfloor" },
+    shed: { id: "shed", name: "Tool shed", size: "2.4 x 3.0 m", w: 2.4, l: 3.0, note: "A single-pitch roof, one door and one window, on six pier blocks.", roof: { shape: "shed", dir: 0, axis: "x", pitch12: 4, eave: 0.3, rake: 0.25, mat: "shingle", gutters: true }, door: [2, 0], windows: [[1, 1]], found: "pier-blocks", ins: null, lining: null, trim: null, fmat: "subfloor" },
     cabin: { id: "cabin", name: "Small cabin", size: "3.6 x 4.8 m", w: 3.6, winW: 0.9, l: 4.8, note: "A gable roof, a door and two windows, insulated and lined, on pier blocks.", roof: { shape: "gable", dir: 0, axis: "z", pitch12: 8, mat: "shingle", gutters: true }, door: [2, 1], windows: [[1, 2], [3, 2]], found: "pier-blocks", ins: "fibreglass_batt", lining: "boards" },
   };
   const planList = () => Object.values(PLANS).map((p) => ({ id: p.id, name: p.name, size: p.size, widthM: p.w, lengthM: p.l, note: p.note, foundation: p.found }));
@@ -9857,7 +9871,7 @@
     const pl = PLANS[id];
     if (!pl) return null;
     pushUndo();
-    const S = newStruct({ ox: x, oz: z, yaw: yawRad || 0, y0: G.heightAt(x, z) + FOUNDATIONS[pl.found].drop - 0.05, level: 0, hs: 1, found: pl.found, ins: pl.ins, lining: pl.lining, fresh: true }),
+    const S = newStruct({ ox: x, oz: z, yaw: yawRad || 0, y0: G.heightAt(x, z) + FOUNDATIONS[pl.found].drop - 0.05, level: 0, hs: 1, found: pl.found, ins: pl.ins, lining: pl.lining, trim: pl.trim, fresh: true }),
       hw = pl.w / 2,
       hl = pl.l / 2,
       cs = [[-hw, -hl], [hw, -hl], [hw, hl], [-hw, hl]];

@@ -37,8 +37,7 @@ export const ITEMS_FLOORING = Object.freeze([
   { id: 'thinset_mortar', name: 'Thinset mortar', category: 'flooring', unit: 'kg', material: 'mortar', priceUsd: 0.9, blurb: 'Combed out with a notched trowel; tile is pressed into it' },
   { id: 'grout_sanded', name: 'Sanded grout', category: 'flooring', unit: 'kg', material: 'mortar', priceUsd: 1.6, blurb: 'Floated into the joints between tiles' },
   { id: 'tack_strip', name: 'Carpet tack strip', category: 'flooring', unit: 'm', material: 'spf_seasoned', dims: { widthM: 0.025, depthM: 0.007 }, priceUsd: 1.1, blurb: 'Wood strips with angled pins: they grip the carpet round the walls' },
-  // the edges
-  { id: 'baseboard_primed', name: 'Primed baseboard 12 x 89 mm', category: 'flooring', unit: 'm', material: 'pine_seasoned', dims: { widthM: 0.089, depthM: 0.012 }, priceUsd: 4.6, blurb: 'Covers the gap at the wall and takes the knocks' },
+  // the edge, where it meets the next floor
   { id: 'threshold_oak', name: 'Oak threshold 915 mm', category: 'flooring', unit: 'each', material: 'oak_seasoned', dims: { lengthM: 0.915, widthM: 0.1, thicknessM: 0.015 }, priceUsd: 26, blurb: 'A low saddle under a door where two floors meet' },
   { id: 'nails_floor', name: 'Flooring cleats', category: 'fasteners', unit: 'kg', material: 'steel', priceUsd: 9.5, blurb: 'L-shaped nails driven through the tongue at 45 degrees' },
 ]);

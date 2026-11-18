@@ -22,7 +22,8 @@
   const low = (t) => t.charAt(0).toLowerCase() + t.slice(1);
 
   const look = B.memberLook();
-  const FCOL = (window.__flooring && window.__flooring.FLOOR_COLORS) || {};     // the floor's colours as hex, for the saw and the stacks
+  const FCOL = { ...((window.__flooring && window.__flooring.FLOOR_COLORS) || {}), ...((window.__trim && window.__trim.TRIM_COLORS) || {}) };     // floor and trim colours as hex, for the saw and the stacks
+  const FIN = (stage) => stage === 'flooring' || stage === 'trim';             // finish work: no nail heads on show, its own gestures
   const MARK = [0.09, 0.08, 0.09], CHALK = [0.8, 0.9, 1.0];       // pencil, and a snapped chalk line (pale blue)
   const asm = window.__assembly.create(G, { geo: look.geo, mat: look.mat, colorOf: (m) => (m.col === 'mark' ? MARK : m.col === 'chalk' ? CHALK : look.colors[m.col || 'timber'] || look.colors.timber) });
   const sounds = window.__assembly.createSounds();
@@ -344,7 +345,9 @@
     if (f === 'roll') return { form: 'roll', w: 0.17, l: 1.0, h: 0.17, n: n(30), color: itemId === 'housewrap' ? COLORS.wrap : itemId === 'underlay_rosin' ? FCOL.flRosin : itemId === 'vapour_barrier' ? FCOL.flPoly : COLORS.felt };
     if (f === 'bundle') return { form: 'heap', w: 0.9, l: 0.33, h: 0.09, n: n(3), color: COLORS.shingle };
     if (f === 'trim' && itemId === 'threshold_oak') return { form: 'lumber', w: 0.1, h: 0.015, l: 0.92, n: n(1), color: FCOL.flThresh };
-    if (f === 'trim' && (itemId === 'baseboard_primed' || itemId === 'tack_strip')) return { form: 'lumber', w: itemId === 'tack_strip' ? 0.025 : 0.089, h: itemId === 'tack_strip' ? 0.007 : 0.012, l: itemId === 'tack_strip' ? 1.22 : 3.6, n: n(itemId === 'tack_strip' ? 1.22 : 3.6), color: itemId === 'tack_strip' ? FCOL.flTack : FCOL.flBase };
+    if (f === 'trim' && itemId === 'tack_strip') return { form: 'lumber', w: 0.025, h: 0.007, l: 1.22, n: n(1.22), color: FCOL.flTack };
+    if (f === 'trim' && d.widthM && !/gutter|downspout|drip|flash/.test(itemId)) return { form: 'lumber', w: d.widthM, h: d.depthM || 0.016, l: 2.4, n: n(2.4), color: /rough/.test(itemId) ? FCOL.trPineRough : /flat|stool/.test(itemId) ? FCOL.trFir : FCOL.trPrimed };
+    if (itemId === 'trim_paint') return { form: 'heap', w: 0.22, l: 0.22, h: 0.25, n: n(4), color: 0xe9e6dc };
     if (f === 'trim') return { form: 'lumber', w: 0.12, h: 0.05, l: 3.05, n: n(3.05), color: /gutter|downspout/.test(itemId) ? 0xe4e3de : 0xb9bec2 };
     if (f === 'bale') return { form: 'heap', w: 1.15, l: 0.4, h: 0.28, n: n(5), color: COLORS.batt };
     if (f === 'door') return { form: 'lean', w: 0.92, l: 2.03, h: 0.05, n: n(1), color: COLORS.door };
@@ -385,11 +388,11 @@
   function liftTo(id, layer, mid, h) {
     const m = geom(id) && geom(id).byId.get(mid);
     if (m && m.kind === 'cladding' && m.out) asm.lift(id, layer, mid, h * 0.5, m.out);
-    else if (m && m.stage === 'flooring' && m.out) asm.lift(id, layer, mid, h * (FLOOR_PROUD[m.kind] ?? 0.5), m.out);
+    else if (m && FIN(m.stage) && m.out) asm.lift(id, layer, mid, h * (FLOOR_PROUD[m.kind] ?? 0.5), m.out);
     else asm.lift(id, layer, mid, h);
   }
   const PROUD = 0.085;     // how far a set piece stands proud before its first blow: enough to read at play distance
-  const FLOOR_PROUD = { plank: 0.45, tile: 0.25, grout: 0.08, backer: 0.2, baseboard: 0.3, threshold: 0.2, tackstrip: 0.2 };   // a floor's pieces sit lower: a finger off the last row, a tile on its bed
+  const FLOOR_PROUD = { plank: 0.45, tile: 0.25, grout: 0.08, backer: 0.2, baseboard: 0.3, threshold: 0.2, tackstrip: 0.2, casing: 0.3, stool: 0.25, apron: 0.3, shoe: 0.25, crown: 0.3 };   // a floor's pieces sit lower: a finger off the last row, a tile on its bed
   const proud = (mid) => { if (V.sheetMids && V.sheetMids.has(mid)) return 0; const sw = V.swingIn; if (sw && sw.mid === mid) return PROUD + 0.55 * (1 - Math.min(1, sw.t / 0.2)) ** 2; const b = V.blows[mid]; return PROUD * (1 - (b ? b.n / b.of : 0)); };
   const qTmp = new T.Quaternion(), aTmp = new T.Vector3(), wA = new T.Vector3(), wB = new T.Vector3(), wM = new T.Vector3();
   // a point of a member in the world, wherever its frame lies just now
@@ -404,7 +407,7 @@
   const STICKS = new Set(['post', 'beam', 'skid', 'joist', 'plate', 'stud', 'header', 'rafter', 'drip', 'rake', 'ridgecap', 'gutter', 'downspout']);
   const SHEETS = new Set(['sheathing', 'membrane', 'roofing', 'lining', 'insulation', 'cladding']);
   // the layer that hides a stage's nail heads once it is complete
-  const COVER = { 'floor-frame': 'subfloor', subfloor: 'lining', 'wall-frame': 'lining', 'top-plates': 'lining', 'roof-frame': 'roof-deck', 'roof-deck': 'dry-in', 'dry-in': 'roofing', sheathing: 'wrap', wrap: 'cladding' };
+  const COVER = { 'floor-frame': 'subfloor', subfloor: 'lining', 'wall-frame': 'lining', 'top-plates': 'lining', 'roof-frame': 'roof-deck', 'roof-deck': 'dry-in', 'dry-in': 'roofing', sheathing: 'wrap', wrap: 'cladding', lining: 'lining' };   // the lining's screws are taped, mudded and painted over once it is all up
   // a member's nail points in its own frame, or null when it is fastened with plain blows (piers, the site, doors)
   function nailLocal(g, mid) {
     const nm = g.nails || (g.nails = new Map());
@@ -448,6 +451,7 @@
     const pr = S().progress[id], g = geom(id);
     if (!pr || !g) return;
     const by = new Map();
+    V.dotStages = {};
     for (const mid in pr.members) {
       const pm = pr.members[mid];
       if ((!pm.built && !(pm.need > 0 && pm.got >= pm.need - 1e-6)) || V.sawing.has(mid) || V.flights.has(mid)) continue;
@@ -455,12 +459,14 @@
       if (!pts) continue;
       const cv = COVER[pm.stage];
       if (pm.built && cv && pr.tally[cv] && api.stageComplete(pr, cv)) continue;
+      if (pm.built && api.stageComplete(pr, pm.stage)) continue;    // the nails show while their stage is under way, as feedback; a finished stage is clean (set, filled, covered)
       if (pm.built && pm.kind === 'roofing') continue;      // a course's nails are under the course above
-      if (pm.stage === 'flooring') continue;                 // no nail heads on a floor: wood is nailed through its tongue (hidden by the next board), the rest is not nailed at all
+      if (FIN(pm.stage)) continue;                           // no nail heads on a floor (wood is nailed through its tongue, hidden by the next board; the rest is not nailed at all) or on trim (brads, set and filled)
       const b = V.blows[mid], flat = C.STAGE[pm.stage].flat && g.walls.has(pm.parent) && !pr.raised[pm.parent], layer = flat ? pm.parent : 'main', h = pm.built ? 0 : PROUD * (1 - (b ? b.n / b.of : 0));
       let list = by.get(layer);
       if (!list) by.set(layer, (list = []));
       pts.forEach((p, i) => list.push({ p, h, k: pm.built || (b && b.d[i]) ? 1 : 0 }));
+      (V.dotStages || (V.dotStages = {}))[pm.stage + ':' + pm.kind + (pm.built ? '' : ':loose')] = ((V.dotStages || {})[pm.stage + ':' + pm.kind + (pm.built ? '' : ':loose')] || 0) + pts.length;
     }
     const old = dotLayers.get(id) || new Set();
     for (const layer of new Set([...old, ...by.keys()])) {
@@ -769,7 +775,7 @@
         worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB);
         if (segDist(P.x, P.z, wA, wB) > REACH) continue;
         const dy = (wA.y + wB.y) / 2 - P.y;
-        if (dy > LAD.reachUpM) { high = true; continue; }        // out of reach from here: it is worked from a ladder
+        if (dy > LAD.reachUpM + (pm.stage === 'trim' && pm.kind !== 'crown' ? 0.25 : 0)) { high = true; continue; }        // out of reach from here: it is worked from a ladder (a door head's trim is reached from the floor; crown is not)
         if (dy < -3.2) continue;
         if (reach.free) { score = 1e9; for (const t of [0.5, 0.15, 0.85]) { wM.lerpVectors(wA, wB, t).project(G.camera); score = Math.min(score, Math.hypot((wM.x * 0.5 + 0.5) * reach.w - reach.px, (-wM.y * 0.5 + 0.5) * reach.h - reach.py)); } }
         else score = segDist(reach.x, reach.z, wA, wB) * 100;
@@ -898,7 +904,7 @@
     const sawn = r.cuts && r.cuts.find((q) => q.stick);
     if (sawn) { sawPiece(id, mid, layer, sawn, at, quiet); if (!quiet) flash(cutWords(sawn)); }
     else if (r.cuts && r.cuts.length && !quiet) flash(r.cuts[0].how === 'offcut' ? 'Cut from an offcut' : 'Cut to fit; offcut kept');
-    if (r.set.length) { if (swp) V.stick = { id, mid }; if (sawn) { /* it swings in when the saw is through */ } else if (pm.stage === 'flooring' && m) { if (!floorCut(id, mid, layer, m, at, quiet)) floorIn(id, layer, mid, m, at, quiet); } else if (pm.kind === 'cladding') slideIn(id, layer, mid); else if (V.sheetMids && V.sheetMids.has(mid)) wrapRoll(id, layer, mid); else flyIn(id, layer, mid); sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
+    if (r.set.length) { if (swp) V.stick = { id, mid }; if (sawn) { /* it swings in when the saw is through */ } else if (FIN(pm.stage) && m) { if (!floorCut(id, mid, layer, m, at, quiet)) floorIn(id, layer, mid, m, at, quiet); } else if (pm.kind === 'cladding') slideIn(id, layer, mid); else if (V.sheetMids && V.sheetMids.has(mid)) wrapRoll(id, layer, mid); else flyIn(id, layer, mid); sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
     else if (!quiet) { const q = r.partial[0]; sounds.play('rustle'); flash(plain(lineOf(pr, mid).label) + ': ' + Math.round((100 * q.got) / q.need) + '% there. Fetch more.'); }
     return r;
   }
@@ -907,7 +913,8 @@
   function floorIn(id, layer, mid, m, at, quiet, sawn) {
     const k = m.kind;
     if (V.sheetMids && V.sheetMids.has(mid)) wrapRoll(id, layer, mid);
-    else if (k === 'plank' || k === 'baseboard' || k === 'grout') slideIn(id, layer, mid);
+    else if (k === 'plank' || k === 'baseboard' || k === 'grout' || k === 'shoe' || k === 'crown') slideIn(id, layer, mid);
+    else if (k === 'paint') { /* the caulk and paint go on with the strokes */ }
     else if (sawn) V.jolt = { id, layer, mid, t: 0, built: false };       // the saw has carried it to its seat
     else flyIn(id, layer, mid);
     if (k === 'tile' || k === 'backer') G.burst(at.x, at.y, at.z, 4, 0x9c9a94, 0.45, 0.35, 0.04, 0.35);   // thinset squeezing out
@@ -917,14 +924,15 @@
   // power), tiles on the wet saw. A board's cut-off is what starts the next row.
   function floorCut(id, mid, layer, m, at, quiet) {
     if (!CS || !m.cut || m.cut - m.cutTo < 0.004) return false;
-    const P = G.player, tile = m.kind === 'tile', tools = G.sim.state.sys.stock.tools, power = tile || (tools.includes('circular_saw') && !!(G.powerAvailable && G.powerAvailable())),
-      rest = m.cut - m.cutTo - 0.003, onH = !tile && CS.near(P.x, P.z, 4.5);
+    const P = G.player, tile = m.kind === 'tile', trim = m.stage === 'trim', tools = G.sim.state.sys.stock.tools, power = tile || (tools.includes('circular_saw') && !!(G.powerAvailable && G.powerAvailable())),
+      rest = m.cut - m.cutTo - 0.003, onH = !tile && CS.near(P.x, P.z, 4.5), mitre = trim && (m.type === 'leg' || m.type === 'head' || m.kind === 'crown' || m.type === 'sill');
     V.sawing.add(mid);
     CS.cut({ stockM: m.cut, lenM: m.cutTo, sawn: true, keptM: rest >= 0.2 ? rest : 0, onHorses: onH, x: P.x + Math.sin(P.face) * 0.7, z: P.z + Math.cos(P.face) * 0.7, y: P.y, yaw: P.face + Math.PI / 2,
       to: { x: at.x, y: at.y, z: at.z }, power, slow: quiet ? 0.45 : 0.8, w: m.section.d, h: Math.max(0.005, m.section.b), color: FCOL[m.col] === undefined ? 0xdcbc8c : FCOL[m.col], dust: tile ? 0xdedbd2 : 0xe8d9b0 },
       () => { V.sawing.delete(mid); V.rev++; if (S().progress[id]) { redraw(id); floorIn(id, layer, mid, m, at, quiet, true); } });
     if (!quiet) {
-      if (!V.named['fcut:' + m.kind]) { V.named['fcut:' + m.kind] = 1; note(tile ? 'Cut on the wet saw' : 'Cut to fit', tile ? 'The tiles at the walls are cut to fit. Laying out from the middle of the room keeps those cuts even on both sides.' : 'The last board in a row is cut to fit the gap left at the wall. What is cut off starts the next row, so the end joints never line up.'); }
+      if (trim) { if (!V.named['tcut']) { V.named['tcut'] = 1; note('The mitre saw', 'Every piece of trim is cut to length on the mitre saw. Casing meets at 45 degree mitres in the corners; baseboard is coped where two walls meet inside a corner, so it stays tight as the house moves.'); } else flash((mitre && m.trim !== 'craftsman' && m.trim !== 'farmhouse' ? 'Mitred at 45°: ' : 'Cut square: ') + mm(m.cutTo)); }
+      else if (!V.named['fcut:' + m.kind]) { V.named['fcut:' + m.kind] = 1; note(tile ? 'Cut on the wet saw' : 'Cut to fit', tile ? 'The tiles at the walls are cut to fit. Laying out from the middle of the room keeps those cuts even on both sides.' : 'The last board in a row is cut to fit the gap left at the wall. What is cut off starts the next row, so the end joints never line up.'); }
       else flash(tile ? 'Wet saw: ' + mm(m.cutTo) + ' piece for the wall' : 'Cut ' + mm(m.cutTo) + ' from a ' + mm(m.cut) + ' board' + (rest >= 0.2 ? '; the cut-off starts the next row' : ''));
     }
     return true;
@@ -1020,7 +1028,7 @@
     if (pm.kind === 'site' || !m) { strikeNow(ctx, ni); return; }      // a shovel stroke lands at once
     // the hammer winds up and comes down; the blow lands at contact (tickBlow). One still in the air lands first.
     if (V.blow && !V.blow.hit) strikeNow(V.blow.ctx, V.blow.ni);
-    V.blow = { ctx, ni, t: 0, hit: false, pose: pm.stage === 'flooring' ? floorPose(pm.kind, m && m.type) : 'hammer' };
+    V.blow = { ctx, ni, t: 0, hit: false, pose: FIN(pm.stage) ? floorPose(pm.kind, m && m.type) : 'hammer' };
   }
   const CONTACT_S = 0.1, BLOW_S = 0.26;
   function tickBlow(dt) {
@@ -1035,7 +1043,7 @@
   // staples and finish nails; hands pressing a tile down into its thinset; a sponge wiped across grout; a knee into the kicker
   function floorPose(kind, type) {
     if (kind === 'tile' || kind === 'paving' || kind === 'backer' || kind === 'threshold' || (kind === 'underlay' && type !== 'rosin')) return 'press';
-    if (kind === 'grout') return 'wipe';
+    if (kind === 'grout' || kind === 'paint') return 'wipe';
     if (kind === 'carpet') return 'kick';
     return 'hammer';
   }
@@ -1132,9 +1140,11 @@
     if (!g || !pl || !pl.view.next) return null;
     const ids = Object.keys(pr.members).filter((k) => { const pm = pr.members[k]; return pm.stage === pl.view.next && !pm.built && pm.kind !== 'site' && g.byId.has(k); });
     if (!ids.length || ids.length > 5) return null;
+    const open = ids.filter((k) => !api.blocked(pr, k));       // an arrow only over what can go in now: the paint waits for the last apron
+    if (!open.length) return null;
     const [ylo, yhi] = yRange(g), P = G.player, c = wB.set(g.cx, 0, g.cz).applyMatrix4(g.matrix), cx = c.x, cz = c.z, list = [], seen = [];
     let high = false;
-    for (const mid of ids) {
+    for (const mid of open) {
       const pm = pr.members[mid], m = g.byId.get(mid), hw = C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null;
       worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wM); wM.add(wA).multiplyScalar(0.5);
       const dx = wM.x - cx, dz = wM.z - cz, dir = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 'east' : 'west') : (dz > 0 ? 'south' : 'north'), f = (wM.y - ylo) / Math.max(0.5, yhi - ylo), part = STAGE_PART[pm.stage];
@@ -1143,7 +1153,7 @@
       list.push({ mid, x: wM.x, y: wM.y, z: wM.z, where, top: yhi });
       seen.includes(where) || seen.push(where);
     }
-    return { stage: pl.view.next, list, high, text: list.length + ' left: ' + seen.slice(0, 3).join(' and ') + (high ? ' · bring the ladder' : '') };
+    return { stage: pl.view.next, list, high, text: ids.length + ' left: ' + seen.slice(0, 3).join(' and ') + (high ? ' · bring the ladder' : '') };
   }
   // ------------------------------------------------------------------ the wheelbarrow: a few boxes and a cylinder wheel
   const barrow = new T.Group(), bWood = new T.MeshLambertMaterial({ color: 0x9a7448 }), bTray = new T.MeshLambertMaterial({ color: 0x4d7f68 }), bIron = new T.MeshLambertMaterial({ color: 0x45484d }),
@@ -1418,7 +1428,8 @@
     if (done('subfloor')) celebrate('deck');
     if (j.kind === 'rafter' && Object.values(pr.members).filter((m) => m.kind === 'rafter' && m.built).length === 1) celebrate('firstRafter');
     if (done('roofing')) { celebrate('driedIn'); const w = G.sim.state.sys.weather; if (w && w.rainMmH > 0.05) setTimeout(() => note('It is raining', 'And it is dry inside your ' + low(pr.name) + '.'), 4200); }
-    if (done('flooring')) celebrate('floorDown');
+    if (done('trim')) celebrate('trimmed');
+    else if (done('flooring')) celebrate('floorDown');
     else if (j.kind === 'plank' || j.kind === 'tile') {
       const g = geom(pr.id), m0 = g && g.byId.get(j.memberId);
       if (m0 && m0.row === 0 && !V.named['row0:' + m0.parent + j.kind] && Object.keys(pr.members).every((id) => { const q = pr.members[id], m = g.byId.get(id); return q.kind !== j.kind || q.parent !== m0.parent || !m || m.row !== 0 || q.built; })) { V.named['row0:' + m0.parent + j.kind] = 1; if (j.kind === 'plank') celebrate('firstRow'); else note('First row of tile set', 'Keep going row by row. The joints stay even because every tile follows this row.'); }
@@ -1514,15 +1525,17 @@
     P.work = pose.kind ? pose : null;
     // kneel for work near the ground, as people do: a floor, a sill, a pier block, a cut on the deck
     let low = !!(V.cutNow && V.cutNow.low);
-    if (!low && ctx && ctx.kind === 'hands' && ctx.mid && (V.blow || W.job || V.handT < 1.2)) {
-      const g = geom(ctx.id), m = g && g.byId.get(ctx.mid);
-      const pr = S().progress[ctx.id], pm = pr && pr.members[ctx.mid];
+    // the piece in hand: the one being worked by hand, or the one "Work until done" is on
+    const kw = V.working && W.job ? { id: V.working.id, mid: V.working.memberId } : ctx && ctx.kind === 'hands' && ctx.mid && (V.blow || V.handT < 1.2) ? { id: ctx.id, mid: ctx.mid } : null;
+    if (!low && kw) {
+      const g = geom(kw.id), m = g && g.byId.get(kw.mid);
+      const pr = S().progress[kw.id], pm = pr && pr.members[kw.mid];
       if (m && pm) { const hw = C.STAGE[pm.stage].flat && g.walls.has(pm.parent) && !pr.raised[pm.parent] ? g.walls.get(pm.parent) : null; worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); low = Math.max(wA.y, wB.y) - P.y < 0.45; }
     }
     P.kneel = low ? 1 : 0;
     // the hammer is in the hand while there is nailing to do here, the hatchet otherwise
-    const pmc = ctx && ctx.kind === 'hands' && S().progress[ctx.id] && S().progress[ctx.id].members[ctx.mid], gmc = pmc && pmc.stage === 'flooring' && geom(ctx.id) && geom(ctx.id).byId.get(ctx.mid);
-    P.hammer = pose.kind === 'hammer' || (!!ctx && ctx.kind === 'hands' && (ctx.act === 'nail' || V.handT < 1.5) && !(pmc && pmc.stage === 'flooring' && floorPose(pmc.kind, gmc && gmc.type) !== 'hammer'));
+    const pmc = ctx && ctx.kind === 'hands' && S().progress[ctx.id] && S().progress[ctx.id].members[ctx.mid], gmc = pmc && FIN(pmc.stage) && geom(ctx.id) && geom(ctx.id).byId.get(ctx.mid);
+    P.hammer = pose.kind === 'hammer' || (!!ctx && ctx.kind === 'hands' && (ctx.act === 'nail' || V.handT < 1.5) && !(pmc && FIN(pmc.stage) && floorPose(pmc.kind, gmc && gmc.type) !== 'hammer'));
     // hand finished pieces back to build mode once the hammer rests
     V.idleT = W.job ? 0 : V.idleT + dt;
     if (V.idleT > 0.45) for (const [id, f] of V.fresh) if (f.size && !V.flushing.some((q) => q.id === id)) flush(id);
@@ -1568,7 +1581,7 @@
       const A = V.auto, w = V.working && workLabel(pr, V.working.memberId), v = plan(A.id).view.stages.find((q) => q.id === A.stage);
       setPrompt('E', 'Stop · ' + (V.raise ? 'raising the wall' : w ? low(w.text) : A.wait > 0 ? 'fetching more' : low(C.STAGE[A.stage].name)), v ? v.built + ' of ' + v.total : '', V.raise ? Math.min(1, V.raise.p) : W.job ? W.progress() : null);
     } else if (ctx.kind === 'raise') setPrompt('E', 'Hold and push up to raise the wall', '', V.raise ? Math.min(1, V.raise.p) : 0);
-    else if (ctx.kind === 'hands') { const w = workLabel(pr, ctx.mid), pm = pr.members[ctx.mid], b = V.blows[ctx.mid], of = b ? b.of : nailCount(geom(ctx.id), pm, ctx.mid), gm = geom(ctx.id).byId.get(ctx.mid), fh = pm.stage === 'flooring' && C.floorHands ? C.floorHands(pm.kind, gm && gm.type) : null;
+    else if (ctx.kind === 'hands') { const w = workLabel(pr, ctx.mid), pm = pr.members[ctx.mid], b = V.blows[ctx.mid], of = b ? b.of : nailCount(geom(ctx.id), pm, ctx.mid), gm = geom(ctx.id).byId.get(ctx.mid), fh = FIN(pm.stage) && C.floorHands ? C.floorHands(pm.kind, gm && gm.type) : null;
       if (fh && ctx.act !== 'dig') { const know = api.knows(S(), pm.kind) && sweepable(pr, ctx.mid, geom(ctx.id)); setPrompt('E', ctx.act === 'set' ? (know ? 'Hold and drag along the row: ' + low(fh[0]) : fh[0]) + (gm && gm.cut && gm.cut - gm.cutTo > 0.004 ? ' (cut to fit)' : '') : fh[1] + ': ' + (b ? b.n : 0) + ' of ' + of + ' ' + fh[2], ctx.act === 'set' ? w.count : '', ctx.act === 'set' ? null : (b ? b.n : 0) / of); }
       else setPrompt('E', ctx.act === 'set' ? (api.knows(S(), pm.kind) && sweepable(pr, ctx.mid, geom(ctx.id)) ? 'Hold and drag along the run: ' + low(w.text).replace(/s$/, '') : 'Set the ' + low(w.text)) + (pm.line && pr.lines[pm.line].sheet && !api.needsStock(S(), pr, ctx.mid) ? ' (from an offcut)' : '') : ctx.act === 'dig' ? 'Dig and level' : pm.kind === 'pier' ? 'Stamp it level: ' + (b ? b.n : 0) + ' of ' + of : 'Nail them: ' + (b ? b.n : 0) + ' of ' + of, ctx.act === 'set' ? w.count : '', ctx.act === 'set' ? null : (b ? b.n : 0) / of); }
     else if (ctx.kind === 'lean') setPrompt('E', 'Lean the ladder here', '', null);
@@ -1625,15 +1638,16 @@
     if (pr.level === 'guided') return { ...out, line: 'Stand by the ' + low(pr.name) + ' and press <kbd>E</kbd>, or use the button.', btn: ['auto:' + v.id, v.verb], target: at };
     if (!ln) return { ...out, line: 'Stand on the plan and hold <kbd>E</kbd> (or the mouse button) to dig it level.', target: at };
     const looseOne = pl.inst.find((id) => pr.members[id].need > 0 && pr.members[id].got >= pr.members[id].need - 1e-6);
-    if (looseOne) return { ...out, line: 'A piece is set but loose. ' + (pr.members[looseOne].kind === 'pier' ? 'Point at it and click to stamp it level.' : 'Strike it once to drive all its nails, or hold and drag across the pieces.'), target: at };
+    if (looseOne) return { ...out, line: 'A piece is set but loose. ' + (pr.members[looseOne].kind === 'pier' ? 'Point at it and click to stamp it level.' : FIN(pr.members[looseOne].stage) ? (() => { const fh = C.floorHands(pr.members[looseOne].kind, (geom(pr.id).byId.get(looseOne) || {}).type); return (fh ? fh[1] : 'Fix it') + ': click it, or hold and drag across the pieces.'; })() : 'Strike it once to drive all its nails, or hold and drag across the pieces.'), target: at };
     if (['top-plates', 'roof-frame', 'roof-deck', 'dry-in', 'roofing', 'gutters'].includes(v.id) && !s.ladder && !V.climb && !s.options.auto && pr.level !== 'guided' && ((s.carried && s.carried.itemId === LAD.itemId) || s.stacks.some((k) => k.itemId === LAD.itemId))) return { ...out, line: 'This is out of reach from the ground. Carry the ladder to a wall and click to lean it. Walk onto the ladder to climb.', target: at };
     const c = s.carried;
     if (['dry-in', 'roofing'].includes(v.id) && RW && c && c.itemId === ln.itemId && pr.level !== 'guided' && !s.options.auto) {
       if (!RW.on()) return { ...out, line: 'Roofers work on the roof: climb the ladder and keep walking, onto the deck. On a steep roof, fix an anchor at the ridge and clip in first.', target: at };
       return { ...out, line: 'From the eave up, each layer lapping the one below. The glowing strip is the next one; the blue chalk line marks its top edge.' + (V.clip == null && RW.at() && RW.at().k > RWC.slideK ? ' Steep: clip in at the ridge first.' : ''), target: at };
     }
-    if (v.id === 'flooring' && first && pr.level !== 'guided' && !s.options.auto && c && c.itemId === ln.itemId && !api.knows(s, pr.members[first].kind)) {
-      const words = { underlay: 'Roll the underlayment out from the far wall, strip by strip, and fasten it down.', backer: 'Cement board first: set each sheet in thinset and screw it down, the joints staggered.', plank: 'Row by row from the far wall. The glowing row is next and the blue chalk line marks its edge: set a board, then nail or tap it tight against the row before.', tile: 'Row by row from the chalk line. Set each tile in thinset, then beat it in level. The cut tiles at the walls go through the wet saw.', grout: 'Float grout across each row, then sponge off the haze.', tackstrip: 'Tack strip round the walls, a finger\'s width out from them, broken at the door.', pad: 'Roll the pad out inside the tack strip and staple the seams.', carpet: 'Unroll the carpet, then kick it tight onto the tack strip all along the walls.', baseboard: 'Baseboard last: it hides the gap left at the walls. Nail it into the studs.', threshold: 'A threshold under each door, where this floor meets the next.' }[pr.members[first].kind];
+    if ((v.id === 'flooring' || v.id === 'trim') && first && pr.level !== 'guided' && !s.options.auto && c && c.itemId === ln.itemId && !api.knows(s, pr.members[first].kind)) {
+      const words = { underlay: 'Roll the underlayment out from the far wall, strip by strip, and fasten it down.', backer: 'Cement board first: set each sheet in thinset and screw it down, the joints staggered.', plank: 'Row by row from the far wall. The glowing row is next and the blue chalk line marks its edge: set a board, then nail or tap it tight against the row before.', tile: 'Row by row from the chalk line. Set each tile in thinset, then beat it in level. The cut tiles at the walls go through the wet saw.', grout: 'Float grout across each row, then sponge off the haze.', tackstrip: 'Tack strip round the walls, a finger\'s width out from them, broken at the door.', pad: 'Roll the pad out inside the tack strip and staple the seams.', carpet: 'Unroll the carpet, then kick it tight onto the tack strip all along the walls.', threshold: 'A threshold under each door, where this floor meets the next.',
+        stool: 'Window stools first: the shelf at the foot of each window, its horns running past where the casing will stand.', casing: 'Case each door and window: the two legs, then the head across them. Every piece is cut on the mitre saw.', apron: 'An apron under each stool, as wide as the casing.', baseboard: 'Baseboard round the walls, butting into the door casing. It hides the gap left at the floor\'s edge.', shoe: 'Shoe moulding along the foot of the baseboard.', crown: 'Crown where the walls meet the ceiling: lift it into the corner and nail it off.', paint: 'Last: caulk the seams, fill the nail holes and paint. Wipe along the trim.' }[pr.members[first].kind];
       if (words) return { ...out, line: words, target: at };
     }
     if (c && c.itemId === ln.itemId && first && api.knows(s, pr.members[first].kind)) return { ...out, line: 'You know this work: hold the button and drag along the glowing places. Each piece is set and nailed as you pass.', target: at };
@@ -1981,7 +1995,7 @@
   canvas.addEventListener('pointerdown', (e) => {
     ptr.x = e.clientX; ptr.y = e.clientY; ptr.has = true; sounds.wake();
     if (V.placing) { e.stopImmediatePropagation(); e.preventDefault(); if (e.button === 2) endPlacing(); else { tickPlacing(); commitPlacing(); } return; }
-    if (e.button === 0 && V.beacons.length && !OFF[G.player.tool] && !V.auto) { const rc = canvas.getBoundingClientRect(), lk = !!document.pointerLockElement, hit = beaconAt(lk ? rc.left + rc.width / 2 : e.clientX, lk ? rc.top + rc.height / 2 : e.clientY); if (hit) { e.stopImmediatePropagation(); finishPlace(hit); return; } }
+    if (e.button === 0 && V.beacons.length && !OFF[G.player.tool] && !V.auto && !(V.ctx && V.ctx.kind === 'hands')) { const rc = canvas.getBoundingClientRect(), lk = !!document.pointerLockElement, hit = beaconAt(lk ? rc.left + rc.width / 2 : e.clientX, lk ? rc.top + rc.height / 2 : e.clientY); if (hit) { e.stopImmediatePropagation(); finishPlace(hit); return; } }
     // the left button is the hands: whatever F would do here
     if (e.button === 0 && !OFF[G.player.tool] && V.ctx && V.ctx.kind !== 'hint' && V.ctx.kind !== 'drop') { e.stopImmediatePropagation(); V.mDown = true; V.fTap = true; V.fSrc = 'click'; return; }
     const ctx = V.ctx;

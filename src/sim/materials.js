@@ -69,6 +69,7 @@ add('osb', 'OSB', 'wood', 650, 0.13, 1700, {
   strengthBasis: 'characteristic', bendingStrengthMPa: 18, compressiveStrengthMPa: 15, elasticModulusGPa: 4.93, source: 'ISO 10456 OSB 650 kg/m3; EN 300 OSB/3 major-axis bending and modulus' });
 add('engineered_oak', 'Engineered oak (oak on plywood)', 'wood', 600, 0.14, 1600, { approx: true, source: 'A 3-4 mm oak wear layer on a birch-ply core: mass-weighted from ISO 10456 oak 700 and plywood 500' });
 add('hdf', 'High-density fibreboard (laminate core)', 'wood', 850, 0.14, 1700, { source: 'ISO 10456 fibreboard 800-900 kg/m3: 0.14-0.18; laminate flooring core' });
+add('mdf', 'Medium-density fibreboard (MDF)', 'wood', 750, 0.13, 1700, { source: 'ISO 10456 fibreboard 600-800 kg/m3: 0.12-0.14' });
 add('glulam', 'Glulam (GL24h)', 'wood', 420, 0.12, woodCp(0.12), {
   strengthBasis: 'characteristic', bendingStrengthMPa: 24, compressiveStrengthMPa: 24, elasticModulusGPa: 11.5, source: 'EN 14080 GL24h; mean density 420' });
 
@@ -148,6 +149,7 @@ add('rosin_paper', 'Rosin paper', 'fabric', 750, 0.12, 1400, { approx: true, sou
 add('pe_foam', 'Polyethylene foam underlay', 'insulation', 30, 0.035, 1900, { approx: true, source: 'Closed-cell PE foam 25-35 kg/m3, lambda 0.033-0.040; foam cp taken a little under solid LDPE (2300)' });
 add('rebond_foam', 'Rebond carpet pad', 'insulation', 100, 0.04, 1400, { approx: true, source: 'Bonded PU foam pad, 6-8 lb/ft3 (96-128 kg/m3); CIBSE carpet underlay ~0.04-0.06' });
 add('vinyl_plank', 'Rigid-core vinyl plank (stone-polymer)', 'masonry', 1900, 0.25, 1000, { approx: true, source: 'SPC (stone-polymer core) vinyl ~1900-2100 kg/m3; ISO 10456 PVC 0.17, filled 0.2-0.3' });
+add('paint_acrylic', 'Acrylic paint (wet)', 'fluid', 1100, 0.2, 2500, { approx: true, source: 'Water-based trim paint is 1.1-1.3 kg/L; a coat is too thin to matter thermally' });
 add('canvas', 'Canvas (cotton duck)', 'fabric', 500, 0.07, 1300, { approx: true, source: 'Cotton fabric ~400 g/m2 at 0.8 mm; cotton cp 1300; conductivity typical of dry fabric' });
 add('carpet', 'Wool carpet', 'fabric', 200, 0.06, 1300, { approx: true, source: 'CIBSE/ASHRAE carpet and underlay ~0.06; wool cp ~1300' });
 

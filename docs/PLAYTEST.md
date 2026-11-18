@@ -464,7 +464,7 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 
 **What is new**
 
-- A Flooring stage after the lining (`docs/FLOORING.md`). Plan mode's Floor swatches now include Oak strip, Engineered oak, Laminate, Vinyl plank, Porcelain tile, Berber carpet and Bare subfloor alongside the old ones; every wood, tile and carpet floor is laid piece by piece the way the trade does it, then baseboard and a threshold.
+- A Flooring stage after the lining (`docs/FLOORING.md`). Plan mode's Floor swatches now include Oak strip, Engineered oak, Laminate, Vinyl plank, Porcelain tile, Berber carpet and Bare subfloor alongside the old ones; every wood, tile and carpet floor is laid piece by piece the way the trade does it, then a threshold (baseboard is now part of Trim).
 - Only the row being laid glows, with a blue chalk line at its edge. Boards slide in (click boards angle in and drop), tiles drop onto thinset, rolls unroll, grout sweeps along; then nails, taps, mallet beats, staples, knee kicks or sponge wipes. Cut boards and tiles go through the saw (tiles on the wet saw) and a row's cut-off starts the next row.
 - Laid floors stay drawn as their real boards and tiles, also in sandbox and on finished buildings: staggered oak strip, terracotta on grout lines.
 - The small cabin's floor is pine floorboards on rosin paper. The tool shed's deck is its floor (no flooring stage), so the tutorial is unchanged.
@@ -481,3 +481,22 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 - Spacers along the walls for floating floors, transition strips between two different floors and floor sanding/finishing are not modelled.
 - Thermal: a finished floor's layers count only once the whole floor is down.
 - Stairs, tower rooms and round floors have no flooring pieces yet.
+
+## Trim: the finish carpenter's stage (branch `flooring`)
+
+**What is new**
+
+- A Trim stage after Flooring (`docs/TRIM.md`). Plan mode shows a **Trim** choice beside **Inside** once a room is lined: Craftsman (flat stained fir, a head with a cap), Colonial (moulded and painted white, shoe and crown), Modern (thin square MDF, picture-frame windows) and Farmhouse (wide rough-sawn). New buildings start Craftsman.
+- In the trade's order: window stools, door and window casing, aprons, baseboard (it stops at the door casing), shoe, crown, then caulk, filler and paint. Every piece is cut on the mitre saw ("Mitred at 45°" or "Cut square") and brad-nailed by hand; painted styles turn white when the paint goes on.
+- The character kneels for floor work and baseboard, also during "Work until done".
+- Nail and screw markers are gone from finished work: a stage's markers show only while that stage is under way, and floors and trim never show any.
+- Fix: the arrows over the last few pieces of a stage no longer point at a piece that cannot go in yet (it stole the click from the apron you were nailing).
+
+**Try this**
+
+1. Finish the cabin's floor, order Trim, and case the door and windows. Change the style in Plan mode and lay it again.
+
+**Known gaps**
+
+- Coped inside corners, returns on stools and scarf joints in long baseboard runs are drawn as plain butts.
+- Paint is one gesture for the whole room.
