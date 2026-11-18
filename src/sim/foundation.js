@@ -10,7 +10,7 @@
 // The other hands-on steps (base, forms, rebar, pour, finish, strip) come in B3-B8.
 //
 // state sys.foundation = { v: 1, nextId, jobs: { [id]: job }, carry: null, machines: {} }
-// job = { id, owner: { structId } | null, type, x, z, yaw, topY, step, layout, digs: [{ poly, targetY, frac }], roughIn, elements: [element], pour,
+// job = { id, owner: { structId } | null, type, x, z, yaw, topY, step, layout, digs: [{ poly, targetY, frac, rough }], roughIn, elements: [element], pour,
 //         held: reason | null, baseIds: [construction member ids of the gravel base] }
 // element = { id, kind, memberIds, w, botY, topY, volM3, dig, base, forms, rebar, bolts, pour, finish, cure }
 // events: 'foundation.gate' { jobId, gate } when a gate opens; 'foundation.cured' { jobId } when it is followed no more.
@@ -115,11 +115,11 @@ function envOf(ctx) {
 }
 
 // ------------------------------------------------------------------------------------------------ layout and dig (B2)
-function digFrac(job) {
+function digFrac(job, key = 'frac') {
   const d = job.digs || [];
   if (!d.length) return 1;
   let a = 0, f = 0;
-  for (const q of d) { const A = Math.abs(polyArea(q.poly)); a += A; f += A * (q.frac || 0); }
+  for (const q of d) { const A = Math.abs(polyArea(q.poly)); a += A; f += A * (q[key] || 0); }
   return a > 0 ? f / a : 1;
 }
 function polyArea(P) { let A = 0; for (let a = 0, b = P.length - 1; a < P.length; b = a++) A += (P[b][0] + P[a][0]) * (P[b][1] - P[a][1]); return A / 2; }
@@ -222,7 +222,7 @@ export const foundationSystem = ({ cure = CC.CURE, every = CC.CURE_EVERY } = {})
       if (p.digs !== undefined) {
         if (!(Array.isArray(p.digs) && p.digs.length <= 64 && p.digs.every((d) => d && num(d.targetY) && Array.isArray(d.poly) && d.poly.length >= 3 && d.poly.length <= 256 && d.poly.every(okPt)))) return fail('bad digs');
         const old2 = job.digs || [];
-        job.digs = p.digs.map((d, k) => ({ poly: d.poly.map((q) => [r6(q[0]), r6(q[1])]), targetY: r6(d.targetY), frac: old2[k] && Math.abs(old2[k].targetY - d.targetY) < 1e-4 ? old2[k].frac : 0 }));
+        job.digs = p.digs.map((d, k) => ({ poly: d.poly.map((q) => [r6(q[0]), r6(q[1])]), targetY: r6(d.targetY), frac: 0, rough: 0, ...(old2[k] && Math.abs(old2[k].targetY - d.targetY) < 1e-4 ? { frac: old2[k].frac, rough: old2[k].rough || 0 } : {}) }));
       }
       if (!job.digs) job.digs = [];
       if (pr && !num(p.x)) { job.x = pr.x; job.z = pr.z; }
@@ -263,6 +263,7 @@ export const foundationSystem = ({ cure = CC.CURE, every = CC.CURE_EVERY } = {})
       for (const d of job.digs || []) {
         const r = groundRead.conform(ctx.state, { poly: d.poly }, d.targetY, D.tolUpM, D.tolDownM, D.cellM);
         d.frac = r.n ? r6(1 - r.high.length / r.n) : 1;
+        d.rough = r.n ? r6(1 - r.high.filter((q) => q[2] > D.roughM).length / r.n) : 1;
         n += r.n; high += r.high.length; low += r.low.length;
       }
       const frac = n ? 1 - high / n : 1;
@@ -273,7 +274,7 @@ export const foundationSystem = ({ cure = CC.CURE, every = CC.CURE_EVERY } = {})
         finishSite(ctx, job);
         ctx.emit('foundation.step', { jobId: job.id, step: job.step });
       }
-      return { ok: true, step: job.step, frac: r6(frac), low: n ? r6(low / n) : 0, advanced };
+      return { ok: true, step: job.step, frac: r6(frac), rough: r6(digFrac(job, 'rough')), low: n ? r6(low / n) : 0, advanced };
     },
     // The flat of the shovel trims along a stroke down to the line (only once most of it is dug), and the earth it
     // takes is pushed out past the edge of the dig. { jobId | structId, x0, z0, x1, z1, w? }
@@ -282,7 +283,7 @@ export const foundationSystem = ({ cure = CC.CURE, every = CC.CURE_EVERY } = {})
       if (!job) return fail('no such job');
       if (![p.x0, p.z0, p.x1, p.z1].every(num)) return fail('no stroke');
       if (job.step !== 'excavate') return fail('not digging');
-      if (digFrac(job) < D.trimFrom) return fail('Dig more of it first: trim when most of the amber is gone');
+      if (digFrac(job, 'rough') < D.trimFrom) return fail('Dig more of it first: trim when most of the dark amber is gone');
       const L = Math.hypot(p.x1 - p.x0, p.z1 - p.z0);
       if (L > D.maxStrokeM) return fail('too far in one stroke');
       const w = num(p.w) && p.w > 0 && p.w <= 1 ? p.w : D.bladeW, rect = strokeRect(p.x0, p.z0, p.x1, p.z1, w);
@@ -337,6 +338,6 @@ export const foundationRead = {
     const j = F(state).jobs[jobId];
     if (!j) return null;
     const g = gatesOf(j);
-    return { id: j.id, type: j.type, step: j.step, held: j.held, corners: j.layout.corners.map((c) => [c[0], c[1], !!c[2]]), closed: j.layout.closed, dig: digFrac(j), trimFrom: CC.DIG.trimFrom, strength: g.strength, gates: Object.fromEntries(CC.GATE_ORDER.map((k) => [k, g[k]])), elements: j.elements.map((e) => ({ id: e.id, kind: e.kind, volM3: e.volM3, poured: !!e.cure, strength: e.cure ? e.cure.strength : 0 })) };
+    return { id: j.id, type: j.type, step: j.step, held: j.held, corners: j.layout.corners.map((c) => [c[0], c[1], !!c[2]]), closed: j.layout.closed, dig: digFrac(j), rough: digFrac(j, 'rough'), trimFrom: CC.DIG.trimFrom, roughM: CC.DIG.roughM, strength: g.strength, gates: Object.fromEntries(CC.GATE_ORDER.map((k) => [k, g[k]])), elements: j.elements.map((e) => ({ id: e.id, kind: e.kind, volM3: e.volM3, poured: !!e.cure, strength: e.cure ? e.cure.strength : 0 })) };
   },
 };

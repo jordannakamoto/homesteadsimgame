@@ -55,7 +55,8 @@ export const DIG = Object.freeze({
   tolUpM: 0.02,       // ground this far above the line still counts as dug (a flat shovel's tolerance)
   tolDownM: 0.04,     // dug deeper than this shows as too deep (the gravel base makes it up)
   cellM: 0.2,         // how finely the dig is checked
-  trimFrom: 0.85,     // once this much is down to the line, the flat of the shovel trims the rest with push strokes
+  roughM: 0.07,       // dug roughly: within this of the line (a shovel cannot dig to the centimetre)
+  trimFrom: 0.85,     // once this much is roughly dug, the flat of the shovel trims it to the line with push strokes
   done: 0.97,         // dug: the excavation step is finished and the site stage of the building with it
   bladeW: 0.3,        // the swath one trim stroke cuts
   spoilOutM: 0.35,    // trimmed earth is pushed this far past the edge of the dig

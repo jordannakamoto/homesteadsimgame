@@ -55,10 +55,20 @@ test('dig to the line: read from the ground, trimmed once mostly dug, earth kept
   let c = sim.commandNow('foundation.check', { jobId });
   assert.equal(c.frac, 0);
   assert.match(sim.commandNow('foundation.trim', { jobId, x0: 39, z0: 40, x1: 41, z1: 40 }).reason, /Dig more/);
+  // dug roughly (within a shovel's few centimetres) everywhere: trimming is allowed though little is on the line
+  const s2 = createGameSim(5);
+  assert.ok(s2.commandNow('construction.setPlan', slabPlan()).ok);
+  const j2 = s2.commandNow('foundation.setPlan', { structId: SID, corners: CORNERS, digs: [{ poly: CORNERS, targetY: TARGET }] }).jobId;
+  for (let k = 0; k < 4; k++) s2.commandNow('foundation.stake', { jobId: j2, corner: k });
+  s2.commandNow('ground.trim', { region: { poly: CORNERS }, targetY: TARGET + 0.05 });
+  const c2 = s2.commandNow('foundation.check', { jobId: j2 });
+  assert.ok(c2.frac < 0.1 && c2.rough > 0.97, JSON.stringify(c2));
+  assert.ok(s2.commandNow('foundation.trim', { jobId: j2, x0: 39, z0: 40, x1: 41, z1: 40 }).m3 > 0.01);
   // most of it dug (a strip along the east edge left), as a shovel would leave it
   assert.ok(sim.commandNow('ground.trim', { region: { poly: [[38.5, 38.8], [41.1, 38.8], [41.1, 41.2], [38.5, 41.2]] }, targetY: TARGET }).ok);
   c = sim.commandNow('foundation.check', { jobId });
   assert.ok(c.frac >= 0.85 && c.frac < 0.97, 'mostly dug: ' + c.frac);
+  assert.ok(c.rough >= 0.85, 'roughly dug: ' + c.rough);
   assert.ok(site(sim).every((m) => !m.built));
   const before = groundRead.netVolume(sim.state);
   // push strokes along the remaining strip, eastward: the earth goes out past the east edge
