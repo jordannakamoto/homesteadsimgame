@@ -31,8 +31,12 @@ export function createReflectProbe({ renderer, scene, hide = [], uniforms }) {
     if (fresh) pos.copy(want); else pos.lerp(want, 1 - Math.exp(-dt * 1.5));
     const prevRT = renderer.getRenderTarget(), prevAuto = renderer.shadowMap.autoUpdate, prevXr = renderer.xr.enabled;
     renderer.shadowMap.autoUpdate = false; renderer.xr.enabled = false;
+    // also anything at the top of the scene marked userData.noReflect (unlit specks such as the floating bugs,
+    // which a reflection would spread into glaring smears)
+    const extra = scene.children.filter((o) => o.userData.noReflect && o.visible);
     const vis = hide.map((m) => m.visible);
     for (const m of hide) m.visible = false;
+    for (const o of extra) o.visible = false;
     cube.position.copy(pos); cube.updateMatrixWorld(true);
     if (fresh) {
       // the first time: both maps at once, shown at once
@@ -44,6 +48,7 @@ export function createReflectProbe({ renderer, scene, hide = [], uniforms }) {
       if (face === 6) { face = 0; fade = 0; }               // the back map is whole: fade over to it
     }
     hide.forEach((m, i) => { m.visible = vis[i]; });
+    for (const o of extra) o.visible = true;
     renderer.setRenderTarget(prevRT); renderer.shadowMap.autoUpdate = prevAuto; renderer.xr.enabled = prevXr;
     if (fade < 1) {
       fade = Math.min(1, fade + dt * 3);

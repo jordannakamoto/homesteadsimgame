@@ -642,6 +642,7 @@
   bugGeo.setAttribute("color", new T.BufferAttribute(bugCol, 3));
   const bugMesh = new T.Mesh(bugGeo, new T.MeshBasicMaterial({ vertexColors: true, side: T.DoubleSide }));
   bugMesh.frustumCulled = false;
+  bugMesh.userData.noReflect = true;   // unlit specks: left out of the water's reflections (src/water/reflect-*.js)
   G.scene.add(bugMesh);
   const WING = [col(0xf2efe6), col(0xf0c93a), col(0xe8842c), col(0x5a8fd8), col(0xd96a9a)];
   const bugs = [];
