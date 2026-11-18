@@ -623,3 +623,27 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 - The foundation job is not created automatically: it needs the console call above until the foundation view (B2) does it.
 - A building drawn with only walls (no floor) samples its site round the walls, so the middle of a large plan is levelled only partly, as before; a hole there is filled only where the pad really is level.
 
+
+## Foundations B2 — layout strings and dig to the line (branch `ground-b2`)
+
+**What is new**
+
+- A building with a **slab**, **stem wall** or **poured piers** put up in construction mode is now a foundation job: its site is no longer levelled by magic and its site and foundation stages are done by hand (the construction panel says so).
+- **Site tool, key 7** (also a button on the tool strip). Two things in hand:
+  - **Layout kit**: press a glowing corner and a stake goes in with two hammer blows. Keep holding and pull toward the next corner: you walk after your hand, the pink string pays out behind you, and every corner your hand reaches gets its stake. The last one closes the loop: batter boards pop up beyond the corners, the strings go up on them at finished height, the diagonals flash white (square).
+  - **Shovel** (the Yard's own): inside the white painted line, ground still to dig is **dark amber** (darker = more to go), ground within a few cm of the line is **pale yellow**, dug too deep is faint blue. A yellow tape hangs from the string at the blade and the hint reads "Here: 9 cm to go". Once most of the dark amber is gone, **right-drag** the flat of the blade across the yellow: it trims to the line and pushes the earth out past the edge. When it is all down, "Dug to the line" and the site stage is done.
+- Escape puts the site tools away.
+
+**Try this**
+
+1. On flat-ish ground: L, choose the tool shed, set it down, then in Plan mode (B) change its foundation to Slab (or console: `__build.setFoundation(__build.structs().at(-1).id, 'slab')`).
+2. Press 7, stake the four corners in one drag. Take up the shovel (2), dig the amber (Yard store scoop size 2x or 4x speeds it up), trim, watch the amber go.
+3. Then `__foundation.debugPour()` in the console: framing says the concrete is still green until it cures (speed time up).
+
+**Weak / not in yet**
+
+- After the dig the gravel base, forms and pour are B3-B5; until then use `__foundation.debugPour()`.
+- The slab's thickened edges are not dug as trenches yet (only the pad to the gravel bottom); stem-wall trenches and pier holes are dug the same way but are deep and slow by hand (an auger or machine is later).
+- On a slope the low side ends up below the line (blue); filling it is the gravel base's job (B3).
+- Hammer-blow pose and batter-board look are first passes; untuned against a real playtest. Guided level has no one-click layout yet.
+- Console: `__foundation.drawn()`, `__game.foundation.jobView(__game.sim.state, '1')`. Smoke test: `node test/foundation.smoke.mjs`.
