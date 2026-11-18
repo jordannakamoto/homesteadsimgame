@@ -256,9 +256,24 @@ export function createRivers({ seed = 0, height, SEA = 0, spawnClear = 28, sprin
           add(Math.min(1, tb + (0.6 + 2.2 * H(i, 40 + q)) / sg.L), side * (w / 2 - 0.2 + 0.9 * H(i, 50 + q)), 0.3 + 0.45 * H(i, 60 + q), 0.4, 0.7 + 0.4 * H(i, 70 + q));
         }
       } else {
-        const n = Math.floor(H(i, 80) * (sg.drop > 0.3 ? 3.6 : 2.3));
-        for (let q = 0; q < n; q++) add((i + 0.74 + 0.24 * H(i, 90 + q)) / sg.k, (2 * H(i, 100 + q) - 1) * w * 0.42, (0.13 + 0.32 * H(i, 110 + q)) * Math.min(1.2, 0.5 + w / 6), 0.45, 0.6 + 0.4 * H(i, 120 + q));
+        // riffles: a scatter of cobbles and boulders, many breaking the surface (more on steep reaches)
+        const n = 1 + Math.floor(H(i, 80) * (sg.drop > 0.3 ? 5.5 : 3.8));
+        for (let q = 0; q < n; q++) {
+          const big = H(i, 130 + q) < 0.35;
+          add((i + 0.7 + 0.28 * H(i, 90 + q)) / sg.k, (2 * H(i, 100 + q) - 1) * w * 0.44, (big ? 0.32 + 0.3 * H(i, 110 + q) : 0.13 + 0.2 * H(i, 110 + q)) * Math.min(1.2, 0.55 + w / 6), big ? 0.22 : 0.4, 0.6 + 0.45 * H(i, 120 + q));
+        }
       }
+      // pools: now and then a boulder standing up out of the water, the current parting round it
+      if (H(i, 180) < 0.45) {
+        const tp = (i + 0.2 + 0.4 * H(i, 181)) / sg.k;
+        add(tp, (2 * H(i, 182) - 1) * w * 0.3, (0.4 + 0.35 * H(i, 183)) * Math.min(1.3, 0.6 + w / 6), 0.18, 0.75 + 0.35 * H(i, 184));
+      }
+    }
+    // along both banks: stones lying half in the water, more where the bank is cut
+    for (let t = 0.03, q = 0; t < 0.98; t += 3.2 / sg.L, q++) {
+      if (H(q, 190) < 0.55) continue;
+      const { w } = sizeAt(sg, t), sd = H(q, 191) < 0.5 ? -1 : 1;
+      add(t, sd * (w / 2 - 0.15 + 0.6 * H(q, 192)), 0.16 + 0.3 * H(q, 193), 0.32, 0.65 + 0.4 * H(q, 194));
     }
     // fallen from the cut bank on the outside of bends
     for (let t = 0.04, q = 0; t < 0.97; t += 5 / sg.L, q++) {
