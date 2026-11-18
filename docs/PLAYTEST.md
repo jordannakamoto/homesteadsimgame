@@ -594,7 +594,7 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 
 1. Set down the cabin plan (Build, Plans) and stand inside its walls. F, then 1. Click a stud low on one wall (a new outlet box), aim at another wall: watch the dashes, press R a couple of times, click. Click on round the room.
 2. Wheel to Switch and plan a box at 1.2 m beside the door; wheel to Ceiling light and aim at the floor under where the light should be.
-3. Press 4 (Waste). Wheel to Sink drain, click a stud on an outside wall, wheel to Out of the building, aim low at an outside wall: the drain drops into the floor and falls to the exit. Try a sink drain far across the cabin: it is refused when the joists are not deep enough for the fall.
+3. Press 4 (Waste). Wheel to Sink drain, click a stud on an outside wall, wheel to Out of the building, aim low at an outside wall: the drain drops into the floor and falls to the exit. On a building on skids (no crawl space), a sink drain run far across the floor is refused when the joists are not deep enough for its fall; over the cabin's crawl space it hangs under the joists instead.
 4. With a panel placed on a wall (Equip), its glow is breaker 1; the run you plan from it becomes that breaker's circuit.
 5. Console: `__servicesPlan.plan('power', [x, y, z], [x, y, z], 'outlet')` plans between two frame-local points; `__game.routes.find(...)` and `__game.routes.channelsFor(structId)` are the router and the channels.
 
