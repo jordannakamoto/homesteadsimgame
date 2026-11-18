@@ -406,8 +406,10 @@ The ground is a physical thing now: a smooth surface you shape 10 cm at a time, 
 
 **The tools and how they move**
 
-- **Shovel.** The mouse is your hand on the shovel. Press where the blade should go in: it bites (a stop and crumbs, harder in turf) and levers up a scoop from a bite about 70 cm across. Keep holding and drag: the loaded blade follows your hand, a ring shows where it will land, and dots show the arc if it will be thrown. Let go and it drops there. Pull past arm's reach and your character walks after your hand. A plain click drops the scoop beside the hole. Press a bag to rip it open. No screen shake.
-- **The flat of the blade (right-drag).** Drag it along the ground: loose earth in its way is pushed ahead of it, hollows it passes are filled from what it pushes, and what is left drops where you let go. The blade only goes down as you push (it starts a few centimetres into the ground where you press and follows the ground down), so pushed into a heap from beside it, it bulldozes the heap along; dragged off the top of a heap, it spreads it out. Firm ground and turf are not cut. The middle button turns the view while the shovel is out.
+- **Shovel.** The mouse is your hand on the shovel. Press where the blade should go in: it is stamped in (a stop and crumbs; quick in loose earth, a hard stamp in turf) and takes about half a blade. Hold still and it goes on sinking, deeper and fuller (faster in loose earth, slowly through turf and clay), with earth crumbling in from the rim. Drag and it levers up and comes with you: a ring shows where it will land, dots show the arc if it will be thrown, and you walk after your hand past arm's reach. Let go and it drops there; a plain click drops it beside the hole. Press a bag to rip it open. No screen shake.
+- **The flat of the blade (right-drag).** Drag it along the ground: loose earth in its way is pushed ahead of it, hollows it passes are filled from what it pushes, and what is left drops where you let go. The blade only goes down as you push (it starts a few centimetres into the ground where you press and follows the ground down), so pushed into a heap from beside it, it bulldozes the heap along; dragged off the top of a heap, it spreads it out. The ridge it pushes slumps as it goes and the sides of its track fall in behind it, so nothing stands up in walls or spires. Firm ground and turf are not cut.
+- **Pat it down (right-click).** The back of the blade slapped on the spot: lumps go, the slope stays, and the earth is firm (it no longer slides). Pat a bank to shape it, or a bed to level it.
+- **The view.** Q and E turn it, the wheel zooms, shift and the wheel tilt it, and the middle button drags it round. The yard opens on a lower view so the shape of the ground reads.
 - **Cut turf.** The shovel held flat: drag along the grass to strip the turf off in a strip.
 - **Materials arrive as things.** Wood chips, bark and bed soil come in 56 L bags set down in front of you (a ring marks the spot, and the store closes so you see them): drag one with your hands, rip it open with the shovel, then scoop the heap where it goes. Gravel, crushed stone, sand and the rest are tipped in a heap. Chips thrown straight on grass work, but the grass comes up through them in a week or two; fabric under them stops it.
 - **Wheelbarrow.** Click to shovel a scoop in (up to 100 L); walk it over and drag down to tip it out.
@@ -502,6 +504,21 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 
 - The cord is invisible and its 30 m is a fixed number; no extension cords yet.
 
+## Services S1 — one connection compiler, and a store for runs in buildings
+
+**What is new**
+
+- Nothing to see yet: this is groundwork for in-wall wiring and plumbing. First Water (the kit pipes in the yard) now compiles through the new generic `src/sim/core/links.js` and must play exactly as before; its output was checked identical on 400 random pipe networks.
+- `src/sim/core/routes.js`: a generic store of runs on frames (a building), with nodes, bores, pulling, joins and segments as work steps. Not registered in the game yet (that is S2, with the content).
+
+**Try this**
+
+1. First Water: pump, fit kit parts from the barrel to the tap, open the valve, leave an end open. Flow, leaks and the valve should behave as before.
+
+**What's weak**
+
+- No player-facing change; routes become visible with S2/S3.
+
 ## Vehicles V0 — the controller stack (no visible change)
 
 **What is new**
@@ -518,6 +535,13 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 **Known gaps**
 
 - Nothing uses it yet; the first user is the vehicle seat (V3).
+
+## Vehicles, under the hood (branch `vehicles-v1v2-core`)
+
+- Nothing to drive yet: this is the drive model and the world's record of vehicles that the ATV (next slices) runs on. The page part lands in V3.
+- What exists: an ATV and a small trailer as records (`VEHICLE_KINDS`), gasoline, a 20 L fuel can and the trailer in the catalog (new "Vehicles and fuel" category), and a `vehicles` sim system: parked poses, fuel, seats, hitches, rentals.
+- Try from the console: `__game.sim.commandNow('vehicles.add', { kind: 'atv', x: __game.player.x + 3, z: __game.player.z })`, then look at `__game.sim.state.sys.vehicles`. `__game.vehicleCore` has the drive model (`createBody`, `stepBody`, `headingControl`).
+- Weak: no feel tuning yet (the numbers are from the design, checked only headless); towing a trailer while reversing is purely kinematic; no damage, no rollover by design.
 
 ## Ground A1 — smaller saves (branch `ground-a1a2`)
 

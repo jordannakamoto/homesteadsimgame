@@ -88,11 +88,16 @@ function dig(ctx, p = {}) {
   const s = ensure(ctx);
   if (!finite(p)) return fail('Where?');
   if (!shovelOk(ctx)) return fail('You need a shovel.');
-  if (s.carry.m3 > 1e-6) return fail('The shovel is full. Throw the load somewhere first.');
+  // `add`: the blade pushed further in, adding to what is already on it (up to a full blade, the same material)
+  const cap = SCOOP_M3 * (p.scale || s.scale || 1), add = !!p.add && s.carry.m3 > 1e-6;
+  if (s.carry.m3 > 1e-6 && !add) return fail('The shovel is full. Throw the load somewhere first.');
   const x = +p.x, z = +p.z, pl = plantNear(s, x, z);
   if (pl) return fail('The ' + PLANTS[pl.k].name.toLowerCase() + ' is planted there. Lift it with your hands first.');
   const g = s.grid, i = pt(x), j = pt(z), wasTurf = EW.sAt(g, i, j) === 0, f0 = EW.fAt(g, i, j);
-  const res = EW.cut(g, x, z, SCOOP_M3 * (p.scale || s.scale || 1), { r: 0.34, t: hours(ctx), clearF: FLAG.TAMP1 | FLAG.TAMP2, looseStays: true });
+  if (add) { const what = EW.lAt(g, i, j) > 0.002 ? g.codes[EW.sAt(g, i, j)] : 'soil'; if (what !== s.carry.s) return fail(''); }
+  const want = Math.min(cap - (add ? s.carry.m3 : 0), Number.isFinite(+p.m3) && +p.m3 > 0 ? +p.m3 : cap);
+  if (!(want > 1e-6)) return fail('');
+  const res = EW.cut(g, x, z, want, { r: 0.34, t: hours(ctx), clearF: FLAG.TAMP1 | FLAG.TAMP2, looseStays: true });
   // a heap dug into at its foot is left over-steep: it slides (the view rolls it down grain by grain; else within the hour)
   (s.unsettled ||= []).push([r3(x), r3(z)]); if (s.unsettled.length > 64) s.unsettled.shift();
   if (!(res.m3 > 1e-6)) return fail('That is as deep as a shovel will go here.');
@@ -101,10 +106,10 @@ function dig(ctx, p = {}) {
   const cutLiner = unline(ctx, s, x, z, 0.2);
   if (f0 & FLAG.FABRIC) EW.paint(g, x, z, 0.16, { clearF: FLAG.FABRIC });
   reseat(s);
-  s.carry = { m3: res.m3, s: res.s };                  // exact: what came out of the ground goes back in
+  s.carry = { m3: (add ? s.carry.m3 : 0) + res.m3, s: res.s };   // exact: what came out of the ground goes back in
   s.totals.dugM3 = r4(s.totals.dugM3 + res.m3);
   ctx.emit('landscape.dig', { m3: res.m3, s: res.s, turf: wasTurf });
-  return { ok: true, m3: r4(res.m3), s: res.s, turf: wasTurf, liner: cutLiner, h: r3(EW.reliefAt(g, x, z)) };
+  return { ok: true, m3: r4(res.m3), load: s.carry.m3, cap, s: res.s, turf: wasTurf, liner: cutLiner, h: r3(EW.reliefAt(g, x, z)) };
 }
 // The load thrown onto (x, z): it lands in a heap and runs down to its angle of repose. Inside a garden box it
 // stays inside the walls.
@@ -181,6 +186,16 @@ function pushCmd(ctx, p = {}) {
   const res = EW.push(s.grid, v[0], v[1], v[2], v[3], Number.isFinite(+p.level) ? +p.level : 0, { w: 0.45, t: hours(ctx) });
   reseat(s);
   return { ok: true, m3: res.m3, s: res.s };
+}
+// The back of the shovel patted on loose ground: smoothed toward its own slope and firmed (EW.pat).
+function patCmd(ctx, p = {}) {
+  const s = ensure(ctx);
+  if (!shovelOk(ctx)) return fail('You need a shovel.');
+  if (!finite(p)) return fail('Where?');
+  const m3 = EW.pat(s.grid, +p.x, +p.z, 0.32, 0.85);
+  if (!(m3 > 0)) return fail('Nothing there to pat down: it is turf, or already smooth.');
+  reseat(s);
+  return { ok: true, m3 };
 }
 // Finish settling round (x, z) at once (a slope the grains have worked on long enough).
 function settleAt(ctx, p = {}) { const s = ensure(ctx); if (!finite(p)) return fail('Where?'); EW.settle(s.grid, +p.x, +p.z, Math.min(1.2, +p.r || 0.7)); reseat(s); return { ok: true }; }
@@ -744,7 +759,7 @@ export const landscape = {
     'landscape.plant': plant, 'landscape.lift': lift, 'landscape.move': move, 'landscape.setScale': setScale,
     'landscape.load': load, 'landscape.tip': tip, 'landscape.water': water, 'landscape.line': line, 'landscape.hose': hose,
     'landscape.deliver': deliver, 'landscape.open': open, 'landscape.moveThing': moveThing,
-    'landscape.pour': pour, 'landscape.land': land, 'landscape.shed': shedAt, 'landscape.settle': settleAt, 'landscape.push': pushCmd,
+    'landscape.pour': pour, 'landscape.land': land, 'landscape.shed': shedAt, 'landscape.settle': settleAt, 'landscape.push': pushCmd, 'landscape.pat': patCmd,
   },
 };
 
