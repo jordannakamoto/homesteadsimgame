@@ -501,3 +501,20 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 **What's weak**
 
 - The cord is invisible and its 30 m is a fixed number; no extension cords yet.
+
+## Vehicles V0 — the controller stack (no visible change)
+
+**What is new**
+
+- Nothing you should notice. Under the hood the engine now has one place that decides what body your input drives and what the camera follows (`src/engine/control.js`, `__game.control`). Vehicles (the ATV next) sit on it; cooking, ladders, scaffold, roof walking and the hands move onto it later.
+- Also exposed for add-ons: `__game.groundAt(x, z, y)` (the one ground read: terrain, shaped yard ground and built floors) and `__game.pushOut(o, rad)` (the circle push-out the player uses against trees, rocks and walls).
+
+**Try this (regression only)**
+
+1. Walk, sprint, jump, scroll the camera in and out: the same as before.
+2. Climb a ladder and a scaffold, walk on a roof, open the kitchen and cook, use the hands on the water kit: all the same as before.
+3. Console: `__game.control.top().id` is `'walk'`; `__game.control.canTake('seat')` says why a seat would be refused (e.g. `arms full`, `build mode`).
+
+**Known gaps**
+
+- Nothing uses it yet; the first user is the vehicle seat (V3).
