@@ -16,6 +16,8 @@
 // events: 'foundation.gate' { jobId, gate } when a gate opens; 'foundation.cured' { jobId } when it is followed no more.
 import * as CU from './core/cure.js';
 import * as CC from './content/concrete.js';
+import * as EW from './core/earthwork.js';
+import * as BA from './core/batch.js';
 import { groundRead } from './ground.js';
 
 const STEPS = ['layout', 'excavate', 'base', 'forms', 'rebar', 'roughin', 'pour', 'finish', 'cure', 'strip', 'done'];
@@ -161,6 +163,224 @@ function finishSite(ctx, job) {
   if (ids.length) call(ctx, 'construction.install', { structId: job.owner.structId, memberIds: ids, from: 'stacks' });
 }
 
+
+// ------------------------------------------------------------------------------------------------ base (B3)
+const fineOf = (ctx) => { const L = ctx.get('landscape'); return L && L.grid && L.grid.tiles ? L.grid : null; };
+const baseYOf = (job, d) => (num(d.baseY) ? d.baseY : job.topY - CC.BASE.slabM);
+function* latticeIn(P, step = 0.1) {
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (const [x, z] of P) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+  for (let j = Math.ceil(z0 / step); j <= Math.floor(z1 / step); j++) for (let i = Math.ceil(x0 / step); i <= Math.floor(x1 / step); i++) if (inPoly(P, i * step, j * step)) yield [i, j];
+}
+// How the base under a slab stands, read from the ground: level (its top on the line under the slab), gravel (a
+// point has gravel at least half the base deep) and compact (tamped twice everywhere is 1). Fractions of the area.
+export function baseRead(state, job, fine) {
+  const B = CC.BASE;
+  let n = 0, level = 0, gravel = 0, filled = 0, compact = 0, needM3 = 0;
+  for (const d of job.digs || []) {
+    const by = baseYOf(job, d), thick = Math.max(0.02, by - d.targetY);
+    needM3 += Math.abs(polyArea(d.poly)) * thick;
+    for (const [i, j] of latticeIn(d.poly)) {
+      const x = i * 0.1, z = j * 0.1, dy = groundRead.surfaceY(state, x, z) - by;
+      n++;
+      if (dy <= B.tolUpM && dy >= -B.tolDownM) level++;
+      const q = fine ? EW.point(fine, i, j) : null;
+      // filled at least half the base above the dig line with gravel. Raking and pushing a layer lose track of its
+      // thickness here and there (core earthwork keeps l only roughly once relaxed), so a filled point counts when it
+      // reads as gravel or gravel lies on most of the base (gravelSurf, below)
+      if (q && q.s !== EW.UNTOUCHED && dy + by - d.targetY >= thick * B.minLayer) { filled++; if (B.surfaces.includes(q.s)) gravel++; }
+      if (q && (q.s !== EW.UNTOUCHED)) compact += q.f & B.tamp2 ? 1 : q.f & B.tamp1 ? 0.5 : 0;
+    }
+  }
+  return n ? { n, level: r6(level / n), gravel: r6(gravel / n >= B.gravelSurf ? filled / n : gravel / n), compact: r6(compact / n), needM3: r6(needM3) } : { n: 0, level: 1, gravel: 1, compact: 1, needM3: 0 };
+}
+const baseDone = (b) => b.level >= CC.BASE.levelDone && b.gravel >= CC.BASE.gravelDone && b.compact >= CC.BASE.compactDone;
+
+// ------------------------------------------------------------------------------------------------ forms (B3)
+// One run of form boards per side of the outline: the board's inside face on the string, its top at the slab's top,
+// stakes outside it at the ends and every FORMS.stakeEveryM between.
+export function makeForms(job) {
+  const F = CC.FORMS, C = job.layout.corners, runs = [];
+  for (let k = 0; k < C.length; k++) {
+    const a = C[k], b = C[(k + 1) % C.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (L < 0.05) continue;
+    const ux = (b[0] - a[0]) / L, uz = (b[1] - a[1]) / L, mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2;
+    let nx = uz, nz = -ux;
+    if (inPoly(C, mx + nx * 0.05, mz + nz * 0.05)) { nx = -nx; nz = -nz; }
+    const e = Math.min(F.stakeEndM, L / 3), n = Math.max(2, Math.ceil((L - 2 * e) / F.stakeEveryM - 1e-9) + 1);
+    const stakes = Array.from({ length: n }, (_, q) => r6(e + ((L - 2 * e) * q) / (n - 1)));
+    runs.push({ a: [a[0], a[1]], b: [b[0], b[1]], len: r6(L), out: [r6(nx), r6(nz)], boards: Math.ceil((L + 2 * F.boardT) / F.boardM - 1e-9), set: 0, stakes, driven: stakes.map(() => 0), bow: 0, leak: null });
+  }
+  return { runs, topY: job.topY };
+}
+const formsSet = (job) => !!job.forms && job.forms.runs.every((r) => r.set >= r.boards);
+const stakesLeft = (job) => (job.forms ? job.forms.runs.reduce((n, r) => n + (r.set >= r.boards ? r.driven.filter((d) => !d).length : 0), 0) : 0);
+function runNear(job, x, z, want) {
+  let best = -1, bd = Infinity;
+  job.forms.runs.forEach((r, k) => {
+    if (want && !want(r)) return;
+    const d = segDist(r.a, r.b, x, z);
+    if (d < bd) { bd = d; best = k; }
+  });
+  return best;
+}
+function segDist(a, b, x, z) { const dx = b[0] - a[0], dz = b[1] - a[1], L2 = dx * dx + dz * dz, k = L2 ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / L2)) : 0; return Math.hypot(x - a[0] - dx * k, z - a[1] - dz * k); }
+const along = (r, x, z) => ((x - r.a[0]) * (r.b[0] - r.a[0]) + (z - r.a[1]) * (r.b[1] - r.a[1])) / r.len;
+function stockTake(ctx, id, qty) {
+  const st = ctx.get('stock');
+  if (!st) return qty;
+  const have = st.items[id] || 0, q = Math.min(qty, Math.floor(have + 1e-9));
+  if (q > 0) call(ctx, 'stock.remove', { id, qty: q });
+  return q;
+}
+// the next step after the forms: rebar (B6) and under-slab rough-in (services) when there is any, else the pour
+function afterForms(job) {
+  if (job.elements.some((e) => e.rebar.need > e.rebar.set)) return 'rebar';
+  if ((job.roughIn.needed || []).some((id) => !(job.roughIn.done || []).includes(id))) return 'roughin';
+  return 'pour';
+}
+function stepTo(ctx, job, step) { if (job.step === step) return; job.step = step; ctx.emit('foundation.step', { jobId: job.id, step }); }
+
+// ------------------------------------------------------------------------------------------------ mixing (B4)
+const MIXQ = { num: 'water', den: 'mix', k: CC.MIX.cementKgPerBag / CC.MIX.bagKg, bands: CC.MIX.bands };
+export function mixView(b) {
+  if (!b || BA.isEmpty(b)) return { bags: 0, waterL: 0, vol: 0, mixed: 0, wc: null, band: null, says: null };
+  const q = BA.quality(b, MIXQ);
+  return { bags: r6((b.parts.mix || 0) / CC.MIX.bagKg), waterL: r6(b.parts.water || 0), vol: b.vol, mixed: b.mixed, wc: q.ratio, band: q.band ? q.band.id : null, says: q.band ? q.band.says : 'Dry powder: run water in' };
+}
+const bandOf = (id) => CC.MIX.bands.find((b) => b.id === id) || CC.MIX.bands[2];
+const abrams = (wc) => Math.min(1, Math.pow(CC.MIX.abramsB, CC.MIX.designWc - wc));
+
+// ------------------------------------------------------------------------------------------------ the pour field (B4)
+// The wet concrete is an earthwork-format grid inside the job (job.pour.grid): h is millimetres of concrete over the
+// base, kept as a layer (l = h) whose surface code is its finish ('mud', 'screeded'); the form boards are WALL_BIT on
+// the points just outside the line, so concrete does not run across them until a bowed board gapes (a leak).
+const P = CC.FEEL_POUR;
+function ensurePour(job) {
+  if (job.pour && job.pour.grid) return job.pour;
+  const g = EW.makeGrid(), C = job.layout.corners;
+  EW.code(g, CC.FINISH.mud); EW.code(g, CC.FINISH.screeded);
+  job.pour = { grid: g, m3: 0, wcM3: 0, weakM3: 0, leakM3: 0, cold: 0, firstT: null, lastT: null, screed: 0, needM3: pourNeed(job) };
+  ringWalls(job);
+  return job.pour;
+}
+function pourNeed(job) {
+  let v = 0;
+  for (const d of job.digs || []) v += Math.abs(polyArea(d.poly)) * Math.max(0, job.topY - baseYOf(job, d));
+  return r6(v);
+}
+const insideJob = (job, x, z) => inPoly(job.layout.corners, x, z);
+// set the form walls on the ring outside the line, open where a board gapes
+function ringWalls(job) {
+  const g = job.pour.grid, C = job.layout.corners, R = P.ringM;
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (const [x, z] of C) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+  const runs = job.forms ? job.forms.runs : [];
+  for (let j = Math.floor((z0 - R) / 0.1); j <= Math.ceil((z1 + R) / 0.1); j++) for (let i = Math.floor((x0 - R) / 0.1); i <= Math.ceil((x1 + R) / 0.1); i++) {
+    const x = i * 0.1, z = j * 0.1;
+    if (inPoly(C, x, z)) continue;
+    let k = -1, bd = R + 1e-9;
+    runs.forEach((r, q) => { const d = segDist(r.a, r.b, x, z); if (d <= bd) { bd = d; k = q; } });
+    if (k < 0) continue;
+    const r = runs[k], t = along(r, x, z), open = r.leak && t >= r.leak[0] && t <= r.leak[1];
+    const f = EW.fAt(g, i, j), want = open ? f & ~EW.WALL_BIT : f | EW.WALL_BIT;
+    if (want !== f || !EW.point(g, i, j)) EW.setPoint(g, i, j, { f: want });
+  }
+}
+// the concrete is a layer: keep l = h, a finish code wherever there is some, and loose so a board can move it
+function syncPour(g) {
+  const mud = EW.code(g, CC.FINISH.mud);
+  for (const k in g.tiles) {
+    const t = g.tiles[k];
+    for (let n = 0; n < t.h.length; n++) {
+      if (t.h[n] < 0) t.h[n] = 0;
+      if (t.h[n] > 0) { t.l[n] = t.h[n]; if (t.s[n] === 0) t.s[n] = mud; t.f[n] |= EW.LOOSE_BIT; } else t.l[n] = 0;
+    }
+  }
+}
+// How far each run's boards bow under the concrete against them (a beam between the stakes and corners that hold
+// it), and which stretch gapes and leaks. Returns the runs that leak.
+function formsLoad(job) {
+  const F = CC.FORMS, g = job.pour.grid, leaks = [];
+  job.forms.runs.forEach((r, k) => {
+    const sup = [0, ...r.stakes.filter((s, q) => r.driven[q]), r.len].sort((a, b) => a - b);
+    let worst = 0, gap = null;
+    for (let q = 0; q + 1 < sup.length; q++) {
+      const s0 = sup[q], s1 = sup[q + 1], S = s1 - s0;
+      if (S < 0.05) continue;
+      let dmax = 0;
+      // the concrete against this stretch: the deepest point within 15 cm inside the board
+      for (let t = s0 + 0.05; t < s1; t += 0.1) for (const off of [0.05, 0.15]) {
+        const x = r.a[0] + ((r.b[0] - r.a[0]) * t) / r.len - r.out[0] * off, z = r.a[1] + ((r.b[1] - r.a[1]) * t) / r.len - r.out[1] * off;
+        dmax = Math.max(dmax, EW.reliefAt(g, x, z));
+      }
+      const w = 0.5 * F.wetKNm3 * 1000 * dmax * dmax, bow = (5 * w * S ** 4) / (384 * F.EI);
+      if (bow > worst) { worst = bow; gap = [s0, s1]; }
+    }
+    r.bow = r6(worst);
+    const was = r.leak;
+    r.leak = worst > F.leakBowM && gap ? [r6(gap[0] + (gap[1] - gap[0]) * 0.3), r6(gap[1] - (gap[1] - gap[0]) * 0.3)] : null;
+    if (r.leak) leaks.push(k);
+    if (JSON.stringify(was) !== JSON.stringify(r.leak)) r.changed = 1;
+  });
+  if (job.forms.runs.some((r) => r.changed)) { job.forms.runs.forEach((r) => delete r.changed); ringWalls(job); }
+  return leaks;
+}
+// concrete runs out through the gaps (a little more every time it is worked)
+function leakFlow(job, leaks) {
+  const g = job.pour.grid;
+  let out = 0;
+  for (const k of leaks) {
+    const r = job.forms.runs[k], t = (r.leak[0] + r.leak[1]) / 2, x = r.a[0] + ((r.b[0] - r.a[0]) * t) / r.len, z = r.a[1] + ((r.b[1] - r.a[1]) * t) / r.len;
+    const before = outsideM3(job);
+    EW.settle(g, x, z, 0.9, 0.12, 25);
+    out += outsideM3(job) - before;
+  }
+  return out;
+}
+function outsideM3(job) {
+  const g = job.pour.grid;
+  let v = 0;
+  for (const [i, j, h] of EW.worked(g, 0.0005)) if (h > 0 && !insideJob(job, i * 0.1, j * 0.1)) v += h;
+  return v * 0.01;
+}
+// the screed rides on the forms: the level in concrete millimetres over the base at a point (0 outside the forms)
+const screedLevel = (ctx, job) => (x, z) => (insideJob(job, x, z) ? Math.max(0, job.topY - groundRead.surfaceY(ctx.state, x, z)) : 0);
+// how much of the slab is screeded flat to the forms, and how much is a hollow
+function screedRead(ctx, job) {
+  const g = job.pour.grid, lv = screedLevel(ctx, job), sc = EW.code(g, CC.FINISH.screeded);
+  let n = 0, flat = 0, hollow = 0, low = 0;
+  for (const d of job.digs || []) for (const [i, j] of latticeIn(d.poly)) {
+    const x = i * 0.1, z = j * 0.1, h = EW.hAt(g, i, j), L = lv(x, z);
+    n++;
+    if (h < L - P.hollowM) { low++; if (EW.sAt(g, i, j) !== 0) hollow++; }
+    else if (Math.abs(h - L) <= P.screedTolM + 0.001 && EW.sAt(g, i, j) === sc) flat++;
+  }
+  return n ? { n, flat: r6(flat / n), hollow: r6(hollow / n), low: r6(low / n) } : { n: 0, flat: 0, hollow: 0, low: 0 };
+}
+function pourBand(job) { const p = job.pour; return p && p.m3 > 1e-6 ? bandOf(CC.MIX.bands.find((b) => p.wcM3 / p.m3 < b.upTo)?.id || 'soupy') : bandOf('good'); }
+// the slab is screeded: it is placed. It starts to cure; the foundation's members are finished in construction.
+function finishPour(ctx, job) {
+  const p = job.pour, wc = p.m3 > 0 ? p.wcM3 / p.m3 : CC.MIX.designWc;
+  const cap = abrams(wc) * (1 - 0.3 * Math.min(1, p.weakM3 / Math.max(1e-6, p.m3))) * (1 - 0.02 * Math.min(5, p.cold));
+  const vol = job.elements.reduce((a, e) => a + (e.volM3 || 0), 0);
+  for (const e of job.elements) {
+    e.pour.m3 = r6(vol > 0 ? (p.m3 * (e.volM3 || 0)) / vol : p.m3 / job.elements.length); e.pour.level = 1; e.pour.cold = p.cold;
+    e.finish.screed = p.screed;
+    e.cure = CU.newCure(p.firstT ?? ctx.t, { setH20: CC.SET_H20 * CC.WORKABLE_SCALE });
+    e.cure.cap = r6(Math.max(0.3, cap));
+  }
+  p.doneT = ctx.t; p.wc = r6(wc);
+  // B5 puts the finishing step (float, joints, broom) between the screed and the cure
+  stepTo(ctx, job, 'cure');
+  if (job.owner) {
+    const ids = [...job.baseIds, ...job.elements.flatMap((e) => e.memberIds)];
+    if (ids.length) call(ctx, 'construction.settle', { structId: job.owner.structId, memberIds: ids });
+  }
+  ctx.emit('foundation.poured', { jobId: job.id, m3: r6(p.m3), wc: p.wc, cap: r6(cap) });
+  applyHolds(ctx, job);
+}
+
 export const foundationSystem = ({ cure = CC.CURE, every = CC.CURE_EVERY } = {}) => ({
   name: 'foundation',
   every,
@@ -222,7 +442,7 @@ export const foundationSystem = ({ cure = CC.CURE, every = CC.CURE_EVERY } = {})
       if (p.digs !== undefined) {
         if (!(Array.isArray(p.digs) && p.digs.length <= 64 && p.digs.every((d) => d && num(d.targetY) && Array.isArray(d.poly) && d.poly.length >= 3 && d.poly.length <= 256 && d.poly.every(okPt)))) return fail('bad digs');
         const old2 = job.digs || [];
-        job.digs = p.digs.map((d, k) => ({ poly: d.poly.map((q) => [r6(q[0]), r6(q[1])]), targetY: r6(d.targetY), frac: 0, rough: 0, ...(old2[k] && Math.abs(old2[k].targetY - d.targetY) < 1e-4 ? { frac: old2[k].frac, rough: old2[k].rough || 0 } : {}) }));
+        job.digs = p.digs.map((d, k) => ({ poly: d.poly.map((q) => [r6(q[0]), r6(q[1])]), targetY: r6(d.targetY), ...(num(d.baseY) ? { baseY: r6(d.baseY) } : {}), frac: 0, rough: 0, ...(old2[k] && Math.abs(old2[k].targetY - d.targetY) < 1e-4 ? { frac: old2[k].frac, rough: old2[k].rough || 0 } : {}) }));
       }
       if (!job.digs) job.digs = [];
       if (pr && !num(p.x)) { job.x = pr.x; job.z = pr.z; }
@@ -257,6 +477,21 @@ export const foundationSystem = ({ cure = CC.CURE, every = CC.CURE_EVERY } = {})
       const s = ensure(ctx), job = jobOf(s, p);
       if (!job) return fail('no such job');
       if (job.step === 'layout' && !job.layout.corners.length) job.step = 'excavate';
+      // B3: the base, read from the ground (gravel, level under the slab, tamped twice); done, the forms come next
+      if (job.step === 'base' && job.type === 'slab') {
+        const b = baseRead(ctx.state, job, fineOf(ctx));
+        for (const e of job.elements) { e.base.needM = r6(job.digs.length ? baseYOf(job, job.digs[0]) - job.digs[0].targetY : 0); e.base.frac = Math.min(b.level, b.gravel); e.base.compact = b.compact; }
+        job.base = { level: b.level, gravel: b.gravel, compact: b.compact };
+        let advanced = false;
+        if (baseDone(b)) {
+          advanced = true;
+          if (job.owner && job.baseIds.length) call(ctx, 'construction.settle', { structId: job.owner.structId, memberIds: job.baseIds });
+          job.forms = makeForms(job);
+          stepTo(ctx, job, 'forms');
+        }
+        return { ok: true, step: job.step, level: b.level, gravel: b.gravel, compact: b.compact, advanced };
+      }
+      if (job.step === 'forms' && formsSet(job) && !stakesLeft(job)) { stepTo(ctx, job, afterForms(job)); return { ok: true, step: job.step, advanced: true }; }
       if (job.step !== 'excavate') return { ok: true, step: job.step, frac: digFrac(job) };
       const D = CC.DIG;
       let n = 0, high = 0, low = 0;
@@ -300,6 +535,221 @@ export const foundationSystem = ({ cure = CC.CURE, every = CC.CURE_EVERY } = {})
       }
       return { ok: true, m3: r6(m3) };
     },
+    // ------------------------------------------------------------------------------------------ the base (B3)
+    // The gravel truck tips a heap at (x, z): the building's gravel from its stacks (or the inventory's) is set out
+    // as a landscape heap. { jobId | structId, x, z, m3? }
+    'foundation.gravel'(ctx, p = {}) {
+      const s = ensure(ctx), job = jobOf(s, p), B = CC.BASE;
+      if (!job) return fail('no such job');
+      if (job.step !== 'base') return fail(job.step === 'excavate' || job.step === 'layout' ? 'Dig to the line first' : 'The base is in');
+      if (!num(p.x) || !num(p.z)) return fail('Where?');
+      const need = baseRead(ctx.state, job, null).needM3 * B.extra, got = job.gravelM3 || 0;
+      if (got >= need - 1e-4) return fail('That is all the base needs: rake it level and tamp it');
+      const want = r6(Math.min(num(p.m3) && p.m3 > 0 ? p.m3 : B.heapM3, need - got));
+      if (job.owner) {
+        const st = ctx.get('stock'), have = st ? st.items[B.item] || 0 : 0;
+        if (have < want - 1e-6) {
+          const d = call(ctx, 'construction.draw', { itemId: B.item, qty: r6(want - have), x: p.x, z: p.z, structId: job.owner.structId, stacksOnly: true });
+          if (d && d.ok && d.qty > 0 && st) call(ctx, 'stock.add', { id: B.item, qty: d.qty });
+        }
+      }
+      const r = call(ctx, 'landscape.deliver', { item: B.item, qty: want, x: p.x, z: p.z });
+      if (!r || !r.ok) return fail('No gravel to tip: order the building\'s materials, or buy gravel in the Yard store');
+      job.gravelM3 = r6(got + r.m3);
+      return { ok: true, m3: r.m3, delivered: job.gravelM3, needM3: r6(need) };
+    },
+    // ------------------------------------------------------------------------------------------ forms (B3)
+    // Set up to n boards on a run (the run named, or the nearest one with boards still to set), snapped to the string.
+    // { jobId | structId, run? | x, z, n }
+    'foundation.setForm'(ctx, p = {}) {
+      const s = ensure(ctx), job = jobOf(s, p), F = CC.FORMS;
+      if (!job) return fail('no such job');
+      if (job.step !== 'forms') return fail(job.step === 'base' ? 'The base goes in first: gravel, raked level, tamped twice' : 'Not setting forms now');
+      const k = Number.isInteger(p.run) ? p.run : num(p.x) && num(p.z) ? runNear(job, p.x, p.z, (r) => r.set < r.boards) : job.forms.runs.findIndex((r) => r.set < r.boards);
+      const r = job.forms.runs[k];
+      if (!r) return fail('no such run');
+      const n = Math.max(1, Math.min(4, Math.round(+p.n || 1), r.boards - r.set));
+      if (n <= 0 || r.set >= r.boards) return { ok: true, set: 0, run: k, done: formsSet(job) };
+      const got = stockTake(ctx, F.boardItem, n);
+      if (!got) return fail('You need form boards (2 x 6 x 8 ft): ' + job.forms.runs.reduce((a, q) => a + q.boards - q.set, 0) + ' more');
+      r.set += got;
+      const done = formsSet(job);
+      if (done && !stakesLeft(job)) stepTo(ctx, job, afterForms(job));
+      return { ok: true, set: got, run: k, runDone: r.set >= r.boards, done, stakesLeft: stakesLeft(job) };
+    },
+    // Drive stakes on a run: the one named (or nearest x, z) and the next ones along it, n in all. Allowed while the
+    // forms are set and during the pour (a bowing board staked stops its leak). { jobId, run | x, z, stake?, n }
+    'foundation.stakeForm'(ctx, p = {}) {
+      const s = ensure(ctx), job = jobOf(s, p), F = CC.FORMS;
+      if (!job) return fail('no such job');
+      if (!job.forms || !['forms', 'rebar', 'roughin', 'pour'].includes(job.step)) return fail('Not setting forms now');
+      const k = Number.isInteger(p.run) ? p.run : num(p.x) && num(p.z) ? runNear(job, p.x, p.z, (r) => r.set >= r.boards && r.driven.some((d) => !d)) : -1;
+      const r = job.forms.runs[k];
+      if (!r) return fail('no stake to drive there');
+      if (r.set < r.boards) return fail('Set the boards on this side first');
+      let first = Number.isInteger(p.stake) ? p.stake : -1;
+      if (first < 0 && num(p.x) && num(p.z)) { const t = along(r, p.x, p.z); let bd = Infinity; r.stakes.forEach((q, i) => { if (!r.driven[i] && Math.abs(q - t) < bd) { bd = Math.abs(q - t); first = i; } }); }
+      if (first < 0) first = r.driven.indexOf(0);
+      if (first < 0 || first >= r.stakes.length) return { ok: true, driven: [], run: k };
+      // the aimed stake, then outward along the run
+      const order = [first];
+      for (let d = 1; order.length < r.stakes.length; d++) { if (first + d < r.stakes.length) order.push(first + d); if (first - d >= 0) order.push(first - d); if (first + d >= r.stakes.length && first - d < 0) break; }
+      const want = order.filter((i) => !r.driven[i]).slice(0, Math.max(1, Math.min(4, Math.round(+p.n || 1))));
+      if (!want.length) return { ok: true, driven: [], run: k };
+      const got = stockTake(ctx, F.stakeItem, want.length);
+      if (!got) return fail('You need form stakes: ' + stakesLeft(job) + ' more');
+      const driven = want.slice(0, got);
+      for (const i of driven) r.driven[i] = 1;
+      let leaks = [];
+      if (job.pour && job.pour.grid) { leaks = formsLoad(job); }
+      if (job.step === 'forms' && formsSet(job) && !stakesLeft(job)) stepTo(ctx, job, afterForms(job));
+      return { ok: true, driven, run: k, stakesLeft: stakesLeft(job), leaking: leaks.length > 0 };
+    },
+    // ------------------------------------------------------------------------------------------ mixing (B4)
+    // The barrow: slash bags open over it, run water in, hoe it through. { bags?, waterL?, work? (metres of hoe),
+    // jobId? (the building whose bags are drawn) }. Returns the mix as it is now (mixView).
+    'foundation.mix'(ctx, p = {}) {
+      const s = ensure(ctx), M = CC.MIX, job = jobOf(s, p);
+      if (p.vessel && p.vessel !== 'barrow') return fail('only the barrow mixes for now');
+      const st = ctx.get('stock');
+      if (st && !st.tools.includes('wheelbarrow')) return fail('You need a wheelbarrow to mix in');
+      if (!s.carry || !s.carry.parts) s.carry = BA.newBatch({ capM3: M.barrowBags * M.bagM3 });
+      const b = s.carry, out = { ok: true };
+      if (+p.bags > 0) {
+        const roomBags = Math.floor((BA.room(b) / M.bagM3) * 1000 + 1e-6) / 1000;
+        if (roomBags < 0.05) return { ...fail('The barrow holds ' + M.barrowBags + ' bags: mix these and tip them first'), mix: mixView(b) };
+        const n = Math.min(Math.max(1, Math.min(4, Math.round(+p.bags))), Math.ceil(roomBags - 1e-6));
+        let kg = r6(Math.min(n, roomBags) * M.bagKg), drawn = 0;
+        if (job && job.owner) { const d = call(ctx, 'construction.draw', { itemId: M.item, qty: kg, structId: job.owner.structId }); if (d && d.ok) drawn = d.qty; }
+        else if (st) { const have = st.items[M.item] || 0, q = Math.min(kg, have); if (q > 0) { call(ctx, 'stock.remove', { id: M.item, qty: r6(q) }); drawn = q; } }
+        else drawn = kg;
+        if (!(drawn > 1e-6)) return { ...fail('No concrete mix: order the building\'s materials (it comes in 80 lb bags)'), mix: mixView(b) };
+        BA.add(b, 'mix', r6(drawn), { m3Each: M.bagM3 / M.bagKg });
+        out.bags = r6(drawn / M.bagKg);
+      }
+      if (+p.waterL > 0) {
+        if (!(b.parts.mix > 0)) return { ...fail('Bags in first: water on its own is just a wet barrow'), mix: mixView(b) };
+        BA.add(b, 'water', r6(Math.min(20, +p.waterL)), { clock: ctx.t });
+      }
+      if (+p.work > 0 && b.parts.mix > 0) {
+        if (!(b.parts.water > 0)) out.dry = true;
+        else BA.work(b, Math.min(5, +p.work), M.workPerBagM / M.bagM3);
+      }
+      out.mix = mixView(b);
+      return out;
+    },
+    // Fill the barrow from a mixer's drum (B7 machines): { from: machineId, m3? }
+    'foundation.take'(ctx, p = {}) {
+      const s = ensure(ctx), M = CC.MIX, m = s.machines && s.machines[p.from];
+      if (!m || !m.batch) return fail('no such mixer');
+      if (!s.carry || !s.carry.parts) s.carry = BA.newBatch({ capM3: M.barrowBags * M.bagM3 });
+      const q = BA.transfer(m.batch, s.carry, num(p.m3) && p.m3 > 0 ? p.m3 : Infinity);
+      if (!(q > 0)) return fail(BA.room(s.carry) < 1e-6 ? 'The barrow is full' : 'The drum is empty');
+      return { ok: true, m3: q, mix: mixView(s.carry) };
+    },
+    // ------------------------------------------------------------------------------------------ the pour (B4)
+    // Tip the barrow into the forms at (x, z): a heap that slumps and spreads as wet as the mix is. { jobId, x, z, m3? }
+    'foundation.tip'(ctx, p = {}) {
+      const s = ensure(ctx), job = jobOf(s, p), M = CC.MIX;
+      if (!job) return fail('no such job');
+      if (job.type !== 'slab') return fail('Only slabs are poured from the barrow so far');
+      if (job.step === 'forms' && formsSet(job)) stepTo(ctx, job, afterForms(job));
+      if (job.step !== 'pour') return fail(['layout', 'excavate', 'base', 'forms'].includes(job.step) ? 'Not ready to pour: ' + (CC.STEP_SAYS[job.step] || job.step) : 'Poured');
+      const b = s.carry;
+      if (!b || !(b.vol > 1e-6)) return fail('The barrow is empty: mix a batch first');
+      const q = BA.quality(b, MIXQ);
+      if (!q.band) return fail('That is dry powder: run water in and hoe it through');
+      if (b.mixed < M.tipMixed) return fail('Hoe it through first: there is dry powder in the corners');
+      if (!num(p.x) || !num(p.z)) return fail('Where?');
+      const C = job.layout.corners;
+      let x = p.x, z = p.z;
+      // tipped at the forms: the heap lands inside them (the barrow's lip rests on the board)
+      const cx = C.reduce((a, c) => a + c[0], 0) / C.length, cz = C.reduce((a, c) => a + c[1], 0) / C.length;
+      const edge = (xx, zz) => Math.min(...C.map((c, k) => segDist(c, C[(k + 1) % C.length], xx, zz)));
+      if (!insideJob(job, x, z) && edge(x, z) > 0.6) return fail('Tip it into the forms');
+      for (let k = 0; k < 40 && (!insideJob(job, x, z) || edge(x, z) < P.tipR * 0.8); k++) { x += (cx - x) * 0.08; z += (cz - z) * 0.08; }
+      const pr = ensurePour(job), g = pr.grid, mixed = b.mixed, t0 = b.t0;
+      const d = BA.discharge(b, num(p.m3) && p.m3 > 0 ? p.m3 : b.vol);
+      const put = EW.fill(g, x, z, d.m3, { r: P.tipR, surface: CC.FINISH.mud, layer: true, spread: false });
+      EW.settle(g, x, z, P.flowR, q.band.slope, P.flowIters);
+      syncPour(g);
+      // a batch placed against concrete that has already set makes a cold joint
+      if (pr.lastT !== null && pr.lastT !== undefined && (ctx.t - pr.lastT) / 3600 > CU.setHoursAt(CC.SET_H20 * CC.WORKABLE_SCALE, envOf(ctx).airC)) pr.cold++;
+      pr.m3 = r6(pr.m3 + put); pr.wcM3 = r6(pr.wcM3 + q.ratio * put); pr.weakM3 = r6(pr.weakM3 + (1 - mixed) * put);
+      if (pr.firstT === null) pr.firstT = t0 ?? ctx.t;
+      pr.lastT = ctx.t;
+      const leaks = formsLoad(job), lost = leaks.length ? leakFlow(job, leaks) : 0;
+      if (lost > 0) { pr.leakM3 = r6(pr.leakM3 + lost); syncPour(g); }
+      if (s.carry && !(s.carry.vol > 1e-9)) s.carry = null;
+      return { ok: true, m3: r6(put), band: q.band.id, slump: q.band.slope, placed: pr.m3, needM3: pr.needM3, leaking: leaks, leakM3: r6(lost), at: [r6(x), r6(z)] };
+    },
+    // A rake (come-along) pulled through the wet concrete: it evens it out, into empty corners too. { jobId, x, z, r? }
+    'foundation.rake'(ctx, p = {}) {
+      const s = ensure(ctx), job = jobOf(s, p);
+      if (!job) return fail('no such job');
+      if (job.step !== 'pour' || !job.pour || !job.pour.grid) return fail('Nothing wet to rake');
+      if (!num(p.x) || !num(p.z)) return fail('Where?');
+      const g = job.pour.grid, r = Math.min(0.6, num(p.r) && p.r > 0 ? p.r : P.rakeR), band = pourBand(job);
+      // the tines reach into the empty corners of the forms: they become part of the pour
+      EW.paint(g, p.x, p.z, r, { surface: CC.FINISH.mud, setF: EW.LOOSE_BIT, ok: (q, i, j) => q.s === EW.UNTOUCHED && insideJob(job, i * 0.1, j * 0.1) });
+      const moved = EW.relax(g, p.x, p.z, r, band.rakeK);
+      syncPour(g);
+      const leaks = formsLoad(job), lost = leaks.length ? leakFlow(job, leaks) : 0;
+      if (lost > 0) { job.pour.leakM3 = r6(job.pour.leakM3 + lost); syncPour(g); }
+      return { ok: true, m3: r6(moved), leaking: leaks, leakM3: r6(lost) };
+    },
+    // The screed board laid across the forms and drawn along them from (x0, z0) to (x1, z1): it rides on the boards
+    // at the slab's top, cuts what stands above, fills hollows from the ridge of concrete it rolls ahead of itself, and
+    // leaves the surface flat and wet. { jobId, x0, z0, x1, z1 }
+    'foundation.screed'(ctx, p = {}) {
+      const s = ensure(ctx), job = jobOf(s, p);
+      if (!job) return fail('no such job');
+      if (job.step !== 'pour' || !job.pour || !job.pour.grid) return fail('Nothing to screed');
+      if (![p.x0, p.z0, p.x1, p.z1].every(num)) return fail('no stroke');
+      const L0 = Math.hypot(p.x1 - p.x0, p.z1 - p.z0);
+      if (L0 > P.maxStrokeM) return fail('too far in one stroke');
+      if (L0 < 1e-4) return { ok: true, m3: 0 };
+      const C = job.layout.corners, g = job.pour.grid, band = pourBand(job);
+      // the board lies across the forms square to the side nearest the stroke's direction, and is drawn along it
+      const sx = (p.x1 - p.x0) / L0, sz = (p.z1 - p.z0) / L0;
+      let ux = 1, uz = 0, best = -1;
+      for (let k = 0; k < C.length; k++) { const a = C[k], b = C[(k + 1) % C.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L < 0.05) continue; const d = Math.abs((b[0] - a[0]) / L * sx + (b[1] - a[1]) / L * sz); if (d > best) { best = d; ux = (b[0] - a[0]) / L; uz = (b[1] - a[1]) / L; } }
+      if (ux * sx + uz * sz < 0) { ux = -ux; uz = -uz; }
+      const nx = -uz, nz = ux;
+      let lo = Infinity, hi = -Infinity;
+      for (const c of C) { const v = c[0] * nx + c[1] * nz; lo = Math.min(lo, v); hi = Math.max(hi, v); }
+      const mid = (lo + hi) / 2, w = hi - lo + 2 * P.screedOverM;
+      const a0 = p.x0 * ux + p.z0 * uz, a1 = p.x1 * ux + p.z1 * uz, at = (a) => [a * ux + mid * nx, a * uz + mid * nz];
+      const lvl = screedLevel(ctx, job), steps = Math.max(1, Math.ceil(Math.abs(a1 - a0) / P.screedStepM));
+      let ridge = 0;
+      for (let k = 0; k < steps; k++) {
+        const [xa, za] = at(a0 + ((a1 - a0) * k) / steps), [xb, zb] = at(a0 + ((a1 - a0) * (k + 1)) / steps);
+        ridge = EW.push(g, xa, za, xb, zb, lvl, { w, t: 0 }).m3;
+      }
+      syncPour(g);
+      // what the board passed over is screeded where it closed up on the level (a dry mix tears instead)
+      const sc = EW.code(g, CC.FINISH.screeded), mud = EW.code(g, CC.FINISH.mud);
+      const amin = Math.min(a0, a1) - 0.05, amax = Math.max(a0, a1) + 0.05;
+      let passed = 0, torn = 0;
+      for (const [i, j] of latticeIn(C)) {
+        const x = i * 0.1, z = j * 0.1, a = x * ux + z * uz;
+        if (a < amin || a > amax) continue;
+        const h = EW.hAt(g, i, j), L = lvl(x, z);
+        if (EW.sAt(g, i, j) === 0) continue;
+        passed++;
+        const flat = Math.abs(h - L) <= P.screedTolM + 0.001;
+        if (flat && band.screeds) EW.setPoint(g, i, j, { s: sc });
+        else { EW.setPoint(g, i, j, { s: mud }); if (flat) torn++; }
+      }
+      const leaks = formsLoad(job), lost = leaks.length ? leakFlow(job, leaks) : 0;
+      if (lost > 0) { job.pour.leakM3 = r6(job.pour.leakM3 + lost); syncPour(g); }
+      const rd = screedRead(ctx, job);
+      job.pour.screed = rd.flat;
+      for (const e of job.elements) e.finish.screed = rd.flat;
+      const done = rd.flat >= P.screedDone;
+      if (done) finishPour(ctx, job);
+      return { ok: true, m3: r6(ridge), screed: rd.flat, hollow: rd.hollow, low: rd.low, torn: torn > passed * 0.3 ? band.says : null, done, leaking: leaks, board: { w: r6(w), mid: r6(mid), u: [r6(ux), r6(uz)] } };
+    },
     // Sandbox and tests: every element is poured now (the foundation members are finished in construction) and
     // starts to cure from now; framing on it waits for the frame gate.
     'foundation.debugPour'(ctx, p = {}) {
@@ -325,6 +775,13 @@ export const foundationSystem = ({ cure = CC.CURE, every = CC.CURE_EVERY } = {})
 // Reads for views and tools (any state, no ctx).
 const F = (state) => (state && state.sys && state.sys.foundation) || freshFoundation();
 export const foundationRead = {
+  // the barrow's mix (B4): { bags, waterL, vol, mixed, wc, band, says }
+  carry: (state) => mixView(F(state).carry),
+  // B3: what the base needs and has, read from the ground
+  base: (state, jobId) => { const j = F(state).jobs[jobId]; return j ? baseRead(state, j, state.sys.landscape && state.sys.landscape.grid) : null; },
+  pourGrid: (state, jobId) => { const j = F(state).jobs[jobId]; return j && j.pour ? j.pour.grid : null; },
+  screedLevelAt: (state, jobId, x, z) => { const j = F(state).jobs[jobId]; return j ? (inPoly(j.layout.corners, x, z) ? Math.max(0, j.topY - groundRead.surfaceY(state, x, z)) : 0) : 0; },
+  inside: (state, jobId, x, z) => { const j = F(state).jobs[jobId]; return !!j && inPoly(j.layout.corners, x, z); },
   job: (state, jobId) => F(state).jobs[jobId] || null,
   jobFor: (state, structId) => jobOf(F(state), { structId }),
   gates: (state, jobId) => { const j = F(state).jobs[jobId]; return j ? gatesOf(j) : null; },
@@ -338,6 +795,9 @@ export const foundationRead = {
     const j = F(state).jobs[jobId];
     if (!j) return null;
     const g = gatesOf(j);
-    return { id: j.id, type: j.type, step: j.step, held: j.held, corners: j.layout.corners.map((c) => [c[0], c[1], !!c[2]]), closed: j.layout.closed, dig: digFrac(j), rough: digFrac(j, 'rough'), trimFrom: CC.DIG.trimFrom, roughM: CC.DIG.roughM, strength: g.strength, gates: Object.fromEntries(CC.GATE_ORDER.map((k) => [k, g[k]])), elements: j.elements.map((e) => ({ id: e.id, kind: e.kind, volM3: e.volM3, poured: !!e.cure, strength: e.cure ? e.cure.strength : 0 })) };
+    return { id: j.id, type: j.type, step: j.step, held: j.held, corners: j.layout.corners.map((c) => [c[0], c[1], !!c[2]]), closed: j.layout.closed, dig: digFrac(j), rough: digFrac(j, 'rough'), trimFrom: CC.DIG.trimFrom, roughM: CC.DIG.roughM, strength: g.strength, gates: Object.fromEntries(CC.GATE_ORDER.map((k) => [k, g[k]])), elements: j.elements.map((e) => ({ id: e.id, kind: e.kind, volM3: e.volM3, poured: !!e.cure, strength: e.cure ? e.cure.strength : 0 })),
+      base: j.base ? { ...j.base, gravelM3: j.gravelM3 || 0 } : { level: 0, gravel: 0, compact: 0, gravelM3: j.gravelM3 || 0 },
+      forms: j.forms ? { boards: j.forms.runs.reduce((a, r) => a + r.boards, 0), set: j.forms.runs.reduce((a, r) => a + r.set, 0), stakes: j.forms.runs.reduce((a, r) => a + r.stakes.length, 0), driven: j.forms.runs.reduce((a, r) => a + r.driven.filter(Boolean).length, 0), leaking: j.forms.runs.some((r) => r.leak), bow: Math.max(0, ...j.forms.runs.map((r) => r.bow)) } : null,
+      pour: j.pour ? { m3: j.pour.m3, needM3: j.pour.needM3, screed: j.pour.screed, leakM3: j.pour.leakM3, cold: j.pour.cold, band: pourBand(j).id, wc: j.pour.m3 > 0 ? r6(j.pour.wcM3 / j.pour.m3) : null } : null };
   },
 };

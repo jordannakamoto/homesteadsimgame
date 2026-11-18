@@ -3,6 +3,8 @@
 // the mixer machine records here.
 import { STAGES } from './construction.js';
 import { DEFAULTS } from '../core/cure.js';
+import { FLAG as GROUND_FLAG } from './landscape.js';
+export { ITEMS_CONCRETE } from './concrete-items.js';
 
 // The design strength is the catalog's concrete (C25/30): cure fractions are of this.
 export const DESIGN_MPA = 25;
@@ -67,4 +69,70 @@ export const STEP_SAYS = Object.freeze({
   layout: 'Lay out the corners with string lines first',
   excavate: 'Dig to the strings: the amber is ground still too high',
   base: 'Dug to the line. The gravel base goes in next',
+  forms: 'The base is firm. Set the form boards along the strings and stake them',
+  pour: 'Formed. Mix concrete in the barrow, tip it in, rake it and screed it off the forms',
 });
+
+// The gravel base (slice B3). Gravel is delivered as heaps (the landscape's bulk delivery), barrowed, raked to the
+// level under the slab and tamped twice with the hand tamper (the landscape's tamp flags). Heights are world metres.
+export const BASE = Object.freeze({
+  item: 'gravel',                       // what the base is bought as (m3)
+  surfaces: Object.freeze(['gravel', 'crushed']),   // ground layers that count as a base
+  thickM: 0.1,                          // default base under a slab: 4 in of compacted gravel
+  slabM: 0.1,                           // default slab thickness (when the page sends no base level)
+  tolUpM: 0.02, tolDownM: 0.03,         // the top of the base counts as level within these of the line
+  minLayer: 0.5,                        // a point is gravelled filled at least this fraction of the base thickness
+  gravelSurf: 0.5,                      // ... once at least this much of the base reads as gravel on top
+  tamp1: GROUND_FLAG.TAMP1, tamp2: GROUND_FLAG.TAMP2,   // tamped once, tamped twice (firm)
+  levelDone: 0.9, gravelDone: 0.92, compactDone: 0.9,   // fractions of the base area for the base to be done
+  heapM3: 0.12,                         // one heap off the truck as it tips along a drag
+  extra: 1.1,                           // a tenth more than the base volume is delivered (tamping takes some up)
+});
+
+// Forms (slice B3): 2x6 boards on edge with their inside face on the string line and their top at the finished
+// height, held by stakes outside them. An unstaked stretch bows under the concrete as a beam would: the deflection of
+// a simply supported board under the hydrostatic push of wet concrete, 5 w L^4 / 384 EI, and leaks once it gapes.
+export const FORMS = Object.freeze({
+  boardItem: 'form_board', stakeItem: 'form_stake',
+  boardM: 2.44, boardH: 0.14, boardT: 0.038,
+  stakeEveryM: 0.9, stakeEndM: 0.15, stakeOutM: 0.06,
+  EI: 10e9 * (0.14 * 0.038 ** 3) / 12,  // N m2: a 2x6 (E 10 GPa) bent flat-wise, outward
+  wetKNm3: 23.5,                        // wet concrete pushes like a fluid this heavy (kN/m3)
+  leakBowM: 0.01,                       // a board bowed out this far opens a gap at its foot: the concrete leaks
+});
+
+// Mixing by hand in the barrow (slice B4). An 80 lb bag of mix holds about 5.4 kg of cement; the maker asks about
+// 3 L of water a bag (a water/cement ratio near 0.55). The bands are of water/cement ratio: too dry crumbles and
+// will not close under the screed, too wet slumps flat, bleeds and is weaker (Abrams: strength falls about 14^(w/c)).
+export const MIX = Object.freeze({
+  item: 'concrete_mix', bagKg: 36, bagM3: 0.017, cementKgPerBag: 5.4,
+  idealLPerBag: 3.0, barrowBags: 3,     // a 6 cu ft barrow mixes three bags at a time
+  hoseLps: 0.5,                         // a garden hose running into the barrow
+  workPerBagM: 1.4,                     // metres of hoe strokes to mix one bag through once water is in
+  tipMixed: 0.5,                        // mixed enough to tip (less leaves streaks of dry powder)
+  designWc: 0.56, abramsB: 14,          // full design strength at the maker's 3 L a bag; weaker as it gets wetter
+  bands: Object.freeze([
+    Object.freeze({ id: 'dry', upTo: 0.4, slope: 0.75, rakeK: 0.18, screeds: false, says: 'Dry and crumbly: it will not close up under the screed. Add water' }),
+    Object.freeze({ id: 'stiff', upTo: 0.48, slope: 0.42, rakeK: 0.4, screeds: true, says: 'Stiff: it holds its heap. A little more water and it flows' }),
+    Object.freeze({ id: 'good', upTo: 0.64, slope: 0.2, rakeK: 0.65, screeds: true, says: 'Right: a rolling, glossy mud that holds a ridge' }),
+    Object.freeze({ id: 'wet', upTo: 0.78, slope: 0.08, rakeK: 0.85, screeds: true, says: 'Wet: it slumps and spreads. It will be weaker' }),
+    Object.freeze({ id: 'soupy', upTo: Infinity, slope: 0.03, rakeK: 0.9, screeds: true, says: 'Soupy: it runs flat and bleeds water. Much weaker' }),
+  ]),
+});
+
+// How a pour behaves (the tunables of the pour field): the wet concrete is an earthwork grid inside the job whose
+// height is millimetres of concrete over the base; the forms are walls in it.
+export const FEEL_POUR = Object.freeze({
+  tipR: 0.3,               // a barrow tipped lands as a heap this wide
+  flowR: 1.6, flowIters: 80,
+  rakeR: 0.35,
+  screedStepM: 0.1,        // a screed stroke is pushed in short steps so the board follows the forms
+  screedOverM: 0.12,       // the board is this much longer than the gap between the forms it rides on
+  screedTolM: 0.004,       // on the level within this: screeded (flat and wet-bright)
+  hollowM: 0.006,          // below the level by more: a hollow behind the board (dull)
+  screedDone: 0.95,        // this much of the slab screeded flat: the pour is done
+  ringM: 0.12,             // the form boards stand in a ring of points this wide outside the line
+  maxStrokeM: 4,
+});
+// Finish codes kept per point of the pour grid (the earthwork surface channel).
+export const FINISH = Object.freeze({ mud: 'mud', screeded: 'screeded' });

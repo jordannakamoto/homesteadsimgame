@@ -525,6 +525,7 @@ function setPlan(ctx, p) {
   if (!s.waste) s.waste = {};
   requote(s, pr);
   if (old) for (const k in old.raised) pr.raised[k] = true;
+  if (old && old.hold && Object.keys(old.hold).length) pr.hold = { ...old.hold };   // holds belong to another system (construction.setHold): a plan sent again keeps them
   if (!old) for (const st of C.STAGES) if (st.flat) for (const par of flatParents(pr, st.id)) if (frameReady(pr, st.id, par)) pr.raised[par] = true;
   retally(pr);
   if (!pr.lines[LADDER_KEY] && C.LADDER.with.some((st) => pr.tally[st] && pr.tally[st][1]) && item(C.LADDER.itemId)) {   // work at height is done from a ladder: it comes with the order
@@ -931,6 +932,14 @@ export const constructionSystem = () => ({
       refresh(c, c.s, pr);
       c.emit('construction.hold', { structId: pr.id, stages, reason: p.reason || null });
       return { ok: true };
+    },
+    // another system uses up the building's material from its stacks (nearest (x, z) first), then from the inventory
+    // (the gravel base, bags of concrete mix): { itemId, qty, x?, z?, structId? } -> { ok, qty: what was drawn }
+    'construction.draw': (c, p) => {
+      if (!p || !item(p.itemId) || !(p.qty > 0)) return { ok: false, reason: 'nothing to draw' };
+      const pr = p.structId !== undefined ? c.s.progress[p.structId] : null, x = Number.isFinite(p.x) ? p.x : pr ? pr.x : 0, z = Number.isFinite(p.z) ? p.z : pr ? pr.z : 0;
+      const got = round6(drawSupply(c.s, p.stacksOnly ? null : c.get('stock'), p.itemId, round6(p.qty), x, z));
+      return { ok: got > 1e-9, qty: got, reason: got > 1e-9 ? undefined : 'none on site' };
     },
     'construction.dismantle': dismantle,
     'construction.setLevel': (c, p) => { if (!LEVELS.includes(p.level)) return { ok: false, reason: 'unknown level' }; const pr = c.s.progress[p.structId]; if (pr) pr.level = p.level; else c.s.level = p.level; return { ok: true }; },
