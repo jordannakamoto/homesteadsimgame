@@ -674,3 +674,31 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 - Gravel coverage is read as "filled to half the base depth over the dig line" once the job's own gravel has been tipped in (core earthwork loses track of a raked layer's thickness, so the label alone is not reliable).
 - Water feedback is the meter, the colour of the heap in the barrow and the hint; no sloshing or crumb visuals in the tub yet. The screed's "saw" is a small wobble of the board.
 - Console: `__foundation.drawn()`, `__game.foundation.jobView(__game.sim.state, '1')`, `__game.foundation.carry(__game.sim.state)`. Tests: `node --test test/foundation-pour.test.mjs`, `node test/foundation.smoke.mjs`.
+
+## Foundations B5 — finishing, cure, covers, bolts and stripping (branch `ground-b5`)
+
+**What is new**
+
+- Screeded, a slab is no longer "poured and done": it is **finished by hand** (step `finish`) and **cures from the moment it is placed**. The Site bar (key 7) becomes the finishing kit (one tool in the store, **Concrete finishing kit**, $95): **Float** (bull float: drag over the screeded top, it goes from wet-bright to an even satin), **Trowel** and **Broom** (drag), **Edger** (drag along inside a form), **Joints** (the groover along dashed lines; only slabs with a span over 3 m need them, at most 2.5 m apart) and **Bolts** (anchor bolts, $1.6 each: press a glowing mark along the sill line; `gesture` at a time).
+- **Timing matters.** The wet top bleeds: a bright sheen of water rises after the screed. Float right away, then **wait for the sheen to go** (the wet-bright look fades; a wetter mix bleeds longer). Trowel or broom **before** that works the water into the skin: pale scaled blotches and a weaker top. After **final set** the tools tear and refuse; the finish step ends by itself and what was not worked stays as it is. All windows are in units of the concrete's set time at its temperature, so cold stretches them and heat shrinks them (and pausing the clock removes the pressure). The hint and the chip tell you the phase and the hours left.
+- **Anchor bolts** are needed on a slab: **framing refuses** ("Anchor bolts first...") until every mark has a bolt, even once the concrete is strong. They push in while it is wet; after initial set they are drilled and epoxied in, one at a time.
+- The finish step ends when the top is floated and worked (troweled or broomed), jointed where needed and bolted: the wet field goes and build mode draws the slab.
+- **Cure look**: a thin dark overlay on the slab (not build mode's member) that is wet-dark at first and **lightens with strength**; misting darkens it again; drying out shows pale crazing, frost shows scaled patches. A **chip** at the top of the screen shows the strength with ticks at walk 10% / strip 20% / frame 50% and what is next.
+- **Covers**: **Blanket** (holds moisture and heat in: for cold nights) and **Plastic** (holds moisture in), $70 / $28, reusable, press to roll over, press again to take off. **Mist** (a garden hose, $35 in the Yard store): the top stays wet for half an hour (not in frost). Both feed the cure's drying and frost terms: a hot windy day on a bare slab crazes it.
+- **Strip**: at a fifth of the strength the Strip tool pries a side (`gesture` boards at a time); the first board off takes that side's stakes. Boards and stakes go back to stock. A side whose edge was not run with the edger chips as it comes off.
+- Fixed: the screed's strength factor (a wet mix, a cold joint) used to be overwritten by the next cure step; it now sticks (`cure.q`).
+
+**Try this**
+
+1. As B4 (a slab shed, dig, base, forms, pour, screed), but buy the finishing kit, a blanket (or plastic), a hose and 8+ anchor bolts first (the hints have Buy buttons).
+2. After the screed: float the whole top, watch the sheen. Try the broom on a corner right away (scales), then wait until the hint says the sheen is gone and broom the rest. Click each bolt mark.
+3. Cover it, wait until the chip shows Strip forms at 20%, strip the sides. Framing opens at 50% with the bolts in.
+4. Console: `__game.foundation.finish(__game.sim.state, '1')` (window, bolts, joints, cover), `__game.sim.commandNow('foundation.finishAt', { jobId: '1', x, z, kind: 'float' })`, `foundation.setBolt`, `foundation.joint`, `foundation.cover { kind }`, `foundation.mist`, `foundation.strip`, `foundation.finish` (stop working the top now). Time speeds the cure: `__game.sim.runTicks(60)` is an hour.
+
+**Weak / not in yet**
+
+- The windows are tuned on paper (bleed ends at 0.3 of initial set, tools stop at 1.5), with the 2.5x working-time scale; they need a playtest against the real game clock. The sheen and phase are read from the cure every 10 sim minutes, so they lag a little.
+- Slabs only (stem walls and piers by `debugPour` have no finish step, bolts or strip yet: B8). No saw-cut for a joint missed in time, and a slab left unjointed is not cracked yet. No rebar (B6).
+- The cover is a flat sheet with a pop-in, no cloth physics; the mist is a particle spray with no water use. Hand models for the finishing tools are first-pass boxes.
+- The tint is an overlay at the slab top; if build mode's slab member is raised or changed in height it will not follow (it reads the job's top).
+- Tests: `node --test test/foundation-finish.test.mjs`, `node test/foundation.smoke.mjs` (now through strip).

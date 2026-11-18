@@ -71,6 +71,9 @@ export const STEP_SAYS = Object.freeze({
   base: 'Dug to the line. The gravel base goes in next',
   forms: 'The base is firm. Set the form boards along the strings and stake them',
   pour: 'Formed. Mix concrete in the barrow, tip it in, rake it and screed it off the forms',
+  finish: 'Screeded. Bull float it, wait for the bleed water to go, then trowel or broom, joint it and set the anchor bolts',
+  cure: 'Curing. Cover it or mist it, and strip the forms at a fifth of its strength',
+  strip: 'Strong enough to strip the forms',
 });
 
 // The gravel base (slice B3). Gravel is delivered as heaps (the landscape's bulk delivery), barrowed, raked to the
@@ -135,4 +138,31 @@ export const FEEL_POUR = Object.freeze({
   maxStrokeM: 4,
 });
 // Finish codes kept per point of the pour grid (the earthwork surface channel).
-export const FINISH = Object.freeze({ mud: 'mud', screeded: 'screeded' });
+export const FINISH = Object.freeze({ mud: 'mud', screeded: 'screeded', floated: 'floated', troweled: 'troweled', broomed: 'broomed', scaled: 'scaled' });
+
+// Finishing, joints, anchor bolts, covers, misting and stripping (slice B5). Times are in units of the concrete's
+// initial set time at its temperature (the cure record's setX), so they stretch with WORKABLE_SCALE, the cold and
+// the heat the same way the set does: 1 is initial set, about 1.5 is final set (a thumb leaves no print).
+export const FIN = Object.freeze({
+  bleedEnd: 0.3,            // the sheen of bleed water has gone off a normal mix by this time
+  bleedScale: Object.freeze({ dry: 0.5, stiff: 0.75, good: 1, wet: 1.4, soupy: 1.9 }),   // a wetter mix bleeds longer
+  sheenFade: 0.1,           // the sheen thins over this much time before it is gone
+  floatUntil: 1.5, trowelUntil: 1.5, edgeUntil: 1.35, jointUntil: 1.3,   // later than this the tool tears the surface
+  boltFree: 1.0,            // anchor bolts push in until initial set; after that they are drilled and epoxied
+  r: Object.freeze({ float: 0.5, trowel: 0.3, broom: 0.35, edge: 0.18 }),   // the swath each tool works
+  done: 0.9,                // this much of the slab worked: finished
+  scaledLoss: 0.15,         // troweling bleed water in weakens the skin: up to this much of the strength
+  kit: 'concrete_finishing_kit',   // bull float, edger, groover, steel trowel and a stiff broom
+  maxStrokeM: 4,
+  jointAboveM: 3.0, jointEveryM: 2.5, jointCellM: 0.25, jointReachM: 0.3,   // a span over 3 m is jointed, lines at most 2.5 m apart
+  edgeCellM: 0.3,
+});
+export const BOLTS = Object.freeze({ item: 'anchor_bolt', everyM: 1.8, endM: 0.2, insetM: 0.05, mergeM: 0.45, perCall: 4, reachM: 0.45 });
+export const COVERS = Object.freeze({ blanket: 'curing_blanket', plastic: 'poly_sheeting' });
+export const MIST = Object.freeze({ tool: 'garden_hose', holdS: 1800, minAirC: 3 });   // a misting keeps the top wet for half an hour
+export const BOLT_SAYS = 'Anchor bolts first: the sills bolt to the slab, and the bolts go in while the concrete is wet';
+export const FINISH_SAYS = Object.freeze({
+  bleeding: 'Bleed water still on top: float it, then wait for the sheen to go before you trowel',
+  ready: 'The sheen is gone: trowel or broom it now, before it stiffens',
+  late: 'It has set: too late to work the surface',
+});

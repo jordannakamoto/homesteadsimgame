@@ -12,7 +12,10 @@
 // formula) in the first `dryWindowH` clock hours, uncovered and not kept wet, costs up to `dryLoss` and crazes the top.
 // Rain on the surface before set pits it (cosmetic: `pit`).
 //
-// record = { t0, ageH, setP, set, eqH, strength, cap, frost, dry, pit, covered, wet, tc }
+// record = { t0, ageH, setP, setX, set, eqH, strength, cap, q, frost, dry, pit, covered, wet, tc }
+//   setX: like setP but not clamped at initial set: hours of working time in units of the initial set time (it is 1.5
+//   at about final set), so a finishing window can be read from it; q: quality factor from how it was made (a wet
+//   mix, a cold joint) that scales the damage-free strength and is never overwritten by a step.
 //   ageH: clock hours since placing; setP: 0..1 toward initial set; eqH: equivalent age in hours at 20 C;
 //   strength: fraction of the design strength now; cap: 1 minus damage (frost, drying); covered: null | 'plastic' |
 //   'blanket' (or any cover word the content uses); wet: kept wet (misted, ponded); tc: material temperature last step.
@@ -38,7 +41,7 @@ export const DEFAULTS = Object.freeze({
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
 export function newCure(t, o = {}) {
-  return { t0: t, ageH: 0, setP: 0, set: false, eqH: 0, strength: 0, cap: 1, frost: 0, dry: 0, pit: 0, covered: null, wet: false, tc: null, setH20: o.setH20 ?? DEFAULTS.setH20 };
+  return { t0: t, ageH: 0, setP: 0, setX: 0, q: 1, set: false, eqH: 0, strength: 0, cap: 1, frost: 0, dry: 0, pit: 0, covered: null, wet: false, tc: null, setH20: o.setH20 ?? DEFAULTS.setH20 };
 }
 export const strengthAt = (teDays, k = DEFAULTS) => (teDays > 0 ? teDays / (k.a + k.b * teDays) : 0);
 // equivalent hours at the reference temperature per clock hour at tc
@@ -64,6 +67,7 @@ export function stepCure(c, dtH, lifeDtH, env = {}, k = DEFAULTS) {
   if (c.covered && k.insulating.includes(c.covered) && c.eqH < k.blanketH) tc += k.blanketC;
   c.tc = tc;
   c.ageH += dtH;
+  c.setX = (c.setX || 0) + dtH / setHoursAt(c.setH20 ?? k.setH20, tc);
   if (!c.set) {
     c.setP += dtH / setHoursAt(c.setH20 ?? k.setH20, tc);
     if (c.setP >= 1 - 1e-9) { c.setP = 1; c.set = true; }
@@ -77,9 +81,9 @@ export function stepCure(c, dtH, lifeDtH, env = {}, k = DEFAULTS) {
     const e = evaporation(tc, air, env.rh ?? 0.6, env.windMs ?? 0);
     if (e > k.evapLimit) c.dry = clamp(c.dry + (dtH * (e - k.evapLimit)) / k.dryH, 0, 1);
   }
-  c.cap = clamp(1 - k.frostLoss * c.frost - k.dryLoss * c.dry, 0, 1);
+  c.cap = clamp((c.q ?? 1) * (1 - k.frostLoss * c.frost - k.dryLoss * c.dry), 0, 1);
   c.strength = strengthFrac(c, k);
   return c;
 }
 // Jump a record to an equivalent age (tests and sandbox), no damage.
-export function ageTo(c, eqH, k = DEFAULTS) { c.eqH = eqH; c.setP = 1; c.set = true; c.strength = strengthFrac(c, k); return c; }
+export function ageTo(c, eqH, k = DEFAULTS) { c.eqH = eqH; c.setP = 1; c.setX = Math.max(c.setX || 0, 2); c.set = true; c.strength = strengthFrac(c, k); return c; }

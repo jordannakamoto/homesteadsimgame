@@ -22,6 +22,14 @@
      drag down at the forms tips it (a meter shows the water/cement ratio against too dry .. soupy). The rake spreads
      it. The screed board lies across the forms: drag it toward you and the surplus rolls ahead as a ridge, leaving a
      flat, wet-bright top; dull patches are hollows. The wet field is one mesh (window.__fieldmesh.create).
+   - Finishing (B5): screeded, the wet field stays and the Site bar offers the finishing kit: Float (the bull float, drag over
+     the screeded top: it goes from wet-bright to an even satin), Trowel / Broom (drag; only once the bleed-water sheen is
+     gone, a bar and the hint say when: before that it scales the skin, after final set it tears), Edger (drag along a form),
+     Joints (the groover dragged along the dashed lines on a slab over 3 m) and Bolts (press a glowing mark along the sill line:
+     pushed in while wet; framing stays held without them). A small chip shows strength against the walk / strip / frame
+     gates. Then cure: Blanket and Plastic (press to roll one over, again to take it off), Mist (the hose) and Strip (press a
+     side: its boards and stakes come off to stock once the concrete is a fifth strength). The slab is tinted dark when wet
+     and lightens with strength: a thin overlay from here (build mode's slab member is untouched).
    Owns no truth: the job, its layout and its dig are the foundation system's (src/sim/foundation.js); the ground is
    the ground system's. Registers window.__foundation = { owns, hint, job, redraw, tools, debugPour }.
    Cost: a sync of jobs twice a second (cheap reads); the overlay is recoloured only when the ground changes and the
@@ -253,7 +261,7 @@
     for (const j of Object.values(FS().jobs)) {
       if (!j.layout || !j.layout.corners.length) continue;
       const C = j.layout.corners, cx = C.reduce((a, c) => a + c[0], 0) / C.length, cz = C.reduce((a, c) => a + c[1], 0) / C.length;
-      const d = Math.hypot(cx - P.x, cz - P.z) - (['layout', 'excavate', 'base', 'forms', 'pour'].includes(j.step) ? 0 : 20);
+      const d = Math.hypot(cx - P.x, cz - P.z) - (['layout', 'excavate', 'base', 'forms', 'pour', 'finish', 'cure', 'strip'].includes(j.step) ? 0 : 20);
       if (d < bd) { bd = d; best = j; }
     }
     return best;
@@ -453,7 +461,7 @@
     job.forms.runs.forEach((r, k) => {
       const rg = new T.Group(), segs = [];
       g.add(rg);
-      const setL = Math.min(r.len + F.boardT * 2, r.set * F.boardM);
+      const setL = Math.min(r.len + F.boardT * 2, (r.set - (r.stripped || 0)) * F.boardM);
       // the boards, in short pieces so a bow shows as a curve
       for (let t0 = -F.boardT; t0 < setL - F.boardT - 1e-3; t0 += 0.3) {
         const t1 = Math.min(setL - F.boardT, t0 + 0.3), tm = (t0 + t1) / 2, m = new T.Mesh(box, formWood);
@@ -462,7 +470,7 @@
       }
       // stakes driven outside the boards; the ones still to drive glow where they go
       r.stakes.forEach((s, q) => {
-        if (s > setL) return;
+        if (s > setL || r.pulled) return;
         const [x, z] = runPt(r, s, F.boardT + 0.022);
         if (r.driven[q]) { const m = stakeMesh(x, z, top - 0.015, stakeWood, 0.038); rg.add(m); }
         else { const d = new T.Mesh(dotGeo, dotMat); d.position.set(x, surf(x, z) + 0.03, z); d.renderOrder = 3; d.userData = { run: k, stake: q }; g.add(d); fv.dots.push(d); }
@@ -481,7 +489,7 @@
       }
     }
   }
-  const formsSig = (j) => j && j.forms ? j.step + ':' + j.topY + ':' + j.forms.runs.map((r) => r.set + '/' + r.driven.join('') + '/' + Math.round(r.bow * 1000)).join(';') : '';
+  const formsSig = (j) => j && j.forms ? j.step + ':' + j.topY + ':' + j.forms.runs.map((r) => r.set + '/' + (r.stripped || 0) + '/' + r.driven.join('') + '/' + Math.round(r.bow * 1000)).join(';') : '';
   // the ghost of the next boards, snapped along the run nearest the hand
   function ghostTick(a, job) {
     const show = on && held() === 'board' && job && job.step === 'forms' && job.forms && a.valid;
@@ -778,31 +786,36 @@
     G.burst(cx, job.topY + 0.1, cz, 30, 0xdfe6ea, 2.6, 1.4, 0.05, 1.1);
     screedMesh.visible = false;
     const v = FR.jobView(G.sim.state, job.id);
-    say('<b>Screeded.</b> Dead flat and wet-bright, right to the forms. The slab is poured: ' + (v.pour ? Math.round(v.pour.m3 * 1000) + ' L' : '') + '. It is curing now; framing waits until it is half strength.', 9);
+    say('<b>Screeded.</b> Dead flat and wet-bright, right to the forms (' + (v.pour ? Math.round(v.pour.m3 * 1000) + ' L' : '') + '). Now finish it: take up the <b>float</b> and sweep it over the top while the bleed water rises.', 9);
+    setTimeout(() => { if (on) { H.setSlots(slotList()); H.hold && H.hold('bfloat'); } }, 260);
   }
 
   /* ---------- the pour drawn: the wet field (fieldmesh) ---------- */
   const pourMesh = { fm: null, jobId: null, grid: null, colour: null };
   function pourDirty(x, z, r) { if (pourMesh.fm) pourMesh.fm.request([Math.floor((x - r) / 0.1), Math.floor((z - r) / 0.1), Math.ceil((x + r) / 0.1), Math.ceil((z + r) / 0.1)]); }
   function pourColour(job) {
-    const top = job.topY, band = (FR.jobView(G.sim.state, job.id).pour || {}).band || 'good';
+    const top = job.topY, band = (FR.jobView(G.sim.state, job.id).pour || {}).band || 'good', fw = FR.finish(G.sim.state, job.id), sheen = fw ? fw.sheen : 1;
     return (tile, n, i, j, out) => {
       const g = pourMesh.grid, name = g.codes[tile.s[n]], h = tile.h[n] / 1000, x = i * 0.1, z = j * 0.1;
       const lv = FR.screedLevelAt(G.sim.state, job.id, x, z), inside = lv > 0, nz = ((i * 73856093) ^ (j * 19349663)) % 7 / 300;
       // wet concrete is a dark, cool grey; the finish channel is how glossy (the bleed-water sheen of a screeded top)
       let v = 0.34 + nz, f = 0.22;
-      if (name === 'screeded') { v = 0.31; f = 0.7; }
+      if (name === 'screeded') { v = 0.31 + 0.09 * (1 - sheen); f = 0.1 + 0.6 * sheen; }
+      else if (name === 'floated') { v = 0.34 + nz * 0.5 + 0.04 * (1 - sheen); f = 0.08 + 0.45 * sheen; }          // an even satin, the sheen over it while it bleeds
+      else if (name === 'troweled') { v = 0.31 + nz * 0.3; f = 0.5; }                                           // burnished steel-trowel satin
+      else if (name === 'broomed') { v = ((i >> 1) & 1) ? 0.43 : 0.39; f = 0.02; }                                // fine broom lines
+      else if (name === 'scaled') { v = 0.5 + nz * 3; f = 0.0; }                                                  // pale, blotchy: water worked into the skin
       else if (inside && h < lv - 0.006) { v = 0.4 + nz; f = 0.05; }                 // a hollow: dull
       else if (inside && h > lv + 0.01) { v = 0.36 + nz; f = 0.15; }                 // standing proud: lumpy
-      if (band === 'soupy' || band === 'wet') { v -= 0.03; f = Math.max(f, 0.6); }
+      if (band === 'soupy' || band === 'wet') { v -= 0.03; f = Math.max(f, 0.6 * (name ? sheen : 1)); }
       if (band === 'dry') { v += 0.06; f = Math.min(f, 0.05); }
       if (!inside) { v += 0.03; f = 0.15; }
-      out[0] = v; out[1] = v * 0.985; out[2] = v * 0.95; out[3] = f;
+      out[0] = v; out[1] = v * 0.985; out[2] = v * (0.95 + 0.05 * sheen); out[3] = f;
       return true;
     };
   }
   function pourSync(job) {
-    const g = job && job.step === 'pour' && job.pour ? job.pour.grid : null;
+    const g = job && (job.step === 'pour' || job.step === 'finish') && job.pour ? job.pour.grid : null;
     if (!g) {
       if (pourMesh.fm) {
         // poured: build mode draws the slab member in its place
@@ -812,7 +825,12 @@
       }
       return;
     }
-    if (pourMesh.fm && pourMesh.jobId === job.id && pourMesh.grid === g) { pourMesh.colour = pourColour(job); return; }
+    if (pourMesh.fm && pourMesh.jobId === job.id && pourMesh.grid === g) {
+      pourMesh.colour = pourColour(job);
+      const w = FR.finish(G.sim.state, job.id), sg = w ? Math.round(w.sheen * 10) + w.phase : '';
+      if (sg !== pourMesh.sheenSig) { pourMesh.sheenSig = sg; pourMesh.fm.request(); }      // the sheen thins as the time goes
+      return;
+    }
     if (pourMesh.fm) pourMesh.fm.dispose();
     const C = job.layout.corners;
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
@@ -849,10 +867,257 @@
   }
   function b34Slow(job) { pourSync(job); bagPile(job); }
 
+  /* ================= B5: finishing, bolts, joints, curing, covers, stripping ================= */
+  const KIT = 'concrete_finishing_kit', COVER_ITEM = { blanket: 'curing_blanket', plastic: 'poly_sheeting' }, HOSE = 'garden_hose';
+  const STROKE = { bfloat: 'float', trowel: 'trowel', broom: 'broom', edger: 'edge' };
+  const FIN_IDS = ['bfloat', 'trowel', 'broom', 'edger', 'groover', 'bolt', 'blanket', 'plastic', 'mist', 'strip'];
+  const steelLight = mat(0xb9c2c9), boltMat = mat(0x8b9399), blanketMat = new T.MeshLambertMaterial({ color: 0xb8864b, side: T.DoubleSide }), plasticMat = new T.MeshLambertMaterial({ color: 0xcfe8ff, transparent: true, opacity: 0.4, side: T.DoubleSide, depthWrite: false });
+  const grooveMat = new T.MeshBasicMaterial({ color: 0x23262a }), dashMat = new T.MeshBasicMaterial({ color: 0xfff2c4, transparent: true, opacity: 0.8, depthWrite: false });
+  const bfloatItem = { obj: (() => { const g = new T.Group(); g.add(part(bx(0.024, 1.7, 0.024), handleMat, 0, 0.88, 0), part(bx(0.2, 0.014, 0.62), steelLight, 0, 0.02, 0.1), part(bx(0.04, 0.05, 0.1), steel, 0, 0.06, 0.1)); return g; })(), use: 'tip', still: [0.38, 0.02, 0.24, 0, 0, 0], stillArm: -0.5, walk: [0.3, 1.74, -0.78, 2.15, 0, 0], walkArm: -1.0 };
+  const broomItem = { obj: (() => { const g = new T.Group(); g.add(part(bx(0.024, 1.6, 0.024), handleMat, 0, 0.83, 0), part(bx(0.46, 0.05, 0.07), mat(0x6e5a3a), 0, 0.03, 0.04)); return g; })(), use: 'tip', still: [0.38, 0.02, 0.24, 0, 0, 0], stillArm: -0.5, walk: [0.3, 1.74, -0.78, 2.15, 0, 0], walkArm: -1.0 };
+  const handTool = (parts) => ({ obj: (() => { const g = new T.Group(); for (const q of parts) g.add(q); return g; })(), use: 'hand', still: [0.3, 0.9, 0.15, 0, 1.5, 0], stillArm: -0.6, walk: [0.3, 1.5, -0.1, 0, 1.5, 1.4], walkArm: -1.2 });
+  const trowelItem = handTool([part(bx(0.34, 0.01, 0.12), steelLight, 0, 0, 0), part(bx(0.03, 0.03, 0.1), handleMat, 0, 0.04, 0)]);
+  const edgerItem = handTool([part(bx(0.2, 0.01, 0.09), steelLight, 0, 0, 0), part(bx(0.2, 0.025, 0.012), steelLight, 0, 0.012, -0.045), part(bx(0.03, 0.03, 0.08), handleMat, 0, 0.04, 0)]);
+  const grooverItem = handTool([part(bx(0.26, 0.012, 0.07), steelLight, 0, 0, 0), part(bx(0.26, 0.03, 0.012), steel, 0, -0.012, 0), part(bx(0.03, 0.03, 0.07), handleMat, 0, 0.04, 0)]);
+  const boltItem = handTool([part(new T.CylinderGeometry(0.008, 0.008, 0.26, 8), boltMat, 0, 0, 0), part(bx(0.04, 0.012, 0.04), boltMat, 0, 0.12, 0)]);
+  const rollItem = (m) => handTool([part(new T.CylinderGeometry(0.07, 0.07, 0.5, 12), m, 0, 0, 0, 0, 0, Math.PI / 2)]);
+  const mistItem = handTool([part(new T.CylinderGeometry(0.02, 0.02, 0.22, 8), mat(0x2f9e5a), 0, 0, 0, 0, 0, Math.PI / 2), part(new T.CylinderGeometry(0.028, 0.012, 0.06, 8), steel, 0.13, 0, 0, 0, 0, Math.PI / 2)]);
+  const barItem = handTool([part(bx(0.04, 0.03, 0.5), dark, 0, 0, 0), part(bx(0.04, 0.03, 0.1), dark, 0, 0.02, 0.22, 0.5)]);
+  ICONS.bfloat = I('<path d="M6 8l22 14" stroke="#d8b585" stroke-width="2.6"/><path d="M5 30h24l-3-6H8z" fill="#b9c2c9" stroke="#e7ecef"/>');
+  ICONS.trowel = I('<path d="M4 24l20-9 6 4-18 11z" fill="#b9c2c9" stroke="#e7ecef"/><path d="M26 12l6-5" stroke="#c9975a" stroke-width="3"/>');
+  ICONS.broom = I('<path d="M28 5L14 25" stroke="#d8b585" stroke-width="2.6"/><path d="M6 25l13 8-2 2L4 28z" fill="#8a6f43" stroke="#cdb381"/><path d="M8 29l-2 3M11 31l-2 3M14 33l-2 3" stroke="#cdb381" stroke-width="1.6"/>');
+  ICONS.edger = I('<path d="M5 27h22" stroke="#b9c2c9" stroke-width="3"/><path d="M5 27c0-5 4-6 8-6" stroke="#e7ecef" stroke-width="2"/><path d="M24 22l7-9" stroke="#c9975a" stroke-width="3"/>');
+  ICONS.groover = I('<path d="M4 28h24" stroke="#b9c2c9" stroke-width="3"/><path d="M8 31h16" stroke="#23262a" stroke-width="2"/><path d="M26 24l6-9" stroke="#c9975a" stroke-width="3"/>');
+  ICONS.bolt = I('<path d="M18 5v22c0 4-8 4-8 0" stroke="#aab2b8" stroke-width="3"/><path d="M14 8h8" stroke="#d8dde0" stroke-width="3"/><path d="M5 30h26" stroke="#76736d" stroke-width="3"/>');
+  ICONS.blanket = I('<rect x="5" y="12" width="26" height="14" rx="3" fill="#b8864b" stroke="#e3c08a"/><path d="M9 12v14M14 12v14M19 12v14M24 12v14M28 12v14" stroke="#8a6a3a" stroke-width="1.2"/>');
+  ICONS.plastic = I('<path d="M4 24l8-10h20l-8 10z" fill="#cfe8ff" fill-opacity=".55" stroke="#e8f4ff"/><path d="M12 14l-4 10M32 14l-8 10" stroke="#fff" stroke-width="1" stroke-opacity=".7"/>');
+  ICONS.mist = I('<path d="M5 26h14" stroke="#2f9e5a" stroke-width="3"/><path d="M21 22l8 -3M21 26h9M21 30l8 3" stroke="#6fb8ff" stroke-width="2.2"/><circle cx="32" cy="18" r="1.4" fill="#6fb8ff"/><circle cx="33" cy="26" r="1.4" fill="#6fb8ff"/><circle cx="32" cy="34" r="1.4" fill="#6fb8ff"/>');
+  ICONS.strip = I('<path d="M6 30l20-20" stroke="#4a4f55" stroke-width="3"/><path d="M26 10c3 0 5 2 5 5" stroke="#4a4f55" stroke-width="3"/><path d="M6 32h12" stroke="#d2b07a" stroke-width="4"/>');
+
+  const fin = { sig: '', group: null, dots: [], last: null, tool: '', warn: 0, cover: null, coverKind: null, coverJob: null, pop: 1, ov: null, ovJob: null, ovSig: '', mistAcc: 0 };
+  const hash2 = (i, j) => (((i * 73856093) ^ (j * 19349663)) >>> 0) % 1000 / 1000;
+  const smooth = (a, b, v) => ease((v - a) / (b - a));
+  const pctS = (v) => Math.round(v * 100) + '%';
+  // ---- the marks on the slab: bolt marks and bolts, the joint lines (dashed to cut, dark when cut)
+  function finSync(job, fw) {
+    const sig = job && fw ? job.id + ':' + job.step + ':' + fw.bolts.map((b) => b[2]).join('') + ':' + fw.joints.map((l) => l.cells.join('')).join('/') : '';
+    if (sig === fin.sig) return;
+    fin.sig = sig;
+    if (fin.group) { G.scene.remove(fin.group); fin.group = null; }
+    fin.dots = [];
+    if (!job || !fw || !fw.bolts) return;
+    const g = (fin.group = new T.Group()), y = job.topY;
+    G.scene.add(g);
+    fw.bolts.forEach((b, k) => {
+      if (b[2]) {
+        const m = part(new T.CylinderGeometry(0.0065, 0.0065, 0.1, 6), boltMat, b[0], y + 0.045, b[1]); g.add(m);
+        g.add(part(bx(0.032, 0.008, 0.032), boltMat, b[0], y + 0.09, b[1]));
+      } else if (job.step === 'finish' || job.step === 'cure' || job.step === 'strip') {
+        const d = new T.Mesh(dotGeo, dotMat); d.position.set(b[0], y + 0.012, b[1]); d.renderOrder = 3; d.userData = { bolt: k }; g.add(d); fin.dots.push(d);
+      }
+    });
+    for (const l of fw.joints) {
+      const n = l.cells.length, ux = (l.b[0] - l.a[0]) / l.len, uz = (l.b[1] - l.a[1]) / l.len, cw = l.len / n;
+      for (let c = 0; c < n; c++) {
+        if (!l.cells[c] && (job.step !== 'finish' || (c & 1))) continue;
+        const t = (c + 0.5) * cw, m = new T.Mesh(box, l.cells[c] ? grooveMat : dashMat);
+        m.scale.set(cw * (l.cells[c] ? 1.02 : 0.85), 0.004, l.cells[c] ? 0.018 : 0.024); m.rotation.y = -Math.atan2(uz, ux);
+        m.position.set(l.a[0] + ux * t, y + (l.cells[c] ? 0.001 : 0.006), l.a[1] + uz * t); m.renderOrder = 3; g.add(m);
+      }
+    }
+  }
+  // ---- the cure tint: dark and wet at first, lightening with strength (a thin overlay on the slab member)
+  function cureColour(job, fw) {
+    return (x, z, out) => {
+      if (!inPoly(job.layout.corners, x, z)) return false;
+      const s = fw.strength, i = Math.floor(x * 10), j = Math.floor(z * 10), h = hash2(i, j);
+      let a = 0.62 * (1 - smooth(0.02, 0.9, s)), r = 0.16, gg = 0.17, b = 0.19;
+      if ((fw.wetUntil || 0) > G.sim.state.t) { a += 0.14; b += 0.04; }                           // misted: wet-dark again
+      if (fw.dry > 0.2 && h < fw.dry * 0.14) { r = gg = b = 0.92; a = 0.3; }                       // crazing from drying out
+      else if (fw.frost > 0.15 && h < fw.frost * 0.25) { r = gg = b = 0.85; a = 0.34; }            // frost-scaled patches
+      if (a < 0.015) return false;
+      out[0] = r; out[1] = gg; out[2] = b; out[3] = Math.min(0.8, a); return true;
+    };
+  }
+  function cureSync(job, fw) {
+    const show = job && fw && ['cure', 'strip', 'done'].includes(job.step) && job.type === 'slab' && fw.strength < 0.97;
+    if (!show) { if (fin.ov) { fin.ov.dispose(); fin.ov = null; fin.ovJob = null; fin.ovSig = ''; } return; }
+    const sig = job.id + ':' + Math.round(fw.strength * 100) + ':' + Math.round(fw.dry * 10) + ':' + Math.round(fw.frost * 10) + ':' + ((fw.wetUntil || 0) > G.sim.state.t ? 1 : 0);
+    if (!fin.ov || fin.ovJob !== job.id) {
+      if (fin.ov) fin.ov.dispose();
+      const C = job.layout.corners;
+      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+      for (const [x, z] of C) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+      let cell = 0.1;
+      while (((x1 - x0) / cell) * ((z1 - z0) / cell) > 12000) cell *= 1.25;
+      const y = job.topY;
+      fin.ov = FM.overlay({ x0, z0, nx: Math.ceil((x1 - x0) / cell), nz: Math.ceil((z1 - z0) / cell), cell, yAt: () => y, colourAt: (x, z, o) => fin.colour(x, z, o), lift: 0.006, minMs: 300 });
+      fin.ovJob = job.id; fin.ovSig = '';
+    }
+    if (sig !== fin.ovSig) { fin.ovSig = sig; fin.colour = cureColour(job, fw); fin.ov.refresh(); }
+  }
+  // ---- the cover rolled over the slab
+  function coverSync(job, fw) {
+    const kind = job && fw && ['cure', 'strip'].includes(job.step) ? fw.cover : null;
+    if (kind === fin.coverKind && (!job || fin.coverJob === job.id)) return;
+    if (fin.cover) { G.scene.remove(fin.cover); fin.cover.geometry.dispose(); fin.cover = null; }
+    fin.coverKind = kind; fin.coverJob = job ? job.id : null;
+    if (!kind) return;
+    const C = job.layout.corners, cx = C.reduce((a, c) => a + c[0], 0) / C.length, cz = C.reduce((a, c) => a + c[1], 0) / C.length;
+    const sh = new T.Shape(); C.forEach((c, k) => { const x = c[0] - cx, z = -(c[1] - cz); if (k) sh.lineTo(x, z); else sh.moveTo(x, z); });
+    const geo = new T.ShapeGeometry(sh); geo.rotateX(-Math.PI / 2);
+    const m = new T.Mesh(geo, kind === 'blanket' ? blanketMat : plasticMat);
+    m.position.set(cx, job.topY + (kind === 'blanket' ? 0.04 : 0.025), cz); m.scale.set(1.04, 1, 1.04); m.receiveShadow = true; m.renderOrder = 4;
+    fin.cover = m; fin.pop = 0; G.scene.add(m);
+  }
+  // ---- the gate chip: strength against the gates, and what is next
+  const chip = document.createElement('div');
+  chip.id = 'fgate'; chip.hidden = true; chip.setAttribute('aria-live', 'polite');
+  css.textContent += '#fgate{position:fixed;top:62px;left:50%;transform:translateX(-50%);z-index:5;pointer-events:none;padding:6px 12px 7px;border-radius:12px;background:rgba(30,26,20,.78);color:var(--ink);font-size:13px;text-align:center;min-width:250px;max-width:92vw}#fgate[hidden]{display:none}' +
+    '#fgate .gt{font-family:var(--font-display);font-size:15px;margin-bottom:3px}#fgate .gb{position:relative;display:block;height:8px;border-radius:5px;background:rgba(255,255,255,.14);margin:2px 0 3px}#fgate .gb i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:linear-gradient(90deg,#7ab0c4,#e8e2d0)}' +
+    '#fgate .gb u{position:absolute;top:-2px;bottom:-2px;width:2px;background:rgba(255,255,255,.7)}#fgate .gl{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--ink-dim)}#fgate .gl .ok{color:#9be29b}#fgate .gn{margin-top:3px;font-size:12px}';
+  document.body.appendChild(chip);
+  let chipHtml = '';
+  function chipTick(job, fw) {
+    let html = '';
+    if (job && fw && ['finish', 'cure', 'strip'].includes(job.step)) {
+      const v = FR.jobView(G.sim.state, job.id), gt = v.gates, st = Math.round(fw.strength * 100), GATES = [['walk', 10, 'Walk'], ['strip', 20, 'Strip forms'], ['frame', 50, 'Frame']];
+      const marks = GATES.map(([k, pc]) => '<u style="left:' + Math.min(100, pc * 100 / 50) + '%"></u>').join('');
+      const labs = GATES.map(([k, pc, nm]) => '<span class="' + (gt[k] ? 'ok' : '') + '">' + (gt[k] ? '✓ ' : '') + nm + ' ' + pc + '%</span>').join('');
+      let next = '';
+      if (job.step === 'finish') next = fw.phase === 'bleeding' ? 'Bleed water on top: float, then wait for the sheen to go' : fw.phase === 'ready' ? '<b>Sheen gone:</b> trowel or broom it now, about ' + Math.max(1, Math.round(fw.leftH)) + ' h of working time left' : 'Setting up';
+      else if (fw.boltsLeft && !gt.frame) next = 'Anchor bolts still to set: ' + fw.boltsLeft;
+      else if (!gt.strip) next = 'Cure: ' + (fw.cover ? fw.cover + ' on' : 'cover it or mist it');
+      else if (fw.unstripped) next = '<b>Strip the forms</b> (' + fw.unstripped + ' boards)';
+      else if (fw.boltsLeft) next = 'Set the anchor bolts: framing waits for them';
+      else if (!gt.frame) next = 'Frame at 50%: still green';
+      else next = 'Ready for framing';
+      html = '<div class="gt">Slab ' + st + '%</div><span class="gb"><i style="width:' + Math.min(100, st * 2) + '%"></i>' + marks + '</span><div class="gl">' + labs + '</div><div class="gn">' + next + '</div>';
+    }
+    if (html !== chipHtml) { chipHtml = html; chip.innerHTML = html; chip.hidden = !html; }
+  }
+  // ---- gestures
+  const finSay = (job, r, kind) => {
+    if (!r.ok) return say(r.reason + (/finishing kit/.test(r.reason) ? buyBtn(KIT, 1, 'Buy the kit') : ''), 5);
+    if (r.early) { if (performance.now() - fin.warn > 2500) { fin.warn = performance.now(); say('<b>Too soon:</b> the bleed water is still on top and you are working it into the skin. Pale blotches will scale. Float, then wait for the sheen to go.', 5); } return; }
+    if (r.unfloated) { if (performance.now() - fin.warn > 3000) { fin.warn = performance.now(); say(r.unfloated, 4); } return; }
+  };
+  function strokeTo(a, job, tool) {
+    const kind = STROKE[tool], L = fin.last ? Math.hypot(a.x - fin.last[0], a.z - fin.last[1]) : 1;
+    if (L < 0.1) return;
+    const n = Math.max(1, Math.ceil(L / 0.18));
+    let any = false, lastR = null;
+    for (let k = 1; k <= n; k++) {
+      const x = fin.last[0] + ((a.x - fin.last[0]) * k) / n, z = fin.last[1] + ((a.z - fin.last[1]) * k) / n;
+      const r = cmd('finishAt', { jobId: job.id, x, z, kind });
+      lastR = r;
+      if (!r.ok) break;
+      if (r.n > 0) { any = true; pourDirty(x, z, FINR[kind] + 0.2); }
+      if (r.done) break;
+    }
+    fin.last = [a.x, a.z];
+    if (!lastR) return;
+    finSay(job, lastR, kind);
+    if (any) {
+      G.cam.shake = Math.min((G.cam.shake || 0) + 0.003, 0.05);
+      if (Math.random() < 0.5) G.burst(a.x, job.topY + 0.03, a.z, 1, kind === 'broom' ? 0x8a8780 : 0x6c6a65, 0.5, 0.4, 0.03, 0.3);
+    }
+    if (lastR.done) finishedOut(job);
+  }
+  const FINR = { float: 0.5, trowel: 0.3, broom: 0.35, edge: 0.18 };
+  function finishedOut(job) {
+    G.juice.hitStop = 0.1; G.cam.shake = Math.min((G.cam.shake || 0) + 0.1, 0.3);
+    const C = job.layout.corners;
+    for (const c of C) G.burst(c[0], job.topY + 0.2, c[1], 8, 0xfff2c4, 1.5, 2.2, 0.06, 0.9);
+    say('<b>Finished.</b> Floated, ' + (FR.finish(G.sim.state, job.id) && FR.finish(G.sim.state, job.id).cov && FR.finish(G.sim.state, job.id).cov.broom > 0.5 ? 'broomed' : 'troweled') + ', bolted down. It cures now: cover it or mist it, and strip the forms at a fifth of its strength.', 9);
+    setTimeout(() => { if (on) { H.setSlots(slotList()); H.hold && H.hold(['blanket', 'plastic'].find((k) => ownsTool(COVER_ITEM[k])) || 'mist'); } }, 260);
+  }
+  function groovePress(a, job) { fin.last = [a.x, a.z]; const fw = FR.finish(G.sim.state, job.id); if (!fw || !fw.joints.length) say('This slab is small enough to need no control joints.', 4); else say('Drag the groover along a dashed line: it cuts a joint a quarter of the slab deep.', 4); }
+  function grooveFrame(a, job) {
+    lead(a);
+    if (!fin.last || Math.hypot(a.x - fin.last[0], a.z - fin.last[1]) < 0.15) return;
+    const r = cmd('joint', { jobId: job.id, x0: fin.last[0], z0: fin.last[1], x1: a.x, z1: a.z });
+    fin.last = [a.x, a.z];
+    if (!r.ok) return say(r.reason + (/finishing kit/.test(r.reason) ? buyBtn(KIT, 1, 'Buy the kit') : ''), 5);
+    if (r.n > 0) { G.burst(a.x, job.topY + 0.02, a.z, 2, 0x6c6a65, 0.5, 0.4, 0.03, 0.3); fin.sig = ''; if (r.done) finishedOut(job); else say('Joint: ' + (r.cut ? r.cut.map(pctS).join(' · ') : ''), 2); }
+    else if (r.reason) say(r.reason, 2);
+  }
+  function boltAt(a) {
+    let best = null, bd = 0.5;
+    for (const d of fin.dots) { const x = d.position.x, z = d.position.z, dh = Math.min(Math.hypot(x - a.x, z - a.z), a.gx != null ? Math.hypot(x - a.gx, z - a.gz) : Infinity); if (dh < bd && Math.hypot(x - G.player.x, z - G.player.z) < 2.6) { bd = dh; best = d; } }
+    return best;
+  }
+  function boltPress(a, job) {
+    const d = boltAt(a);
+    if (!d) return say(fin.dots.length ? 'Aim at a glowing bolt mark along the sill line.' : 'Every bolt is in.');
+    const r = cmd('setBolt', { jobId: job.id, x: d.position.x, z: d.position.z, n: gestureN() });
+    if (!r.ok) return say(r.reason + (/anchor bolts/.test(r.reason) ? buyBtn('anchor_bolt', Math.max(4, fin.dots.length), 'Buy ' + Math.max(4, fin.dots.length)) : ''), 6);
+    G.juice.hitStop = 0.05; G.cam.shake = Math.min((G.cam.shake || 0) + 0.025, 0.2);
+    G.burst(d.position.x, job.topY + 0.05, d.position.z, 5, 0x9aa2a8, 0.9, 1.4, 0.03, 0.4);
+    fin.sig = '';
+    if (r.done) return finishedOut(job);
+    say(r.left ? (r.retro ? 'Drilled and epoxied one in (it has set). ' : 'Pushed in ' + r.n + '. ') + r.left + ' to go.' : '<b>Every bolt is in.</b> Framing can bolt down to the slab.', 4);
+  }
+  function coverPress(kind, job) {
+    const fw = FR.finish(G.sim.state, job.id), want = fw && fw.cover === kind ? null : kind;
+    const r = cmd('cover', { jobId: job.id, kind: want });
+    if (!r.ok) return say(r.reason + (/blanket|sheeting/.test(r.reason) ? buyBtn(COVER_ITEM[kind], 1) : ''), 6);
+    G.juice.hitStop = 0.04; fin.coverKind = '?'; fin.ovSig = '';
+    say(want ? (kind === 'blanket' ? '<b>Blanket on.</b> It holds the moisture and the heat in: good for a cold night.' : '<b>Plastic on.</b> It holds the moisture in so the top cannot dry out.') : 'Cover off.', 5);
+  }
+  function mistPress(a, job) {
+    const r = cmd('mist', { jobId: job.id });
+    if (!r.ok) return say(r.reason + (/hose/.test(r.reason) ? buyBtn(HOSE, 1) : ''), 6);
+    fin.mistAcc = 0; fin.sig = ''; fin.ovSig = '';
+    say('<b>Misting.</b> The top stays wet for half an hour: it cannot dry out in the sun or wind.', 5);
+  }
+  function mistFrame(a, dt, job) {
+    fin.mistAcc += dt;
+    if (fin.mistAcc > 0.06) { fin.mistAcc = 0; G.burst(a.x + (Math.random() - 0.5) * 0.5, job.topY + 0.25, a.z + (Math.random() - 0.5) * 0.5, 2, 0x9fd0ff, 0.5, 0.2, 0.025, 0.4); }
+  }
+  function stripPress(a, job) {
+    const fw = FR.finish(G.sim.state, job.id);
+    const r = cmd('strip', { jobId: job.id, x: a.gx ?? a.x, z: a.gz ?? a.z, n: gestureN() });
+    if (!r.ok) return say(r.reason, 5);
+    const run = FR.job(G.sim.state, job.id).forms.runs[r.run];
+    const [x, z] = runPt(run, run.len / 2, 0.15);
+    G.juice.hitStop = 0.07; G.cam.shake = Math.min((G.cam.shake || 0) + 0.05, 0.25);
+    G.burst(x, job.topY - 0.05, z, 14, 0xd2b07a, 1.8, 2, 0.05, 0.7);
+    fv.sig = '';
+    say(r.all ? '<b>Forms off.</b> The slab stands alone, boards and stakes back in your stock.' + (fw && fw.boltsLeft ? ' Set the anchor bolts so framing can start.' : '') : 'Boards off' + (r.stakes ? ' with ' + r.stakes + ' stakes' : '') + (r.chipped ? ' (the unedged corner chipped)' : '') + '. ' + r.left + ' to go.', 5);
+  }
+  function finPress(a, job, id) {
+    act.kind = id; fin.last = [a.x, a.z]; fin.warn = 0;
+    if (STROKE[id]) {
+      if (job.step !== 'finish') return say('The top is past finishing.');
+      fin.last = [a.x - 0.2, a.z]; return strokeTo(a, job, id);
+    }
+    if (id === 'groover') return job.step === 'finish' ? groovePress(a, job) : say('Joints are cut while the top is workable.');
+    if (id === 'bolt') return boltPress(a, job);
+    if (id === 'blanket' || id === 'plastic') return coverPress(id, job);
+    if (id === 'mist') return mistPress(a, job);
+    if (id === 'strip') return stripPress(a, job);
+  }
+  function finFrame(a, dt, job) {
+    const id = act.kind;
+    if (STROKE[id]) { lead(a); if (job.step === 'finish') strokeTo(a, job, id); } else if (id === 'groover') grooveFrame(a, job); else if (id === 'mist') mistFrame(a, dt, job);
+  }
+  // each frame: the sheen, the marks, the tint and the cover
+  function finSlow(job) {
+    const fw = job ? FR.finish(G.sim.state, job.id) : null;
+    finSync(job, fw); cureSync(job, fw); coverSync(job, fw); chipTick(job, fw);
+    if (fin.ov && fin.ov.visible) fin.ov.update();
+  }
+  function finTick(dt, t) {
+    if (fin.dots.length) { const s = 1 + 0.15 * Math.sin(t / 170), on2 = on && held() === 'bolt'; for (const d of fin.dots) { d.scale.set(s, 1, s); d.material.opacity = on2 ? 0.95 : 0.5; } }
+    if (fin.cover && fin.pop < 1) { fin.pop = Math.min(1, fin.pop + dt * 4); const k = ease(fin.pop); fin.cover.scale.set(1.04 * (0.2 + 0.8 * k), 1, 1.04 * (0.2 + 0.8 * k)); }
+  }
+
   /* ================= press, drag, let go ================= */
   const held = () => H.held;
   function press(a) {
     const job = site.job, id = held();
+    if (job && FIN_IDS.includes(id)) return finPress(a, job, id);
     if (job && ['gravel', 'barrow', 'rake', 'tamper', 'board', 'hammer', 'screed'].includes(id)) {
       act.kind = id; b3.lx = a.x; b3.lz = a.z; b3.n = 0; b3.tipped = false; b3.warned = 0; b3.why = ''; b3.acc = 0; b4.rx = a.x; b4.rz = a.z; b4.leakSaid = 0;
       const pour = job.step === 'pour';
@@ -890,6 +1155,7 @@
   function frame(a, dt) {
     if (!a.down) return;
     const job = site.job, k0 = act.kind;
+    if (job && FIN_IDS.includes(k0)) return finFrame(a, dt, job);
     if (job && k0 === 'gravel') return gravelFrame(a, job);
     if (job && k0 === 'barrow') return job.step === 'pour' ? mixFrame(a, dt, job) : barrowTipBase(a);
     if (job && k0 === 'rake') return job.step === 'pour' ? rakeConcreteFrame(a, job) : rakeBaseFrame(a, job);
@@ -908,6 +1174,7 @@
     const k = act.kind;
     act.kind = '';
     G.player.lead = null;
+    if (FIN_IDS.includes(k)) { fin.last = null; return; }
     if (k === 'barrow' && site.job && site.job.step !== 'pour') return barrowRelease(a);
     if (k === 'barrow') { b4.hose = false; return; }
     if (k === 'screed') { b4.scr = null; screedMesh.visible = false; return; }
@@ -940,6 +1207,29 @@
         { id: 'hammer', name: 'Stakes', icon: ICONS.hammer, item: kit, title: 'Hammer and stakes: stake a form that bows out' },
       ];
     }
+    if (step === 'finish' || step === 'cure' || step === 'strip') {
+      const fw = site.job ? FR.finish(G.sim.state, site.job.id) : null, kit = own(KIT), bolts = fw ? fw.boltsLeft : 0;
+      const bolt = { id: 'bolt', name: 'Bolts', icon: ICONS.bolt, item: boltItem, badge: bolts ? String(bolts) : null, dim: !bolts, title: 'Anchor bolts: press a glowing mark along the sill line; they go in while the concrete is wet' };
+      if (step === 'finish') {
+        const cv = (fw && fw.cov) || { float: 0, trowel: 0, broom: 0 };
+        return [
+          { id: 'bfloat', name: 'Float', icon: ICONS.bfloat, item: bfloatItem, dim: !kit, meter: cv.float, title: 'Bull float: sweep it over the screeded top right away; evens it out and brings the water up' },
+          { id: 'trowel', name: 'Trowel', icon: ICONS.trowel, item: trowelItem, dim: !kit, meter: cv.trowel, title: 'Steel trowel: only once the sheen has gone. A smooth, hard top for indoors' },
+          { id: 'broom', name: 'Broom', icon: ICONS.broom, item: broomItem, dim: !kit, meter: cv.broom, title: 'Broom: only once the sheen has gone. A gripping top for outdoors' },
+          { id: 'edger', name: 'Edger', icon: ICONS.edger, item: edgerItem, dim: !kit, title: 'Edger: run it along a form to round the edge so it does not chip' },
+          { id: 'groover', name: 'Joints', icon: ICONS.groover, item: grooverItem, dim: !kit || !(fw && fw.joints.length), title: 'Groover: drag along the dashed lines (slabs over 3 m)' },
+          bolt,
+        ];
+      }
+      const cover = fw && fw.cover;
+      return [
+        { id: 'blanket', name: 'Blanket', icon: ICONS.blanket, item: rollItem(blanketMat), dim: !own(COVER_ITEM.blanket), badge: cover === 'blanket' ? 'on' : null, title: 'Curing blanket: holds moisture and heat in (press again to take it off)' },
+        { id: 'plastic', name: 'Plastic', icon: ICONS.plastic, item: rollItem(plasticMat), dim: !own(COVER_ITEM.plastic), badge: cover === 'plastic' ? 'on' : null, title: 'Plastic sheeting: holds moisture in (press again to take it off)' },
+        { id: 'mist', name: 'Mist', icon: ICONS.mist, item: mistItem, dim: !own(HOSE), title: 'Hose on a fine mist: keeps the top wet for half an hour (not in frost)' },
+        { id: 'strip', name: 'Strip', icon: ICONS.strip, item: barItem, badge: fw && fw.unstripped ? String(fw.unstripped) : null, dim: !(fw && fw.unstripped), title: 'Pry the forms off: a side at a time, once the concrete is a fifth strength' },
+        ...(bolts ? [bolt] : []),
+      ];
+    }
     const out = [{ id: 'kit', name: 'Layout', icon: ICONS.kit, item: kit, title: 'Layout kit: press a glowing corner to drive a stake, keep holding and pull to the next corner' }];
     if (LS()) {
       const v = site.job ? FR.jobView(G.sim.state, site.job.id) : null;
@@ -950,7 +1240,7 @@
   function enter() {
     on = true; document.body.classList.add('gardening'); bar.hidden = false;
     const j = site.job;
-    H.open({ bar: toolsEl, reach: 1.6, camDist: 8.5, camPitch: 0.95, camFree: true, pace: 0.55, tipPx: 90, liftPx: 70, slots: slotList(), held: j ? ({ excavate: 'shovel', base: 'gravel', forms: 'board', pour: 'barrow' }[j.step] || lastHeld) : lastHeld, onHold, press, frame, release, alt: (cur) => !!cur && (cur.id === 'shovel' || (cur.id === 'barrow' && !!site.job && site.job.step === 'pour')) });
+    H.open({ bar: toolsEl, reach: 1.6, camDist: 8.5, camPitch: 0.95, camFree: true, pace: 0.55, tipPx: 90, liftPx: 70, slots: slotList(), held: j ? ({ excavate: 'shovel', base: 'gravel', forms: 'board', pour: 'barrow', finish: 'bfloat', cure: 'blanket', strip: 'strip' }[j.step] || lastHeld) : lastHeld, onHold, press, frame, release, alt: (cur) => !!cur && (cur.id === 'shovel' || (cur.id === 'barrow' && !!site.job && site.job.step === 'pour')) });
     onHold(held());
   }
   function leave() {
@@ -958,7 +1248,7 @@
     if (LS()) LS().bindSay(null);
     on = false; bar.hidden = true; tape.visible = false; G.player.lead = null;
     if (!['garden', 'yard'].includes(G.player.tool)) document.body.classList.remove('gardening');
-    if (H.isOpen && H.held && H.slots.some((s) => ['kit', 'gravel', 'board', 'screed'].includes(s.id))) H.close();
+    if (H.isOpen && H.held && H.slots.some((s) => ['kit', 'gravel', 'board', 'screed', 'bfloat', 'blanket', 'strip'].includes(s.id))) H.close();
     screedMesh.visible = false; if (fv.ghost) fv.ghost.visible = false;
   }
   function onHold() { sayT = 0; updateHint(true); }
@@ -994,12 +1284,37 @@
       else if (id === 'rake') h += '<b>Drag</b> through it to push it into the corners and even it out.';
       else if (id === 'screed') h += pct < 95 ? 'Get a little more than enough in first, then screed.' : 'Stand at one end and <b>drag the board toward you</b>, sawing a little. The surplus rolls ahead of it.';
       else h += 'Stake a bowing form: click its glowing marks.';
+    } else if (job.step === 'finish') {
+      const fw = FR.finish(G.sim.state, job.id), cv = (fw && fw.cov) || { float: 0, worked: 0 };
+      const state = !fw ? '' : fw.phase === 'bleeding' ? 'Bleed water is on top: <b>float</b> it, then wait for the sheen to go. ' : fw.phase === 'ready' ? '<b>The sheen is gone:</b> trowel or broom it now. ' : 'It has set. ';
+      const todo = [];
+      if (fw && cv.float < 0.9) todo.push('float');
+      if (fw && cv.worked < 0.9) todo.push('trowel or broom');
+      if (fw && fw.joints.some((l) => l.cells.some((c) => !c))) todo.push('joints');
+      if (fw && fw.boltsLeft) todo.push('bolts (' + fw.boltsLeft + ')');
+      h = state + 'Float <b>' + pctS(cv.float) + '</b> · worked <b>' + pctS(cv.worked) + '</b>' + (todo.length ? ' · still to do: ' + todo.join(', ') : '') + '. ';
+      const kitWhy = needTool(KIT, 'the finishing kit');
+      if (kitWhy && ['bfloat', 'trowel', 'broom', 'edger', 'groover'].includes(id)) h += kitWhy;
+      else if (id === 'bfloat') h += '<b>Drag</b> the float over the top, overlapping your passes.';
+      else if (id === 'trowel') h += fw && fw.phase === 'bleeding' ? 'Not yet! Troweling now scales the skin.' : '<b>Drag</b> in broad arcs over the floated top.';
+      else if (id === 'broom') h += fw && fw.phase === 'bleeding' ? 'Not yet! Brooming now scales the skin.' : '<b>Drag</b> straight across the floated top, one pass at a time.';
+      else if (id === 'edger') h += '<b>Drag</b> along inside a form to round the edge.';
+      else if (id === 'groover') h += fw && fw.joints.length ? '<b>Drag</b> along each dashed line.' : 'No joints needed on a slab this size.';
+      else if (id === 'bolt') h += fin.dots.length ? '<b>Click</b> a glowing mark along the sill line: a bolt goes in (' + gestureN() + ' at a time).' : 'Every bolt is in.';
+    } else if (job.step === 'cure' || job.step === 'strip') {
+      const fw = FR.finish(G.sim.state, job.id), st = fw ? Math.round(fw.strength * 100) : 0;
+      h = 'Curing <b>' + st + '%</b>' + (fw && fw.cover ? ' · ' + fw.cover + ' on' : '') + (fw && fw.wetUntil > G.sim.state.t ? ' · misted' : '') + '. ';
+      if (id === 'blanket') h += needTool(COVER_ITEM.blanket, 'a curing blanket') || '<b>Click</b> to roll it over the slab (again to take it off): it keeps the heat in on a cold night.';
+      else if (id === 'plastic') h += needTool(COVER_ITEM.plastic, 'polyethylene sheeting') || '<b>Click</b> to lay it over the slab: it stops the top drying out.';
+      else if (id === 'mist') h += needTool(HOSE, 'a garden hose') || '<b>Click</b> to mist the top: wet for half an hour. Do it in hot, dry wind.';
+      else if (id === 'strip') h += fw && fw.unstripped ? (fw.strength >= 0.2 ? '<b>Click</b> a side: its boards and stakes come off.' : 'The forms stay on until it is a fifth strength (' + st + '%).') : 'The forms are off.';
+      else if (id === 'bolt') h += fin.dots.length ? '<b>Click</b> a bolt mark: it is drilled and epoxied in now that it has set.' : 'Every bolt is in.';
     } else h = STEP_LINE[job.step] || 'The foundation is past digging.';
     if (h !== hintEl.innerHTML) hintEl.innerHTML = h;
   }
   const STEP_LINE = {
     base: 'Dug to the line. The gravel base goes in next (slab foundations; stem walls and piers are poured with <b>__foundation.debugPour()</b> for now).',
-    cure: 'Poured: the concrete is curing.', strip: 'Poured: the concrete is curing.', done: 'The foundation is finished.',
+    done: 'The foundation is finished.',
   };
   addEventListener('keydown', (e) => {
     if (e.target && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
@@ -1025,7 +1340,7 @@
     const dt = Math.min(0.1, (t - last) / 1000); last = t;
     const want = G.player.tool === 'site';
     if (want !== on) { if (want) enter(); else leave(); }
-    driveTick(dt); popTick(dt); b34Tick(dt, t);
+    driveTick(dt); popTick(dt); b34Tick(dt, t); finTick(dt, t);
     if (site.strings.visible) {
       if (on && held() === 'kit' && site.job && site.job.step === 'layout' && site.order.length) site.strings.hand(handPt()); else if (site.job && site.job.step === 'layout') site.strings.hand(null);
       site.strings.update(dt);
@@ -1062,7 +1377,7 @@
           if (r.ok && r.advanced) { if (step0 === 'excavate') dugOut(fresh); else baseIn(fresh); }
         }
       }
-      b34Slow(fresh);
+      b34Slow(fresh); finSlow(fresh);
       if (on) { H.setSlots(slotList()); updateHint(); }
     }
     requestAnimationFrame(tick);
@@ -1099,13 +1414,15 @@
       if (j.step === 'base') return j.type === 'slab' ? 'The gravel base: press <kbd>7</kbd>, tip gravel on the pad, rake it to the line and tamp it twice.' : 'Dug to the line. Stem walls and piers are not poured by hand yet: <code>__foundation.debugPour()</code> pours it for testing.';
       if (['forms', 'rebar', 'roughin'].includes(j.step)) return 'Set the forms: press <kbd>7</kbd>, snap form boards along the strings and stake them.';
       if (j.step === 'pour') return 'Pour the slab: press <kbd>7</kbd>, mix bags in the barrow, tip, rake and screed it off the forms.';
+      if (j.step === 'finish') return 'Finish the slab: press <kbd>7</kbd>: float it, trowel or broom it once the sheen is gone, joints and anchor bolts.';
+      if (j.step === 'cure' || j.step === 'strip') { const f = FR.finish(G.sim.state, j.id); return f && f.boltsLeft ? 'Set the anchor bolts (press <kbd>7</kbd>): framing waits for them.' : f && f.unstripped ? 'Curing: cover or mist it, and strip the forms at a fifth strength (press <kbd>7</kbd>).' : null; }
       return null;
     },
     job: (structId) => (structId === undefined ? site.job : jobFor(structId)),
     redraw: () => { site.sig = ''; site.ovSig = ''; },
     tools: { kit },
     // for tests: what is drawn
-    drawn: () => ({ overlay: !!(site.ov && site.ov.visible), tinted: site.ov ? (() => { const c = site.ov.mesh.geometry.attributes.color.array; let n = 0; for (let i = 3; i < c.length; i += 16) if (c[i] > 0) n++; return n; })() : 0, strands: site.strings.visible ? site.strings.mesh.count : 0, boards: site.boards.filter(Boolean).length, stakes: site.stakes.filter(Boolean).length, ghosts: site.ghosts.filter(Boolean).length, boardsDrawn: fv.runs.reduce((a, r) => a + r.segs.length, 0), stakeMarks: fv.dots.length, pour: !!(pourMesh.fm && pourMesh.fm.visible), bags: fv.bags ? fv.bags.children.length : 0 }),
+    drawn: () => ({ overlay: !!(site.ov && site.ov.visible), tinted: site.ov ? (() => { const c = site.ov.mesh.geometry.attributes.color.array; let n = 0; for (let i = 3; i < c.length; i += 16) if (c[i] > 0) n++; return n; })() : 0, strands: site.strings.visible ? site.strings.mesh.count : 0, boards: site.boards.filter(Boolean).length, stakes: site.stakes.filter(Boolean).length, ghosts: site.ghosts.filter(Boolean).length, boardsDrawn: fv.runs.reduce((a, r) => a + r.segs.length, 0), stakeMarks: fv.dots.length, pour: !!(pourMesh.fm && pourMesh.fm.visible), bags: fv.bags ? fv.bags.children.length : 0, boltMarks: fin.dots.length, finishMarks: fin.group ? fin.group.children.length : 0, cureTint: fin.ov ? (() => { const c = fin.ov.mesh.geometry.attributes.color.array; let n = 0; for (let i = 3; i < c.length; i += 16) if (c[i] > 0) n++; return n; })() : 0, cover: fin.cover ? fin.coverKind : null, chip: chip.hidden ? '' : chip.innerText }),
     // testing: the nearest job (or a building's) is poured now and starts to cure
     debugPour(structId) {
       const j = structId === undefined ? site.job || nearJob() : jobFor(structId);

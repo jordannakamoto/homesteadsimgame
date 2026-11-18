@@ -155,10 +155,62 @@ const sc = await G((sid) => {
   }
   return { ok: r.ok, done: r.done, screed: r.screed, hollow: r.hollow, low: r.low, strokes, extra, leak: __foundation.job(sid).pour.leakM3, step: __foundation.job(sid).step };
 }, sid);
-check('screeded off the forms: the slab is poured and curing', sc.done && sc.step === 'cure', JSON.stringify(sc));
+check('screeded off the forms: the slab is poured, now finished by hand', sc.done && sc.step === 'finish', JSON.stringify(sc));
 await until((sid) => { const pr = __game.sim.state.sys.construction.progress[sid]; return pr.hold && Object.keys(pr.hold).length > 0; }, sid, 30000);
 const held = await G((sid) => { const pr = __game.sim.state.sys.construction.progress[sid]; return pr.hold ? Object.keys(pr.hold).length : 0; }, sid);
 check('the poured slab holds the stages on the concrete', held > 0, 'holds ' + held);
+
+// B5: finishing (float, wait for the sheen, broom, anchor bolts), cure (cover), strip the forms
+await G(() => { for (const t of ['concrete_finishing_kit', 'curing_blanket', 'poly_sheeting', 'garden_hose']) __game.sim.commandNow('stock.add', { id: t, qty: 1 }); __game.sim.commandNow('stock.add', { id: 'anchor_bolt', qty: 20 }); });
+await wait(900);
+const fs0 = await G(() => ({ slots: __hands.slots.map((s) => s.id).join(), held: __hands.held, d: __foundation.drawn(), hint: document.querySelector('#fbar .ghint').innerText }));
+check('the finish step offers the finishing kit and bolts; the wet field and bolt marks stay', fs0.slots === 'bfloat,trowel,broom,edger,groover,bolt' && fs0.d.pour && fs0.d.boltMarks >= 4 && /Bleed water/.test(fs0.hint), JSON.stringify(fs0));
+check('the gate chip shows the slab at 0% with the sheen to wait out', /Slab 0%/.test(fs0.d.chip) && /Bleed water/.test(fs0.d.chip), fs0.d.chip);
+const fl = await G((sid) => {
+  const j = __foundation.job(sid), sim = __game.sim, C = j.layout.corners;
+  const x0 = Math.min(...C.map((c) => c[0])), x1 = Math.max(...C.map((c) => c[0])), z0 = Math.min(...C.map((c) => c[1])), z1 = Math.max(...C.map((c) => c[1]));
+  let r;
+  for (let z = z0 + 0.1; z < z1; z += 0.3) for (let x = x0 + 0.1; x < x1; x += 0.3) r = sim.commandNow('foundation.finishAt', { jobId: j.id, x, z, kind: 'float', r: 0.5 });
+  const early = sim.commandNow('foundation.finishAt', { jobId: j.id, x: x0 + 0.5, z: z0 + 0.5, kind: 'broom' });
+  return { float: r.cov.float, early: early.early, phase: early.phase };
+}, sid);
+check('bull-floated; brooming before the sheen is gone scales the skin', fl.float > 0.9 && fl.early && fl.phase === 'bleeding', JSON.stringify(fl));
+await G((sid) => { const sim = __game.sim; let k = 0; while (__game.foundation.finish(sim.state, __foundation.job(sid).id).phase === 'bleeding' && k++ < 400) sim.runTicks(10); }, sid);
+const bl = await G((sid) => {
+  const j = __foundation.job(sid), sim = __game.sim, C = j.layout.corners, fw = __game.foundation.finish(sim.state, j.id);
+  const x0 = Math.min(...C.map((c) => c[0])), x1 = Math.max(...C.map((c) => c[0])), z0 = Math.min(...C.map((c) => c[1])), z1 = Math.max(...C.map((c) => c[1]));
+  let r;
+  for (let z = z0 + 0.1; z < z1; z += 0.25) for (let x = x0 + 0.1; x < x1; x += 0.25) r = sim.commandNow('foundation.finishAt', { jobId: j.id, x, z, kind: 'broom', r: 0.35 });
+  // joints on a slab that needs them
+  const lines = fw.joints.length;
+  let b;
+  for (const m of fw.bolts) b = sim.commandNow('foundation.setBolt', { jobId: j.id, x: m[0], z: m[1], n: 4 });
+  return { phase: fw.phase, worked: r.cov.worked, lines, left: b && b.left, step: __foundation.job(sid).step };
+}, sid);
+await wait(900);
+const fin = await G(() => ({ d: __foundation.drawn(), slots: __hands.slots.map((s) => s.id).join() }));
+check('floated, brooming once the sheen is gone, bolted: the slab goes on to cure (wet field gone, tint on, chip)', bl.phase === 'ready' && bl.step === 'cure' && !fin.d.pour && fin.d.cureTint > 50 && /Slab/.test(fin.d.chip) && /^blanket,plastic,mist,strip/.test(fin.slots), JSON.stringify({ bl, d: fin.d, slots: fin.slots }));
+await shot('foundation-curing');
+await G((sid) => __game.sim.commandNow('foundation.cover', { jobId: __foundation.job(sid).id, kind: 'blanket' }), sid);
+await wait(700);
+check('a blanket rolled over the slab is drawn', await G(() => __foundation.drawn().cover === 'blanket'));
+const strip = await G((sid) => {
+  const j = __foundation.job(sid), sim = __game.sim, st = sim.state.sys.stock.items;
+  for (const e of j.elements) { e.cure.eqH = 0.5; e.cure.strength = 0.01; }   // the page clock has run on: put the cure back to the first hour
+  const early = sim.commandNow('foundation.strip', { jobId: j.id });
+  for (const e of j.elements) { e.cure.eqH = 24 * 1.5; }
+  sim.runTicks(10);
+  const b0 = st.form_board || 0, want = j.forms.runs.reduce((a, q) => a + q.boards, 0);
+  let r;
+  for (let k = 0; k < 4; k++) r = sim.commandNow('foundation.strip', { jobId: j.id, run: k, n: 4 });
+  return { early: early.reason, all: r.all, boards: (st.form_board || 0) - b0, want, step: __foundation.job(sid).step };
+}, sid);
+await wait(900);
+const drawnS = await G(() => __foundation.drawn());
+check('forms stripped at a fifth strength: boards back to stock, none left standing', /still green/.test(strip.early) && strip.all && strip.boards === strip.want && strip.step === 'cure' && drawnS.boardsDrawn === 0 && drawnS.stakeMarks === 0, JSON.stringify({ strip, boardsDrawn: drawnS.boardsDrawn }));
+await G((sid) => { const j = __foundation.job(sid); for (const e of j.elements) e.cure.eqH = 24 * 6; __game.sim.runTicks(10); }, sid);
+const framed = await G((sid) => { const pr = __game.sim.state.sys.construction.progress[sid]; return pr.hold ? Object.keys(pr.hold).length : 0; }, sid);
+check('at half strength with the bolts in, framing is let go', framed === 0, 'holds ' + framed);
 
 await page.keyboard.press('Escape');
 await wait(300);

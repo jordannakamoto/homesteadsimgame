@@ -212,7 +212,7 @@ test('the pour: tip, rake, screed with a ridge riding ahead; volume kept; cure s
   }
   assert.ok(s.done, 'screeded: ' + JSON.stringify(s));
   const j = job(sim, jobId);
-  assert.equal(j.step, 'cure');
+  assert.equal(j.step, 'finish', 'screeded: finishing comes before the cure');
   assert.ok(j.elements.every((e) => e.cure && e.cure.cap > 0.95), 'a right mix: full strength to come');
   const pr = sim.state.sys.construction.progress[SID];
   assert.ok(K.stageComplete(pr, 'foundation'));

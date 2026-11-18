@@ -15,13 +15,21 @@
 // forms are WALL bits) worked by foundation.tip (fill and flow), foundation.rake (relax) and foundation.screed (push
 // riding on the forms, the ridge rolling ahead). Each board bows as a beam between what holds it; past
 // FORMS.leakBowM it gapes and the concrete runs out. Screeded flat, the slab starts to cure (finishing is B5).
-// The other hands-on steps (rebar, finish, strip, piers and walls) come in B5-B8.
+// B5: screeded, the slab is not yet cured but finished: step 'finish' (cure runs from here, on the set clock): the bull
+// float (foundation.finishAt float), the bleed-water sheen that must go before troweling or brooming (too early scales
+// the skin; too late, past final set, the tool tears and the step ends), the edger, joints along a straightedge
+// (foundation.joint, planned lines for spans over 3 m) and anchor bolts along the sill line (foundation.setBolt: pushed
+// in while wet; framing stays held without them). Then 'cure': covers (foundation.cover plastic | blanket) and misting
+// (foundation.mist) feed the cure's drying and frost terms; at the strip gate (20%) the forms come off
+// (foundation.strip, boards and stakes go back to stock). The other hands-on steps (rebar, piers and walls) are B6-B8.
 //
 // state sys.foundation = { v: 1, nextId, jobs: { [id]: job }, carry: batch | null (the barrow's mix), machines: {} }
 // job = { id, owner: { structId } | null, type, x, z, yaw, topY, step, layout, digs: [{ poly, targetY, frac, rough }], roughIn, elements: [element], pour,
 //         held: reason | null, baseIds: [construction member ids of the gravel base], base: { level, gravel, compact },
 //         gravelM3, forms: { runs: [{ a, b, len, out, boards, set, stakes, driven, bow, leak }] },
-//         pour: { grid, m3, wcM3, weakM3, leakM3, cold, firstT, lastT, screed, needM3 } }
+//         pour: { grid, m3, wcM3, weakM3, leakM3, cold, firstT, lastT, screed, needM3 },
+//         finish: { bolts: { pos: [[x, z, set, retro]] }, joints: { lines: [{ a, b, len, cells }] }, edge: [[0|1]], early, cov, result } | null,
+//         cover: null | 'plastic' | 'blanket', wetUntil: sim seconds | 0, stripped: 0 | 1 }
 // element = { id, kind, memberIds, w, botY, topY, volM3, dig, base, forms, rebar, bolts, pour, finish, cure }
 // events: 'foundation.gate' { jobId, gate } when a gate opens; 'foundation.cured' { jobId } when it is followed no more.
 import * as CU from './core/cure.js';
@@ -99,10 +107,16 @@ export function gatesOf(job, gates = CC.CURE_GATES) {
   for (const g in gates) out[g] = poured(job) && st >= gates[g];
   return out;
 }
-// what each held stage should say now: { stage: reason | null }
+// what each held stage should say now: { stage: reason | null }. The frame gate first; then the anchor bolts (a slab's
+// sills bolt down, so framing waits until they are in).
+const boltsMissing = (job) => !!(job.finish && job.finish.bolts && job.finish.bolts.pos.some((b) => !b[2]));
 function wantHolds(job) {
-  const out = {}, g = gatesOf(job);
-  for (const h of CC.GATE_HOLDS) for (const st of h.stages) out[st] = poured(job) && job.step !== 'done' && !g[h.gate] ? CC.GATE_SAYS[h.gate] : out[st] || null;
+  const out = {}, g = gatesOf(job), pr = poured(job);
+  for (const h of CC.GATE_HOLDS) for (const st of h.stages) {
+    if (pr && job.step !== 'done' && !g[h.gate]) out[st] = CC.GATE_SAYS[h.gate];
+    else if (pr && boltsMissing(job)) out[st] = out[st] || CC.BOLT_SAYS;
+    else out[st] = out[st] || null;
+  }
   return out;
 }
 // make the construction holds match the cure (also puts them back if the building's plan was sent again)
@@ -370,7 +384,8 @@ function screedRead(ctx, job) {
   return n ? { n, flat: r6(flat / n), hollow: r6(hollow / n), low: r6(low / n) } : { n: 0, flat: 0, hollow: 0, low: 0 };
 }
 function pourBand(job) { const p = job.pour; return p && p.m3 > 1e-6 ? bandOf(CC.MIX.bands.find((b) => p.wcM3 / p.m3 < b.upTo)?.id || 'soupy') : bandOf('good'); }
-// the slab is screeded: it is placed. It starts to cure; the foundation's members are finished in construction.
+// the slab is screeded: it is placed. It starts to cure (on the set clock) and is finished by hand: float, trowel or
+// broom, joints, anchor bolts. The foundation's members are finished in construction.
 function finishPour(ctx, job) {
   const p = job.pour, wc = p.m3 > 0 ? p.wcM3 / p.m3 : CC.MIX.designWc;
   const cap = abrams(wc) * (1 - 0.3 * Math.min(1, p.weakM3 / Math.max(1e-6, p.m3))) * (1 - 0.02 * Math.min(5, p.cold));
@@ -379,11 +394,11 @@ function finishPour(ctx, job) {
     e.pour.m3 = r6(vol > 0 ? (p.m3 * (e.volM3 || 0)) / vol : p.m3 / job.elements.length); e.pour.level = 1; e.pour.cold = p.cold;
     e.finish.screed = p.screed;
     e.cure = CU.newCure(p.firstT ?? ctx.t, { setH20: CC.SET_H20 * CC.WORKABLE_SCALE });
-    e.cure.cap = r6(Math.max(0.3, cap));
+    e.cure.q = r6(Math.max(0.3, cap)); e.cure.cap = e.cure.q;
   }
   p.doneT = ctx.t; p.wc = r6(wc);
-  // B5 puts the finishing step (float, joints, broom) between the screed and the cure
-  stepTo(ctx, job, 'cure');
+  startFinish(job);
+  stepTo(ctx, job, 'finish');
   if (job.owner) {
     const ids = [...job.baseIds, ...job.elements.flatMap((e) => e.memberIds)];
     if (ids.length) call(ctx, 'construction.settle', { structId: job.owner.structId, memberIds: ids });
@@ -391,6 +406,95 @@ function finishPour(ctx, job) {
   ctx.emit('foundation.poured', { jobId: job.id, m3: r6(p.m3), wc: p.wc, cap: r6(cap) });
   applyHolds(ctx, job);
 }
+
+// ------------------------------------------------------------------------------------------------ finishing (B5)
+const FN = CC.FIN;
+const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+const anyCure = (job) => { const e = job.elements.find((q) => q.cure); return e ? e.cure : null; };
+// where the working time of the surface stands: setX is hours in units of the initial set time at its temperature
+export function windowOf(job) {
+  const c = anyCure(job), x = c ? c.setX || 0 : 0, be = FN.bleedEnd * (FN.bleedScale[pourBand(job).id] ?? 1);
+  const sheen = x >= be ? 0 : x >= be - FN.sheenFade ? (be - x) / FN.sheenFade : 1;
+  const phase = x < be ? 'bleeding' : x < FN.trowelUntil ? 'ready' : 'late';
+  const setH = c ? CU.setHoursAt(c.setH20 ?? CC.SET_H20, c.tc ?? 20) : 0;
+  return { x: r6(x), bleedEnd: r6(be), sheen: r6(sheen), phase, bleedLeftH: r6(Math.max(0, be - x) * setH), leftH: r6(Math.max(0, FN.trowelUntil - x) * setH), set: !!(c && c.set) };
+}
+const boltPrimary = (job) => job.elements.find((e) => e.kind === 'slab') || job.elements[0];
+// anchor bolts along the sill line of the outline: near each corner and at most every 1.8 m between, a hand inside
+export function makeBolts(job) {
+  const B = CC.BOLTS, C = job.layout.corners, pos = [];
+  for (let k = 0; k < C.length; k++) {
+    const a = C[k], b = C[(k + 1) % C.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (L < 0.05) continue;
+    const ux = (b[0] - a[0]) / L, uz = (b[1] - a[1]) / L, mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2;
+    let nx = uz, nz = -ux;
+    if (!inPoly(C, mx + nx * 0.05, mz + nz * 0.05)) { nx = -nx; nz = -nz; }
+    const e = Math.min(B.endM, L / 2), span = L - 2 * e, n = span < 0.05 ? 1 : Math.ceil(span / B.everyM - 1e-9) + 1;
+    for (let q = 0; q < n; q++) {
+      const t = n === 1 ? L / 2 : e + (span * q) / (n - 1), x = a[0] + ux * t + nx * B.insetM, z = a[1] + uz * t + nz * B.insetM;
+      if (pos.some((o) => Math.hypot(o[0] - x, o[1] - z) < B.mergeM)) continue;
+      pos.push([r6(x), r6(z), 0, 0]);
+    }
+  }
+  return { pos };
+}
+// control joints: a span over 3 m is cut across at most every 2.5 m; each line is a row of cells the groover fills
+export function makeJoints(job) {
+  const C = job.layout.corners, a0 = C[0], a1 = C[1], L0 = Math.hypot(a1[0] - a0[0], a1[1] - a0[1]) || 1, ux = (a1[0] - a0[0]) / L0, uz = (a1[1] - a0[1]) / L0, lines = [];
+  for (const [dx, dz] of [[ux, uz], [-uz, ux]]) {                         // lines run along (dx, dz), spaced across it
+    const nx = -dz, nz = dx, v = C.map((c) => c[0] * nx + c[1] * nz), lo = Math.min(...v), hi = Math.max(...v), span = hi - lo;
+    if (span <= FN.jointAboveM) continue;
+    const n = Math.ceil(span / FN.jointEveryM - 1e-9) - 1;
+    for (let q = 1; q <= n; q++) {
+      const off = lo + (span * q) / (n + 1);
+      let t0 = Infinity, t1 = -Infinity;
+      const ts = C.map((c) => c[0] * dx + c[1] * dz), tlo = Math.min(...ts) - 0.1, thi = Math.max(...ts) + 0.1;
+      for (let t = tlo; t <= thi; t += 0.05) if (inPoly(C, dx * t + nx * off, dz * t + nz * off)) { t0 = Math.min(t0, t); t1 = Math.max(t1, t); }
+      if (!(t1 - t0 > 0.3)) continue;
+      const len = r6(t1 - t0);
+      lines.push({ a: [r6(dx * t0 + nx * off), r6(dz * t0 + nz * off)], b: [r6(dx * t1 + nx * off), r6(dz * t1 + nz * off)], len, cells: Array.from({ length: Math.ceil(len / FN.jointCellM) }, () => 0) });
+    }
+  }
+  return { lines };
+}
+function startFinish(job) {
+  const f = { bolts: makeBolts(job), joints: makeJoints(job), edge: (job.forms ? job.forms.runs : []).map((r) => Array.from({ length: Math.max(1, Math.ceil(r.len / FN.edgeCellM)) }, () => 0)), early: 0, cov: { float: 0, trowel: 0, broom: 0, scaled: 0, worked: 0 }, result: null };
+  job.finish = f;
+  const e = boltPrimary(job);
+  for (const q of job.elements) q.bolts = { need: q === e ? f.bolts.pos.length : 0, set: 0 };
+}
+// how much of the slab each finish covers, read from the pour grid's finish codes
+function finishCover(job) {
+  const g = job.pour && job.pour.grid, c = job.finish.cov;
+  if (!g) return c;
+  const name = (i, j) => g.codes[EW.sAt(g, i, j)];
+  let n = 0, fl = 0, tr = 0, br = 0, sc = 0;
+  for (const d of job.digs || []) for (const [i, j] of latticeIn(d.poly)) {
+    const k = name(i, j);
+    n++;
+    if (k === 'floated') fl++; else if (k === 'troweled') tr++; else if (k === 'broomed') br++; else if (k === 'scaled') sc++;
+  }
+  if (!n) return c;
+  c.float = r6((fl + tr + br + sc) / n); c.trowel = r6(tr / n); c.broom = r6(br / n); c.scaled = r6(sc / n); c.worked = r6((tr + br + sc) / n);
+  for (const e of job.elements) { e.finish.float = c.float; e.finish.trowel = c.trowel; e.finish.broom = c.broom; }
+  return c;
+}
+const lineDone = (l) => l.cells.filter(Boolean).length / l.cells.length >= FN.done;
+const jointsDone = (job) => job.finish.joints.lines.every(lineDone);
+const finishDone = (job) => { const c = job.finish.cov; return c.float >= FN.done && c.worked >= FN.done && jointsDone(job) && !boltsMissing(job); };
+// the working time is over or the slab is all worked: it goes on to cure. Unfinished work is left as it is.
+function endFinish(ctx, job, forced) {
+  const f = job.finish, c = finishCover(job), scaled = c.scaled;
+  for (const e of job.elements) if (e.cure) { e.cure.q = r6(e.cure.q * (1 - FN.scaledLoss * Math.min(1, scaled / Math.max(0.05, c.worked)) * (c.worked > 0 ? 1 : 0))); }
+  f.result = { forced: !!forced, scaled: c.scaled, worked: c.worked, unjointed: f.joints.lines.filter((l) => !lineDone(l)).length, unfloated: r6(1 - c.float) };
+  if (job.pour) job.pour.grid = null;
+  stepTo(ctx, job, 'cure');
+  ctx.emit('foundation.finished', { jobId: job.id, ...f.result });
+  applyHolds(ctx, job);
+}
+const unstripped = (job) => (job.forms ? job.forms.runs.reduce((a, r) => a + Math.max(0, r.set - (r.stripped || 0)), 0) : 0);
+const cutFrac = (l) => l.cells.filter(Boolean).length / l.cells.length;
+const toolMissing = (ctx, id, say) => { const st = ctx.get('stock'); return st && st.tools && !st.tools.includes(id) ? say : null; };
 
 export const foundationSystem = ({ cure = CC.CURE, every = CC.CURE_EVERY } = {}) => ({
   name: 'foundation',
@@ -402,18 +506,20 @@ export const foundationSystem = ({ cure = CC.CURE, every = CC.CURE_EVERY } = {})
     let env = null;
     for (const id in s.jobs) {
       const job = s.jobs[id];
-      if (job.step !== 'cure' && job.step !== 'strip') continue;
+      if (job.step !== 'finish' && job.step !== 'cure' && job.step !== 'strip') continue;
       env = env || envOf(ctx);
-      const before = gatesOf(job);
+      const before = gatesOf(job), jenv = { ...env, wet: (job.wetUntil || 0) > ctx.t };   // a misting keeps the top wet
       let done = true;
       for (const e of job.elements) {
         if (!e.cure) { done = false; continue; }
-        CU.stepCure(e.cure, ctx.dt / 3600, (ctx.lifeDt ?? ctx.dt) / 3600, env, cure);
+        CU.stepCure(e.cure, ctx.dt / 3600, (ctx.lifeDt ?? ctx.dt) / 3600, jenv, cure);
         if (e.cure.eqH < CC.CURE_DONE_EQH) done = false;
       }
       const after = gatesOf(job);
       for (const g of CC.GATE_ORDER) if (after[g] && !before[g]) ctx.emit('foundation.gate', { jobId: job.id, gate: g });
-      if (done) { job.step = 'done'; ctx.emit('foundation.cured', { jobId: job.id }); }
+      if (job.step === 'finish') { if (job.finish && windowOf(job).phase === 'late') endFinish(ctx, job, true); }
+      else if (done && !boltsMissing(job)) { job.step = 'done'; ctx.emit('foundation.cured', { jobId: job.id }); }
+      else if (job.step === 'cure' && after.strip && unstripped(job) > 0) stepTo(ctx, job, 'strip');
       applyHolds(ctx, job);
     }
   },
@@ -761,12 +867,176 @@ export const foundationSystem = ({ cure = CC.CURE, every = CC.CURE_EVERY } = {})
       if (done) finishPour(ctx, job);
       return { ok: true, m3: r6(ridge), screed: rd.flat, hollow: rd.hollow, low: rd.low, torn: torn > passed * 0.3 ? band.says : null, done, leaking: leaks, board: { w: r6(w), mid: r6(mid), u: [r6(ux), r6(uz)] } };
     },
+    // ------------------------------------------------------------------------------------------ finishing (B5)
+    // A finishing tool worked over the wet slab at (x, z): float (the bull float, right after the screed: floated),
+    // trowel or broom (once the bleed-water sheen is gone: troweled / broomed; before that the water is worked back in and
+    // the skin scales), edge (the edger along a form). { jobId, x, z, r?, kind }
+    'foundation.finishAt'(ctx, p = {}) {
+      const s = ensure(ctx), job = jobOf(s, p);
+      if (!job) return fail('no such job');
+      const kind = p.kind;
+      if (!FN.r[kind]) return fail('no such finishing tool');
+      if (job.step === 'pour') return fail('Screed it off first');
+      if (job.step !== 'finish' || !job.finish) return fail('The surface is past finishing');
+      if (!num(p.x) || !num(p.z)) return fail('Where?');
+      const why = toolMissing(ctx, FN.kit, 'You need the concrete finishing kit (bull float, edger, groover, trowel, broom).');
+      if (why) return fail(why);
+      const w = windowOf(job), f = job.finish, r = Math.min(1, num(p.r) && p.r > 0 ? p.r : FN.r[kind]);
+      if (kind === 'edge') {
+        if (!job.forms) return fail('No form to run the edger along');
+        if (w.x >= FN.edgeUntil) return fail(CC.FINISH_SAYS.late);
+        const k = runNear(job, p.x, p.z);
+        if (k < 0 || segDist(job.forms.runs[k].a, job.forms.runs[k].b, p.x, p.z) > 0.7) return fail('Run the edger along a form: it rounds the edge');
+        const run = job.forms.runs[k], cells = f.edge[k];
+        let n = 0;
+        for (let q = 0; q < cells.length; q++) {
+          const t = Math.min(run.len, (q + 0.5) * FN.edgeCellM), cx = run.a[0] + ((run.b[0] - run.a[0]) * t) / run.len, cz = run.a[1] + ((run.b[1] - run.a[1]) * t) / run.len;
+          if (!cells[q] && Math.hypot(cx - p.x, cz - p.z) <= r + FN.edgeCellM / 2) { cells[q] = 1; n++; }
+        }
+        const tot = f.edge.reduce((a, c) => a + c.length, 0), got = f.edge.reduce((a, c) => a + c.filter(Boolean).length, 0);
+        return { ok: true, kind, n, run: k, edge: r6(got / tot), phase: w.phase };
+      }
+      if (kind === 'float' && w.x >= FN.floatUntil) return fail(CC.FINISH_SAYS.late);
+      if ((kind === 'trowel' || kind === 'broom') && w.phase === 'late') return fail(CC.FINISH_SAYS.late);
+      const g = job.pour && job.pour.grid;
+      if (!g) return fail('Nothing wet to finish');
+      const code = (nm) => EW.code(g, nm), FNS = CC.FINISH;
+      const early = (kind === 'trowel' || kind === 'broom') && w.phase === 'bleeding';
+      const put = kind === 'float' ? code(FNS.floated) : early ? code(FNS.scaled) : code(kind === 'trowel' ? FNS.troweled : FNS.broomed);
+      const from = kind === 'float' ? [code(FNS.mud), code(FNS.screeded)] : [code(FNS.floated)];
+      let n = 0, unfloated = 0, wet = 0;
+      for (let j = Math.floor((p.z - r) / 0.1); j <= Math.ceil((p.z + r) / 0.1); j++) for (let i = Math.floor((p.x - r) / 0.1); i <= Math.ceil((p.x + r) / 0.1); i++) {
+        if (Math.hypot(i * 0.1 - p.x, j * 0.1 - p.z) > r || !insideJob(job, i * 0.1, j * 0.1) || !(EW.hAt(g, i, j) > 0)) continue;
+        wet++;
+        const sc = EW.sAt(g, i, j);
+        if (from.includes(sc)) { EW.setPoint(g, i, j, { s: put }); n++; } else if (kind !== 'float' && (sc === code(FNS.screeded) || sc === code(FNS.mud))) unfloated++;
+      }
+      if (early) f.early += n;
+      const c = finishCover(job), done = finishDone(job);
+      if (done) endFinish(ctx, job, false);
+      return { ok: true, kind, n, wet, early, phase: w.phase, sheen: w.sheen, cov: { ...c }, done, unfloated: n === 0 && unfloated > 0 ? 'Bull float it first: the trowel and broom want a floated surface' : null };
+    },
+    // The groover along a straightedge: a control joint cut as deep as a quarter of the slab. Cuts the planned line
+    // (spans over 3 m, at most every 2.5 m) it runs along. { jobId, x0, z0, x1, z1 }
+    'foundation.joint'(ctx, p = {}) {
+      const s = ensure(ctx), job = jobOf(s, p);
+      if (!job) return fail('no such job');
+      if (job.step !== 'finish' || !job.finish) return fail('Joints are cut while the top is workable');
+      if (![p.x0, p.z0, p.x1, p.z1].every(num)) return fail('no stroke');
+      const L = Math.hypot(p.x1 - p.x0, p.z1 - p.z0);
+      if (L > FN.maxStrokeM) return fail('too far in one stroke');
+      const why = toolMissing(ctx, FN.kit, 'You need the concrete finishing kit (bull float, edger, groover, trowel, broom).');
+      if (why) return fail(why);
+      const lines = job.finish.joints.lines;
+      if (!lines.length) return fail('This slab is small enough to need no joints');
+      if (windowOf(job).x >= FN.jointUntil) return fail(CC.FINISH_SAYS.late);
+      let n = 0, hit = -1;
+      const steps = Math.max(1, Math.ceil(L / 0.05));
+      for (let q = 0; q <= steps; q++) {
+        const x = p.x0 + ((p.x1 - p.x0) * q) / steps, z = p.z0 + ((p.z1 - p.z0) * q) / steps;
+        lines.forEach((l, k) => {
+          if (segDist(l.a, l.b, x, z) > FN.jointReachM) return;
+          const t = Math.max(0, Math.min(l.len, ((x - l.a[0]) * (l.b[0] - l.a[0]) + (z - l.a[1]) * (l.b[1] - l.a[1])) / l.len)), c = Math.min(l.cells.length - 1, Math.floor(t / FN.jointCellM));
+          if (!l.cells[c]) { l.cells[c] = 1; n++; hit = k; }
+        });
+      }
+      if (!n) return { ok: true, n: 0, line: -1, reason: 'Drag along a dashed joint line' };
+      const done = finishDone(job);
+      if (done) endFinish(ctx, job, false);
+      return { ok: true, n, line: hit, cut: lines.map(cutFrac), lines: lines.length, done };
+    },
+    // Anchor bolts pushed into the wet slab at the marks along the sill line (the nearest unset ones to (x, z), n of
+    // them). After initial set they are drilled and epoxied in instead (slower: one at a time). { jobId, x?, z?, n? }
+    'foundation.setBolt'(ctx, p = {}) {
+      const s = ensure(ctx), job = jobOf(s, p), B = CC.BOLTS;
+      if (!job) return fail('no such job');
+      if (!job.finish || !['finish', 'cure', 'strip'].includes(job.step)) return fail(job.step === 'pour' ? 'Screed it off first' : 'No bolts to set');
+      const pos = job.finish.bolts.pos, left = pos.map((b, k) => [b, k]).filter(([b]) => !b[2]);
+      if (!left.length) return { ok: true, n: 0, left: 0 };
+      const w = windowOf(job), retro = w.x >= FN.boltFree;
+      if (retro && !gatesOf(job).walk) return fail('Too soft to drill, too stiff to push: wait for it to firm up');
+      const near = num(p.x) && num(p.z) ? left.map(([b, k]) => [Math.hypot(b[0] - p.x, b[1] - p.z), k]).sort((a, c) => a[0] - c[0]) : left.map(([, k]) => [0, k]);
+      if (near[0][0] > B.reachM * 4 && num(p.x)) return fail('Aim at a glowing bolt mark along the sill line');
+      const want = near.slice(0, retro ? 1 : Math.max(1, Math.min(B.perCall, Math.round(+p.n || 1)))).map((q) => q[1]);
+      const got = stockTake(ctx, B.item, want.length);
+      if (!got) return fail('You need anchor bolts: ' + left.length + ' more');
+      for (const k of want.slice(0, got)) { pos[k][2] = 1; pos[k][3] = retro ? 1 : 0; }
+      const e = boltPrimary(job), setN = pos.filter((b) => b[2]).length;
+      for (const q of job.elements) if (q === e) q.bolts.set = setN;
+      const lf = pos.length - setN;
+      let done = false;
+      if (job.step === 'finish') { finishCover(job); done = finishDone(job); if (done) endFinish(ctx, job, false); }
+      if (lf === 0) { applyHolds(ctx, job); ctx.emit('foundation.bolted', { jobId: job.id }); }
+      return { ok: true, n: got, left: lf, retro, done };
+    },
+    // Finish now: stop working the top and let it cure (what is not done stays as it is). { jobId }
+    'foundation.finish'(ctx, p = {}) {
+      const s = ensure(ctx), job = jobOf(s, p);
+      if (!job) return fail('no such job');
+      if (job.step !== 'finish' || !job.finish) return fail('Not finishing');
+      endFinish(ctx, job, true);
+      return { ok: true, result: job.finish.result };
+    },
+    // A cover over the finished slab: plastic holds the moisture in, a blanket holds the heat in as well; null takes it
+    // off. { jobId, kind: 'plastic' | 'blanket' | null }
+    'foundation.cover'(ctx, p = {}) {
+      const s = ensure(ctx), job = jobOf(s, p);
+      if (!job) return fail('no such job');
+      if (!poured(job) || !['cure', 'strip'].includes(job.step)) return fail(job.step === 'finish' ? 'Finish the top first: a cover marks wet concrete' : 'Nothing to cover');
+      const kind = p.kind || null;
+      if (kind !== null && !CC.COVERS[kind]) return fail('no such cover');
+      if (kind) { const why = toolMissing(ctx, CC.COVERS[kind], kind === 'blanket' ? 'You need a curing blanket.' : 'You need polyethylene sheeting.'); if (why) return fail(why); }
+      job.cover = kind;
+      for (const e of job.elements) if (e.cure) e.cure.covered = kind;
+      return { ok: true, cover: kind };
+    },
+    // The hose on a fine mist keeps the top wet for half an hour (it feeds the cure's drying term, and cools). Not in
+    // freezing air. { jobId }
+    'foundation.mist'(ctx, p = {}) {
+      const s = ensure(ctx), job = jobOf(s, p), M = CC.MIST;
+      if (!job) return fail('no such job');
+      if (!poured(job) || !['cure', 'strip'].includes(job.step)) return fail(job.step === 'finish' ? 'Finish the top first: water on wet concrete weakens it' : 'Nothing to mist');
+      const why = toolMissing(ctx, M.tool, 'You need a garden hose.');
+      if (why) return fail(why);
+      if (envOf(ctx).airC < M.minAirC) return fail('Too cold to mist: the water would freeze on it. Cover it instead');
+      if (job.cover === 'plastic') return fail('Under plastic it stays wet already');
+      job.wetUntil = ctx.t + M.holdS;
+      for (const e of job.elements) if (e.cure) e.cure.wet = true;
+      return { ok: true, minutes: M.holdS / 60, until: job.wetUntil };
+    },
+    // Pull the forms once the concrete is a fifth strength: up to n boards of a side (the one named, or nearest
+    // (x, z)); the first board off a side takes its stakes with it. Boards and stakes go back to stock. { jobId, run? | x, z, n }
+    'foundation.strip'(ctx, p = {}) {
+      const s = ensure(ctx), job = jobOf(s, p), F = CC.FORMS;
+      if (!job) return fail('no such job');
+      if (!job.forms) return fail('No forms to strip');
+      if (job.stripped) return fail('The forms are off');
+      if (!poured(job) || !['cure', 'strip'].includes(job.step)) return fail(job.step === 'finish' ? 'Finish the top first: the forms stay on' : 'Nothing to strip yet');
+      const g = gatesOf(job);
+      if (!g.strip) return fail(CC.GATE_SAYS.strip + ' (' + Math.round(g.strength * 100) + '% of ' + Math.round(CC.CURE_GATES.strip * 100) + '%)');
+      const runs = job.forms.runs, left = (r) => r.set - (r.stripped || 0) > 0;
+      const k = Number.isInteger(p.run) ? p.run : num(p.x) && num(p.z) ? runNear(job, p.x, p.z, left) : runs.findIndex(left);
+      const r = runs[k];
+      if (!r || !left(r)) return fail('That side is already stripped');
+      const n = Math.max(1, Math.min(4, Math.round(+p.n || 1), r.set - (r.stripped || 0)));
+      r.stripped = (r.stripped || 0) + n;
+      let stakes = 0;
+      if (!r.pulled) { r.pulled = 1; stakes = r.driven.filter(Boolean).length; }
+      if (n) call(ctx, 'stock.add', { id: F.boardItem, qty: n });
+      if (stakes) call(ctx, 'stock.add', { id: F.stakeItem, qty: stakes });
+      // a side whose edge was not run with the edger chips as the board comes off
+      const ec = job.finish && job.finish.edge && job.finish.edge[k] ? job.finish.edge[k].filter(Boolean).length / job.finish.edge[k].length : 1, chipped = ec < 0.6;
+      if (chipped && job.finish) job.finish.chips = (job.finish.chips || 0) + 1;
+      const all = runs.every((q) => !left(q));
+      if (all) { job.stripped = 1; if (job.step === 'strip') stepTo(ctx, job, 'cure'); ctx.emit('foundation.stripped', { jobId: job.id }); }
+      return { ok: true, run: k, boards: n, stakes, chipped, runDone: !left(r), all, left: unstripped(job) };
+    },
     // Sandbox and tests: every element is poured now (the foundation members are finished in construction) and
     // starts to cure from now; framing on it waits for the frame gate.
     'foundation.debugPour'(ctx, p = {}) {
       const s = ensure(ctx), job = jobOf(s, p);
       if (!job) return fail('no such job');
-      if (STEPS.indexOf(job.step) >= STEPS.indexOf('cure')) return fail('already poured');
+      if (STEPS.indexOf(job.step) >= STEPS.indexOf('finish')) return fail('already poured');
       for (const e of job.elements) {
         e.pour.m3 = e.volM3; e.pour.level = 1;
         e.cure = CU.newCure(ctx.t, { setH20: CC.SET_H20 * CC.WORKABLE_SCALE });
@@ -802,11 +1072,19 @@ export const foundationRead = {
     const e = elementId !== undefined ? j.elements.find((q) => q.id === String(elementId)) : j.elements.find((q) => q.cure && q.cure.strength === jobStrength(j));
     return e && e.cure ? { ...e.cure, workability: CU.workability(e.cure) } : null;
   },
+  // B5: the finishing window and what is on the slab (for the view): { x, bleedEnd, sheen, phase, leftH, cover, wetUntil, bolts, joints, edge, cov, ... }
+  finish: (state, jobId) => {
+    const j = F(state).jobs[jobId];
+    if (!j || !j.elements.some((e) => e.cure)) return null;
+    const w = windowOf(j), f = j.finish, c = anyCure(j);
+    return { ...w, cover: j.cover || null, wetUntil: j.wetUntil || 0, stripped: !!j.stripped, unstripped: unstripped(j), dry: c ? c.dry : 0, frost: c ? c.frost : 0, tc: c ? c.tc : null, strength: c ? c.strength : 0,
+      bolts: f ? f.bolts.pos : [], joints: f ? f.joints.lines.map((l) => ({ a: l.a, b: l.b, len: l.len, cells: l.cells })) : [], edge: f ? f.edge : [], cov: f ? f.cov : null, early: f ? f.early : 0, result: f ? f.result : null, chips: f && f.chips || 0, boltsLeft: f ? f.bolts.pos.filter((b) => !b[2]).length : 0 };
+  },
   jobView: (state, jobId) => {
     const j = F(state).jobs[jobId];
     if (!j) return null;
     const g = gatesOf(j);
-    return { id: j.id, type: j.type, step: j.step, held: j.held, corners: j.layout.corners.map((c) => [c[0], c[1], !!c[2]]), closed: j.layout.closed, dig: digFrac(j), rough: digFrac(j, 'rough'), trimFrom: CC.DIG.trimFrom, roughM: CC.DIG.roughM, strength: g.strength, gates: Object.fromEntries(CC.GATE_ORDER.map((k) => [k, g[k]])), elements: j.elements.map((e) => ({ id: e.id, kind: e.kind, volM3: e.volM3, poured: !!e.cure, strength: e.cure ? e.cure.strength : 0 })),
+    return { id: j.id, type: j.type, step: j.step, held: j.held, corners: j.layout.corners.map((c) => [c[0], c[1], !!c[2]]), closed: j.layout.closed, dig: digFrac(j), rough: digFrac(j, 'rough'), trimFrom: CC.DIG.trimFrom, roughM: CC.DIG.roughM, strength: g.strength, gates: Object.fromEntries(CC.GATE_ORDER.map((k) => [k, g[k]])), elements: j.elements.map((e) => ({ id: e.id, kind: e.kind, volM3: e.volM3, poured: !!e.cure, strength: e.cure ? e.cure.strength : 0 })), cover: j.cover || null, stripped: !!j.stripped,
       base: j.base ? { ...j.base, gravelM3: j.gravelM3 || 0 } : { level: 0, gravel: 0, compact: 0, gravelM3: j.gravelM3 || 0 },
       forms: j.forms ? { boards: j.forms.runs.reduce((a, r) => a + r.boards, 0), set: j.forms.runs.reduce((a, r) => a + r.set, 0), stakes: j.forms.runs.reduce((a, r) => a + r.stakes.length, 0), driven: j.forms.runs.reduce((a, r) => a + r.driven.filter(Boolean).length, 0), leaking: j.forms.runs.some((r) => r.leak), bow: Math.max(0, ...j.forms.runs.map((r) => r.bow)) } : null,
       pour: j.pour ? { m3: j.pour.m3, needM3: j.pour.needM3, screed: j.pour.screed, leakM3: j.pour.leakM3, cold: j.pour.cold, band: pourBand(j).id, wc: j.pour.m3 > 0 ? r6(j.pour.wcM3 / j.pour.m3) : null } : null };
