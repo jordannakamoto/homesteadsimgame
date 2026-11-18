@@ -118,19 +118,30 @@ const resolvePipe = (p) => {
   return FIXTURES_WATER.pipe_pex_20;
 };
 
-// Hand-fitted runs arrive from another system (state `plumbing`: { version, pieces }) as extra connection
-// pieces: "pipe" runs between fixture ports (with `shut` when a closed valve is on the way and `equivM` for
-// the fittings), and "leak" pieces for open ends. They are joined to the site's pieces here.
+// Hand-fitted runs arrive from other systems as extra connection pieces: `plumbing` (kit parts in the yard:
+// { version, pieces }) and `services` (runs in buildings: { version, waterPieces }). "pipe" runs between fixture
+// ports (with `shut` when a closed valve is on the way and `equivM` for the fittings), "leak" pieces for open ends,
+// and fixtures fitted on stubs. They are joined to the site's pieces here, memoised so the network (cached by the
+// identity of the array) is rebuilt only when one of them changes.
+const SOURCES = ['plumbing', 'services'];
 const merged = new WeakMap();
+const extraOf = (x) => (x ? x.waterPieces || x.pieces : null);
 function piecesFor(ctx) {
-  const site = ctx.get('site'), extra = ctx.get('plumbing');
+  const site = ctx.get('site');
   if (!site) return null;
-  if (!extra || !extra.pieces || !extra.pieces.length) return site.pieces;
+  const extras = [];
+  for (const n of SOURCES) { const e = extraOf(ctx.get(n)); if (e && e.length) extras.push(e); }
+  if (!extras.length) return site.pieces;
   let m = merged.get(site.pieces);
-  if (!m || m.extra !== extra.pieces) { m = { extra: extra.pieces, all: site.pieces.concat(extra.pieces) }; merged.set(site.pieces, m); }
+  if (!m || m.extras.length !== extras.length || m.extras.some((e, i) => e !== extras[i])) { m = { extras, all: site.pieces.concat(...extras) }; merged.set(site.pieces, m); }
   return m.all;
 }
-const versionOf = (ctx) => { const site = ctx.get('site'), extra = ctx.get('plumbing'); return extra && extra.version ? site.version + ':' + extra.version : site.version; };
+const versionOf = (ctx) => {
+  const site = ctx.get('site');
+  let v = site.version;                                                // a plain number while nothing else adds pieces
+  for (const n of SOURCES) { const x = ctx.get(n); if (x && x.version) v += (n === 'plumbing' ? ':' : '|' + n + ':') + x.version; }
+  return v;
+};
 // An open pipe end is an orifice the size of the bore: all the head left becomes velocity (v = sqrt(2 g h)).
 const openEndSpec = (dM) => ({ ratedLmin: Math.PI * (dM / 2) ** 2 * Math.sqrt(2 * G) * 60000, ratedKPa: KPA_PER_M });
 

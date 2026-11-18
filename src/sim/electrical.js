@@ -119,10 +119,34 @@ export const dropPercent = (currentA, spec, lengthM, volts) => (200 * currentA *
 const cloudTransmission = (c) => 1 - 0.75 * Math.pow(c, 3.4);   // the same rules weather.js uses
 const directTransmission = (c) => Math.max(0, 1 - Math.pow(c, 1.5));
 
+// ------------------------------------------------------------------------------------------- pieces
+// The site's pieces plus what other systems add (services: cable runs in buildings, as { version, powerPieces }).
+// Memoised by the identity of both arrays: the topology cache below is keyed by array identity, so an
+// unmemoised concat would recompile the network every tick.
+const SOURCES = ['services'];
+const merged = new WeakMap();
+function piecesFor(state) {
+  const site = state && state.sys ? state.sys.site : null;
+  if (!site || !Array.isArray(site.pieces)) return null;
+  const extras = [];
+  for (const n of SOURCES) { const x = state.sys[n], e = x && (x.powerPieces || x.pieces); if (e && e.length) extras.push(e); }
+  if (!extras.length) return site.pieces;
+  let m = merged.get(site.pieces);
+  if (!m || m.extras.length !== extras.length || m.extras.some((e, i) => e !== extras[i])) { m = { extras, all: site.pieces.concat(...extras) }; merged.set(site.pieces, m); }
+  return m.all;
+}
+function versionOf(state) {
+  const site = state.sys.site;
+  let v = String(site ? site.version | 0 : 0);
+  for (const n of SOURCES) { const x = state.sys[n]; if (x && x.version) v += ':' + n + x.version; }
+  return v;
+}
+
 // ------------------------------------------------------------------------------------------- topology
 // Compiled from pieces plus the few things in state that change the wiring (tripped breakers, inverters
 // switched off, loads attached by command). Pure, cached per pieces array and key, never saved.
 const cache = new WeakMap();
+export const electricalStats = { compiles: 0 };    // topology compiles since load (a test asserts idle ticks add none)
 const EMPTY = Object.freeze({ empty: true });
 const FOREIGN = Object.freeze({ id: 'foreign', noun: 'device', category: 'load', ratedW: 0, supply: 'any', priority: 5, voltageV: 120, loadPoint: true, foreign: true });
 
@@ -145,6 +169,7 @@ function topoKeyOf(s) {
 const ROLE_OF = { solar_panel: 'panel', battery: 'battery', generator: 'gen', load: 'load', tool: 'load', outlet: 'load' };
 
 function compile(pieces, s) {
+  electricalStats.compiles++;
   const fx = new Map();          // pieceId -> { p, def }
   let own = 0;
   for (const p of pieces) {
@@ -528,10 +553,9 @@ function deactivate(s) {
 function step(ctx) {
   let s = ctx.s;
   if (!s || s.v !== STATE_V) ctx.s = s = initState(ctx);
-  const site = ctx.get('site');
-  const T = topology(site && site.pieces, s);
+  const T = topology(piecesFor(ctx.state), s);
   if (T.empty) { if (s.active) deactivate(s); return; }
-  const sig = (site.version | 0) + '|' + s.topoKey;
+  const sig = versionOf(ctx.state) + '|' + s.topoKey;
   let fresh = false;
   if (s.sig !== sig) { reconcile(s, T, sig); fresh = true; }
   const dt = ctx.dt, dtH = dt / 3600, t = ctx.t, tMid = t + dt / 2;
@@ -983,8 +1007,8 @@ export function powerNear(state, x, z, cordM = 30, minW = 1) {
   const s = sysState(state); if (!s || !s.active) return false;
   const ids = Object.keys(s.points || {});
   if (!ids.length) return powerAvailableAt(state) >= minW;
-  const site = state && state.sys ? state.sys.site : null;
-  const places = site && Array.isArray(site.pieces) ? placesOf(site.pieces) : null;
+  const all = piecesFor(state);
+  const places = all ? placesOf(all) : null;
   if (!places) return false;
   const r2 = cordM * cordM;
   for (const id of ids) {
