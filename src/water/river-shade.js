@@ -22,7 +22,7 @@ export const RIVER_SHADE = /* glsl */ `
   uniform samplerCube uEnv, uEnv2; uniform vec4 uEnvPos; uniform float uEnvMix;
   uniform sampler2D uRefl; uniform mat4 uReflMat; uniform vec4 uReflOn;   // the mirror (reflect-plane.js)
   uniform vec4 uWake; uniform vec2 uWakeK;   // someone wading: where, the current past their legs (x, z); how deep, on          // the reflection probe (reflect-probe.js): where, and w on/off
-  uniform vec4 uRip[24]; uniform vec2 uRipV[24];      // ripples, and the current that carries each one away                   // ripples: x, z, start time, strength
+  uniform vec4 uRip[24]; uniform vec2 uRipV[24], uRipD[24];   // ripples; the current that carries each; the way its maker was moving      // ripples, and the current that carries each one away                   // ripples: x, z, start time, strength
   const mat4 BAYER = mat4(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
   float bayer4(vec2 c) { ivec2 i = ivec2(mod(c, 4.0)); return (BAYER[i.y][i.x] + 0.5) / 16.0; }
   // how far the live water has taken over at p: 0 outside its window, 1 more than 4 m inside, dithered between
@@ -132,13 +132,23 @@ export const RIVER_SHADE = /* glsl */ `
       vec2 dp = q - r.xy - uRipV[i] * age; float dd = length(dp) + 1e-4;
       float R = 0.12 + age * 0.75, wv = 0.05 + age * 0.05;
       float x = (dd - R) / wv;
-      g += dp / dd * (x * exp(-x * x)) * r.w * 0.9 * exp(-age * 1.3) / (1.0 + dd * 2.0);
+      // a ring left by something moving (uRipD: its heading) shows only its sides: the overlapping sides of rings
+      // dropped along a path are what make a wake's two arms, and a whole circle from each would show as rings
+      float side = 1.0;
+      if (dot(uRipD[i], uRipD[i]) > 0.25) { float c = dot(dp / dd, uRipD[i]); side = (1.0 - c * c) * (1.0 - c * c); }
+      g += dp / dd * (x * exp(-x * x)) * r.w * 0.9 * exp(-age * 1.3) / (1.0 + dd * 2.0) * side;
     }
     if (uSnap > 0.5) g = floor(g * 8.0 + 0.5) / 8.0;                // pixel style: ripples as facets
     vec3 N = normalize(vec3(-g.x, 1.0, -g.y));
     vec3 V = normalize(cameraPosition - world);
     float ndv = max(dot(N, V), 0.0);
     float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
+    // Water seen low across it is not a perfect mirror: its ripples tilt many facets away (they show the water and
+    // the bed instead, or are hidden behind the next ripple), so the reflection is weaker the rougher it is, and
+    // what is reflected is smeared up and down (the long wavering reflections of a lake at eye level)
+    float graze = 1.0 - ndv;
+    fres *= mix(1.0, 0.55, smoothstep(0.1, 0.9, rough) * smoothstep(0.6, 0.95, graze));
+    fres = min(fres, mix(0.85, 0.65, rough));
     float skyVis = mix(1.0, texture2D(uSkyMap, (q + 0.5) / 512.0).r, uSkyK);
     vec3 R = reflect(-V, N); R.y = abs(R.y);
     // What the water reflects is mostly its surroundings, not an empty sky (an even sky on a wavy surface is what
@@ -153,7 +163,7 @@ export const RIVER_SHADE = /* glsl */ `
     vec3 sky = mix(mix(bank, trees, smoothstep(0.0, 0.06, R.y)), skyC, smoothstep(line - 0.04, line + 0.04, R.y));
     // near the player, the real surroundings from the probe, blurred where the water is rough
     float envK = uEnvPos.w * (1.0 - smoothstep(25.0, 50.0, distance(q, uEnvPos.xz)));
-    float lod = 2.0 + 2.5 * rough;
+    float lod = 2.0 + 2.5 * rough + 1.5 * smoothstep(0.7, 0.98, graze);
     if (envK > 0.0) sky = mix(sky, mix(textureLod(uEnv, R, lod).rgb, textureLod(uEnv2, R, lod).rgb, uEnvMix), envK);
     // and where this water lies at the mirror's level, the mirror: the banks and what hangs over them, in place,
     // wavering with the ripples
@@ -162,8 +172,12 @@ export const RIVER_SHADE = /* glsl */ `
       if (kp > 0.0) {
         vec4 pr = uReflMat * vec4(world.x, uReflOn.y, world.z, 1.0);
         vec2 ruv = pr.xy / pr.w + g * (0.05 + 0.08 * rough);
+        float smear = (0.003 + 0.012 * rough) * (1.0 + 3.0 * smoothstep(0.6, 0.98, graze));
         kp *= smoothstep(0.0, 0.03, min(min(ruv.x, 1.0 - ruv.x), min(ruv.y, 1.0 - ruv.y)));
-        sky = mix(sky, texture2D(uRefl, clamp(ruv, 0.001, 0.999)).rgb, kp);
+        vec3 mir = texture2D(uRefl, clamp(ruv, 0.001, 0.999)).rgb * 0.36;
+        mir += texture2D(uRefl, clamp(ruv + vec2(0.0, smear), 0.001, 0.999)).rgb * 0.22 + texture2D(uRefl, clamp(ruv - vec2(0.0, smear), 0.001, 0.999)).rgb * 0.22;
+        mir += texture2D(uRefl, clamp(ruv + vec2(0.0, smear * 2.2), 0.001, 0.999)).rgb * 0.1 + texture2D(uRefl, clamp(ruv - vec2(0.0, smear * 2.2), 0.001, 0.999)).rgb * 0.1;
+        sky = mix(sky, mir, kp);
       }
     }
     float sd = max(dot(R, uSunDir), 0.0);

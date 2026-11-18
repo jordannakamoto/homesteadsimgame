@@ -1033,7 +1033,7 @@ float bedCaustic = 0.0;
       vec2 g = mix(texture2D(uSeaTex, q * 0.31 - v * t0 * 0.55).rg, texture2D(uSeaTex, q * 0.31 - v * t1 * 0.55 + 0.37).rg, wb) - 0.5;
       g = g * (0.3 + 0.7 * smoothstep(0.05, 1.1, sp)) + (texture2D(uSeaTex, q * 1.7 - v * t0 * 0.9 + uTime * vec2(0.05, 0.03)).rg - 0.5) * 0.35;
       vec2 bp = q + g * min(dep, 0.6) * 0.5;
-      if (uBedVox > 0.5) bp = (floor(bp * 32.0) + 0.5) / 32.0;                      // voxel style: the bed in 3 cm texels
+      if (uBedVox > 0.5) { float tpm = uBedVox > 1.5 ? 32.0 : 16.0; bp = (floor(bp * tpm) + 0.5) / tpm; }   // voxel style: 6 cm texels (fine: 3 cm)
       // what the current leaves: cobbles in fast water, gravel in middling, sand in slow pools, each layer lying on
       // the finer one, with the finer stuff showing between
       float big = smoothstep(0.3, 0.9, sp + (texture2D(uFoamTex, bp * 0.11).b - 0.5) * 0.6);
@@ -2726,7 +2726,7 @@ let probeAt = null, probeAway = 0;
 reflectProbe.setDetail(LOOK.waterReflect === 'full'); reflectPlane.setDetail(LOOK.waterReflect === 'full');
 riverWater.uniforms.uTPM.value = LOOK.waterTexel === 'ground' ? 6.4 : 25.6;
 riverWater.uniforms.uSnap.value = LOOK.waterTexel === 'smooth' ? 0 : 1;
-U.bedVox.value = LOOK.bedStyle === 'real' ? 0 : 1;
+U.bedVox.value = LOOK.bedStyle === 'real' ? 0 : LOOK.bedStyle === 'voxelFine' ? 2 : 1;
 // The stream water at a point: the live simulation's where it runs, else the baked water of the day.
 // { depth (m), vx, vz (m/s), foam } or null where there is no stream.
 function streamWaterAt(x, z) {
@@ -3176,7 +3176,7 @@ function setLook(key, value) {
   if (key === 'taa') { applyGfx(); resize(); }
   if (key === 'riverWater') riverLive.setMode(value === 'baked' ? 'bed' : value);
   if (key === 'waterReflect') { if (value === 'simple') { reflectProbe.setOn(false); reflectPlane.setOn(false); } reflectProbe.setDetail(value === 'full'); reflectPlane.setDetail(value === 'full'); }
-  if (key === 'bedStyle') U.bedVox.value = value === 'real' ? 0 : 1;
+  if (key === 'bedStyle') U.bedVox.value = value === 'real' ? 0 : value === 'voxelFine' ? 2 : 1;
   if (key === 'waterTexel') { riverWater.uniforms.uTPM.value = value === 'ground' ? 6.4 : 25.6; riverWater.uniforms.uSnap.value = value === 'smooth' ? 0 : 1; }      // MSAA off or back on, and the resolve path
   if (key === 'toneMap') {
     renderer.toneMapping = TONE_MAPS[value] || THREE.ACESFilmicToneMapping;   // the composer's output pass follows it by itself
@@ -3251,7 +3251,7 @@ const gfxPanel = (() => {
     rw.addEventListener('change', () => { setLook('riverWater', rw.value); canvas.focus(); });
     const wt = h('select', { disabled: !RIVERS_ON }, ...[['smooth', 'Smooth (realistic)'], ['fine', 'Pixels, fine (4 per ground pixel)'], ['ground', 'Pixels, as the ground']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.waterTexel === v })));
     wt.addEventListener('change', () => { setLook('waterTexel', wt.value); canvas.focus(); });
-    const bs = h('select', { disabled: !RIVERS_ON }, ...[['voxel', 'Voxel'], ['real', 'Realistic']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.bedStyle === v })));
+    const bs = h('select', { disabled: !RIVERS_ON }, ...[['voxel', 'Voxel'], ['voxelFine', 'Voxel, fine'], ['real', 'Realistic']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.bedStyle === v })));
     bs.addEventListener('change', () => { setLook('bedStyle', bs.value); canvas.focus(); });
     const wr = h('select', { disabled: !RIVERS_ON }, ...[['probe', 'Surroundings'], ['full', 'Surroundings, full'], ['simple', 'Simple']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.waterReflect === v })));
     wr.addEventListener('change', () => { setLook('waterReflect', wr.value); canvas.focus(); });
@@ -3313,7 +3313,7 @@ const gfxPanel = (() => {
       chk('ao', 'Extra ambient occlusion', 'A second, stronger occlusion on top of the Lighting pass (Ultra full, High and Medium half resolution).'),
       h('div', { className: 'row' }, h('span', {}, 'Stream water', h('span', { className: 'hint', textContent: 'Live simulates the water round you on the graphics card: it flows round what you put in it, fills what you dig and stirs as you wade. Baked is the still, cheaper version everywhere. Beyond the live window the baked water shows.' })), rw),
       h('div', { className: 'row' }, h('span', {}, 'Stream reflections', h('span', { className: 'hint', textContent: 'Surroundings: streams near you reflect what is really round them: the banks, grass and rocks mirrored in place where they meet the water, and a small picture of the surroundings further off. It draws the scene again, every other frame, at low resolution and only to 40 m. Surroundings, full: every frame, sharper and to the horizon (costly). Simple: a sky and a tree line worked out in the shader, cheapest.' })), wr),
-      h('div', { className: 'row' }, h('span', {}, 'Stream beds', h('span', { className: 'hint', textContent: 'The stones under the stream water near you. Voxel draws them in small texels with a few tones, like the rest of the world; Realistic draws them smooth.' })), bs),
+      h('div', { className: 'row' }, h('span', {}, 'Stream beds', h('span', { className: 'hint', textContent: 'The stones under the stream water near you. Voxel draws them in small texels with a few tones, like the rest of the world (Voxel, fine: texels half the size); Realistic draws them smooth.' })), bs),
       h('div', { className: 'row' }, h('span', {}, 'Water style', h('span', { className: 'hint', textContent: 'Smooth draws the foam, flow and ripples of the streams at full detail. The pixel styles cut them into texels like the ground.' })), wt),
       h('div', { className: 'row' }, h('span', {}, 'Upscaler', h('span', { className: 'hint', textContent: 'How a below-full-size render is enlarged. Sharp pixels keeps each pixel a crisp block. FSR 1 is made for photoreal images and smears pixel textures.' })), up),
       h('div', { className: 'row' }, h('span', {}, 'Tone mapping', h('span', { className: 'hint', textContent: 'How bright light is fitted to the screen. AgX rolls bright colours to white without ACES\'s hue shift; Neutral keeps colours as painted.' })), tm),
@@ -3919,8 +3919,10 @@ function updatePlayer(dt) {
     // the wake: rings dropped as you go, carried off by the current; together they spread into a V behind you
     P.ringT = (P.ringT || 0) - dt;
     if (P.ringT <= 0) {
-      P.ringT = rel > 0.25 ? clamp(0.06 / rel, 0.08, 0.2) : 0.9;
-      waterFx.ripple(P.x, P.z, clamp(0.2 + 0.35 * rel, 0.2, 0.6) * Math.min(1, d * 3), sw.vx, sw.vz);
+      P.ringT = rel > 0.25 ? clamp(0.06 / rel, 0.08, 0.2) : 1.1;
+      // heading of the legs through the water (against the current going past them)
+      const hx = rel > 0.25 ? -rx / rel : 0, hz = rel > 0.25 ? -rz / rel : 0;
+      waterFx.ripple(P.x, P.z, (rel > 0.25 ? clamp(0.25 + 0.35 * rel, 0.25, 0.6) : 0.15) * Math.min(1, d * 3), sw.vx, sw.vz, hx, hz);
     }
     P.splashT = (P.splashT || 0) - dt;
     if (P.splashT <= 0 && sp > 0.5) {

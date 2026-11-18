@@ -76,7 +76,8 @@ export function createWaterFx({ scene, river, groundAt }) {
   const rips = u.uRip.value;
   let ripNext = 0;
   // a ring spreading from (x, z), carried along at (vx, vz) by the current
-  function ripple(x, z, strength = 1, vx = 0, vz = 0) { rips[ripNext].set(x, z, u.uTime.value, strength); u.uRipV.value[ripNext].set(vx, vz); ripNext = (ripNext + 1) % rips.length; }
+  // dx, dz: the heading of what made it, if it was moving (only the ring's sides then show: see river-shade.js)
+  function ripple(x, z, strength = 1, vx = 0, vz = 0, dx = 0, dz = 0) { rips[ripNext].set(x, z, u.uTime.value, strength); u.uRipV.value[ripNext].set(vx, vz); u.uRipD.value[ripNext].set(dx, dz); ripNext = (ripNext + 1) % rips.length; }
 
   // sprites: camera-facing quads, droplets stretched along their velocity (motion-stretched billboards, the usual
   // way games draw spray: a fast drop is seen as a short streak, not a dot)
