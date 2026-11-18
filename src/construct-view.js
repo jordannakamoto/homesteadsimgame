@@ -1290,18 +1290,24 @@
     }
     return null;
   }
-  // hold at a pile with a trailer by it: the pieces stream onto the bed, about eight a second, until you let go or it is full
+  // hold at a pile with a trailer by it: the press picks up an armful as always; still held, that armful goes onto the
+  // bed and the rest of the pile streams after it, about eight pieces a second, until you let go or the bed is full
+  const T_HOLD_S = 0.5;
   function tickTHold(dt) {
     const h = V.tHold;
     if (!h) return;
     if (!(V.mDown || G.keys.KeyE)) {
       V.tHold = null;
-      if (h.t < 0.3) { const k = S().stacks.find((q) => q.id === h.stack); if (k) pickUp(k); }
-      else if (h.n) flash(h.n + (h.n === 1 ? ' piece' : ' pieces') + ' of ' + stackName(h.itemId) + ' on the trailer');
+      if (h.n) flash(h.n + (h.n === 1 ? ' piece' : ' pieces') + ' of ' + stackName(h.itemId) + ' on the trailer');
       return;
     }
     h.t += dt;
-    if (h.t < 0.3) return;
+    if (h.t < T_HOLD_S) return;
+    const c = S().carried;
+    if (!h.n && c && c.itemId === h.itemId) {
+      const P = G.player, r = cmd('carrierLoad', { hands: true, carrier: h.trailer, x: P.x, z: P.z });
+      if (r.ok) { window.__vehicles.flyFrom(h.trailer, { x: P.x, y: P.y + 1.3, z: P.z }); h.n++; sounds.play('thunk'); }
+    }
     for (h.next -= dt; h.next <= 0; h.next += 0.125) {
       const k = S().stacks.find((q) => q.id === h.stack);
       if (!k) { V.tHold = null; V.mDown = false; flash('All of it is on the trailer'); return; }
@@ -1360,7 +1366,7 @@
     else if (ctx.kind === 'cut') cutNext(ctx);
     else if (ctx.kind === 'hgrab') { V.horsesHeld = true; V.rev++; sounds.play('lift'); flash('Carry the sawhorses to the work; press again to set them down'); }
     else if (ctx.kind === 'hset') { const h = CS.horses; V.horsesHeld = false; if (h) cmd('moveHorses', { x: h.x, z: h.z, yaw: h.yaw }); sounds.play('thunk'); }
-    else if (ctx.kind === 'pick' && ctx.trailer) V.tHold = { t: 0, n: 0, next: 0, stack: ctx.stack.id, itemId: ctx.stack.itemId, trailer: ctx.trailer };     // a tap picks up; held, it loads the trailer
+    else if (ctx.kind === 'pick' && ctx.trailer) { V.tHold = { t: 0, n: 0, next: 0, stack: ctx.stack.id, itemId: ctx.stack.itemId, trailer: ctx.trailer }; pickUp(ctx.stack); }     // a tap picks up; held, it loads the trailer
     else if (ctx.kind === 'pick') pickUp(ctx.stack);
     else if (ctx.kind === 'back' || ctx.kind === 'drop' || (ctx.kind === 'hint' && ctx.drop)) putDown();
     else if (ctx.kind === 'swap') { putDown(); pickUp(ctx.stack); }
@@ -1599,7 +1605,7 @@
     else if (ctx.kind === 'sdrop') setPrompt('E', 'Put the scaffold down (point at a wall for a bay, or inside the frame for a tower)', '', null);
     else if (ctx.kind === 'sstrike') setPrompt('E', 'Take the scaffold down', '', null);
     else if (ctx.kind === 'hset') setPrompt('E', 'Set the sawhorses down here', '', null);
-    else if (ctx.kind === 'pick' && ctx.trailer) setPrompt('E', 'Tap: pick up ' + stackName(ctx.stack.itemId) + ' · Hold: load the trailer', V.tHold && V.tHold.n ? V.tHold.n + ' on' : '', V.tHold && !V.tHold.n ? Math.min(1, V.tHold.t / 0.3) : null);
+    else if (ctx.kind === 'pick' && ctx.trailer) setPrompt('E', 'Tap: pick up ' + stackName(ctx.stack.itemId) + ' · Hold: load the trailer', V.tHold && V.tHold.n ? V.tHold.n + ' on' : '', V.tHold && !V.tHold.n ? Math.min(1, V.tHold.t / T_HOLD_S) : null);
     else if (ctx.kind === 'pick') setPrompt('E', (ctx.more ? 'Take more ' : 'Pick up ') + stackName(ctx.stack.itemId) + (ctx.stack.carrier ? ' off the trailer' : ''), '', null);
     else if (ctx.kind === 'back') setPrompt('E', 'Put back the ' + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'swap') setPrompt('E', 'Swap for ' + stackName(ctx.stack.itemId), '', null);

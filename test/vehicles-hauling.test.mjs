@@ -37,6 +37,12 @@ test('hauling: load, drive, build from the trailer and tip it off; the ledger ba
   assert.equal(sim.commandNow('construction.carrierLoad', { stackId: lum.id, carrier: atv }).reason, 'no such trailer');
   const nails = S.stacks.find((k) => C.SITE_SUPPLY.includes(k.itemId));
   if (nails) assert.equal(sim.commandNow('construction.carrierLoad', { stackId: nails.id, carrier: tr }).reason, 'stays by the stacks');
+  // the press picks up an armful; held, the armful goes onto the bed first
+  assert.ok(sim.commandNow('construction.pickUp', { stackId: lum.id }).ok);
+  const arm = S.carried.qty, hr = sim.commandNow('construction.carrierLoad', { hands: true, carrier: tr });
+  assert.ok(hr.ok && Math.abs(hr.qty - arm) < 1e-6 && S.carried === null, JSON.stringify(hr));
+  assert.equal(imb(sim), imb0, 'balanced after putting the armful on');
+  assert.equal(sim.commandNow('construction.carrierLoad', { hands: true, carrier: tr }).reason, 'nothing carried');
   // hold to load: one piece at a time until the bed is at capacity
   let n = 0, r;
   const per = 3;                                    // a 2x4 stud is 3 m of the line

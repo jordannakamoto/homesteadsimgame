@@ -662,18 +662,20 @@ function carrierUnit(ctx, id) {
 function carrierLoad(ctx, p) {
   const s = ctx.s, id = p && p.carrier, cu = id != null ? carrierUnit(ctx, id) : null;
   if (!cu) return { ok: false, reason: 'no such trailer' };
-  const from = s.stacks.find((k) => k.id === (p && p.stackId));
-  if (!from || from.barrow || from.carrier) return { ok: false, reason: 'no such stack' };
+  // from a ground stack, or (hands) what the arms hold, put on the bed
+  const from = p.hands ? (s.carried ? { itemId: s.carried.itemId, qty: s.carried.qty, x: p.x, z: p.z } : null) : s.stacks.find((k) => k.id === (p && p.stackId));
+  if (!from || from.barrow || from.carrier) return { ok: false, reason: p.hands ? 'nothing carried' : 'no such stack' };
   if (isSupply(from.itemId)) return { ok: false, reason: 'stays by the stacks' };
-  if (Math.hypot(from.x - cu.u.x, from.z - cu.u.z) > CARRIER_REACH_M) return { ok: false, reason: 'too far' };
+  if (!p.hands && Math.hypot(from.x - cu.u.x, from.z - cu.u.z) > CARRIER_REACH_M) return { ok: false, reason: 'too far' };
+  if (p.hands && Number.isFinite(p.x) && Math.hypot(p.x - cu.u.x, p.z - cu.u.z) > CARRIER_REACH_M) return { ok: false, reason: 'too far' };
   const it = item(from.itemId), capKg = Math.min(cu.capKg, Number.isFinite(p.capKg) && p.capKg > 0 ? p.capKg : Infinity);
   const room = capKg - carrierKg(s, id);
   let n = Math.min(from.qty, room / it.massKgPerUnit, p.qty > 0 ? p.qty : Infinity);
   if (it.unit === 'each') n = Math.floor(n + 1e-9);
   n = round6(n);
   if (!(n > 1e-6)) return { ok: false, reason: 'full' };
-  from.qty = round6(from.qty - n);
-  if (from.qty <= 1e-6) s.stacks = s.stacks.filter((k) => k !== from);
+  if (p.hands) { s.carried.qty = round6(s.carried.qty - n); if (s.carried.qty <= 1e-6) s.carried = null; }
+  else { from.qty = round6(from.qty - n); if (from.qty <= 1e-6) s.stacks = s.stacks.filter((k) => k !== from); }
   const load = s.stacks.find((k) => k.carrier === id && k.itemId === from.itemId);
   if (load) load.qty = round6(load.qty + n);
   else s.stacks.push({ id: 's' + s.nextId++, itemId: from.itemId, qty: n, x: round6(cu.u.x), z: round6(cu.u.z), carrier: id });
