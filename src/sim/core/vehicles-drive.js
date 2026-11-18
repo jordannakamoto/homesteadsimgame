@@ -125,11 +125,12 @@ function engineForce(b, kind, th, brake, M, dt) {
   return F;
 }
 
-// the share of the body's weight on driven wheels (weight moves rearward under acceleration)
+// the share of the body's weight on driven wheels (weight moves rearward under acceleration; a trailer's tongue
+// load on a ball behind the rear axle lifts the front: b.sF0 is the static front share with it)
 function drivenShare(kind, b) {
   const axles = kind.axles || [];
   if (axles.length === 1) return axles[0].driven ? 1 : 0;
-  const sF = clamp(0.5 - (b.ax / GRAV) * kind.cgH / kind.wheelbase, 0.1, 0.9), zMax = Math.max(...axles.map((a) => a.z));
+  const sF = clamp((b.sF0 ?? 0.5) - (b.ax / GRAV) * kind.cgH / kind.wheelbase, 0.1, 0.9), zMax = Math.max(...axles.map((a) => a.z));
   let share = 0;
   for (const a of axles) if (a.driven) share += a.z === zMax ? sF : 1 - sF;
   return share;
@@ -140,7 +141,7 @@ export function createBody(kind, { x = 0, z = 0, yaw = 0, fuelL = Infinity, carg
   const b = {
     x, z, yaw, u: 0, w: 0, r: 0,
     y: 0, vy: 0, gy: 0, pitch: 0, vp: 0, roll: 0, vr: 0,
-    steer: 0, air: false, contact: [0, 0, 0, 0],
+    steer: 0, air: false, contact: [0, 0, 0, 0], sF0: 0.5, jack: false,
     ax: 0, ay: 0, slip: 0, bump: 0, land: 0, stalled: null, rev: false, artic: 0,
     gear: 1, rpm: kind.engine ? kind.engine.idleRpm : 0, shiftT: 0, spin: 0, spinning: false, tip: 0,
     fuelL, cargoKg, burnedL: 0, distM: 0, engineS: 0,
@@ -214,10 +215,17 @@ export function stepBody(b, kind, input, env, dt = SUB, trailer = null) {
   [b.roll, b.vr] = angSpring(b.roll, b.vr, t.roll + Math.atan((b.ay / GRAV) * kind.cgH / kind.track) * transfer, s, kc, dt);
   b.roll = clamp(b.roll, -0.6, 0.6); b.pitch = clamp(b.pitch, -0.9, 0.9);
 
-  // 3. longitudinal
+  // 3. longitudinal. A trailer adds its mass and rolling resistance to what the engine moves and the brakes stop (a
+  // small trailer has no brakes of its own), and puts its tongue load (hitch.tongueK of its gross) on the ball: more
+  // weight on the driven wheels, less on the front ones when the ball is behind the rear axle.
   const towKg = trailer ? trailer.kind.massKg + (trailer.body.cargoKg || 0) : 0;
+  const tongueKg = trailer ? towKg * ((trailer.kind.hitch && trailer.kind.hitch.tongueK) || 0) : 0;
   const Mo = kind.massKg + (b.cargoKg || 0), M = Mo + towKg;
-  const N = Mo * GRAV * cosT * kc;
+  if (tongueKg > 0 && kind.wheelbase > 0) {
+    const ball = pointOf(kind, trailer.kind.hitch.type), zr = -kind.wheelbase / 2;
+    b.sF0 = clamp((Mo * 0.5 + tongueKg * ((ball ? ball.at[2] : zr) - zr) / kind.wheelbase) / (Mo + tongueKg), 0.1, 0.9);
+  } else b.sF0 = 0.5;
+  const N = (Mo + tongueKg) * GRAV * cosT * kc;
   let th = clamp(input.throttle || 0, -1, 1);
   const brake = clamp(input.brake || 0, 0, 1), hand = !!input.handbrake;
   const depth = env.water ? env.water(b.x, b.z) : 0;
@@ -274,16 +282,22 @@ export function stepBody(b, kind, input, env, dt = SUB, trailer = null) {
       // the front washes out (understeer): what grip the friction circle leaves after driving or braking, scaled by
       // the load on the front axle (less under power, more under braking); spinning or locked wheels give less still
       const used = clamp(Math.abs(Fdrive - Math.sign(b.u) * brakeRes) / Math.max(mu * N, 1e-6), 0, 1);
-      const sF = clamp(0.5 - (b.ax / GRAV) * kind.cgH / kind.wheelbase, 0.1, 0.9);
+      const sF = clamp(b.sF0 - (b.ax / GRAV) * kind.cgH / kind.wheelbase, 0.1, 0.9);
       const front = Math.sqrt(sF / 0.5) * Math.sqrt(1 - used * used * 0.9) * (b.spin > 0.5 ? slideK : 1);
       const rCap = (mu * GRAV * kc * 1.05 * clamp(front, 0.2, 1.2)) / Math.max(Math.abs(b.u), 0.1);
       b.r = clamp(r, -rCap, rCap);
     } else b.r *= Math.exp(-0.3 * dt);
   }
-  // the towed unit's stop: at full articulation the tow unit cannot turn further that way
+  // the towed unit's stop: at full articulation the tow unit cannot turn further that way, and backing up folds it
+  // further still (artic' = -(u / L) sin(artic) - r), so the rig binds: the tongue is against the stop and it stops
+  b.jack = false;
   if (trailer) {
     const a = trailer.body.artic;
     if ((a >= ARTIC_MAX - 1e-3 && b.r < 0) || (a <= -ARTIC_MAX + 1e-3 && b.r > 0)) b.r = 0;
+    if (Math.abs(a) >= ARTIC_MAX - 1e-3 && b.u < 0) {
+      const L = trailer.kind.hitch.at[2] || 1, fold = (-(b.u / L) * Math.sin(a) - b.r) * Math.sign(a);
+      if (fold > 0) { if (b.u < -1) b.bump = Math.max(b.bump, -b.u * 2); b.u = 0; b.ax = 0; b.jack = true; }
+    }
   }
 
   // 4. lateral: turning rotates the velocity's frame; grip takes the sideways part out, no faster than mu g allows

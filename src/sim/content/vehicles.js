@@ -36,7 +36,10 @@ export const VEHICLE_KINDS = Object.freeze({
     fuel: { item: FUEL_ITEM, tankL: 14.8, burnLph: 5 },                       // about three hours flat out
     look: 'atv',
   }),
-  // A small utility trailer with a tipping bed, towed on the ATV's ball.
+  // A small utility trailer with a tipping bed, towed on the ATV's ball: an ATV dump trailer of the common steel kind
+  // (about 1.8 x 1.1 m bed, 90 kg empty, 350 kg rated, 2-inch ball, 18-22 in tyres). Unbraked, as they are: the ATV's
+  // brakes stop both. About a tenth of its gross weight rests on the ball. The bed is a manual dump: it pivots just
+  // behind the axle, and dry lumber on steel slides once the bed passes about 27 degrees (friction about 0.5).
   trailer_small: Object.freeze({
     id: 'trailer_small', name: 'Small utility trailer', drive: 'towed',
     dims: { l: 2.9, w: 1.3, h: 0.75 }, massKg: 90, cgH: 0.45,
@@ -46,8 +49,9 @@ export const VEHICLE_KINDS = Object.freeze({
     grip: { mu: 0.65, lateral: 12, rolling: 0.035 },
     susp: { travel: 0.1, hz: 2.6, damp: 0.35 },
     seats: [], points: [{ id: 'bed', type: 'bed', at: [0, 0.5, 0] }],
-    hitch: { type: 'ball', at: [0, 0.42, 1.65] },
-    cargo: { capKg: 350, bed: { at: [0, 0.5, 0], l: 1.8, w: 1.1, h: 0.3 }, tips: true },
+    hitch: { type: 'ball', at: [0, 0.42, 1.65], tongueK: 0.1, latchM: 0.4, alignRad: deg(35) },
+    cargo: { capKg: 350, bed: { at: [0, 0.5, 0], l: 1.8, w: 1.1, h: 0.3 }, tips: true,
+      pivot: [0.44, -0.3], tipMaxRad: deg(48), tipRadS: deg(30), slideRad: deg(27) },
     fuel: null,
     look: 'trailer_small',
   }),
