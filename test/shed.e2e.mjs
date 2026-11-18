@@ -178,7 +178,12 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
             await T.page.reload({ waitUntil: 'domcontentloaded', timeout: 120000 }); await T.boot(); await tick(10);
             const back = await G(() => { const s = __game.sim.state.sys.construction, pr = __construct.current(), mw = __build.membersOf(pr.id); return { c: JSON.stringify(s), money: __game.sim.state.sys.stock.money, load: __construct.carry.loadForm, stacks: __construct.carry.pieceCount,
               agree: Object.keys(pr.members).every((id) => { const m = pr.members[id], lying = m.stage === 'wall-frame' && !pr.raised[m.parent]; return mw.planned.has(id) === !(m.built && !lying); }) }; });
-            check('a save in the middle of a wall reloads exactly: stacks, the load in the arms, every piece', back.c === snap.c && back.money === snap.money && back.load === 'lumber' && back.stacks > 50 && back.agree && snap.flat > 3, snap.built + ' built, ' + snap.flat + ' lying flat');
+            // the plan is sent again when the page loads: a lumber line's cut list is drawn up again (what must survive is the offcuts
+            // on hand, not the plan for sticks still unopened) and a piece's length comes back from the drawing to within a millimetre
+            const lens = (j) => { const out = []; JSON.parse(j, (k, v) => { if (k === 'len' && typeof v === 'number') out.push(v); return v; }); return out; };
+            const canon = (j) => JSON.stringify(JSON.parse(j), (k, v) => k === 'cut' && v && Array.isArray(v.sticks) ? v.sticks.filter((st) => st.open && st.left > 1e-6).map((st) => st.left).sort((a, b) => a - b) : k === 'len' && typeof v === 'number' ? 0 : v);
+            const lenOk = ((a, b) => a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 0.002))(lens(snap.c), lens(back.c));
+            check('a save in the middle of a wall reloads exactly: stacks, the load in the arms, every piece', canon(back.c) === canon(snap.c) && lenOk && back.money === snap.money && back.load === 'lumber' && back.stacks > 50 && back.agree && snap.flat > 3, snap.built + ' built, ' + snap.flat + ' lying flat');
             reloaded = true; break;
           }
         }
@@ -188,17 +193,21 @@ let handsOnRoofed = 0, handsOnAll = 0, cost = 0;
       }
       if (!s.target) { await tick(20); continue; }
       if (!(await walkTo(s.target, 1.0))) await around(s.target, 1.0);
-      const sp = await G((t) => { const v = new __game.THREE.Vector3(t.x, __game.heightAt(t.x, t.z) + 0.2, t.z).project(__game.camera); return { x: (v.x * 0.5 + 0.5) * __construct.reach.w, y: (-v.y * 0.5 + 0.5) * __construct.reach.h }; }, s.target);
+      // point at the foot of the pile, where it meets the ground: on a slope seen from above, a point higher up lands on the pile behind
+      const sp = await G((t) => { const v = new __game.THREE.Vector3(t.x, __game.heightAt(t.x, t.z) + 0.02, t.z).project(__game.camera); return { x: (v.x * 0.5 + 0.5) * __construct.reach.w, y: (-v.y * 0.5 + 0.5) * __construct.reach.h }; }, s.target);
       await page.mouse.move(sp.x, sp.y); await tick(2);
       const c = await state();
       if (c.ctx === 'pick' || c.ctx === 'swap' || c.ctx === 'back') { await page.mouse.down(); await tick(1); await page.mouse.up(); await tick(2); trips++; }
+      // the cuts made on site (cripples and the like): at the sawhorses, hold F to saw them one after another
+      else if (c.ctx === 'cut') { await page.keyboard.down('KeyE'); for (let i = 0; i < 80 && (await state()).ctx === 'cut'; i++) await tick(10); await page.keyboard.up('KeyE'); await tick(2); }
       else await tick(10);
     }
   };
   await byHand((q) => q.stage !== 'foundation' && q.stage !== 'floor-frame' && q.stage !== 'subfloor' && q.stage !== 'wall-frame' && q.stage !== 'site');
   s = await state();
   check('by hand: pier blocks stamped, floor framed, deck laid, four walls framed flat, nailed and tilted up', s.stage === 'top-plates' && s.raised === 4 && reloaded, Math.round(s.played - t0) + ' s of play, ' + trips + ' trips to the stacks');
-  check('built walls now stop the player; the deck carries them', await G(() => { const st = __build.structs()[0]; const e = { x: st.x + 5, z: st.z, y: st.y0 }; let hit = false; for (let i = 0; i < 80; i++) { const was = e.x; e.x -= 0.1; __build.collide(e, 0.28, true); if (Math.abs(e.x - (was - 0.1)) > 1e-6) hit = true; } return hit && __build.ground(st.x, st.z, st.y0 + 0.2, -50) > st.y0; }));
+  // the player steps through bare framing on purpose; anything else is stopped by it
+  check('built walls now stop things (the player can still step through bare framing); the deck carries them', await G(() => { const st = __build.structs()[0]; const e = { x: st.x + 5, z: st.z, y: st.y0 }; let hit = false; for (let i = 0; i < 80; i++) { const was = e.x; e.x -= 0.1; __build.collide(e, 0.28, false); if (Math.abs(e.x - (was - 0.1)) > 1e-6) hit = true; } return hit && __build.ground(st.x, st.z, st.y0 + 0.2, -50) > st.y0; }));
   // the long stages: work until done
   await page.keyboard.press('KeyL'); await tick(2);
   await page.click('#cvbody input[data-opt="auto"]'); await tick(2);

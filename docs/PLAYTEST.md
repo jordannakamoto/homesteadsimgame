@@ -603,3 +603,9 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 
 - Macro (1 m) cuts and fills are blocky next to the 10 cm hand-dug ground, and a machine-sized cut wipes hand-dug detail under it (by design: it absorbs it).
 - Build mode's site cut still goes through the old path (slice A3 routes it through `ground.grade`).
+
+## Shed by hand again: the barrow, the sawhorses and the last pieces stop getting in the way
+- **New:** the wheelbarrow arrives beside the stacks on the far side from the building, no longer on its footprint (it used to take E from "Work until done" and from the pier blocks). Pointing at a pile nearer than the barrow picks up the pile. A wall frame ready to tilt up, or a glowing place right under the pointer, comes before cutting at or grabbing the sawhorses that stand by the wall. With empty hands (or a load too short for the next stick), the note sends you to the stacks even when only a few places are left; the view no longer offers to set a piece the arms hold too little lumber for.
+- **Try:** a new world, the tool shed by hand (L, place, order, level). Stand by the east wall near the sawhorses and nail, cut, raise: E does what the note says.
+- **Test:** `node test/shed.e2e.mjs` passes again (it aims at the foot of a pile, cuts at the sawhorses, and expects bare framing to let the player through).
+- **Weak:** the sawhorses still stand close to the building when the delivery spot is near it; pointing at the top of a pile on a steep slope can still pick the pile behind it (the ring shows where the pointer lands).
