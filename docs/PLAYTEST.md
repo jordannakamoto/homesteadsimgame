@@ -579,6 +579,30 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 - No planning or gestures yet (S5 to S7): runs come only from the console. The sample sets the building's frame once; frames do not follow a moved building until the plan UI syncs them.
 - Overlay colours are per run, not per segment, and there are no moving dashes yet (S12). Drains and vents compile but nothing drains through them indoors yet (S11).
 - A switch box is just a box: switching what it controls comes with trim-out (S9b).
+## A finished building looks finished (branch `finish`)
+
+- Once the last stage is done, the construction view lets go of the building: no nail heads, no studs or sheathing showing through. Build mode draws it (siding on the walls, the roof) as it does any finished building.
+- The dollhouse cut shows solid wall sections: a cut piece is drawn with a dark section where it was opened, not as a hollow box.
+- A gable's sheathing, wrap and siding belong to its roof and hide with it when you are inside (siding on a gable end is real; it just floated there with the roof gone).
+- By the sawhorses, two neat stacks: the pieces cut and waiting to go in on the near side, the offcuts on the far side, each sorted longest first, ends flush, four to a layer, at their real lengths and sizes.
+
+## Ground A2 — one ground in the simulation (branch `ground-a1a2`)
+
+**What is new**
+
+- Nothing should look different. Terrain height edits (the brush, the starting well's levelled spot, build mode's site cut) are now part of the simulation's save (save version 3) instead of a side list in the engine, and there is one command API for moving earth at any scale, ready for machines and foundations.
+- Old saves load with their levelled sites and dug terrain.
+
+**Try this (console)**
+
+1. `p = __game.player; y = __game.heightAt(p.x + 6, p.z) - 0.5; __game.ground.cmd('grade', { samples: [[p.x + 6, p.z], [p.x + 9, p.z]], targetY: y, core: 1.5, rim: 3.5 })`: a sunken pad appears beside you. Reload: it is still there.
+2. `__game.ground.cmd('cut', { x: p.x + 4, z: p.z + 4, r: 2, m3: 3 })` (machine-sized bite) and `__game.ground.cmd('fill', { x: p.x - 4, z: p.z, r: 2, m3: 3 })`.
+3. Use the old terrain brush and build a site as before; `__game.ground.verify()` should report `tiles: 0`.
+
+**What's weak**
+
+- Macro (1 m) cuts and fills are blocky next to the 10 cm hand-dug ground, and a machine-sized cut wipes hand-dug detail under it (by design: it absorbs it).
+- Build mode's site cut still goes through the old path (slice A3 routes it through `ground.grade`).
 
 ## Vehicles V3 + V4 — ride the ATV (branch `vehicles-v3v4-atv`)
 

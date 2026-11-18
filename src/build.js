@@ -9312,7 +9312,16 @@
   const lapMat = makeLapMat(null);
   // a building's own copies of the member materials, cut by its dollhouse planes like its walls: the siding (drawn as
   // boards, the whole outside of a sided wall) opens with the wall when you are inside
-  const memberMats = (planes) => ({ mem: Object.assign(memMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true }), lap: makeLapMat(planes), wrap: Object.assign(wrapMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true }) });
+  // where the cut opens a piece you look into the box from inside: its back faces are drawn as a flat dark section, so a
+  // cut wall reads as solid (the dollhouse look) instead of hollow boxes
+  const capped = (m) => {
+    m.side = T.DoubleSide;
+    const before = m.onBeforeCompile, key = m.customProgramCacheKey && m.customProgramCacheKey.call(m);
+    m.onBeforeCompile = (sh, r) => { before && before.call(m, sh, r); sh.fragmentShader = sh.fragmentShader.replace("#include <dithering_fragment>", "#include <dithering_fragment>\n if (!gl_FrontFacing) gl_FragColor = vec4(0.19, 0.155, 0.125, 1.0);"); };
+    m.customProgramCacheKey = () => (key || "") + "|capped";
+    return m;
+  };
+  const memberMats = (planes) => ({ mem: capped(Object.assign(memMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })), lap: capped(makeLapMat(planes)), wrap: capped(Object.assign(wrapMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })) });
   const isLap = (m) => /^siding/.test(m.col || "") && m.type === "boards";
   const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), siding: col(0xb8beb1), sidingDark: col(0x5d4a3b), trim: col(0xefece4), concrete: CONCRETE, gravel: col(0x8f8b82) };
   for (const [k, h] of Object.entries(FR.ROOF_COLORS || {})) MCOL[k] = col(h); // the roofing layers while they go on (src/framing.js)
