@@ -36,11 +36,11 @@
       let L = t.layers.get(id);
       if (L && L.cap < cap) { dropLayer(t, id); L = null; }
       if (!L) {
-        L = { cap, dots: null, group: new T.Group(), solid: new T.InstancedMesh(look.geo, look.mat, cap), glow: new T.InstancedMesh(look.geo, glowMat, cap), at: new Map(), list: [], pivot: new T.Vector3(), lift: new T.Vector3(0, 1, 0), angle: 0, axis: new T.Vector3(1, 0, 0) };
+        L = { cap, dots: null, group: new T.Group(), solid: new T.InstancedMesh(look.geo, (t.mats && t.mats.mat) || look.mat, cap), glow: new T.InstancedMesh(look.geo, glowMat, cap), at: new Map(), list: [], pivot: new T.Vector3(), lift: new T.Vector3(0, 1, 0), angle: 0, axis: new T.Vector3(1, 0, 0) };
         L.solid.castShadow = L.solid.receiveShadow = true;
         L.solid.count = L.glow.count = 0;
         // members the look draws with its other material (lap siding): their own mesh, the same box
-        if (look.alt) { L.alt = new T.InstancedMesh(look.geo, look.alt.mat, cap); L.alt.castShadow = L.alt.receiveShadow = true; L.alt.count = 0; L.alt.frustumCulled = false; L.group.add(L.alt); }
+        if (look.alt) { L.alt = new T.InstancedMesh(look.geo, (t.mats && t.mats.alt) || look.alt.mat, cap); L.alt.castShadow = L.alt.receiveShadow = true; L.alt.count = 0; L.alt.frustumCulled = false; L.group.add(L.alt); }
         L.solid.frustumCulled = L.glow.frustumCulled = false;
         L.glow.renderOrder = 4;
         L.group.add(L.solid, L.glow);
@@ -56,6 +56,14 @@
     }
     const local = (L, m, out, grow, h, dir) => { matrixOf(m, out, grow, dir ? v.set(dir[0], dir[1], dir[2]) : L.lift, h); out.elements[12] -= L.pivot.x; out.elements[13] -= L.pivot.y; out.elements[14] -= L.pivot.z; return out; };
     return {
+      // the materials this thing's pieces are drawn with ({ mat, alt }), in place of the look's (a building's own, cut open
+      // when you are inside it); null goes back to the look's
+      setMats(key, mats) {
+        const t = thing(key);
+        if (t.mats === mats || (t.mats && mats && t.mats.mat === mats.mat && t.mats.alt === mats.alt)) return;
+        t.mats = mats;
+        for (const L of t.layers.values()) { L.solid.material = (mats && mats.mat) || look.mat; if (L.alt) L.alt.material = (mats && mats.alt) || look.alt.mat; }
+      },
       setFrame(key, matrix) { const t = thing(key); t.root.matrix.copy(matrix); t.root.matrixWorldNeedsUpdate = true; },
       remove(key) { const t = things.get(key); if (!t) return; for (const id of [...t.layers.keys()]) dropLayer(t, id); G.scene.remove(t.root); things.delete(key); },
       keys: () => [...things.keys()],

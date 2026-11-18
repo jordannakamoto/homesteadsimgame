@@ -473,3 +473,7 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 - Lap siding is drawn flat, course on course, with the lap painted by its own material: a crisp shadow line under each butt edge and a lit bottom edge. No more shadow-map blocks from leaning boards.
 - Corner and opening trim is painted white; plain siding is a soft grey-green, dark siding a deep brown. Nail heads don't show on finished siding (it is blind-nailed).
 - Board and batten carries on up the gables as vertical boards; the battens sit tight on the boards.
+
+## The dollhouse cut opens the siding too (branch `dollhouse`)
+
+- Inside a building, the stretch of wall between the camera and you opens as before, and now its siding boards (and the framing, wrap and anything else drawn as pieces) open with it. Each building draws its pieces with its own copy of the materials, cut by the same planes as its walls, in build mode's drawing and in the construction view's.

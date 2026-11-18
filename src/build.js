@@ -3858,6 +3858,7 @@
     };
     S.wallMat = makeWallMat(S.clip, S.near, S.sideA, S.sideB);
     S.glassMat = makeGlassMat([S.clip, S.near, S.sideA, S.sideB]);
+    S.memMats = memberMats([S.clip, S.near, S.sideA, S.sideB]);
     S.group.position.set(S.ox, S.y0, S.oz);
     S.group.rotation.y = S.yaw;
     G.scene.add(S.group);
@@ -3870,6 +3871,7 @@
     S.roofMat.dispose();
     S.wallMat.dispose();
     S.glassMat.dispose();
+    if (S.memMats) for (const k in S.memMats) S.memMats[k].dispose();
     S.glassMesh && S.glassMesh.geometry.dispose();
     S.glow && S.glow.geometry.dispose();
     S.glowMat.dispose();
@@ -9537,12 +9539,19 @@
   // lap siding: each board is a flat box one course tall; on its face the material paints what the lap does in life. Under
   // the butt edge of the course above, a shadow line falls on the top of this board (darkest right under it, a soft fall
   // below); the board's own bottom edge, standing proud, catches the light. Only the face and back (local z) get it.
-  const lapMat = new T.MeshLambertMaterial({ color: 0xffffff });
+  const makeLapMat = (planes) => {
+  const lapMat = new T.MeshLambertMaterial({ color: 0xffffff, clippingPlanes: planes || null, clipIntersection: !!planes, clipShadows: !!planes });
   lapMat.onBeforeCompile = (sh) => {
     sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nvarying vec2 vLapUv; varying float vLapF;").replace("#include <begin_vertex>", "#include <begin_vertex>\n vLapUv = uv; vLapF = step(0.5, abs(normal.z));");
     sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nvarying vec2 vLapUv; varying float vLapF;").replace("#include <color_fragment>", "#include <color_fragment>\n { float y = vLapUv.y; float shade = 1.0 - 0.42 * smoothstep(0.86, 0.985, y) - 0.12 * smoothstep(0.6, 0.86, y); float lit = 1.0 + 0.12 * (1.0 - smoothstep(0.0, 0.07, y)); diffuseColor.rgb *= mix(1.0, shade * lit, vLapF); }");
   };
   lapMat.customProgramCacheKey = () => "lapSiding";
+  return lapMat;
+  };
+  const lapMat = makeLapMat(null);
+  // a building's own copies of the member materials, cut by its dollhouse planes like its walls: the siding (drawn as
+  // boards, the whole outside of a sided wall) opens with the wall when you are inside
+  const memberMats = (planes) => ({ mem: Object.assign(memMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true }), lap: makeLapMat(planes), wrap: Object.assign(wrapMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true }) });
   const isLap = (m) => /^siding/.test(m.col || "") && m.type === "boards";
   const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), siding: col(0xb8beb1), sidingDark: col(0x5d4a3b), trim: col(0xefece4), concrete: CONCRETE, gravel: col(0x8f8b82) };
   for (const [k, h] of Object.entries(FR.ROOF_COLORS || {})) MCOL[k] = col(h); // the roofing layers while they go on (src/framing.js)
@@ -9649,7 +9658,8 @@
       for (const wr of [0, 1, 2]) {      // 0 everything, 1 house wrap, 2 lap siding
         const part = list.filter((m) => (m.col === "wrap" && m.kind === "membrane" ? 1 : isLap(m) ? 2 : 0) === wr);
         if (!part.length) continue;
-        const mesh = new T.InstancedMesh(boxGeo, wr === 1 ? wrapMat : wr === 2 ? lapMat : memMat, part.length);
+        const MM = S.memMats || { mem: memMat, lap: lapMat, wrap: wrapMat };
+        const mesh = new T.InstancedMesh(boxGeo, wr === 1 ? MM.wrap : wr === 2 ? MM.lap : MM.mem, part.length);
         place(mesh, part, k, true);
         mesh.instanceMatrix.needsUpdate = true;
         add(mesh, k === 1, true);
@@ -10915,7 +10925,9 @@
       S.group.updateMatrixWorld(true);
       return { matrix: S.group.matrixWorld, y0: S.y0, list: membersOf(S).list, planned: S.plan, roofs: membersOf(S).roofs };
     },
-    memberLook: () => ({ geo: boxGeo, mat: memMat, colors: MCOL, alt: { mat: lapMat, test: isLap } }),
+    memberLook: () => ({ geo: boxGeo, mat: memMat, colors: MCOL, alt: { mat: lapMat, test: isLap },
+      // the materials one building's pieces are drawn with (cut open with its walls when you are inside it), or null
+      matsFor: (structId) => { const S = B.structs.find((O) => O.id === structId); return S && S.memMats ? { mat: S.memMats.mem, alt: S.memMats.lap } : null; } }),
     // called when the player climbs out of a room that has no door (see climbOut)
     setOnClimbOut(fn) {
       B.onClimbOut = fn;

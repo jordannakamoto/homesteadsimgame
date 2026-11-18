@@ -190,6 +190,7 @@
   function redraw(id) {
     const pr = S().progress[id], g = geom(id);
     if (!pr || !g) return;
+    asm.setMats(id, look.matsFor ? look.matsFor(id) : null);      // its building's materials: cut open with the walls when you are inside
     asm.setFrame(id, g.matrix);
     const w = V.working && V.working.id === id && !V.working.partial ? V.working : null;
     const main = [], loose = [];
@@ -1442,7 +1443,8 @@
   function tickWork(dt) {
     const ctx = V.ctx, held = !!G.keys.KeyE || V.mDown, s = S();
     V.cool -= dt * (C.workSpeed(G.sim.state.sys.stock.tools, G.powerAvailable && G.powerAvailable()));
-    V.handT += dt; tickBlow(dt); tickFlights(dt); if (V.cutBusy > 0) V.cutBusy -= dt;
+    V.handT += dt; tickBlow(dt); tickFlights(dt);
+    if ((V.matT = (V.matT || 0) - dt) < 0) { V.matT = 0.5; if (look.matsFor) for (const k of asm.keys()) asm.setMats(k, look.matsFor(k)); }   // a building rebuilt has new materials if (V.cutBusy > 0) V.cutBusy -= dt;
     if (V.jolt) { const j = V.jolt; j.t += dt; liftTo(j.id, j.layer, j.mid, Math.max(-0.025, (j.built ? 0 : proud(j.mid)) - 0.045 * Math.exp(-j.t * 16) * Math.cos(j.t * 46))); if (j.t > 0.28) { asm.lift(j.id, j.layer, j.mid, j.built ? 0 : proud(j.mid)); V.jolt = null; } }
     tickSlides(dt); tickRolls(dt);
     if (V.swingIn) { V.swingIn.t += dt; const w = V.swingIn; asm.lift(w.id, w.layer, w.mid, proud(w.mid)); if (w.t > 0.2) V.swingIn = null; }
