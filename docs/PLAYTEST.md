@@ -466,3 +466,10 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 - The cuts a carpenter really makes on site are yours to make, as a job of their own: posts cut to height, cripples, gable studs, rafters, blocking, and any stub under 60 cm. Point at the sawhorses and press E once per piece: the stick is sawn there and the piece goes into your arms (six at most; with full arms it waits on the horses). Then carry them in and each goes where it was cut for.
 - The Build panel lists precut pieces as "36 × cut to 2.61 m"; what you cut yourself is still bought as stock sticks ("8 × 12 ft").
 - "Work until done" and guided building still cut for you.
+
+## Siding that looks like siding (branch `cuts`)
+
+- Finished walls showed the old voxel wall (planks with a dark beam every metre) fighting the siding boards at the same depth: the brick-and-stripe look. A wall clad with boards now keeps its body behind them, so only the siding shows, with slim corner posts hidden inside the trim.
+- Lap siding is drawn flat, course on course, with the lap painted by its own material: a crisp shadow line under each butt edge and a lit bottom edge. No more shadow-map blocks from leaning boards.
+- Corner and opening trim is painted white; plain siding is a soft grey-green, dark siding a deep brown. Nail heads don't show on finished siding (it is blind-nailed).
+- Board and batten carries on up the gables as vertical boards; the battens sit tight on the boards.

@@ -23,7 +23,7 @@
 
   const look = B.memberLook();
   const MARK = [0.09, 0.08, 0.09], CHALK = [0.8, 0.9, 1.0];       // pencil, and a snapped chalk line (pale blue)
-  const asm = window.__assembly.create(G, { geo: look.geo, mat: look.mat, colorOf: (m) => (m.col === 'mark' ? MARK : m.col === 'chalk' ? CHALK : look.colors[m.col || 'timber'] || look.colors.timber) });
+  const asm = window.__assembly.create(G, { geo: look.geo, mat: look.mat, alt: look.alt, colorOf: (m) => (m.col === 'mark' ? MARK : m.col === 'chalk' ? CHALK : look.colors[m.col || 'timber'] || look.colors.timber) });
   const sounds = window.__assembly.createSounds();
   const carry = window.__carry.create(G);
   const reach = window.__carry.createReach(G, { reach: C.WORK.reachM });
@@ -432,6 +432,7 @@
     for (const mid in pr.members) {
       const pm = pr.members[mid];
       if ((!pm.built && !(pm.need > 0 && pm.got >= pm.need - 1e-6)) || V.sawing.has(mid) || V.flights.has(mid)) continue;
+      if (pm.built && pm.kind === 'cladding') continue;          // siding is blind-nailed: the next course covers the nails
       const pts = nailLocal(g, mid);
       if (!pts) continue;
       const cv = COVER[pm.stage];
@@ -1379,6 +1380,12 @@
   });
   const vTmp = new T.Vector3();
   const reason = (r, kind, mid) => r.reason === 'support missing' ? ((C.SUPPORT_SAYS[r.missing] || 'Set the supports') + ' first') : (kind === 'door' || kind === 'window') && (r.reason === 'stage not open' || r.reason === 'frame not finished') ? (r.reason === 'frame not finished' ? 'Frame the opening first' : 'Wrap the wall before the ' + kind + ' goes in') : ({ 'no material': 'You need ' + (r.itemId ? stackName(r.itemId) : 'material') + ' for that', 'wrong material': 'That needs ' + (r.itemId ? stackName(r.itemId) : 'something else'), 'no fasteners': 'Out of ' + (r.itemId ? low(CAT[r.itemId].name) : 'fasteners') + ': buy more in the Supplier (U)', 'stage not open': 'Not yet: an earlier stage comes first', 'cut first': 'Cut it at the sawhorses first', 'no sawhorses': 'The sawhorses come with the lumber', 'nothing to cut': 'Nothing left to cut' })[r.reason] || 'That cannot go in yet';
+  function autoCan(s, pr, mid, ln, c) {
+    const pm = pr.members[mid], sn = pm.prep ? 1 : api.stockNeed(s, pr, mid);
+    if (holds(c, pr, mid) && (!ln.stick || c.qty + 1e-6 >= sn)) return true;
+    if (pm.site && !pm.prep) return sn <= 1e-6 || (!!c && c.itemId === ln.itemId && c.qty + 1e-6 >= sn);
+    return !pm.site && !api.needsStock(s, pr, mid);
+  }
   function beginMember(id, memberId, from) {
     const pr = S().progress[id], g = geom(id), m = g.byId.get(memberId) || { id: memberId, kind: 'site', a: [g.cx, 0, g.cz], b: [g.cx, 0, g.cz], n: [0, 1, 0], section: { b: 0, d: 0 }, draw: 0 }, pm = pr.members[memberId], ln = lineOf(pr, memberId);
     const need = pm.need - pm.got, c = S().carried;
@@ -1450,7 +1457,8 @@
         if (!q.length) { const was = A.stage; stopAuto(); if (!api.stageComplete(pr, was)) flash('Stopped: ' + C.STAGE[was].name + ' is waiting on something else'); return; }
         const ln = lineOf(pr, q[0]), pm = pr.members[q[0]], c = s.carried;
         if (A.guided || !ln || pm.need - pm.got < 1e-6) beginMember(A.id, q[0], A.guided ? 'stacks' : 'carried');
-        else if ((holds(c, pr, q[0]) && (ln.stick ? c.qty + 1e-6 >= api.stockNeed(s, pr, q[0]) : true)) || (!pr.members[q[0]].site && !api.needsStock(s, pr, q[0]))) beginMember(A.id, q[0], 'carried');
+        // working until done cuts on-site pieces itself: from an offcut, or from the sticks in the arms
+        else if (autoCan(s, pr, q[0], ln, c)) beginMember(A.id, q[0], 'carried');
         else {                                        // fetch the next armful: a short pause for the walk
           A.wait += dt;
           if (A.wait > 0.8) {
@@ -1980,5 +1988,5 @@
     for (const mid of pl.inst) { const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid), set = !ln || pm.need - pm.got < 1e-6; if (!set && !holds(c, pr, mid)) continue; if (!m) return { mid, x: V.structs.get(pr.id).x, z: V.structs.get(pr.id).z, site: true }; const hw = C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null; worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); wM.lerpVectors(wA, wB, 0.5); const w = { x: wM.x, y: wM.y, z: wM.z }; wM.project(G.camera); return { mid, ...w, sx: (wM.x * 0.5 + 0.5) * reach.w, sy: (-wM.y * 0.5 + 0.5) * reach.h, set }; }
     return null;
   }
-  window.__construct = { asm, roof: RW, syncRoof, tryHop, ladderTop, ladderSpot, chalkLines: (id) => chalkLines(S().progress[id], geom(id)), scaffoldSpot, scaffold: SC, station: CS, press: (c) => press(c || V.ctx), beaconAt, finishPlace, nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };
+  window.__construct = { redraw, asm, roof: RW, syncRoof, tryHop, ladderTop, ladderSpot, chalkLines: (id) => chalkLines(S().progress[id], geom(id)), scaffoldSpot, scaffold: SC, station: CS, press: (c) => press(c || V.ctx), beaconAt, finishPlace, nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };
 })();
