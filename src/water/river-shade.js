@@ -193,7 +193,10 @@ export const RIVER_SHADE = /* glsl */ `
     vec3 skyC = mix(uSky, uZenith, pow(clamp(R.y, 0.0, 1.0), 0.7));
     vec3 sky = mix(mix(bank, trees, smoothstep(0.0, 0.06, R.y)), skyC, smoothstep(line - 0.04, line + 0.04, R.y));
     // near the player, the real surroundings from the probe, blurred where the water is rough
-    float envK = uEnvPos.w * (1.0 - smoothstep(25.0, 50.0, distance(q, uEnvPos.xz)));
+    // (only for directions well above the horizon: low down, the picture from beside you shows the banks and
+    // whatever your light falls on right there, which is wrong for water further off: there the worked-out banks
+    // and tree line, or the mirror, stand in)
+    float envK = uEnvPos.w * (1.0 - smoothstep(25.0, 50.0, distance(q, uEnvPos.xz))) * smoothstep(0.04, 0.22, R.y);
     float lod = 2.0 + 2.5 * rough + 1.5 * smoothstep(0.7, 0.98, graze);
     if (envK > 0.0) sky = mix(sky, mix(textureLod(uEnv, R, lod).rgb, textureLod(uEnv2, R, lod).rgb, uEnvMix), envK);
     // and where this water lies at the mirror's level, the mirror: the banks and what hangs over them, in place,
@@ -208,6 +211,9 @@ export const RIVER_SHADE = /* glsl */ `
         vec3 mir = texture2D(uRefl, clamp(ruv, 0.001, 0.999)).rgb * 0.36;
         mir += texture2D(uRefl, clamp(ruv + vec2(0.0, smear), 0.001, 0.999)).rgb * 0.22 + texture2D(uRefl, clamp(ruv - vec2(0.0, smear), 0.001, 0.999)).rgb * 0.22;
         mir += texture2D(uRefl, clamp(ruv + vec2(0.0, smear * 2.2), 0.001, 0.999)).rgb * 0.1 + texture2D(uRefl, clamp(ruv - vec2(0.0, smear * 2.2), 0.001, 0.999)).rgb * 0.1;
+        // a reflection is a little darker and greyer than what it shows (some light goes into the water, the surface
+        // is never quite clean), more so in the silty shallows by the banks
+        mir = mix(mir, vec3(dot(mir, vec3(0.3, 0.5, 0.2))), 0.2 + 0.3 * fringe) * mix(0.82, 0.6, fringe);
         sky = mix(sky, mir, kp);
       }
     }
