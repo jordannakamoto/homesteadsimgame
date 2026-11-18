@@ -2927,6 +2927,7 @@ function updateStreams(dt) {
     u.uTurbid.value += (sw.turbidity - u.uTurbid.value) * k;
     const wxs = sim.state.sys.weather;
     u.uCloud.value += ((wxs ? wxs.cloud || 0 : 0) - u.uCloud.value) * k;
+    u.uRain.value += (Math.min(1, (wxs ? wxs.rainMmH || 0 : 0) / 5) - u.uRain.value) * (1 - Math.exp(-dt * 2));
   }
   riverFalls.update(dt, player.x, player.z, { fx: waterFx, live: riverLive.on ? riverLive : null, wet: u.uWetSpeed.value });
   const wx = sim.state.sys.weather, wms = wx ? wx.windMs || 0 : 0, wd = wx ? wx.windDirRad || 0 : 0;
