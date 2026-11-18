@@ -547,6 +547,8 @@ test('an old save whose walls were lined in one piece stays finished: its new sh
   assert.ok(sim.commandNow('construction.setPlan', K.planFromPieces('s2', now, F.materialsList(now), { x: 40, z: 40, r: 2 })).ok);
   const pr = cs(sim).progress.s2;
   assert.ok(Object.values(pr.members).some((m) => m.kind === 'joint') && pr.done && K.liningCovered(pr, 'w1'), 'still finished after the change');
+});
+
 // ---------------------------------------------------------------- services in the walls (rough-in, trim-out: S8)
 // A small walled box: roofed and sheathed (sent as built), two walls to insulate and line. Cable and pipe are planned
 // on its frame through the routes commands, as services-plan.js does.
@@ -584,7 +586,7 @@ test('services: no runs planned, insulation goes on as before and there is no ro
   assert.ok(!v.stages.some((q) => q.id === 'rough-in' || q.id === 'trim-out'), v.stages.map((q) => q.id).join());
   assert.ok(K.stageOpen(P(), 'insulation'), 'nothing planned: insulation is open');
   assert.equal(C.STAGE_ORDER.indexOf('rough-in'), C.STAGE_ORDER.indexOf('gutters') + 1);
-  assert.equal(C.STAGE_ORDER.indexOf('trim-out'), C.STAGE_ORDER.indexOf('lining') + 1);
+  assert.equal(C.STAGE_ORDER.indexOf('trim-out'), C.STAGE_ORDER.indexOf('finish') + 1);     // after lining and its taping (docs/design/interior-walls.md)
   assert.ok(C.UNLOCKS.find((u) => u.when === 'plan:cabin').opens.includes('services:in-wall'));
 });
 
