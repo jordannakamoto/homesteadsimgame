@@ -450,3 +450,12 @@ The ground is a physical thing now: a smooth surface you shape 10 cm at a time, 
 
 - Every piece that can go in next breathes with a faint glow from any distance, not only within arm's reach, so you can see what's next from across the yard.
 - Pale means you can reach it from where you stand; amber means it is above you: get on the ladder, a scaffold or the roof first. The colour changes as you climb.
+
+## Hands that feel like work (branch `feel`)
+
+- **Work camera.** When you start setting and nailing by hand, the camera eases in close and a little lower, then drifts back out a couple of seconds after you stop. Scrolling the camera yourself turns it off until next time.
+- **A real hammer.** A framing hammer replaces the hatchet in the hand while there is nailing to do. Each blow winds up behind the head, snaps down and recoils. The dust, the shake and the nail going in all land at the moment of contact, not on the click. Click again before a blow lands and it lands at once, then the next one starts. "Work until done" uses the same swing.
+- **Pieces fly from the shoulder.** Sheets, blocks and other unsawn pieces leave your shoulder, arc over and drop onto their seat with a small rock, a puff and a nudge of the camera. Sawn sticks still arc from the saw as before.
+- **Blows you can see.** A set piece stands nearly twice as proud as before, so each blow visibly drives it down, and the last one seats it with a bright spark.
+
+Try: lay the subfloor by hand from the default camera; nail a wall frame lying on the deck.
