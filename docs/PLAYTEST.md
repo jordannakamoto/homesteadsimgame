@@ -487,3 +487,51 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 - A cut piece is no longer something you carry: it waits at the sawhorses and is fetched from there when you set it. Point at its glowing place and click, whatever is in your arms; it flies in from the horses.
 - Hold E at the sawhorses to cut piece after piece. Pieces for the frame lying on the deck now are cut first.
 - The guide sends you to the sawhorses when only cut-to-fit pieces are left in a stage, then back to the frame once they are cut. Guided building and "Work until done" still cut for you.
+
+## Services S0 — power tools see real power
+
+**What is new**
+
+- `window.__game.powerAvailable()` now asks the electrical solve instead of always saying no. A corded tool has power when a live load point (an outlet, a light, any wired load) with spare watts is within 30 m of you; with no load points wired at all it falls back to the main circuit's spare.
+- The circular saw at the sawhorses, power-tool work speed and the stock panel's "needs power" note all follow it.
+
+**Try this**
+
+1. Equip: a battery or generator, an inverter, a 15 A breaker and an outlet, wired together. Stand near the outlet with a circular saw owned: cutting at the sawhorses uses the saw.
+2. Walk more than 30 m from every outlet, or trip the breaker: the saw stops counting as powered. Console: `__game.powerAvailable()`, `__game.powerAvailable(1500)`.
+
+**What's weak**
+
+- The cord is invisible and its 30 m is a fixed number; no extension cords yet.
+
+## Services S1 — one connection compiler, and a store for runs in buildings
+
+**What is new**
+
+- Nothing to see yet: this is groundwork for in-wall wiring and plumbing. First Water (the kit pipes in the yard) now compiles through the new generic `src/sim/core/links.js` and must play exactly as before; its output was checked identical on 400 random pipe networks.
+- `src/sim/core/routes.js`: a generic store of runs on frames (a building), with nodes, bores, pulling, joins and segments as work steps. Not registered in the game yet (that is S2, with the content).
+
+**Try this**
+
+1. First Water: pump, fit kit parts from the barrel to the tap, open the valve, leave an end open. Flow, leaks and the valve should behave as before.
+
+**What's weak**
+
+- No player-facing change; routes become visible with S2/S3.
+
+## Vehicles V0 — the controller stack (no visible change)
+
+**What is new**
+
+- Nothing you should notice. Under the hood the engine now has one place that decides what body your input drives and what the camera follows (`src/engine/control.js`, `__game.control`). Vehicles (the ATV next) sit on it; cooking, ladders, scaffold, roof walking and the hands move onto it later.
+- Also exposed for add-ons: `__game.groundAt(x, z, y)` (the one ground read: terrain, shaped yard ground and built floors) and `__game.pushOut(o, rad)` (the circle push-out the player uses against trees, rocks and walls).
+
+**Try this (regression only)**
+
+1. Walk, sprint, jump, scroll the camera in and out: the same as before.
+2. Climb a ladder and a scaffold, walk on a roof, open the kitchen and cook, use the hands on the water kit: all the same as before.
+3. Console: `__game.control.top().id` is `'walk'`; `__game.control.canTake('seat')` says why a seat would be refused (e.g. `arms full`, `build mode`).
+
+**Known gaps**
+
+- Nothing uses it yet; the first user is the vehicle seat (V3).

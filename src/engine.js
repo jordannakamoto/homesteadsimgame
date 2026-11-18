@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createCookingView } from './cooking/view.js';
+import { createControl } from './engine/control.js';
 import { createChunkStream } from './world/chunk-stream.js';
 import { createSea } from './water/sea.js';
 import { createSkyDome } from './sky.js';
@@ -12,7 +13,7 @@ import { createWaterFx } from './water/water-fx.js';
 import { createReflectProbe } from './water/reflect-probe.js';
 import { createReflectPlane } from './water/reflect-plane.js';
 import { createRippleSim } from './water/ripple-sim.js';
-import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork } from './sim/index.js';
+import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork, powerNear } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -2589,6 +2590,12 @@ function applyBrush(x, z, mode, dt, target) {
 const keys = {};
 const mouse = { x: 0, y: 0, left: false, right: false, inside: false, click: 0, swallow: false };
 const cam = { yaw: 0.6, pitch: 0.95, dist: 24, aimPitch: 0.2, aimK: 0, yawRate: 0, prevYaw: 0.6, tx: 0, ty: 0, tz: 0, shake: 0 };
+// what body the input drives and what the camera follows (src/engine/control.js); until the takeovers below move onto it,
+// nothing new may take the body while one of them holds it
+const control = createControl({ player, cam, keys, mouse });
+control.guards.push(() => player.tool === 'build' ? 'build mode' : window.__game?.cooking?.active ? 'cooking'
+  : player.climbY != null ? 'climbing' : player.standY != null ? 'standing on something' : window.__reach?.on || window.__hands?.isOpen ? 'hands busy'
+  : sim.state.sys.construction?.carried ? 'arms full' : null);
 const cursor = { x: 0, y: 0, z: 0, valid: false };
 window.addEventListener('keydown', (e) => {
   if (e.target && e.target.tagName === 'INPUT') return;
@@ -3554,6 +3561,7 @@ function pushOut(o, rad) {
   });
   if (window.__game?.cooking) window.__game.cooking.collide(o, rad);
   if (window.__build) window.__build.collide(o, rad, o === player);      // walls and furniture
+  for (let i = 0; i < control.colliders.length; i++) control.colliders[i](o, rad);   // vehicle bodies and other registered pushers
 }
 const trails = { t: 0, cur: null };
 {
@@ -3866,8 +3874,15 @@ function respawn() {
 }
 
 // ============================================================ main loop
+// the one ground read (feet, wheels): terrain, plus hand-shaped ground (src/landscape-view.js), plus built floors
+function groundAt(x, z, y) {
+  const th = heightAt(x, z) + (reliefFn ? reliefFn(x, z) : 0);
+  return window.__build ? window.__build.ground(x, z, y, th) : th;
+}
 function updatePlayer(dt) {
   if (window.__game?.cooking?.active) { mouse.left = mouse.right = false; ring.visible = false; return; }
+  control.compose();
+  if (control.possess(dt)) { ring.visible = false; return; }     // a seat (or other possession) moves the body instead
   const P = player;
   P.hurt = Math.max(0, P.hurt - dt);
   if (P.dead > 0) {
@@ -4022,8 +4037,7 @@ function updatePlayer(dt) {
   P.x += (vx + P.kvx) * dt; P.z += (vz + P.kvz) * dt;
   P.kvx *= Math.exp(-7 * dt); P.kvz *= Math.exp(-7 * dt);
   pushOut(P, 0.28);
-  const th = heightAt(P.x, P.z) + (reliefFn ? reliefFn(P.x, P.z) : 0);              // hand-shaped ground (src/landscape-view.js) counts
-  const gh = window.__build ? window.__build.ground(P.x, P.z, P.y, th) : th;   // built floors count as ground
+  const gh = groundAt(P.x, P.z, P.y);
   // climbY: on a ladder, placed by an add-on. standY: on a platform an add-on keeps you on (scaffold planks): you walk, it holds the height
   const ty = P.climbY != null ? P.climbY : P.standY != null ? P.standY : Math.max(gh, waveHeight(P.x, P.z) - 0.95);
   if (P.air) {
@@ -4177,14 +4191,16 @@ function updateShakes(dt) {
 const _proj = new THREE.Vector3();
 function updateCamera(dt) {
   if (window.__game?.cooking?.updateCamera(dt)) return;
+  if (control.camera(dt, camera)) { afterCamera(cam.dist); return; }   // a possession placed the camera itself
   const k = cam.aimK = lerp(cam.aimK, player.aiming ? 1 : 0, 1 - Math.exp(-11 * dt));
   const follow = 1 - Math.exp(-lerp(9, 24, k) * dt);
-  cam.tx = lerp(cam.tx, player.x, follow); cam.tz = lerp(cam.tz, player.z, follow);
-  cam.ty = lerp(cam.ty, player.y + 1.0, 1 - Math.exp(-lerp(5, 18, k) * dt));
+  const f = control.follow();     // the player, or what a possession wants followed, plus its look-ahead
+  cam.tx = lerp(cam.tx, f.x, follow); cam.tz = lerp(cam.tz, f.z, follow);
+  cam.ty = lerp(cam.ty, f.y + 1.0, 1 - Math.exp(-lerp(5, 18, k) * dt));
   cam.shake = Math.max(0, cam.shake - dt * 1.6);
   const sh = cam.shake * cam.shake * 1.6 * (1 - 0.6 * k);
   // exploring: high above. Bow drawn: down behind the right shoulder.
-  const dist = lerp(cam.dist, 4.4, k), pitch = lerp(cam.pitch, cam.aimPitch, k);
+  const dist = lerp(cam.dist * control.rig.distK, 4.4, k), pitch = lerp(control.rig.pitch(cam.pitch), cam.aimPitch, k);
   const rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw);
   const tx = cam.tx + rx * 0.8 * k, ty = cam.ty + 0.75 * k, tz = cam.tz + rz * 0.8 * k;
   const cp = Math.cos(pitch), spn = Math.sin(pitch);
@@ -4195,9 +4211,13 @@ function updateCamera(dt) {
   const floor = Math.max(heightAt(camera.position.x, camera.position.z), SEA) + lerp(1.5, 0.95, k);
   if (camera.position.y < floor) camera.position.y = floor;
   camera.lookAt(tx, ty, tz);
-  const fov = lerp(40, 52, k);
+  const fov = lerp(control.rig.fov(40), 52, k);
   if (Math.abs(camera.fov - fov) > 0.05) { camera.fov = fov; camera.updateProjectionMatrix(); }
   camera.updateMatrixWorld();
+  afterCamera(dist);
+}
+// what follows the camera every frame, however it was placed: fog, the see-through fade, the water patch
+function afterCamera(dist) {
   // the distance haze. Past the loaded world the far land (src/far-land.js) carries the view on to the horizon, so
   // on a clear, dry day the air only softens the distance (a fifth of the way to the sky's colour by 350 m); humid,
   // misty or overcast air closes in, to a real mist in the worst of it
@@ -4533,7 +4553,7 @@ lockUi();
 window.__game = {
   pm, get seed() { return SEED; }, get nightF() { return SKYK.night; },
   stepHooks,
-  get sim() { return sim; }, setYearDays: (d) => { sim.setYearDays(d); saveGame(); }, savedBuilds: () => simCtl.builds, powerAvailable: () => false,
+  get sim() { return sim; }, setYearDays: (d) => { sim.setYearDays(d); saveGame(); }, savedBuilds: () => simCtl.builds, powerAvailable: (minW = 1) => powerNear(sim.state, player.x, player.z, 30, minW),
   stock: {
     MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, stockMassKg, canAfford, toolAvailable,
     get state() { return stockState(); },
@@ -4568,6 +4588,8 @@ window.__game = {
   // the landscape view's hooks: the ground it shapes is walked on, and shows through the terrain where dug
   setRelief: (fn) => { reliefFn = fn; }, digMask: { win: DIG.uDigWin, enable: enableDigMask },
   handPose: null, sea: SEA,
+  // the controller stack (src/engine/control.js), the one ground read and the circle push-out, for vehicles and other bodies
+  control, groundAt, pushOut,
   // the sky as reflections see it (world sun direction and colour, horizon and zenith), kept up to date each frame
   skyU: { uGSunDir: waterUniforms.uSunDir, uGSunCol: waterUniforms.uSunCol, uGSky: waterUniforms.uSky, uGZen: waterUniforms.uZenith },
 };
