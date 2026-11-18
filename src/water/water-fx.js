@@ -170,7 +170,8 @@ export function createWaterFx({ scene, river, groundAt }) {
   }
   // a foot or a thing breaking the surface at (x, y, z) moving at speed sp (m/s): a crown of fine drops flung up
   // and out (more and higher the faster it goes), a few bigger ones, and rings on the water
-  function splash(x, y, z, sp, vx = 0, vz = 0) {
+  // (ring: false when the fine wave simulation makes the waves instead)
+  function splash(x, y, z, sp, vx = 0, vz = 0, ring = true) {
     const k = Math.min(1.5, 0.25 + sp * 0.3);
     const n = Math.round(10 + 18 * k);
     for (let i = 0; i < n; i++) {
@@ -181,7 +182,7 @@ export function createWaterFx({ scene, river, groundAt }) {
       const a = Math.random() * 6.283;
       add({ k: 0, x, y: y + 0.02, z, vx: Math.cos(a) * 0.3 + vx * 0.4, vy: 0.8 + 0.8 * Math.random() * k, vz: Math.sin(a) * 0.3 + vz * 0.4, age: 0, life: 0.7, s0: 0.016 + 0.01 * Math.random(), s1: 0, a: 0.8, floor: y - 0.02 });
     }
-    ripple(x, z, Math.min(1, 0.35 + 0.25 * sp));
+    if (ring) ripple(x, z, Math.min(1, 0.35 + 0.25 * sp));
   }
   function update(dt, wind = [0, 0]) {
     let n = 0;
