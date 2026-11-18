@@ -135,7 +135,8 @@
       vec4 c = texture2D(tColor, vUv);
       float d = texture2D(tDepth, vUv).x;
       float z = linZ(d);
-      float coc = max(smoothstep(uFocus * 1.45, uFocus * 3.4, z) * uDofFar, smoothstep(uFocus * 0.74, uFocus * 0.34, z) * uDofNear);
+      // (the far blur only softens: blurred all the way, the distance read as a mist even on a clear day)
+      float coc = max(smoothstep(uFocus * 1.5, uFocus * 4.0, z) * 0.55 * uDofFar, smoothstep(uFocus * 0.74, uFocus * 0.34, z) * uDofNear);
       vec3 col = mix(c.rgb, texture2D(tBlur, vUv).rgb, coc);
       if (d < 0.99995) {
         if (uAOOn > 0.5) {
