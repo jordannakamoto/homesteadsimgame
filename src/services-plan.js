@@ -504,7 +504,7 @@
     },
     hint(R) {
       if (R.held || !near) return null;
-      if (!mode) return 'Near the frame: plan cable and pipe with <b>1</b> Power, <b>2</b> Cold, <b>3</b> Hot, <b>4</b> Waste';
+      if (!mode) return (window.__servicesHands ? window.__servicesHands.workLine() : '') + 'Near the frame: plan cable and pipe with <b>1</b> Power, <b>2</b> Cold, <b>3</b> Hot, <b>4</b> Waste';
       return null;
     },
     frame(dt, R) {
