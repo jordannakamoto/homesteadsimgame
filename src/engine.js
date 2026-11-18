@@ -2680,6 +2680,7 @@ canvas.addEventListener('wheel', (e) => {
 
 const TOOLS = ['axe', 'dig', 'raise', 'level'];
 function setTool(t) {
+  if (control.top().locks && control.top().locks.tools && t !== player.tool) return;   // e.g. seated on a vehicle
   player.tool = t;
   for (const b of document.querySelectorAll('#tools button')) b.setAttribute('aria-pressed', b.dataset.tool === t ? 'true' : 'false');
 }
