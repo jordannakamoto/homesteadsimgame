@@ -69,7 +69,7 @@ export function createNightSky({ scene, camera, sky }) {
   const su = sky.uniforms;
   const uniforms = {
     uEqW: { value: new THREE.Matrix3() }, uLimit: { value: 6 }, uVis: { value: 0 }, uScale: { value: 1 },
-    uTime: su.uTime, uCloud: su.uCloud, uWindOff: su.uWindOff, uOpt: su.uOpt,
+    uTime: su.uTime, uCloud: su.uCloud, uWindOff: su.uWindOff, uOpt: su.uOpt, uCloudNoise: su.uCloudNoise,
   };
   const mat = new THREE.ShaderMaterial({
     uniforms, transparent: true, depthWrite: false, depthTest: true, blending: THREE.AdditiveBlending, fog: false,
@@ -85,13 +85,13 @@ export function createNightSky({ scene, camera, sky }) {
         float m = mag + 0.12 * (air - 1.0);
         float f = pow(10.0, -0.4 * (m - uLimit + 1.0));      // flux relative to the faintest seen
         float tw = 1.0 + (0.12 + 0.5 * smoothstep(0.5, 0.05, d.y)) * sin(uTime * (9.0 + fract(mag * 37.0) * 9.0) + mag * 91.0);
-        float b = clamp(f, 0.0, 1.5) * tw * uVis * smoothstep(uLimit + 0.3, uLimit - 0.6, m) * smoothstep(-0.01, 0.06, d.y);
+        float b = clamp(f, 0.0, 3.0) * tw * uVis * smoothstep(uLimit + 0.3, uLimit - 0.6, m) * smoothstep(-0.01, 0.06, d.y);
         vCol = scol * mix(vec3(1.0), vec3(1.0, 0.75, 0.5), smoothstep(0.35, 0.03, d.y)) * b;
         vec4 p = projectionMatrix * viewMatrix * vec4(cameraPosition + d * 280.0, 1.0);
         gl_Position = p.xyww;
         gl_Position.z = gl_Position.w * 0.99999;
         // a few pixels for the brightest, one for the faint; the brightest also bloom
-        gl_PointSize = uScale * (1.8 + 3.4 * clamp(pow(10.0, -0.4 * (mag - 1.0)), 0.0, 1.0));
+        gl_PointSize = uScale * (2.0 + 8.0 * clamp(pow(10.0, -0.4 * (mag - 0.5)), 0.0, 1.0));
       }`,
     fragmentShader: SKY_NOISE_GLSL + /* glsl */ `
       uniform float uCloud; uniform vec2 uWindOff; uniform vec4 uOpt;
@@ -99,10 +99,10 @@ export function createNightSky({ scene, camera, sky }) {
       void main() {
         vec2 q = gl_PointCoord - 0.5;
         float r = length(q) * 2.0;
-        float a = smoothstep(1.0, 0.0, r);
-        a *= a;
+        // a sharp point and, for the bright ones (their sprites are bigger), a soft glow round it, as the eye sees them
+        float a = smoothstep(0.32, 0.0, r) + exp(-r * r * 7.0) * 0.22;
         float hidden = cloudCover(normalize(vDir), clamp(uCloud, 0.0, 1.0), uWindOff, uOpt.y);
-        gl_FragColor = vec4(vCol * a * (1.0 - hidden) * 2.4, 1.0);
+        gl_FragColor = vec4(vCol * a * (1.0 - hidden) * 2.8, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }`,
