@@ -9,6 +9,7 @@ import { createFalls } from './water/falls-render.js';
 import { createWaterFx } from './water/water-fx.js';
 import { createReflectProbe } from './water/reflect-probe.js';
 import { createReflectPlane } from './water/reflect-plane.js';
+import { createRippleSim } from './water/ripple-sim.js';
 import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -2727,6 +2728,8 @@ const reflectProbe = createReflectProbe({ renderer, scene, hide: [riverWater.mat
 // and the mirror of the banks in the water at the level of the stream beside you (src/water/reflect-plane.js)
 const reflectPlane = createReflectPlane({ renderer, scene, hide: [riverWater.material, riverLive.material, riverFalls.material, waterFx.points, water], uniforms: riverWater.uniforms });
 let probeAt = null, probeAway = 0;
+// the fine waves round you when you are in or by a stream (src/water/ripple-sim.js)
+const rippleSim = createRippleSim({ renderer, river: riverWater, live: riverLive });
 reflectProbe.setDetail(LOOK.waterReflect === 'full'); reflectPlane.setDetail(LOOK.waterReflect === 'full');
 riverWater.uniforms.uTPM.value = LOOK.waterTexel === 'ground' ? 6.4 : 25.6;
 riverWater.uniforms.uSnap.value = LOOK.waterTexel === 'smooth' ? 0 : 1;
@@ -2911,6 +2914,7 @@ function updateStreams(dt) {
   if (near) { probeAt = near; probeAway = 0; } else probeAway += dt;
   if (probeAt && probeAway > 4) probeAt = null;
   reflectProbe.setOn(!!probeAt); reflectPlane.setOn(!!probeAt);
+  { const near2 = nearStream(); rippleSim.setOn(!!near2); const w0 = streamWaterAt(player.x, player.z); rippleSim.update(dt, player.x, player.z, w0 ? [w0.vx, w0.vz] : [0, 0]); }
   if (probeAt) { reflectProbe.update(dt, probeAt.x, probeAt.y, probeAt.z); u.uEnvPos.value.set(player.x, probeAt.y, player.z, 1); } else u.uEnvPos.value.w = 0;
   // irrigation: garden cells under stream water (a trench dug from a brook, a flooded bed) soak it up
   irrigT += dt;
@@ -3918,11 +3922,18 @@ function updatePlayer(dt) {
     const drag = 0.35 * smoothstep(0.3, 0.9, d) * Math.min(1.5, cur * cur) * 7 * dt;
     P.kvx += sw.vx * drag; P.kvz += sw.vz * drag;
     const rx = sw.vx - vx, rz = sw.vz - vz, rel = Math.hypot(rx, rz);
-    wu.uWake.value.set(P.x, P.z, rx, rz); wu.uWakeK.value.set(clamp(d / 0.35, 0.35, 1.6), 1);
+    // the legs, moving through the water (relative to it): the fine wave simulation makes their bow waves, troughs
+    // and wake; without it, a drawn bow wave and hollow stand in
+    const fine = rippleSim.available && riverLive.on;
+    if (fine) {
+      const sx = Math.cos(P.face) * 0.1, sz = -Math.sin(P.face) * 0.1, k = clamp(d / 0.3, 0.4, 1.5);
+      rippleSim.mover(0, P.x + sx, P.z + sz, 0.07, -rx, -rz, k); rippleSim.mover(1, P.x - sx, P.z - sz, 0.07, -rx, -rz, k);
+      wu.uWakeK.value.y = 0;
+    } else { wu.uWake.value.set(P.x, P.z, rx, rz); wu.uWakeK.value.set(clamp(d / 0.35, 0.35, 1.6), 1); }
     riverLive.froth(0, P.x, P.z, 0.3, 0.7 * smoothstep(0.25, 1.1, rel));
     // the wake: rings dropped as you go, carried off by the current; together they spread into a V behind you
     P.ringT = (P.ringT || 0) - dt;
-    if (P.ringT <= 0) {
+    if (P.ringT <= 0 && !fine) {
       P.ringT = rel > 0.25 ? clamp(0.06 / rel, 0.08, 0.2) : 1.1;
       // heading of the legs through the water (against the current going past them)
       const hx = rel > 0.25 ? -rx / rel : 0, hz = rel > 0.25 ? -rz / rel : 0;
@@ -3932,7 +3943,9 @@ function updatePlayer(dt) {
     if (P.splashT <= 0 && sp > 0.5) {
       const wy = heightAt(P.x, P.z) + d, side = (P.stepSide = -(P.stepSide || 1)) * 0.12;
       P.splashT = clamp(0.62 / sp, 0.12, 0.4) * 1.6;
-      waterFx.splash(P.x + Math.cos(P.face) * side, wy, P.z - Math.sin(P.face) * side, sp * Math.min(1, d * 3), vx, vz);
+      const fx2 = P.x + Math.cos(P.face) * side, fz2 = P.z - Math.sin(P.face) * side;
+      waterFx.splash(fx2, wy, fz2, sp * Math.min(1, d * 3), vx, vz, !fine);
+      if (fine) rippleSim.drop(fx2 + vx * 0.08, fz2 + vz * 0.08, 0.09, 0.5 + 0.25 * sp);
     }
   } else wu.uWakeK.value.y = 0;
   if (P.climbY != null) { vx = vz = 0; P.kvx = P.kvz = 0; }       // on a ladder (set by the construction add-on): it places the player
@@ -4452,7 +4465,7 @@ window.__game = {
   },
   saveGame, saveData, setSpeed, get speed() { return simCtl.speed; },
   enemies, spawnEnemy, arrows, fireArrow, MOVES, startMove, juice, updateHud, waveHeight, depthState, lockQuality: () => { autoDropped = true; }, world, player, cam, keys, mouse, cursor, step, render, heightAt, fellTree, applyBrush, setQuality, renderer, THREE,
-  taa, lookFlags: LOOK, get rivers() { return rivers; }, riverWater, riverLive, streamWaterAt, waterFx, camera, scene, setTool, fade: addWind, fadeR: U.fadeR, burst, editGet: getDelta, editSet: setDelta, baseHeight, chunkSize: CS, treeKinds: TREE, refreshLock: lockUi, forestAt,
+  taa, lookFlags: LOOK, get rivers() { return rivers; }, riverWater, riverLive, streamWaterAt, waterFx, get rippleSim() { return rippleSim; }, camera, scene, setTool, fade: addWind, fadeR: U.fadeR, burst, editGet: getDelta, editSet: setDelta, baseHeight, chunkSize: CS, treeKinds: TREE, refreshLock: lockUi, forestAt,
   light: SKY, noise: fbm, palette: PAL, quality: () => quality.level, composer: () => composer,
   graphics: { presets: GFX, get preset() { return quality.preset; }, get scale() { return quality.scale; }, get renderScale() { return renderScale(); }, setRenderScale }, bench: perf.bench,
   // Look switches from the console: __game.look.grassRootShade(0..1), __game.look.toggle('ao' | 'grassShadows' | 'tuftShadow' | 'drawOrder'),
