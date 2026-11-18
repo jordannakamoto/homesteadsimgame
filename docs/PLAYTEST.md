@@ -478,3 +478,10 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 ## The dollhouse cut opens the siding too (branch `dollhouse`)
 
 - Inside a building, the stretch of wall between the camera and you opens as before, and now its siding boards (and the framing, wrap and anything else drawn as pieces) open with it. Each building draws its pieces with its own copy of the materials, cut by the same planes as its walls, in build mode's drawing and in the construction view's.
+
+## Cutting made easy (branch `easycut`)
+
+- Fixed: after the first cut the sawhorses stopped cutting (a timer never counted down).
+- A cut piece is no longer something you carry: it waits at the sawhorses and is fetched from there when you set it. Point at its glowing place and click, whatever is in your arms; it flies in from the horses.
+- Hold E at the sawhorses to cut piece after piece. Pieces for the frame lying on the deck now are cut first.
+- The guide sends you to the sawhorses when only cut-to-fit pieces are left in a stage, then back to the frame once they are cut. Guided building and "Work until done" still cut for you.

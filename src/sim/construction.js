@@ -60,16 +60,16 @@ export function sheetSource(s, ln, area) {
 // does putting this piece in want a sheet or a stick from the stacks or the arms?
 export function needsStock(s, pr, id) {
   const m = pr.members[id], ln = m && m.line ? pr.lines[m.line] : null;
-  if (ln && ln.stick && !placed(m)) return m.site ? true : stickSource(s, pr, id).metres > 0;
+  if (ln && ln.stick && !placed(m)) return m.site ? !m.prep : stickSource(s, pr, id).metres > 0;
   if (!ln || !ln.sheet || placed(m)) return true;
   return sheetSource(s, ln, m.area).how === 'new';
 }
-// what setting this member by hand takes in the arms: its line's item, the cut piece when it was cut at the sawhorses, or
-// null when it is still to be cut there
+// what setting this member by hand takes in the arms: its line's item, '' when it is cut and waiting at the sawhorses
+// (nothing to carry), or null when it is still to be cut there
 export function wantItem(pr, id) {
   const m = pr.members[id], ln = m && m.line ? pr.lines[m.line] : null;
   if (!ln) return null;
-  if (ln.stick && m.site && !placed(m)) return m.prep ? C.cutItemOf(ln.itemId) : null;
+  if (ln.stick && m.site && !placed(m)) return m.prep ? '' : null;   // '': cut and waiting at the sawhorses, nothing to carry
   return ln.itemId;
 }
 // the next piece to cut at the sawhorses: of a stage open now, not yet cut or set, in the order of the stages
@@ -78,7 +78,9 @@ export function nextCut(pr) {
   for (const id in pr.members) {
     const m = pr.members[id], ln = m.line ? pr.lines[m.line] : null;
     if (!m.site || m.prep || placed(m) || !ln || !ln.stick || !stageOpen(pr, m.stage)) continue;
-    const i = C.STAGE_ORDER.indexOf(m.stage);
+    // a frame put together lying flat: the one on the deck now first, then the next ones in the order they are built
+    const fl = C.STAGE[m.stage] && C.STAGE[m.stage].flat ? flatParents(pr, m.stage).filter((q) => !pr.raised[q]).indexOf(m.parent) : 0;
+    const i = C.STAGE_ORDER.indexOf(m.stage) * 1000 + Math.max(0, fl);
     if (i < bi || (i === bi && id < best)) { best = id; bi = i; }
   }
   return best;
@@ -87,7 +89,7 @@ export function nextCut(pr) {
 export function stockNeed(s, pr, id) {
   const m = pr.members[id], ln = m && m.line ? pr.lines[m.line] : null;
   if (!ln || placed(m)) return 0;
-  if (ln.stick) return m.prep ? 1 : stickSource(s, pr, id).metres;
+  if (ln.stick) return m.prep ? 0 : stickSource(s, pr, id).metres;
   if (ln.sheet) return sheetSource(s, ln, m.area).how === 'new' ? 1 : 0;
   return round6(m.need - m.got);
 }
@@ -644,8 +646,7 @@ function barrowLoad(ctx, p) {
 }
 
 // cut the next piece (or the one named) at the sawhorses: its stock comes from the arms if they hold that lumber, else the
-// stacks; the cut piece goes into the arms when they are free or already hold cut pieces of it (an armful at most), else
-// onto the horses. The material is used now; the piece goes in later from the arms.
+// stacks. The cut piece waits on the horses (the material is used now); setting it later fetches it from there.
 function cutAtHorses(ctx, p) {
   const s = ctx.s, pr = s.progress[p && p.structId];
   if (!pr) return { ok: false, reason: 'unknown building' };
@@ -654,7 +655,7 @@ function cutAtHorses(ctx, p) {
   if (!m) return { ok: false, reason: 'nothing to cut' };
   if (!m.site || m.prep || placed(m) || !ln || !ln.stick) return { ok: false, reason: 'not cut on site' };
   if (!stageOpen(pr, m.stage)) return { ok: false, reason: 'not yet' };
-  const saw = stickSource(s, pr, id), cid = C.cutItemOf(ln.itemId), fromArms = !!(s.carried && s.carried.itemId === ln.itemId);
+  const saw = stickSource(s, pr, id), fromArms = !!(s.carried && s.carried.itemId === ln.itemId);
   if (saw.metres > 0 && (fromArms ? s.carried.qty : SUP.stackQty(s, ln.itemId)) + 1e-6 < saw.metres) return { ok: false, reason: 'no material', itemId: ln.itemId };
   const cuts = [];
   for (const st0 of saw.steps) {
@@ -668,14 +669,9 @@ function cutAtHorses(ctx, p) {
     cuts.push({ how, stockM: from, lenM: st0.len, keptM: keep ? round6(rest) : 0, sawn: from - st0.len > 1e-6 });
   }
   m.prep = 1; m.cut = cuts.some((c) => c.how === 'new') ? 'new' : 'offcut';
-  { const L = s.ledger[cid] || (s.ledger[cid] = { bought: 0, used: 0, spent: 0 }); L.bought = round6(L.bought + 1); }   // made here, not bought: the stick it came from is booked to its lumber line
-  const n = cuts.length, room = !s.carried || (s.carried.itemId === cid && s.carried.qty + n <= C.SITE_CUT.armful);
-  if (room) s.carried = { itemId: cid, qty: round6((s.carried && s.carried.itemId === cid ? s.carried.qty : 0) + 1) };
-  else SUP.addToStacks(s, cid, 1, s.horses.x, s.horses.z, C.DELIVERY.layout);
   requote(s, pr);
   ctx.emit('construction.cut', { structId: pr.id, id, kind: m.kind });
-  if (room) ctx.emit('construction.carry', { itemId: cid, qty: s.carried.qty });
-  return { ok: true, id, kind: m.kind, cut: { id, how: m.cut, stick: true, pieces: cuts, sawn: cuts.some((c) => c.sawn) }, toArms: room, next: nextCut(pr), carried: s.carried };
+  return { ok: true, id, kind: m.kind, cut: { id, how: m.cut, stick: true, pieces: cuts, sawn: cuts.some((c) => c.sawn) }, next: nextCut(pr) };
 }
 
 function pickUp(ctx, p) {
@@ -711,9 +707,7 @@ function install(ctx, p) {
     const ln = m.line ? pr.lines[m.line] : null;
     let need = round6(m.need - m.got), give = 0, cut = null, saw = null;
     let prep = false;
-    if (ln && ln.stick && need > 1e-6 && m.prep) {      // cut at the sawhorses already: one cut piece from the arms (or the pile)
-      const cid = C.cutItemOf(ln.itemId);
-      if (!fromStacks && !(s.carried && s.carried.itemId === cid)) { out.refused.push({ id, reason: s.carried ? 'wrong material' : 'no material', itemId: cid }); break; }
+    if (ln && ln.stick && need > 1e-6 && m.prep) {      // cut at the sawhorses already: it is fetched from there, whatever is in the arms
       prep = true; need = 0;
     } else if (ln && ln.stick && need > 1e-6 && m.site && !p.auto && (!fromStacks || p.hold)) { out.refused.push({ id, reason: 'cut first', itemId: ln.itemId }); break; }   // by hand: cut it at the sawhorses first
     else if (ln && ln.stick && need > 1e-6) {       // lumber: sawn from offcuts or new sticks, as the cut list says
@@ -738,13 +732,7 @@ function install(ctx, p) {
       }
     }
     const completes = !ln || give + 1e-6 >= need;
-    const doPrep = () => {
-      if (!prep) return;
-      const cid = C.cutItemOf(ln.itemId);
-      if (s.carried && s.carried.itemId === cid) SUP.useCarried(s, cid, 1);
-      else if (SUP.stackQty(s, cid) >= 1) SUP.useFromStacks(s, cid, 1, pr.x, pr.z);
-      m.got = m.need; delete m.prep;
-    };
+    const doPrep = () => { if (prep) { m.got = m.need; delete m.prep; } };
     const doSaw = () => {
       if (!saw) return;
       const cuts = [];

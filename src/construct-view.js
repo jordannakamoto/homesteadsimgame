@@ -114,7 +114,7 @@
   // the item this member takes from the arms: its line's, the cut piece once it is cut at the sawhorses, or null until then
   const wantOf = (pr, id) => api.wantItem(pr, id);
   const holds = (c, pr, id) => !!c && c.itemId === wantOf(pr, id);
-  const usable = (pr, pl, c) => pl.inst.filter((id) => { const ln = lineOf(pr, id); return !ln || pr.members[id].need - pr.members[id].got < 1e-6 || holds(c, pr, id) || (!pr.members[id].site && !api.needsStock(S(), pr, id)); });
+  const usable = (pr, pl, c) => pl.inst.filter((id) => { const ln = lineOf(pr, id); return !ln || pr.members[id].need - pr.members[id].got < 1e-6 || pr.members[id].prep || holds(c, pr, id) || (!pr.members[id].site && !api.needsStock(S(), pr, id)); });
 
   // ------------------------------------------------------------------ keeping build mode and the simulation in step
   function attach() {
@@ -744,7 +744,7 @@
       if (V.sawing.has(mid)) continue;
       const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid);
       if (m && courseOf(pm, m) && pm.need - pm.got > 1e-6 && m.row > low0.get(pm.parent + pm.kind)) continue;
-      const wi = !set0(pm, ln) && wantOf(pr, mid), set = set0(pm, ln), act = pm.kind === 'site' ? 'dig' : set ? 'nail' : pm.site && !pm.prep ? 'tocut' : holds(c, pr, mid) || (!pm.site && !api.needsStock(S(), pr, mid)) || (wi && stackWithin(wi, takeM())) ? 'set' : 'want';
+      const wi = !set0(pm, ln) && wantOf(pr, mid), set = set0(pm, ln), act = pm.kind === 'site' ? 'dig' : set ? 'nail' : pm.site && !pm.prep ? 'tocut' : pm.prep || holds(c, pr, mid) || (!pm.site && !api.needsStock(S(), pr, mid)) || (wi && stackWithin(wi, takeM())) ? 'set' : 'want';
       if (act === 'tocut') { if (!tocut) tocut = mid; continue; }
       let score;
       if (!m) { if (Math.hypot(P.x - st.x, P.z - st.z) > g.reach + 0.5) continue; score = 0; }
@@ -846,11 +846,11 @@
   }
   // a piece set from the arms leaves the shoulder, arcs over and drops onto its seat, then rocks to rest (tickFlights)
   const FLY_S = 0.26;
-  function flyIn(id, layer, mid) {
+  function flyIn(id, layer, mid, from) {
     const g = geom(id), m = g && g.byId.get(mid), P = G.player;
     if (!m) return;
     const hw = layer !== 'main' ? g.walls.get(layer) : null, f = P.face;
-    const sx = P.x + Math.cos(f) * 0.27 + Math.sin(f) * 0.15, sy = P.y + 1.34, sz = P.z - Math.sin(f) * 0.27 + Math.cos(f) * 0.15;
+    const sx = from ? from.x : P.x + Math.cos(f) * 0.27 + Math.sin(f) * 0.15, sy = from ? from.y : P.y + 1.34, sz = from ? from.z : P.z - Math.sin(f) * 0.27 + Math.cos(f) * 0.15;
     toLocal(g, hw, wA.set(sx, sy, sz)); toLocal(g, hw, wB.set(sx, sy + 1, sz));
     const mx = (m.a[0] + m.b[0]) / 2, my = (m.a[1] + m.b[1]) / 2, mz = (m.a[2] + m.b[2]) / 2;
     V.flights.set(mid, { id, layer, mid, t: 0, D: [wA.x - mx, wA.y - my, wA.z - mz], U: [wB.x - wA.x, wB.y - wA.y, wB.z - wA.z], dist: Math.hypot(wA.x - mx, wA.y - my, wA.z - mz) });
@@ -860,7 +860,7 @@
   function tickFlights(dt) {
     for (const [mid, w] of V.flights) {
       w.t += dt;
-      const p = Math.min(1, w.t / FLY_S), e = ease(p), arc = Math.min(0.6, 0.25 + w.dist * 0.12) * 4 * p * (1 - p), k = 1 - e;
+      const p = Math.min(1, w.t / (FLY_S + Math.min(0.35, w.dist * 0.05))), e = ease(p), arc = Math.min(1.1, 0.25 + w.dist * 0.12) * 4 * p * (1 - p), k = 1 - e;
       const pr = S().progress[w.id];
       if (!pr || !pr.members[mid] || pr.members[mid].built) { V.flights.delete(mid); continue; }
       // in its own frame: back toward the shoulder by k, up by the arc, and proud of its seat at the end
@@ -878,12 +878,12 @@
   }
   // set one piece in place with its small moment; returns the install result, or null when it did not work
   function setPiece(id, mid, pm, layer, m, at, swp, quiet) {
-    const pr = S().progress[id], r = cmd('install', { structId: id, memberIds: [mid], hold: true });
+    const wasCut = !!pm.prep, h = S().horses, r = cmd('install', { structId: id, memberIds: [mid], hold: true }), pr = S().progress[id];
     if (!r.ok) { if (!quiet) flash(reason(r, pm.kind)); return null; }
     const sawn = r.cuts && r.cuts.find((q) => q.stick && q.sawn);
     if (sawn) { sawPiece(id, mid, layer, sawn, at, quiet); if (!quiet) flash(cutWords(sawn)); }
     else if (r.cuts && r.cuts.length && !r.cuts[0].stick && !quiet) flash(r.cuts[0].how === 'offcut' ? 'Cut from an offcut' : 'Cut to fit; offcut kept');
-    if (r.set.length) { if (swp) V.stick = { id, mid }; if (sawn) { /* it swings in when the saw is through */ } else if (pm.kind === 'cladding') slideIn(id, layer, mid); else if (V.sheetMids && V.sheetMids.has(mid)) wrapRoll(id, layer, mid); else flyIn(id, layer, mid); sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
+    if (r.set.length) { if (swp) V.stick = { id, mid }; if (sawn) { /* it swings in when the saw is through */ } else if (pm.kind === 'cladding') slideIn(id, layer, mid); else if (V.sheetMids && V.sheetMids.has(mid)) wrapRoll(id, layer, mid); else flyIn(id, layer, mid, wasCut && h ? { x: h.x, y: G.heightAt(h.x, h.z) + 0.8, z: h.z } : null); sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
     else if (!quiet) { const q = r.partial[0]; sounds.play('rustle'); flash(plain(lineOf(pr, mid).label) + ': ' + Math.round((100 * q.got) / q.need) + '% there. Fetch more.'); }
     return r;
   }
@@ -1214,21 +1214,19 @@
     let pr = null, mid = null;
     for (const q of inProgress()) { const m = api.nextCut(q); if (m) { pr = q; mid = m; break; } }
     if (!mid) return null;
-    const ln = lineOf(pr, mid), cid = C.cutItemOf(ln.itemId);
-    if (c && c.itemId !== cid && c.itemId !== ln.itemId) return { kind: 'hint', text: 'Put down what you carry to cut at the sawhorses', drop: true };
     const left = Object.values(pr.members).filter((m) => m.site && !m.prep && !m.built && api.stageOpen(pr, m.stage)).length;
-    return { kind: 'cut', id: pr.id, mid, left, full: !!c && c.itemId === cid && c.qty >= C.SITE_CUT.armful };
+    return { kind: 'cut', id: pr.id, mid, left };
   }
   function cutNext(ctx) {
     if (V.cutBusy > 0) return;
     const pr = S().progress[ctx.id], what = cutLabel(pr, ctx.mid), r = cmd('cut', { structId: ctx.id, memberId: ctx.mid });
     if (!r.ok) { flash(reason(r)); return; }
     const h = S().horses, P = G.player, tools = G.sim.state.sys.stock.tools, power = tools.includes('circular_saw') && !!(G.powerAvailable && G.powerAvailable());
-    const to = r.toArms ? { x: P.x, y: P.y + 1.3, z: P.z } : { x: h.x, y: G.heightAt(h.x, h.z) + 0.75, z: h.z };
+    const to = { x: h.x - Math.cos(h.yaw) * 0.45, y: G.heightAt(h.x, h.z) + 0.05, z: h.z + Math.sin(h.yaw) * 0.45 };   // onto the ground beside the horses
     V.cutBusy = 0.25; P.face = Math.atan2(h.x - P.x, h.z - P.z);
     r.cut.pieces.forEach((pc, i) => CS.cut({ stockM: pc.stockM, lenM: pc.lenM, sawn: pc.sawn, keptM: pc.keptM, onHorses: true, x: h.x, z: h.z, yaw: h.yaw, to, power, slow: 1.5 }, i === r.cut.pieces.length - 1 ? () => { V.rev++; } : null));
     const p = r.cut.pieces[0];
-    flash(what + ' ' + mm(p.lenM) + (p.how === 'offcut' ? ' from an offcut' : ' from a ' + ftOf(p.stockM) + ' stick') + (r.toArms ? '' : '; it waits on the horses'));
+    flash(what + ' ' + mm(p.lenM) + (p.how === 'offcut' ? ' from an offcut' : ' from a ' + ftOf(p.stockM) + ' stick') + (r.next ? '' : '. All cut: set them in their places'));
     V.rev++;
   }
   function context() { const x = contextRaw(); if (x && x.kind === 'hint' && !x.drop && S().carried && !(RW && RW.on())) return { ...x, drop: true }; return x; }
@@ -1382,7 +1380,8 @@
   const vTmp = new T.Vector3();
   const reason = (r, kind, mid) => r.reason === 'support missing' ? ((C.SUPPORT_SAYS[r.missing] || 'Set the supports') + ' first') : (kind === 'door' || kind === 'window') && (r.reason === 'stage not open' || r.reason === 'frame not finished') ? (r.reason === 'frame not finished' ? 'Frame the opening first' : 'Wrap the wall before the ' + kind + ' goes in') : ({ 'no material': 'You need ' + (r.itemId ? stackName(r.itemId) : 'material') + ' for that', 'wrong material': 'That needs ' + (r.itemId ? stackName(r.itemId) : 'something else'), 'no fasteners': 'Out of ' + (r.itemId ? low(CAT[r.itemId].name) : 'fasteners') + ': buy more in the Supplier (U)', 'stage not open': 'Not yet: an earlier stage comes first', 'cut first': 'Cut it at the sawhorses first', 'no sawhorses': 'The sawhorses come with the lumber', 'nothing to cut': 'Nothing left to cut' })[r.reason] || 'That cannot go in yet';
   function autoCan(s, pr, mid, ln, c) {
-    const pm = pr.members[mid], sn = pm.prep ? 1 : api.stockNeed(s, pr, mid);
+    const pm = pr.members[mid], sn = api.stockNeed(s, pr, mid);
+    if (pm.prep) return true;                   // cut and waiting at the sawhorses
     if (holds(c, pr, mid) && (!ln.stick || c.qty + 1e-6 >= sn)) return true;
     if (pm.site && !pm.prep) return sn <= 1e-6 || (!!c && c.itemId === ln.itemId && c.qty + 1e-6 >= sn);
     return !pm.site && !api.needsStock(s, pr, mid);
@@ -1444,7 +1443,8 @@
     const ctx = V.ctx, held = !!G.keys.KeyE || V.mDown, s = S();
     V.cool -= dt * (C.workSpeed(G.sim.state.sys.stock.tools, G.powerAvailable && G.powerAvailable()));
     V.handT += dt; tickBlow(dt); tickFlights(dt);
-    if ((V.matT = (V.matT || 0) - dt) < 0) { V.matT = 0.5; if (look.matsFor) for (const k of asm.keys()) asm.setMats(k, look.matsFor(k)); }   // a building rebuilt has new materials if (V.cutBusy > 0) V.cutBusy -= dt;
+    if ((V.matT = (V.matT || 0) - dt) < 0) { V.matT = 0.5; if (look.matsFor) for (const k of asm.keys()) asm.setMats(k, look.matsFor(k)); }   // a building rebuilt has new materials
+    if (V.cutBusy > 0) V.cutBusy -= dt;
     if (V.jolt) { const j = V.jolt; j.t += dt; liftTo(j.id, j.layer, j.mid, Math.max(-0.025, (j.built ? 0 : proud(j.mid)) - 0.045 * Math.exp(-j.t * 16) * Math.cos(j.t * 46))); if (j.t > 0.28) { asm.lift(j.id, j.layer, j.mid, j.built ? 0 : proud(j.mid)); V.jolt = null; } }
     tickSlides(dt); tickRolls(dt);
     if (V.swingIn) { V.swingIn.t += dt; const w = V.swingIn; asm.lift(w.id, w.layer, w.mid, proud(w.mid)); if (w.t > 0.2) V.swingIn = null; }
@@ -1479,6 +1479,7 @@
       if (V.raise) tickRaise(dt, held && ctx && (ctx.kind === 'raise' || V.raise.landed));
       // holding keeps the hands going at a steady rhythm: set, strike, strike, the next piece
       if (held && ctx && ctx.kind === 'hands' && !V.raise && V.cool <= 0) handAct({ ...ctx, repeat: true });
+      else if (held && ctx && ctx.kind === 'cut' && !(V.cutBusy > 0)) cutNext(ctx);      // hold at the sawhorses: cut after cut
       if (W.job) W.cancel();
     }
     if (V.working && !V.working.partial && V.working.m.draw !== 0) liftTo(V.working.id, V.working.layer, V.working.memberId, 0.24 * (1 - W.progress()));
@@ -1550,7 +1551,7 @@
     else if (ctx.kind === 'bgrab') { const k = ctx.load && s.stacks.find((q) => q.id === ctx.load); if (k) setPrompt('', 'Click: take ' + low(stackName(k.itemId)) + ', ' + describe(k.itemId, k.qty).n + ' left · Hold: take the handles', 'E also takes the handles', V.bHold ? Math.min(1, V.bHold.t / 0.4) : null); else setPrompt('E', 'Take the wheelbarrow handles', 'empty', null); }
     else if (ctx.kind === 'bload') setPrompt('E', 'Load the wheelbarrow with ' + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'bdown') setPrompt('E', 'Set the wheelbarrow down', '', null);
-    else if (ctx.kind === 'cut') setPrompt(ctx.full ? '' : 'E', ctx.full ? 'Your arms are full: carry these to the frame' : 'Cut ' + low(cutLabel(S().progress[ctx.id], ctx.mid)) + ' (' + mm(S().progress[ctx.id].members[ctx.mid].len) + ')', ctx.left + ' to cut', null);
+    else if (ctx.kind === 'cut') setPrompt('E', 'Cut ' + low(cutLabel(S().progress[ctx.id], ctx.mid)) + ' (' + mm(S().progress[ctx.id].members[ctx.mid].len) + ')', ctx.left + ' to cut · hold to keep cutting', null);
     else if (ctx.kind === 'hgrab') setPrompt('E', 'Pick up the sawhorses', 'the cut station', null);
     else if (ctx.kind === 'sgrab') setPrompt('E', 'Take the scaffold bundle', '', null);
     else if (ctx.kind === 'sset') setPrompt('E', ctx.spot.free ? 'Set up a scaffold tower here, under the roof frame' : 'Set up the scaffold along this wall', '', null);
@@ -1599,12 +1600,10 @@
     const c = s.carried;
     {   // only pieces cut on site are left in this stage: to the sawhorses, or in with the ones already cut
       const here = pl.inst.filter((id) => pr.members[id].stage === v.id && pr.members[id].need - pr.members[id].got > 1e-6);
-      if (here.length && here.every((id) => pr.members[id].site) && s.horses && !s.options.auto) {
-        if (c && C.isCutItem(c.itemId)) return { ...out, line: 'Carry the cut pieces in and point at a glowing place: each one goes where it was cut for.', target: at };
-        if (here.some((id) => !pr.members[id].prep)) return { ...out, line: 'Posts, cripples, gable studs and rafters are cut on site, to fit. Go to the sawhorses, point at them and press <kbd>E</kbd> for each cut; the pieces go into your arms.', target: { x: s.horses.x, z: s.horses.z, y: G.heightAt(s.horses.x, s.horses.z) + 1.4 } };
-        const pile = s.stacks.find((k) => C.isCutItem(k.itemId));
-        if (pile) return { ...out, line: 'The cut pieces wait on the sawhorses: pick them up and carry them in.', target: { x: pile.x, z: pile.z, y: G.heightAt(pile.x, pile.z) + 1.2 } };
-      }
+      const tocut = here.filter((id) => pr.members[id].site && !pr.members[id].prep);
+      if (tocut.length && here.every((id) => pr.members[id].site) && s.horses && !s.options.auto && pr.level !== 'guided')
+        return { ...out, line: 'The last pieces of this stage are cut to fit on site (' + tocut.length + '). Go to the sawhorses, point at them and hold <kbd>E</kbd> to cut them one after another. Each waits there until you set it: then point at its glowing place.', target: { x: s.horses.x, z: s.horses.z, y: G.heightAt(s.horses.x, s.horses.z) + 1.4 } };
+      if (here.length && here.every((id) => pr.members[id].prep) && !s.options.auto && pr.level !== 'guided') return { ...out, line: 'Your cut pieces wait at the sawhorses: point at a glowing place and click to set each one, whatever you are carrying.', target: at };
     }
     if (['dry-in', 'roofing'].includes(v.id) && RW && c && c.itemId === ln.itemId && pr.level !== 'guided' && !s.options.auto) {
       if (!RW.on()) return { ...out, line: 'Roofers work on the roof: climb the ladder and keep walking, onto the deck. On a steep roof, fix an anchor at the ridge and clip in first.', target: at };

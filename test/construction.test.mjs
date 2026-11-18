@@ -29,10 +29,9 @@ function workAll(sim, { stopAfter = null, from = 'carried' } = {}) {
     if (!ids.length) break;
     if (stopAfter && !ids.some((id) => C.STAGE_ORDER.indexOf(P.members[id].stage) <= C.STAGE_ORDER.indexOf(stopAfter))) break;
     const id = ids[0], m = P.members[id], ln = m.line ? P.lines[m.line] : null;
-    if (from === 'carried' && m.site && !m.prep) {     // cut on site: at the sawhorses first, into empty arms
-      if (cs(sim).carried) assert.ok(sim.commandNow('construction.putDown', { x: 44, z: 40 }).ok);
+    if (from === 'carried' && m.site && !m.prep) {     // cut on site: at the sawhorses first; then it is set from there
       const c = sim.commandNow('construction.cut', { structId: P.id, memberId: id });
-      assert.ok(c.ok && c.toArms, id + ' cut: ' + c.reason);
+      assert.ok(c.ok, id + ' cut: ' + c.reason);
       const r = sim.commandNow('construction.install', { structId: P.id, memberIds: [id], from });
       assert.ok(r.ok, id + ': ' + r.reason);
       continue;
@@ -200,7 +199,7 @@ test('a whole shed: conservation, the project card, unlocks; then taking it apar
   const trips = workAll(sim);
   const P = pr(sim);
   assert.ok(P.done); assert.equal(K.installable(P).length, 0);
-  assert.ok(trips > 30 && trips < 110, trips + ' trips');
+  assert.ok(trips > 20 && trips < 110, trips + ' trips');      // precut pieces and cut pieces fetched from the sawhorses: fewer trips than sawing each one
   assert.deepEqual(SUP.imbalance(s), {}); assert.deepEqual(K.stickImbalance(s), {});
   // everything bought is in the building: the stacks are empty and the hands are free
   assert.equal(s.carried, null); assert.deepEqual(s.stacks.filter((k) => k.itemId !== 'ladder'), []);   // the ladder is still in its yard
