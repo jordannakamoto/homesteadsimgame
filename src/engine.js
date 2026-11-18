@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createCookingView } from './cooking/view.js';
 import { createChunkStream } from './world/chunk-stream.js';
 import { createSea } from './water/sea.js';
+import { createSkyDome } from './sky.js';
 import { createRivers } from './water/rivers-gen.js';
 import { createRiverWater } from './water/rivers-render.js';
 import { createRiverLive } from './water/rivers-live.js';
@@ -2720,6 +2721,8 @@ const sea = createSea({ U, scene, world, player, CS, P, SEA, clamp, mulberry32 }
 const { waveHeight, depthState, updateDepthMap, uniforms: waterUniforms, mesh: water } = sea;
 // ---- streams and rivers: their own water and shader (src/water/rivers-render.js), one mesh per chunk they cross
 const riverWater = createRiverWater({ U, sea, CS, P, SEA });
+// the sky itself (src/sky.js): gradient, sun and clouds from the weather, instead of the flat fog colour
+const skyDome = createSkyDome({ scene, camera, water: waterUniforms, U });
 // the live tier (src/water/rivers-live.js): a shallow-water simulation on the GPU in a window round the player
 const riverLive = createRiverLive({ renderer, river: riverWater, scene, CS, heightAt, chunkAt: (x, z) => world.chunks.get(ckey(Math.floor(x / CS), Math.floor(z / CS))) });
 riverLive.setMode(LOOK.riverWater === 'baked' ? 'bed' : LOOK.riverWater);
@@ -3045,6 +3048,7 @@ function updateSky() {
   waterUniforms.uSunCol.value.copy(sun.color).multiplyScalar(sun.intensity * 0.32);
   waterUniforms.uAmb.value.copy(hemi.color).multiplyScalar(hemi.intensity * 0.3);
   waterUniforms.uSky.value.copy(_fogC); mixC(waterUniforms.uZenith.value, 'zen'); towardOvercast(waterUniforms.uZenith.value, O.zen, grey);
+  skyDome.update(cloud, dayF, wx ? Math.sin(wx.windDirRad || 0) * (wx.windMs || 0) : 1, wx ? Math.cos(wx.windDirRad || 0) * (wx.windMs || 0) : 0);
   motes.material.opacity = (0.22 + 0.7 * nightF + 0.25 * goldF) * (1 - 0.8 * wet);
   motes.material.color.setHex(nightF > 0.5 ? 0xd9ff8a : 0xfff6c8);
   motes.material.size = 0.13 + 0.09 * nightF;
@@ -4155,7 +4159,11 @@ function updateCamera(dt) {
   const fov = lerp(40, 52, k);
   if (Math.abs(camera.fov - fov) > 0.05) { camera.fov = fov; camera.updateProjectionMatrix(); }
   camera.updateMatrixWorld();
-  scene.fog.near = lerp(cam.dist + 16, 28, k); scene.fog.far = lerp(cam.dist + 96, 122, k);
+  // the distance fog: it must close in by the edge of the loaded world (about 100 m out), but on a clear, dry day
+  // the air is clear until well out toward it; humid, misty or overcast air closes in sooner
+  const wxf = sim.state.sys.weather;
+  const clearAir = wxf ? clamp(1 - 1.1 * smoothstep(0.35, 0.95, wxf.cloud) - 0.8 * smoothstep(0.85, 0.99, wxf.humidity), 0, 1) : 0.5;
+  scene.fog.near = lerp(lerp(cam.dist + 16, cam.dist + 52, clearAir), lerp(28, 60, clearAir), k); scene.fog.far = lerp(cam.dist + 96, 122, k);
   // screen position of the player, for the see-through fade on trees
   const size = renderer.getDrawingBufferSize(_v2);
   if (viaComposer()) size.multiplyScalar(renderScale());     // the scene is drawn at render resolution
