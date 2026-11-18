@@ -777,7 +777,7 @@
     V.idleT = 0;
     const pr = S().progress[id];
     if (r.installed.length) {
-      if (layer === 'main') freshOf(id).add(mid);
+      if (layer === 'main') { freshOf(id).add(mid); B.hideGhost && B.hideGhost(id, r.installed); }
       if (kind === 'site' || kind === 'door' || kind === 'window' || freshOf(id).size >= 40) { flush(id); if (kind === 'site') V.terrainV = (V.terrainV || 0) + 1; }
       moments(pr, { kind }, r);
     }
@@ -1371,7 +1371,7 @@
       V.idleT = 0;
       const pr = S().progress[j.id];
       if (r.installed.length) {
-        if (j.layer === 'main') freshOf(j.id).add(j.memberId);
+        if (j.layer === 'main') { freshOf(j.id).add(j.memberId); B.hideGhost && B.hideGhost(j.id, r.installed); }
         if (j.kind === 'site' || j.kind === 'door' || j.kind === 'window' || freshOf(j.id).size >= 40) { flush(j.id); if (j.kind === 'site') V.terrainV = (V.terrainV || 0) + 1; }
         moments(pr, j, r);
       } else if (r.partial.length) { const q = r.partial[0]; flash(plain(lineOf(pr, j.memberId).label) + ': ' + Math.round((100 * q.got) / q.need) + '% there. Fetch more.'); }

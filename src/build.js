@@ -9565,7 +9565,8 @@
     }
     S.memMeshes = [];
   }
-  const GHOST_LATER = new Set(["insulation"]);
+  const GHOST_LATER = new Set(["insulation"]),
+    ZERO4 = new T.Matrix4().makeScale(0, 0, 0);
   function drawMembers(S, st) {
     dropMembers(S);
     const mem = st.mem,
@@ -9584,6 +9585,7 @@
       ghosts = {}, // "level|top|poly" -> members
       ghostAdd = (m, top) => {
         const idx = STAGES.indexOf(m.stage);
+        if (S.ghostOff && S.ghostOff.has(m.id)) return; // just fitted by hand: its blueprint is gone even before it is handed back
         if (m.kind === "site" || idx < gi || (idx > gi && GHOST_LATER.has(m.kind))) return;
         if (idx > gi && hideLater) return;
         const need = sk[m.kind],
@@ -9718,6 +9720,7 @@
         add(mesh, top === "1", false);
       } else {
         const mesh = new T.InstancedMesh(boxGeo, GHOST[level], list.length);
+        mesh.userData.gids = list.map((m) => m.id);
         place(mesh, list, 0, false);
         mesh.instanceMatrix.needsUpdate = true;
         add(mesh, top === "1", false);
@@ -9797,6 +9800,7 @@
   function markBuilt(S, ids, on) {
     const wasSite = S.sitePlanned;
     for (const id of ids) on ? S.plan.delete(id) : S.plan.add(id);
+    if (S.ghostOff) for (const id of ids) S.ghostOff.delete(id);
     if (S.known) for (const id of ids) S.known.add(id);
     S.ver++;
     S.pc = null;
@@ -10897,6 +10901,22 @@
       return B.cmode;
     },
     setBuilt,
+    // by-hand building: a piece that fits loses its own blueprint at once, without waiting for the batch to be handed back
+    hideGhost(structId, ids) {
+      const S = B.structs.find((q) => q.id === structId);
+      if (!S) return;
+      const set = S.ghostOff || (S.ghostOff = new Set()),
+        gone = new Set();
+      for (const id of ids) S.plan.has(id) && (set.add(id), gone.add(id));
+      if (!gone.size) return;
+      for (const mesh of S.memMeshes) {
+        const g = mesh.userData.gids;
+        if (!g) continue;
+        let hit = false;
+        for (let n = 0; n < g.length; n++) if (gone.has(g[n])) (mesh.setMatrixAt(n, ZERO4), (hit = true));
+        if (hit) mesh.instanceMatrix.needsUpdate = true;
+      }
+    },
     setStageBuilt,
     setSupportKinds(t) {
       B.supportKinds = t;
