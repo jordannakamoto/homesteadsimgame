@@ -103,7 +103,7 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
     }`);
   // 2. depth, velocity, foam
   const stateMat = mat(/* glsl */ `
-    uniform vec4 push[4]; uniform vec2 pushV[4]; uniform vec4 pour[4]; uniform vec4 froth[2]; uniform vec2 org;
+    uniform vec4 push[4]; uniform vec2 pushV[4]; uniform vec4 pour[4]; uniform vec4 froth[2]; uniform vec2 org; uniform float soak, evap;
     vec4 flux(ivec2 p) { return inside(p) ? texelFetch(F, p, 0) : vec4(0.0); }
     float foamAt(vec2 p) {                                    // bilinear, in cells
       vec2 a = p - 0.5, f = fract(a); ivec2 i = ivec2(floor(a));
@@ -144,11 +144,14 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
       // and a channel cut off upstream runs low and slowly recovers
       vec3 fd0 = feed(c);
       d += max(0.0, fd0.x - d) * min(1.0, dt * 0.04);
+      // and it goes away again: water standing where no channel runs on a normal day (a flood, a spill, a bucket
+      // tipped out) soaks into the ground; everything evaporates a little. Rates in game time (set by the engine)
+      d = max(0.0, d - dt * (evap + (fd0.x < 0.005 ? soak : 0.0)));
       // the edges of the window: held to the baked water, so the stream flows in upstream and out downstream
       int e = min(min(c.x, c.y), min(n - 1 - c.x, n - 1 - c.y));
       if (e < 4) { vec3 fd = feed(c); float k = e < 2 ? 0.5 : 0.15; d = mix(d, fd.x, k); v = mix(v, fd.yz, k); }
       gl_FragColor = vec4(d, v, clamp(foam, 0.0, 1.0));
-    }`, { push: { value: pushers }, pushV: { value: pushV }, pour: { value: pours }, froth: { value: froths }, org: { value: new THREE.Vector2() } });
+    }`, { push: { value: pushers }, pushV: { value: pushV }, pour: { value: pours }, froth: { value: froths }, org: { value: new THREE.Vector2() }, soak: { value: 0 }, evap: { value: 0 } });
   // the water the window starts with, or carries over when it moves: the old state shifted, else the baked water
   const initMat = mat(/* glsl */ `
     uniform ivec2 shift; uniform int keep, flux;
@@ -343,13 +346,18 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
     initMat.uniforms.flux.value = 0;
   }
   let acc = 0;
-  function update(dt, px, pz, running) {
+  // game seconds a real second (for soaking in and evaporation, which run on game time)
+  let gameRate = 72;
+  function update(dt, px, pz, running, rate = 72) {
+    gameRate = rate;
     if (!on) return;
     if (!st || SIZE !== wantSize) { SIZE = wantSize; allocate(); }
     const prevRT = renderer.getRenderTarget(), prevXr = renderer.xr.enabled, prevAuto = renderer.autoClear;
     renderer.xr.enabled = false; renderer.autoClear = false;
     if (!built) start(px, pz); else moveTo(px, pz);
     stateMat.uniforms.org.value.set(win.ox, win.oz); orgU.value.set(win.ox, win.oz);
+    // 25 mm an hour soaks into ordinary ground; 4 mm a day evaporates
+    stateMat.uniforms.soak.value = 25e-3 / 3600 * gameRate; stateMat.uniforms.evap.value = 4e-3 / 86400 * gameRate;
     acc = bedOnly ? 0 : Math.min(acc + (running ? dt : 0), STEP_DT * MAX_STEPS);
     while (acc >= STEP_DT) {
       acc -= STEP_DT;

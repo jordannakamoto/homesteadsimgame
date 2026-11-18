@@ -15,7 +15,7 @@ export function createReflectProbe({ renderer, scene, hide = [], uniforms }) {
   const mk = () => new THREE.WebGLCubeRenderTarget(SIZE, { type: THREE.HalfFloatType, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter });
   const targets = [mk(), mk()];
   const cube = new THREE.CubeCamera(0.1, 90, targets[0]);
-  let face = 0, on = false, fresh = true, back = 1, fade = 1;
+  let face = 0, on = false, fresh = true, back = 1, fade = 1, every = 4, tick = 0;
   const pos = new THREE.Vector3(), want = new THREE.Vector3();
   // uniforms.uEnv shows targets[shown], uEnv2 the other; uEnvMix fades from the first to the second
   let shown = 0;
@@ -36,7 +36,7 @@ export function createReflectProbe({ renderer, scene, hide = [], uniforms }) {
       // the first time: both maps at once, shown at once
       for (let f = 0; f < 6; f++) { draw(targets[0], f); draw(targets[1], f); }
       fresh = false; face = 0; fade = 1; shown = 0; back = 1;
-    } else if (fade >= 1) {
+    } else if (fade >= 1 && tick++ % every === 0) {
       draw(targets[back], face);
       face++;
       if (face === 6) { face = 0; fade = 0; }               // the back map is whole: fade over to it
@@ -54,6 +54,8 @@ export function createReflectProbe({ renderer, scene, hide = [], uniforms }) {
   return {
     update,
     setOn(v) { if (on !== v) { on = v; if (!v) fresh = true; } },
+    // cheap: a face every fourth frame and only to 60 m; full: a face every frame, to 90 m
+    setDetail(full) { every = full ? 1 : 4; for (const c of cube.children) { c.far = full ? 90 : 60; c.updateProjectionMatrix(); } },
     get on() { return on; },
   };
 }

@@ -1033,7 +1033,7 @@ float bedCaustic = 0.0;
       vec2 g = mix(texture2D(uSeaTex, q * 0.31 - v * t0 * 0.55).rg, texture2D(uSeaTex, q * 0.31 - v * t1 * 0.55 + 0.37).rg, wb) - 0.5;
       g = g * (0.3 + 0.7 * smoothstep(0.05, 1.1, sp)) + (texture2D(uSeaTex, q * 1.7 - v * t0 * 0.9 + uTime * vec2(0.05, 0.03)).rg - 0.5) * 0.35;
       vec2 bp = q + g * min(dep, 0.6) * 0.5;
-      if (uBedVox > 0.5) bp = (floor(bp * 16.0) + 0.5) / 16.0;                      // voxel style: the bed in 6 cm texels
+      if (uBedVox > 0.5) bp = (floor(bp * 32.0) + 0.5) / 32.0;                      // voxel style: the bed in 3 cm texels
       // what the current leaves: cobbles in fast water, gravel in middling, sand in slow pools, each layer lying on
       // the finer one, with the finer stuff showing between
       float big = smoothstep(0.3, 0.9, sp + (texture2D(uFoamTex, bp * 0.11).b - 0.5) * 0.6);
@@ -2723,7 +2723,8 @@ const reflectProbe = createReflectProbe({ renderer, scene, hide: [riverWater.mat
 // and the mirror of the banks in the water at the level of the stream beside you (src/water/reflect-plane.js)
 const reflectPlane = createReflectPlane({ renderer, scene, hide: [riverWater.material, riverLive.material, riverFalls.material, waterFx.points, water], uniforms: riverWater.uniforms });
 let probeAt = null, probeAway = 0;
-riverWater.uniforms.uTPM.value = LOOK.waterTexel === 'ground' ? 6.4 : 12.8;
+reflectProbe.setDetail(LOOK.waterReflect === 'full'); reflectPlane.setDetail(LOOK.waterReflect === 'full');
+riverWater.uniforms.uTPM.value = LOOK.waterTexel === 'ground' ? 6.4 : 25.6;
 riverWater.uniforms.uSnap.value = LOOK.waterTexel === 'smooth' ? 0 : 1;
 U.bedVox.value = LOOK.bedStyle === 'real' ? 0 : 1;
 // The stream water at a point: the live simulation's where it runs, else the baked water of the day.
@@ -2899,10 +2900,10 @@ function updateStreams(dt) {
   riverFalls.update(dt, player.x, player.z, { fx: waterFx, live: riverLive.on ? riverLive : null, wet: u.uWetSpeed.value });
   const wx = sim.state.sys.weather, wms = wx ? wx.windMs || 0 : 0, wd = wx ? wx.windDirRad || 0 : 0;
   waterFx.update(dt, [Math.sin(wd) * wms, Math.cos(wd) * wms]);
-  riverLive.update(dt, player.x, player.z, simCtl.speed > 0);
+  riverLive.update(dt, player.x, player.z, simCtl.speed > 0, WORLD_SECONDS_PER_REAL_SECOND * Math.min(simCtl.speed, 20));
   // the reflection probe, just above the stream water nearest you, while there is stream water near
   // (kept on for a few seconds after you step away, so it does not blink on and off at a stream's edge)
-  const near = LOOK.waterReflect === 'probe' ? nearStream() : null;
+  const near = LOOK.waterReflect !== 'simple' ? nearStream() : null;
   if (near) { probeAt = near; probeAway = 0; } else probeAway += dt;
   if (probeAt && probeAway > 4) probeAt = null;
   reflectProbe.setOn(!!probeAt); reflectPlane.setOn(!!probeAt);
@@ -3174,9 +3175,9 @@ function setLook(key, value) {
   if (key === 'edgeBelts' && window.__nature) for (const c of world.chunks.values()) { c.litterItems = null; window.__nature.refresh(c); }
   if (key === 'taa') { applyGfx(); resize(); }
   if (key === 'riverWater') riverLive.setMode(value === 'baked' ? 'bed' : value);
-  if (key === 'waterReflect' && value !== 'probe') { reflectProbe.setOn(false); reflectPlane.setOn(false); }
+  if (key === 'waterReflect') { if (value === 'simple') { reflectProbe.setOn(false); reflectPlane.setOn(false); } reflectProbe.setDetail(value === 'full'); reflectPlane.setDetail(value === 'full'); }
   if (key === 'bedStyle') U.bedVox.value = value === 'real' ? 0 : 1;
-  if (key === 'waterTexel') { riverWater.uniforms.uTPM.value = value === 'ground' ? 6.4 : 12.8; riverWater.uniforms.uSnap.value = value === 'smooth' ? 0 : 1; }      // MSAA off or back on, and the resolve path
+  if (key === 'waterTexel') { riverWater.uniforms.uTPM.value = value === 'ground' ? 6.4 : 25.6; riverWater.uniforms.uSnap.value = value === 'smooth' ? 0 : 1; }      // MSAA off or back on, and the resolve path
   if (key === 'toneMap') {
     renderer.toneMapping = TONE_MAPS[value] || THREE.ACESFilmicToneMapping;   // the composer's output pass follows it by itself
     if (!viaComposer()) scene.traverse((o) => { for (const m of o.material ? [].concat(o.material) : []) m.needsUpdate = true; });
@@ -3248,11 +3249,11 @@ const gfxPanel = (() => {
     up.addEventListener('change', () => { setLook('upscaler', up.value); canvas.focus(); });
     const rw = h('select', { disabled: !RIVERS_ON }, ...[['baked', 'Baked'], ['live', 'Live (64 m round you)'], ['wide', 'Live, wide (128 m)']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.riverWater === v, disabled: v !== 'baked' && !riverLive.available })));
     rw.addEventListener('change', () => { setLook('riverWater', rw.value); canvas.focus(); });
-    const wt = h('select', { disabled: !RIVERS_ON }, ...[['smooth', 'Smooth (realistic)'], ['fine', 'Pixels, fine'], ['ground', 'Pixels, as the ground']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.waterTexel === v })));
+    const wt = h('select', { disabled: !RIVERS_ON }, ...[['smooth', 'Smooth (realistic)'], ['fine', 'Pixels, fine (4 per ground pixel)'], ['ground', 'Pixels, as the ground']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.waterTexel === v })));
     wt.addEventListener('change', () => { setLook('waterTexel', wt.value); canvas.focus(); });
     const bs = h('select', { disabled: !RIVERS_ON }, ...[['voxel', 'Voxel'], ['real', 'Realistic']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.bedStyle === v })));
     bs.addEventListener('change', () => { setLook('bedStyle', bs.value); canvas.focus(); });
-    const wr = h('select', { disabled: !RIVERS_ON }, ...[['probe', 'Surroundings'], ['simple', 'Simple']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.waterReflect === v })));
+    const wr = h('select', { disabled: !RIVERS_ON }, ...[['probe', 'Surroundings'], ['full', 'Surroundings, full'], ['simple', 'Simple']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.waterReflect === v })));
     wr.addEventListener('change', () => { setLook('waterReflect', wr.value); canvas.focus(); });
     const tm = h('select', {}, ...[['aces', 'ACES (original)'], ['agxlook', 'AgX look'], ['agx', 'AgX'], ['neutral', 'Neutral']].map(([v, t]) => h('option', { value: v, textContent: t, selected: LOOK.toneMap === v })));
     tm.addEventListener('change', () => { setLook('toneMap', tm.value); canvas.focus(); });
@@ -3311,7 +3312,7 @@ const gfxPanel = (() => {
       chk('skyShade', 'Shade under trees and in hollows', 'Ground and grass beneath tree crowns and down in dips see less sky, so forest floors darken. Baked, no frame cost.'),
       chk('ao', 'Extra ambient occlusion', 'A second, stronger occlusion on top of the Lighting pass (Ultra full, High and Medium half resolution).'),
       h('div', { className: 'row' }, h('span', {}, 'Stream water', h('span', { className: 'hint', textContent: 'Live simulates the water round you on the graphics card: it flows round what you put in it, fills what you dig and stirs as you wade. Baked is the still, cheaper version everywhere. Beyond the live window the baked water shows.' })), rw),
-      h('div', { className: 'row' }, h('span', {}, 'Stream reflections', h('span', { className: 'hint', textContent: 'Surroundings: streams near you reflect what is really round them: the banks, grass and rocks mirrored in place where they meet the water (the scene drawn a second time, at half resolution), and a small picture of the surroundings further off. Simple: a sky and a tree line worked out in the shader, much cheaper.' })), wr),
+      h('div', { className: 'row' }, h('span', {}, 'Stream reflections', h('span', { className: 'hint', textContent: 'Surroundings: streams near you reflect what is really round them: the banks, grass and rocks mirrored in place where they meet the water, and a small picture of the surroundings further off. It draws the scene again, every other frame, at low resolution and only to 40 m. Surroundings, full: every frame, sharper and to the horizon (costly). Simple: a sky and a tree line worked out in the shader, cheapest.' })), wr),
       h('div', { className: 'row' }, h('span', {}, 'Stream beds', h('span', { className: 'hint', textContent: 'The stones under the stream water near you. Voxel draws them in small texels with a few tones, like the rest of the world; Realistic draws them smooth.' })), bs),
       h('div', { className: 'row' }, h('span', {}, 'Water style', h('span', { className: 'hint', textContent: 'Smooth draws the foam, flow and ripples of the streams at full detail. The pixel styles cut them into texels like the ground.' })), wt),
       h('div', { className: 'row' }, h('span', {}, 'Upscaler', h('span', { className: 'hint', textContent: 'How a below-full-size render is enlarged. Sharp pixels keeps each pixel a crisp block. FSR 1 is made for photoreal images and smears pixel textures.' })), up),
@@ -3914,9 +3915,13 @@ function updatePlayer(dt) {
     P.kvx += sw.vx * drag; P.kvz += sw.vz * drag;
     const rx = sw.vx - vx, rz = sw.vz - vz, rel = Math.hypot(rx, rz);
     wu.uWake.value.set(P.x, P.z, rx, rz); wu.uWakeK.value.set(clamp(d / 0.35, 0.35, 1.6), 1);
-    riverLive.froth(0, P.x, P.z, 0.3, 0.6 * smoothstep(0.3, 1.2, rel));
+    riverLive.froth(0, P.x, P.z, 0.3, 0.7 * smoothstep(0.25, 1.1, rel));
+    // the wake: rings dropped as you go, carried off by the current; together they spread into a V behind you
     P.ringT = (P.ringT || 0) - dt;
-    if (P.ringT <= 0 && cur < 0.25) { P.ringT = sp > 0.5 ? 0.3 : 0.9; waterFx.ripple(P.x, P.z, sp > 0.5 ? 0.4 : 0.25); }
+    if (P.ringT <= 0) {
+      P.ringT = rel > 0.25 ? clamp(0.06 / rel, 0.08, 0.2) : 0.9;
+      waterFx.ripple(P.x, P.z, clamp(0.2 + 0.35 * rel, 0.2, 0.6) * Math.min(1, d * 3), sw.vx, sw.vz);
+    }
     P.splashT = (P.splashT || 0) - dt;
     if (P.splashT <= 0 && sp > 0.5) {
       const wy = heightAt(P.x, P.z) + d, side = (P.stepSide = -(P.stepSide || 1)) * 0.12;
@@ -4451,6 +4456,8 @@ window.__game = {
     rebakeShade: () => { const t0 = performance.now(); for (const c of world.chunks.values()) { c.skyT = null; markShade(c); } processShade(); return +(performance.now() - t0).toFixed(1); },
     upscaler: (v) => { if (['bicubic', 'sharp', 'fsr'].includes(v)) setLook('upscaler', v); return LOOK.upscaler; },
     toneMap: (v) => { if (['aces', 'agxlook', 'agx', 'neutral'].includes(v)) setLook('toneMap', v); return LOOK.toneMap; },
+    streamReflections: (v) => { if (['probe', 'full', 'simple'].includes(v)) setLook('waterReflect', v); return LOOK.waterReflect; },
+    waterStyle: (v) => { if (['smooth', 'fine', 'ground'].includes(v)) setLook('waterTexel', v); return LOOK.waterTexel; },
     farGrass: (v) => { if (['off', 'normal', 'aggressive'].includes(v)) setLook('farGrass', v); return LOOK.farGrass; },
     grassRootShade: (k) => { setLook('rootShade', Math.min(1, Math.max(0, +k || 0))); return LOOK.rootShade; },                // 1 = the original roots, lower lifts the roots only (tips unchanged)
     toggle(what) {

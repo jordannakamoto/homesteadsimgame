@@ -22,7 +22,7 @@ export const RIVER_SHADE = /* glsl */ `
   uniform samplerCube uEnv, uEnv2; uniform vec4 uEnvPos; uniform float uEnvMix;
   uniform sampler2D uRefl; uniform mat4 uReflMat; uniform vec4 uReflOn;   // the mirror (reflect-plane.js)
   uniform vec4 uWake; uniform vec2 uWakeK;   // someone wading: where, the current past their legs (x, z); how deep, on          // the reflection probe (reflect-probe.js): where, and w on/off
-  uniform vec4 uRip[24];                   // ripples: x, z, start time, strength
+  uniform vec4 uRip[24]; uniform vec2 uRipV[24];      // ripples, and the current that carries each one away                   // ripples: x, z, start time, strength
   const mat4 BAYER = mat4(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
   float bayer4(vec2 c) { ivec2 i = ivec2(mod(c, 4.0)); return (BAYER[i.y][i.x] + 0.5) / 16.0; }
   // how far the live water has taken over at p: 0 outside its window, 1 more than 4 m inside, dithered between
@@ -68,27 +68,24 @@ export const RIVER_SHADE = /* glsl */ `
     float patchy = smoothstep(0.1, 0.8, snoise(vec3(q * 0.12 + t * vec2(0.05, 0.03), t * 0.04)));
     return snoise(vec3(q * 2.6 + t * vec2(0.35, 0.2), t * 0.9)) * 0.0022 * patchy;
   }
-  // The water round legs standing in a current, in the frame of the water going past them (u downstream, w across):
-  // it piles up against the upstream side (a bow wave), leaves a hollow just behind, and trails two arms in a V
-  // (narrower the faster it goes past) with short transverse waves between them, as on a real wading leg or a post in
-  // a stream. Stands still relative to the legs, so walking and current both make it; grows with depth and speed.
+  // The water right at legs standing in a current, in the frame of the water going past them (u downstream, w
+  // across): it piles up against the upstream side (a bow wave) and leaves a hollow just behind, with white water
+  // where it runs fast past. Only this stays with the legs; the wake behind is left in the water itself (rings
+  // dropped along the way that drift off with the current and spread into a V, and froth in the simulation), so it
+  // lies where you walked rather than following you round like a tail.
   float wakeH(vec2 q, out float foam) {
     foam = 0.0;
     if (uWakeK.y < 0.5) return 0.0;
     vec2 dq = q - uWake.xy;
-    if (dot(dq, dq) > 30.0) return 0.0;
+    if (dot(dq, dq) > 2.0) return 0.0;
     vec2 rel = uWake.zw; float s = length(rel);
     vec2 dir = s > 0.02 ? rel / s : vec2(1.0, 0.0);
     float u = dot(dq, dir), w = dot(dq, vec2(-dir.y, dir.x));
     float k = smoothstep(0.03, 0.45, s) * uWakeK.x;
     float bow = exp(-((u + 0.2) * (u + 0.2) + w * w * 1.6) / 0.022);
-    float hollow = exp(-((u - 0.28) * (u - 0.28) + w * w * 1.3) / 0.03);
-    float spread = mix(0.62, 0.34, smoothstep(0.2, 1.3, s));
-    float arm = u > 0.0 ? exp(-pow(abs(w) - u * spread, 2.0) / (0.002 + u * 0.004)) * exp(-u * 0.5) : 0.0;
-    float inside = u > 0.0 ? smoothstep(u * spread, u * spread * 0.6, abs(w)) : 0.0;
-    float trans = sin(u * 9.81 / max(s * s, 0.12)) * inside * exp(-u * 1.1);
-    foam = k * (exp(-w * w / (0.006 + u * 0.03)) * exp(-u * 0.9) * step(0.0, u) * smoothstep(0.25, 0.9, s) + bow * 0.6 * smoothstep(0.35, 1.0, s));
-    return k * (0.035 * bow - 0.03 * hollow + 0.014 * arm + 0.007 * trans);
+    float hollow = exp(-((u - 0.26) * (u - 0.26) + w * w * 1.3) / 0.025);
+    foam = k * (bow * 0.6 + hollow * 0.4) * smoothstep(0.35, 1.0, s);
+    return k * (0.03 * bow - 0.025 * hollow);
   }
   // the whole surface at q: two flow-mapped layers half a cycle apart (Vlachos), plus the wind
   float surfH(vec2 q, vec2 v, float rough, float f0, float f1, float wv) {
@@ -132,7 +129,7 @@ export const RIVER_SHADE = /* glsl */ `
       vec4 r = uRip[i];
       float age = uTime - r.z;
       if (age < 0.0 || age > 2.4 || r.w <= 0.0) continue;
-      vec2 dp = q - r.xy; float dd = length(dp) + 1e-4;
+      vec2 dp = q - r.xy - uRipV[i] * age; float dd = length(dp) + 1e-4;
       float R = 0.12 + age * 0.75, wv = 0.05 + age * 0.05;
       float x = (dd - R) / wv;
       g += dp / dd * (x * exp(-x * x)) * r.w * 0.9 * exp(-age * 1.3) / (1.0 + dd * 2.0);

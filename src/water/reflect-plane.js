@@ -12,7 +12,10 @@
 // water, spray or particles; only while there is stream water near.
 import * as THREE from 'three';
 
-export function createReflectPlane({ renderer, scene, hide = [], uniforms, scale = 0.5 }) {
+export function createReflectPlane({ renderer, scene, hide = [], uniforms }) {
+  // detail: how often, how sharp and how far (setDetail). The cheap one draws it every other frame (the last one
+  // still maps onto the world correctly in between: it carries its own camera), at a sixth of the pixels, to 40 m
+  let every = 2, scale = 0.4, far = 40, frame = 0;
   const target = new THREE.WebGLRenderTarget(16, 16, { type: THREE.HalfFloatType, samples: 0 });
   target.texture.generateMipmaps = false;
   const cam = new THREE.PerspectiveCamera();
@@ -25,6 +28,7 @@ export function createReflectPlane({ renderer, scene, hide = [], uniforms, scale
   uniforms.uReflMat.value = texMat;
   function update(camera, y, cx, cz) {
     if (!on) return;
+    if (frame++ % every && Math.abs(y - level) < 0.05) return;
     level = y;
     renderer.getDrawingBufferSize(size);
     const w = Math.max(16, Math.round(size.x * scale)), h = Math.max(16, Math.round(size.y * scale));
@@ -41,9 +45,11 @@ export function createReflectPlane({ renderer, scene, hide = [], uniforms, scale
     cam.position.copy(view);
     cam.up.set(0, 1, 0).applyMatrix4(rot).reflect(N);
     cam.lookAt(tgt);
-    cam.far = camera.far; cam.near = camera.near;
+    cam.far = Math.min(camera.far, far); cam.near = camera.near;
     cam.updateMatrixWorld();
     cam.projectionMatrix.copy(camera.projectionMatrix);
+    // the camera's projection, with the far plane brought in (most of the scene's cost is in what lies far off)
+    { const pe = cam.projectionMatrix.elements, n = cam.near, f = cam.far; pe[10] = -(f + n) / (f - n); pe[14] = -2 * f * n / (f - n); }
     cam.projectionMatrix.elements[8] *= -1; cam.projectionMatrix.elements[12] *= -1;
     texMat.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1);
     texMat.multiply(cam.projectionMatrix).multiply(cam.matrixWorldInverse);
@@ -69,6 +75,7 @@ export function createReflectPlane({ renderer, scene, hide = [], uniforms, scale
   return {
     update,
     setOn(v) { on = v; if (!v) uniforms.uReflOn.value.x = 0; },
+    setDetail(full) { every = full ? 1 : 2; scale = full ? 0.5 : 0.4; far = full ? 1e9 : 40; frame = 0; },
     get on() { return on; },
   };
 }
