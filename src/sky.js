@@ -358,12 +358,12 @@ ${SKY_COMMON}      void main() {
             // view moves; the scale steps in powers of two, so it holds still)
             vec3 q = e * uDust, c = floor(q);
             float hs = h3(c);
-            float pr = (0.02 + 0.24 * mw) * clamp(1100.0 / uDust, 0.6, 3.0);
+            float pr = 0.22 * smoothstep(0.25, 0.8, mw) * clamp(1100.0 / uDust, 0.6, 3.0);   // only in the band, as its grain
             float res = 1.0;
             if (hs < pr) {
               vec3 sp = c + 0.5 + (vec3(h3(c + 1.7), h3(c + 4.1), h3(c + 9.3)) - 0.5) * 0.6;
               float b = smoothstep(0.5, 0.0, length(q - sp)) * (0.05 + 0.2 * h3(c + 6.0));
-              col += b * mix(vec3(0.75, 0.82, 1.0), vec3(1.0, 0.9, 0.78), h3(c + 2.0)) * clear * dark * 1.6 * res;
+              col += b * mix(vec3(0.75, 0.82, 1.0), vec3(1.0, 0.9, 0.78), h3(c + 2.0)) * clear * dark * 0.7 * res;
             }
             // airglow: the faint green-gold light of the high air itself, low round the horizon on the darkest nights
             col += vec3(0.010, 0.016, 0.008) * exp(-max(d.y, 0.0) * 9.0) * dark * (1.0 - uMoon.w * 0.8);
