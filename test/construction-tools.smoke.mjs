@@ -98,6 +98,7 @@ check('a ladder is on site for the work at height', s);
 // ---- the roof, worked from on the roof: deck and dry-in by "work until done", then by hand up there
 await G(() => __game.sim.commandNow('construction.returnScaffold', {}));
 for (const st of ['top-plates', 'roof-frame', 'roof-deck', 'dry-in']) await workStage(st);
+if (process.env.DEBUG) console.log(JSON.stringify(await G(() => { const pr = __construct.current(), api = __game.sim.systems.find((q) => q.name === 'construction').api, out = {}; for (const st of ['top-plates', 'roof-frame', 'roof-deck', 'dry-in']) { const left = Object.keys(pr.members).filter((id) => pr.members[id].stage === st && !pr.members[id].built); out[st] = left.length + ' ' + left.slice(0, 3).map((id) => pr.members[id].kind + (pr.members[id].site ? 'S' : '') + (pr.members[id].prep ? 'P' : '') + ':' + pr.members[id].got + '/' + pr.members[id].need).join(','); } out.carried = __game.sim.state.sys.construction.carried; out.hint = __construct.V.hint; return out; })));
 await G(() => __game.sim.commandNow('construction.setOption', { key: 'auto', value: false }));
 s = await G(() => {
   const c = __game.sim, cs = c.state.sys.construction, pr = __construct.current(), g = __construct.geom(pr.id), api = c.systems.find((q) => q.name === 'construction').api;

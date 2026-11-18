@@ -171,8 +171,15 @@ for (const g of ITEMS_LANDSCAPE) add(g);
 // first time it is asked for, the same every time, so saves and orders that name one keep working.
 const BASE = Object.fromEntries(list.map((i) => [i.id, i])), MADE = Object.create(null);
 const madeItem = (id) => {
-  if (typeof id !== 'string' || !id.startsWith('op_')) return undefined;
+  if (typeof id !== 'string') return undefined;
   if (MADE[id]) return MADE[id];
+  // pieces cut at the sawhorses: counted one by one, about 1.2 m each on average, never sold
+  if (id.startsWith('cut_lumber_') && BASE[id.slice(4)]) {
+    const b = BASE[id.slice(4)];
+    return (MADE[id] = Object.freeze({ id, name: 'Cut pieces, ' + b.name.replace(' framing lumber', ''), category: b.category, unit: 'each', material: b.material,
+      dims: { lengthM: 1.2, widthM: b.dims.widthM, depthM: b.dims.depthM }, massKgPerUnit: b.massKgPerUnit * 1.2, priceUsd: 0, made: true }));
+  }
+  if (!id.startsWith('op_')) return undefined;
   const o = openingItemFromId(id);
   if (!o) return undefined;
   const { dims, massKgPerUnit, ...rest } = o;

@@ -29,6 +29,14 @@ function workAll(sim, { stopAfter = null, from = 'carried' } = {}) {
     if (!ids.length) break;
     if (stopAfter && !ids.some((id) => C.STAGE_ORDER.indexOf(P.members[id].stage) <= C.STAGE_ORDER.indexOf(stopAfter))) break;
     const id = ids[0], m = P.members[id], ln = m.line ? P.lines[m.line] : null;
+    if (from === 'carried' && m.site && !m.prep) {     // cut on site: at the sawhorses first, into empty arms
+      if (cs(sim).carried) assert.ok(sim.commandNow('construction.putDown', { x: 44, z: 40 }).ok);
+      const c = sim.commandNow('construction.cut', { structId: P.id, memberId: id });
+      assert.ok(c.ok && c.toArms, id + ' cut: ' + c.reason);
+      const r = sim.commandNow('construction.install', { structId: P.id, memberIds: [id], from });
+      assert.ok(r.ok, id + ': ' + r.reason);
+      continue;
+    }
     if (from === 'carried' && ln && K.needsStock(cs(sim), P, id) && (!cs(sim).carried || cs(sim).carried.itemId !== ln.itemId || cs(sim).carried.qty + 1e-6 < K.stockNeed(cs(sim), P, id))) {
       if (cs(sim).carried) assert.ok(sim.commandNow('construction.putDown', { x: 44, z: 40 }).ok);
       const st = cs(sim).stacks.find((k) => k.itemId === ln.itemId);
@@ -81,7 +89,7 @@ test('every line of the shed is priced, and the items the catalog lacked have re
 
 test('ordering the foundation stage debits the right money and delivers the right stacks', () => {
   const sim = start(), before = money(sim);
-  const posts = 2.4;   // three short posts, sawn from one 8 ft stick
+  const posts = 2.4;   // three short posts, cut to height on site from one 8 ft stick
   const expect = 6 * 12 + Math.round(6 * 17.5 * 100) / 100 + Math.round(posts * 5.6 * 100) / 100 + Math.round(0.5 * 6.2 * 100) / 100;
   const r = sim.commandNow('construction.order', { structId: shed.struct, stage: 'foundation' });
   assert.ok(r.ok); assert.ok(near(r.costUsd, expect), r.costUsd + ' vs ' + expect);
@@ -447,11 +455,12 @@ test('nails bought in the Supplier go to the inventory and construction draws fr
   assert.equal(JSON.stringify(SUP.imbalance(S)), imb0);          // drawing from the inventory neither conjures nor loses material
 });
 
-test('lumber is sawn from stock lengths: the studs line is whole 10 ft sticks, a doubled header is two pieces, offcuts are reused', () => {
+test('lumber comes cut to length from the yard; short and fitted pieces are cut on site from stock sticks and their offcuts', () => {
   const sim = start(), s = cs(sim), P = pr(sim);
-  const studs = P.lines['wall-frame|Studs2x4'];
-  assert.ok(studs.stick && K.cutList(P, 'wall-frame|Studs2x4').every((c) => [2.4, 3, 3.6, 4.2, 4.8].includes(c.lenM)));
-  assert.ok(near((studs.qty / 0.6) % 1, 0, 1e-6) || near((studs.qty / 0.6) % 1, 1, 1e-6), 'whole sticks: ' + studs.qty);
+  const studs = P.lines['wall-frame|Studs2x4'], list = K.cutList(P, 'wall-frame|Studs2x4');
+  assert.ok(studs.stick && list.some((c) => c.pre) && list.filter((c) => !c.pre).every((c) => [2.4, 3, 3.6, 4.2, 4.8].includes(c.lenM)), JSON.stringify(list));
+  const full = Object.keys(P.members).find((id) => P.members[id].kind === 'stud' && P.members[id].len > 2), short = Object.keys(P.members).find((id) => P.members[id].kind === 'stud' && P.members[id].len < 1);
+  assert.ok(!P.members[full].site && P.members[short].site, 'a full stud is precut, a cripple is cut on site');
   const hd = Object.keys(P.members).find((id) => P.members[id].kind === 'header');
   assert.equal(P.members[hd].pcs, 2);
   sim.commandNow('construction.setOption', { key: 'instant', value: true });
@@ -459,6 +468,8 @@ test('lumber is sawn from stock lengths: the studs line is whole 10 ft sticks, a
   workAll(sim, { stopAfter: 'wall-frame', from: 'stacks' });
   const cripples = Object.keys(P.members).filter((id) => P.members[id].kind === 'stud' && P.members[id].stage === 'wall-frame' && P.members[id].built && P.members[id].len < 1);
   assert.ok(cripples.length > 0 && cripples.some((id) => P.members[id].cut === 'offcut'), 'short pieces come out of offcuts');
+  // nothing precut is ever sawn: its piece is the length it goes in at
+  assert.ok(Object.keys(P.members).filter((id) => P.members[id].built && P.members[id].line && P.lines[P.members[id].line].stick && !P.members[id].site).every((id) => P.members[id].cut === 'new'));
   assert.deepEqual(K.stickImbalance(s), {}); assert.deepEqual(SUP.imbalance(s), {});
   // what was bought for the wall frames is exactly what they took
   for (const key of ['wall-frame|Studs2x4', 'wall-frame|Headers2x6']) assert.ok(near(P.lines[key].used, P.lines[key].qty, 1e-6), key);
