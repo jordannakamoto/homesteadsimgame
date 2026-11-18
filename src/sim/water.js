@@ -122,24 +122,26 @@ const resolvePipe = (p) => {
 // { version, pieces }) and `services` (runs in buildings: { version, waterPieces }). "pipe" runs between fixture
 // ports (with `shut` when a closed valve is on the way and `equivM` for the fittings), "leak" pieces for open ends,
 // and fixtures fitted on stubs. They are joined to the site's pieces here, memoised so the network (cached by the
-// identity of the array) is rebuilt only when one of them changes.
-const SOURCES = ['plumbing', 'services'];
+// identity of the array) is rebuilt only when one of them changes. The sources are named in piecesFor and versionOf.
 const merged = new WeakMap();
 const extraOf = (x) => (x ? x.waterPieces || x.pieces : null);
 function piecesFor(ctx) {
   const site = ctx.get('site');
   if (!site) return null;
-  const extras = [];
-  for (const n of SOURCES) { const e = extraOf(ctx.get(n)); if (e && e.length) extras.push(e); }
-  if (!extras.length) return site.pieces;
+  let a = extraOf(ctx.get('plumbing')), b = extraOf(ctx.get('services'));       // plumbing, then services: runs every tick
+  if (a && !a.length) a = null;
+  if (b && !b.length) b = null;
+  if (!a && !b) return site.pieces;
   let m = merged.get(site.pieces);
-  if (!m || m.extras.length !== extras.length || m.extras.some((e, i) => e !== extras[i])) { m = { extras, all: site.pieces.concat(...extras) }; merged.set(site.pieces, m); }
+  if (!m || m.a !== a || m.b !== b) { m = { a, b, all: site.pieces.concat(a || [], b || []) }; merged.set(site.pieces, m); }
   return m.all;
 }
 const versionOf = (ctx) => {
   const site = ctx.get('site');
+  const pl = ctx.get('plumbing'), sv = ctx.get('services');                   // the same two
   let v = site.version;                                                // a plain number while nothing else adds pieces
-  for (const n of SOURCES) { const x = ctx.get(n); if (x && x.version) v += (n === 'plumbing' ? ':' : '|' + n + ':') + x.version; }
+  if (pl && pl.version) v += ':' + pl.version;
+  if (sv && sv.version) v += '|services:' + sv.version;
   return v;
 };
 // An open pipe end is an orifice the size of the bore: all the head left becomes velocity (v = sqrt(2 g h)).
