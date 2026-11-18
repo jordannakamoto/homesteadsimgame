@@ -25,7 +25,7 @@ import { services, servicesGuard } from './services.js';
 import { SERVICE_CLASSES } from './content/services.js';
 import { plumbingSystem } from './plumbing.js';
 import { createVehicleSystem } from './core/vehicles.js';
-import { VEHICLE_KINDS, IMPLEMENT_KINDS, VEHICLE_HOOKS } from './content/vehicles.js';
+import { VEHICLE_KINDS, IMPLEMENT_KINDS, VEHICLE_HOOKS, VEHICLE_SURFACES } from './content/vehicles.js';
 import { PLUMBING_KINDS, PLUMBING_MATES, PLUMBING_STEP_M, PLUMBING_PIPE, STARTER_KIT } from './content/plumbing-parts.js';
 
 export * from './sim.js';
@@ -71,7 +71,7 @@ export * from './content/plumbing-parts.js';
 export { services, servicesSystem, compileServices, servicesGuard, runInfo as serviceRunInfo, overlayData as servicesOverlay } from './services.js';
 export { SERVICE_CLASSES, SERVICE_SPECS, NODE_KINDS as SERVICE_NODE_KINDS, DEVICES as SERVICE_DEVICES, FIXTURES_SERVICES, PRESETS_M as SERVICE_PRESETS_M } from './content/services.js';
 export * as vehicleCore from './core/vehicles.js';
-export { VEHICLE_KINDS, IMPLEMENT_KINDS, ITEMS_VEHICLES, FUEL_ITEM } from './content/vehicles.js';
+export { VEHICLE_KINDS, IMPLEMENT_KINDS, ITEMS_VEHICLES, FUEL_ITEM, VEHICLE_SURFACES } from './content/vehicles.js';
 
 // Systems are added here, in dependency order, as the iterations land. Electrical runs before water
 // so a pump's request for power is answered in the same minute; the garden runs after water, whose draws it uses,
@@ -79,7 +79,7 @@ export { VEHICLE_KINDS, IMPLEMENT_KINDS, ITEMS_VEHICLES, FUEL_ITEM } from './con
 // Kit parts fitted by hand (generic), then plumbing, which compiles them for water, which runs after both.
 const partsSystem = createPartsSystem({ name: 'parts', stepM: PLUMBING_STEP_M, kinds: PLUMBING_KINDS, mates: PLUMBING_MATES });
 // Vehicles (generic mechanism, homestead records): parked poses, fuel, seats, hitches, rentals. The page drives them.
-const vehicles = createVehicleSystem({ name: 'vehicles', kinds: VEHICLE_KINDS, implementKinds: IMPLEMENT_KINDS, hooks: VEHICLE_HOOKS });
+const vehicles = createVehicleSystem({ name: 'vehicles', kinds: VEHICLE_KINDS, implementKinds: IMPLEMENT_KINDS, hooks: VEHICLE_HOOKS, surfaces: VEHICLE_SURFACES });
 const plumbing = plumbingSystem({ kinds: PLUMBING_KINDS, mates: PLUMBING_MATES, stepM: PLUMBING_STEP_M, material: PLUMBING_PIPE, kit: STARTER_KIT });
 // Runs in buildings (generic routes with services content), compiled by services before electrical and water read them.
 const routesSystem = createRoutesSystem({ name: 'routes', classes: SERVICE_CLASSES, guard: servicesGuard });

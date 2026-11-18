@@ -10,11 +10,24 @@
 //
 // env = {
 //   ground(x, z, yHint) -> height,             required: the one ground read (terrain, shaped ground, built floors)
-//   surface?(x, z) -> { mu, roll },            multipliers on grip and rolling resistance (grass, wet grass, dirt...)
+//   surface?(x, z) -> { mu, slide?, roll },    multipliers on peak grip and rolling resistance (grass, wet grass, dirt...);
+//                                              slide: grip while spinning or sliding as a fraction of the peak (default grip.slide)
 //   water?(x, z) -> depth in metres,           slows, stalls past the axle, a wall when deeper than the body
 //   collide?(o, rad),                          moves the circle o = { x, z } out of obstacles (the engine's pushOut)
 // }
 // input = { throttle: -1..1, steer: -1..1, brake: 0..1, handbrake: bool }
+//
+// Optional powertrain (a kind with `engine` and `gears`; without them, force is simply powerW / speed):
+//   engine = { idleRpm, launchRpm, redRpm, torqueNm, curve: [[rpm, k], ...], brakeK, creepMps, creepG }
+//   gears  = { ratios: [overall ratio per forward gear], reverse, eff, shiftS, upRpm: [part, full], downRpm }
+// An automatic: the clutch slips below launchRpm (so it pulls from rest and creeps at idle), it shifts up by engine speed
+// and throttle and down as it slows, the torque dips while it shifts, and lifting off brakes through the engine, harder
+// in the low gears. topMps is the speed limiter; reverseMps the reverse limiter. dragK: aerodynamic N per (m/s)^2.
+// Tyres: grip.mu is the peak; past it the wheels spin (or lock) and give grip.slide of it, and while they spin or the
+// body slides sideways the lateral grip falls the same way. Longitudinal and lateral share one friction circle, and
+// the steering's grip follows the load on the front axle (it washes out under power, bites under braking).
+// Exposed for the page: rpm, gear, spin (0..1, wheels spinning or locked), slip (m/s sideways), tip (side-slope and
+// cornering load against the static stability factor; past 1 it would roll over), bump, land.
 
 export const SUB = 1 / 120;                     // the fixed substep, seconds of real time
 export const GRAV = 9.81;
@@ -66,20 +79,71 @@ function dragOf(kind) {
   let d = DRAG.get(kind);
   if (d === undefined) {
     const top = kind.topMps || 1;
-    d = Math.max(0.05, ((kind.powerW || 0) / top - (kind.grip.rolling || 0) * kind.massKg * GRAV) / (top * top));
+    d = kind.dragK != null ? kind.dragK : Math.max(0.05, ((kind.powerW || 0) / top - (kind.grip.rolling || 0) * kind.massKg * GRAV) / (top * top));
     DRAG.set(kind, d);
   }
   return d;
 }
 const susp = (kind) => kind.susp || { travel: 0.15, hz: 2, damp: 0.4 };
+const RPM = 60 / (2 * Math.PI);
+function curveAt(c, rpm) {                       // piecewise-linear torque curve, fraction of torqueNm
+  if (rpm <= c[0][0]) return c[0][1];
+  for (let i = 1; i < c.length; i++) if (rpm <= c[i][0]) { const a = c[i - 1], b = c[i]; return a[1] + ((b[1] - a[1]) * (rpm - a[0])) / (b[0] - a[0]); }
+  return c[c.length - 1][1];
+}
+// The automatic powertrain: the wheel force from the engine (drive, engine braking, creep) before the tyres limit it.
+function engineForce(b, kind, th, brake, M, dt) {
+  const e = kind.engine, g = kind.gears, r = kind.wheelR, a = Math.abs(th);
+  const want = th > 0.02 ? 1 : th < -0.02 ? -1 : 0;
+  if (!b.gear) b.gear = 1;
+  if (want && Math.sign(b.gear) !== want) {          // into reverse or back to drive only when nearly stopped
+    if (Math.abs(b.u) > 0.6) { b.rpm = e.idleRpm; return 0; }
+    b.gear = want; b.shiftT = g.shiftS;
+  }
+  const dir = Math.sign(b.gear), ratio = dir > 0 ? g.ratios[b.gear - 1] : g.reverse;
+  const wheelRpm = (Math.max(0, b.u * dir) / r) * ratio * RPM;
+  const pulling = want === dir;
+  const rpm = Math.max(wheelRpm, e.idleRpm + (e.launchRpm - e.idleRpm) * (pulling ? a : 0));
+  b.rpm += (rpm - b.rpm) * Math.min(1, 12 * dt);
+  let T = pulling ? e.torqueNm * curveAt(e.curve, rpm) * a : 0;
+  if (rpm > e.redRpm) T *= Math.max(0, 1 - (rpm - e.redRpm) / 150);          // the rev limiter
+  const lim = dir > 0 ? kind.topMps : kind.reverseMps, v = b.u * dir;
+  if (v > lim - 0.5) T *= clamp((lim - v) / 0.5, 0, 1);                        // the speed limiter
+  if (b.shiftT > 0) { b.shiftT -= dt; T *= 0.25; }
+  let F = (dir * T * ratio * g.eff) / r;
+  if (wheelRpm > e.idleRpm && a < 0.05) {            // lifted off with the clutch in: the engine holds it back
+    const x = Math.min(1, (wheelRpm - e.idleRpm) / (e.redRpm - e.idleRpm));
+    F -= (dir * e.torqueNm * e.brakeK * (0.3 + 0.7 * x) * ratio) / r;
+  }
+  if (a < 0.05 && !(brake > 0) && e.creepMps && wheelRpm < e.idleRpm * 1.05) F += dir * (e.creepG || 0.05) * M * GRAV * clamp(1 - v / e.creepMps, 0, 1);
+  if (dir > 0 && b.shiftT <= 0) {                    // the automatic: up by engine speed and throttle, down as it slows
+    const n = g.ratios.length, up = g.upRpm[0] + (g.upRpm[1] - g.upRpm[0]) * a;
+    const lower = b.gear > 1 ? (wheelRpm * g.ratios[b.gear - 2]) / ratio : Infinity;
+    if (wheelRpm > up && b.gear < n) { b.gear++; b.shiftT = g.shiftS; }
+    else if (b.gear > 1 && (wheelRpm < g.downRpm || (a > 0.8 && lower < up * 0.8))) { b.gear--; b.shiftT = g.shiftS * 0.6; }
+  }
+  return F;
+}
+
+// the share of the body's weight on driven wheels (weight moves rearward under acceleration; a trailer's tongue
+// load on a ball behind the rear axle lifts the front: b.sF0 is the static front share with it)
+function drivenShare(kind, b) {
+  const axles = kind.axles || [];
+  if (axles.length === 1) return axles[0].driven ? 1 : 0;
+  const sF = clamp((b.sF0 ?? 0.5) - (b.ax / GRAV) * kind.cgH / kind.wheelbase, 0.1, 0.9), zMax = Math.max(...axles.map((a) => a.z));
+  let share = 0;
+  for (const a of axles) if (a.driven) share += a.z === zMax ? sF : 1 - sF;
+  return share;
+}
 
 // ---------------------------------------------------------------- the body
 export function createBody(kind, { x = 0, z = 0, yaw = 0, fuelL = Infinity, cargoKg = 0 } = {}, env = null) {
   const b = {
     x, z, yaw, u: 0, w: 0, r: 0,
     y: 0, vy: 0, gy: 0, pitch: 0, vp: 0, roll: 0, vr: 0,
-    steer: 0, air: false, contact: [0, 0, 0, 0],
+    steer: 0, air: false, contact: [0, 0, 0, 0], sF0: 0.5, jack: false,
     ax: 0, ay: 0, slip: 0, bump: 0, land: 0, stalled: null, rev: false, artic: 0,
+    gear: 1, rpm: kind.engine ? kind.engine.idleRpm : 0, shiftT: 0, spin: 0, spinning: false, tip: 0,
     fuelL, cargoKg, burnedL: 0, distM: 0, engineS: 0,
   };
   if (env) settle(b, kind, env);
@@ -137,6 +201,7 @@ export function stepBody(b, kind, input, env, dt = SUB, trailer = null) {
   if (kind.drive === 'towed') return b;               // towed units move only through their tow unit
   const s = susp(kind), surf = env.surface ? env.surface(b.x, b.z) : null;
   const sMu = surf ? surf.mu ?? 1 : 1, sRoll = surf ? surf.roll ?? 1 : 1;
+  const slideK = surf && surf.slide != null ? surf.slide : kind.grip.slide ?? 0.8;
   const mu = kind.grip.mu * sMu, tracked = kind.drive === 'tracked';
   b.bump = 0; b.land = 0;
   const x0 = b.x, z0 = b.z;
@@ -150,10 +215,17 @@ export function stepBody(b, kind, input, env, dt = SUB, trailer = null) {
   [b.roll, b.vr] = angSpring(b.roll, b.vr, t.roll + Math.atan((b.ay / GRAV) * kind.cgH / kind.track) * transfer, s, kc, dt);
   b.roll = clamp(b.roll, -0.6, 0.6); b.pitch = clamp(b.pitch, -0.9, 0.9);
 
-  // 3. longitudinal
+  // 3. longitudinal. A trailer adds its mass and rolling resistance to what the engine moves and the brakes stop (a
+  // small trailer has no brakes of its own), and puts its tongue load (hitch.tongueK of its gross) on the ball: more
+  // weight on the driven wheels, less on the front ones when the ball is behind the rear axle.
   const towKg = trailer ? trailer.kind.massKg + (trailer.body.cargoKg || 0) : 0;
+  const tongueKg = trailer ? towKg * ((trailer.kind.hitch && trailer.kind.hitch.tongueK) || 0) : 0;
   const Mo = kind.massKg + (b.cargoKg || 0), M = Mo + towKg;
-  const N = Mo * GRAV * cosT * kc;
+  if (tongueKg > 0 && kind.wheelbase > 0) {
+    const ball = pointOf(kind, trailer.kind.hitch.type), zr = -kind.wheelbase / 2;
+    b.sF0 = clamp((Mo * 0.5 + tongueKg * ((ball ? ball.at[2] : zr) - zr) / kind.wheelbase) / (Mo + tongueKg), 0.1, 0.9);
+  } else b.sF0 = 0.5;
+  const N = (Mo + tongueKg) * GRAV * cosT * kc;
   let th = clamp(input.throttle || 0, -1, 1);
   const brake = clamp(input.brake || 0, 0, 1), hand = !!input.handbrake;
   const depth = env.water ? env.water(b.x, b.z) : 0;
@@ -170,21 +242,25 @@ export function stepBody(b, kind, input, env, dt = SUB, trailer = null) {
     const cap = Math.min(kind.powerW / Math.max(Math.abs(b.u), 1.5), mu * N);
     const ff = (uCmd !== 0 ? Math.sign(uCmd) * rollRes : 0) - Fgrav;
     Fdrive = b.stalled ? 0 : clamp(M * (uCmd - b.u) * 4 + ff, -cap, cap);
+  } else if (kind.engine) {
+    const share = drivenShare(kind, b);
+    const want = b.stalled ? 0 : engineForce(b, kind, th, brake, M, dt), cap = mu * N * share;
+    // the tyres: up to the peak they grip; past it they spin and give the sliding grip until the demand falls back
+    if (Math.abs(want) > cap || (b.spinning && Math.abs(want) > cap * slideK)) { b.spinning = true; Fdrive = Math.sign(want) * cap * slideK; }
+    else { b.spinning = false; Fdrive = want; }
   } else if (th !== 0) {
-    const sF = clamp(0.5 - (b.ax / GRAV) * kind.cgH / kind.wheelbase, 0.1, 0.9);
-    let share = 0;
-    const axles = kind.axles || [];
-    const zMax = Math.max(...axles.map((a) => a.z));
-    for (const a of axles) if (a.driven) share += a.z === zMax ? sF : 1 - sF;
-    if (axles.length === 1 && axles[0].driven) share = 1;
-    const cap = Math.min(powerCap, mu * N * share);
+    const cap = Math.min(powerCap, mu * N * drivenShare(kind, b));
     if (th > 0) Fdrive = cap;
     else Fdrive = -cap * clamp((kind.reverseMps - Math.max(0, -b.u)) / 0.4, 0, 1);
   }
   const Fdrag = tracked ? 0 : -dragOf(kind) * b.u * Math.abs(b.u);
   const Fwater = -4 * Math.min(depth, kind.dims.h) * b.u * M;
   const Fother = Fdrive + Fdrag + Fgrav + Fwater;
-  const brakeRes = Math.min(kind.brakeG * GRAV * Mo * Math.max(brake, hand ? 0.6 : 0), mu * N);
+  const brakeWant = kind.brakeG * GRAV * Mo * Math.max(brake, hand ? 0.6 : 0);
+  const locked = !tracked && brakeWant > mu * N && Math.abs(b.u) > 0.3;       // past the tyres' grip the wheels lock and skid
+  const brakeRes = locked ? mu * N * slideK : brakeWant;
+  if (!tracked && !kind.engine) b.spinning = false;
+  b.spin += ((b.spinning || locked ? 1 : 0) - b.spin) * Math.min(1, 10 * dt);
   const u0 = b.u;
   let u = b.u + (Fother / M) * dt;
   const res = ((rollRes + brakeRes) / M) * dt;
@@ -199,19 +275,29 @@ export function stepBody(b, kind, input, env, dt = SUB, trailer = null) {
     b.steer = 0;
   } else {
     const lim = kind.steerMaxRad * (1 - (kind.steerSpeedFalloff || 0) * Math.min(1, Math.abs(b.u) / kind.topMps));
-    const tgt = clamp(input.steer || 0, -1, 1) * lim, ds = kind.steerRate * dt;
+    const tgt = clamp(input.steer || 0, -1, 1) * lim, ds = kind.steerRate * (1 - 0.5 * Math.min(1, Math.abs(b.u) / kind.topMps)) * dt;
     b.steer = clamp(b.steer + clamp(tgt - b.steer, -ds, ds), -lim, lim);
     if (kc > 0) {
       let r = (b.u * Math.tan(b.steer)) / kind.wheelbase;
-      const rCap = (mu * GRAV * kc * 1.05) / Math.max(Math.abs(b.u), 0.1);   // the front washes out: understeer
-      r = clamp(r, -rCap, rCap);
-      b.r = hand ? r * 1.25 : r;
+      // the front washes out (understeer): what grip the friction circle leaves after driving or braking, scaled by
+      // the load on the front axle (less under power, more under braking); spinning or locked wheels give less still
+      const used = clamp(Math.abs(Fdrive - Math.sign(b.u) * brakeRes) / Math.max(mu * N, 1e-6), 0, 1);
+      const sF = clamp(b.sF0 - (b.ax / GRAV) * kind.cgH / kind.wheelbase, 0.1, 0.9);
+      const front = Math.sqrt(sF / 0.5) * Math.sqrt(1 - used * used * 0.9) * (b.spin > 0.5 ? slideK : 1);
+      const rCap = (mu * GRAV * kc * 1.05 * clamp(front, 0.2, 1.2)) / Math.max(Math.abs(b.u), 0.1);
+      b.r = clamp(r, -rCap, rCap);
     } else b.r *= Math.exp(-0.3 * dt);
   }
-  // the towed unit's stop: at full articulation the tow unit cannot turn further that way
+  // the towed unit's stop: at full articulation the tow unit cannot turn further that way, and backing up folds it
+  // further still (artic' = -(u / L) sin(artic) - r), so the rig binds: the tongue is against the stop and it stops
+  b.jack = false;
   if (trailer) {
     const a = trailer.body.artic;
     if ((a >= ARTIC_MAX - 1e-3 && b.r < 0) || (a <= -ARTIC_MAX + 1e-3 && b.r > 0)) b.r = 0;
+    if (Math.abs(a) >= ARTIC_MAX - 1e-3 && b.u < 0) {
+      const L = trailer.kind.hitch.at[2] || 1, fold = (-(b.u / L) * Math.sin(a) - b.r) * Math.sign(a);
+      if (fold > 0) { if (b.u < -1) b.bump = Math.max(b.bump, -b.u * 2); b.u = 0; b.ax = 0; b.jack = true; }
+    }
   }
 
   // 4. lateral: turning rotates the velocity's frame; grip takes the sideways part out, no faster than mu g allows
@@ -221,10 +307,13 @@ export function stepBody(b, kind, input, env, dt = SUB, trailer = null) {
   b.yaw = wrap(b.yaw + dYaw);
   b.w -= GRAV * t.sinLat * kc * dt;                     // a cross-slope pulls it downhill
   const lat = (tracked ? Math.max(kind.grip.lateral, 14) : kind.grip.lateral) * sMu * (hand ? 0.3 : 1);
-  const dw = b.w * (1 - Math.exp(-lat * dt)), maxDw = mu * GRAV * kc * dt * (tracked ? 1.5 : 1);
+  const sliding = b.spin > 0.5 || Math.abs(b.w) > 1.2;                          // past the peak the tyres hold less
+  const dw = b.w * (1 - Math.exp(-lat * dt)), maxDw = mu * GRAV * kc * dt * (tracked ? 1.5 : 1) * (sliding && !tracked ? slideK : 1);
   b.w -= Math.sign(dw) * Math.min(Math.abs(dw), maxDw);
   b.slip = Math.abs(b.w);
   b.ay = b.u * b.r;
+  // how close to rolling over: the ground's cross-slope plus cornering load against the static stability factor
+  b.tip = (Math.abs(Math.tan(t.roll) + (b.ay / GRAV) * kc)) / (kind.track / (2 * kind.cgH));
 
   // position
   const sy = Math.sin(b.yaw), cy = Math.cos(b.yaw);
@@ -321,7 +410,8 @@ export function stepTowed(tb, tk, tow, towKind, env, dt = SUB) {
 const REV_ON = (120 * Math.PI) / 180, REV_OFF = (80 * Math.PI) / 180;
 export function headingControl(b, kind, mx, mz, { gentle = false } = {}) {
   const mag = Math.min(1, Math.hypot(mx, mz));
-  if (mag < 0.05) { b.rev = false; return { throttle: 0, steer: 0, brake: Math.abs(b.u) < 0.4 ? 1 : 0.15, handbrake: false }; }
+  // no push: an engine with engine braking coasts down on it and the rider holds the brake once nearly stopped
+  if (mag < 0.05) { b.rev = false; return { throttle: 0, steer: 0, brake: Math.abs(b.u) < (kind.engine ? 1.2 : 0.4) ? 1 : kind.engine ? 0 : 0.15, handbrake: false }; }
   const err = wrap(Math.atan2(mx, mz) - b.yaw);
   const tracked = kind.drive === 'tracked';
   if (!b.rev && Math.abs(err) > REV_ON && b.u < 2) b.rev = true;
@@ -334,6 +424,7 @@ export function headingControl(b, kind, mx, mz, { gentle = false } = {}) {
     const steer = tracked ? clamp(errT * 2, -1, 1) : clamp((-errT * 1.5) / Math.max(kind.steerMaxRad, 0.1), -1, 1);
     return { throttle: -mag * k * Math.max(0.3, Math.cos(errT)), steer, brake: 0, handbrake: false };
   }
+  if (kind.engine && b.u < -0.6) return { throttle: 0, steer: 0, brake: mag, handbrake: false };   // still rolling back: stop first
   if (tracked) return { throttle: mag * k * Math.max(0, Math.cos(err)), steer: clamp(err * 2, -1, 1), brake: 0, handbrake: false };
   const lim = kind.steerMaxRad * (1 - (kind.steerSpeedFalloff || 0) * Math.min(1, Math.abs(b.u) / kind.topMps));
   return { throttle: mag * k * Math.max(0.25, Math.cos(err)), steer: clamp((err * 1.5) / Math.max(lim, 0.05), -1, 1), brake: 0, handbrake: false };

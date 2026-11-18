@@ -5,7 +5,7 @@
 // `<name>.sync` twice a second and on stepping off, like the wheelbarrow's barrowMove.
 //
 // State, at sim.state.sys[name]:
-//   { nextId, starter, units: { [id]: unit }, totals: { fuelAddedL, fuelBurnedL, fuelGoneL, distM } }
+//   { nextId, starter, once?: { [name]: true }, units: { [id]: unit }, totals: { fuelAddedL, fuelBurnedL, fuelGoneL, distM } }
 //   unit = { id, kind, x, z, yaw, fuelL, odoM, engineS, seats: { [seatId]: actor | null },
 //            towing: id | null, towedBy: id | null, artic (towed unit only: its yaw minus its tow unit's, rad),
 //            impl: { [pointId]: { kind, q: [], state: {} } }, owner: 'own' | 'rent', rentUntil: t | null }
@@ -14,6 +14,7 @@
 // hooks (content): takeFuel(ctx, litres) -> litres actually taken (pays from stock; default: free),
 //                  pay(ctx, usd) -> bool (rentals; default: refuses)
 // kinds: the vehicle records (see vehicles-drive.js); a kind with rentUsdPerDay can be rented.
+// surfaces: { [name]: { mu, slide, roll } } for the page's env.surface (content names the ground; api.surfaces).
 
 import { hitchPose, towPoint, wrap, ARTIC_MAX } from './vehicles-drive.js';
 export * from './vehicles-drive.js';
@@ -40,7 +41,7 @@ export function seatOf(s, actor) {
   return null;
 }
 
-export function createVehicleSystem({ name = 'vehicles', kinds, implementKinds = {}, hooks = {} } = {}) {
+export function createVehicleSystem({ name = 'vehicles', kinds, implementKinds = {}, hooks = {}, surfaces = {} } = {}) {
   if (!kinds) throw new Error('createVehicleSystem needs kinds');
   const takeFuel = hooks.takeFuel || ((ctx, l) => l);
   const pay = hooks.pay || (() => false);
@@ -52,6 +53,7 @@ export function createVehicleSystem({ name = 'vehicles', kinds, implementKinds =
     if (!k) return bad('unknown kind');
     if (!fin(p.x) || !fin(p.z)) return bad('bad place');
     if (p.starter && s.starter) return bad('already given');
+    if (p.once && s.once && s.once[p.once]) return bad('already given');        // a one-time gift by name (content's)
     const tank = k.fuel ? k.fuel.tankL : 0;
     const fuelL = round6(Math.max(0, Math.min(tank, fin(p.fuelL) ? p.fuelL : tank)));
     const id = 'v' + s.nextId++;
@@ -64,6 +66,7 @@ export function createVehicleSystem({ name = 'vehicles', kinds, implementKinds =
     };
     s.totals.fuelAddedL = round6(s.totals.fuelAddedL + fuelL);
     if (p.starter) s.starter = true;
+    if (p.once) (s.once || (s.once = {}))[String(p.once)] = true;
     ctx.emit(name + '.added', { id, kind: k.id });
     return { ok: true, id };
   }
@@ -247,6 +250,6 @@ export function createVehicleSystem({ name = 'vehicles', kinds, implementKinds =
       }
     },
     commands,
-    api: { kinds, implementKinds, fuelImbalance, seatOf, seated, hitchPose },
+    api: { kinds, implementKinds, surfaces, fuelImbalance, seatOf, seated, hitchPose },
   };
 }

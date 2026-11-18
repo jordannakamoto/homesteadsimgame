@@ -354,11 +354,11 @@
   function drawStacks() {
     const s = S();
     let sig = '';
-    for (const k of s.stacks) if (!k.barrow) sig += k.id + ':' + describe(k.itemId, k.qty).n + ',';
+    for (const k of s.stacks) if (!k.barrow && !k.carrier) sig += k.id + ':' + describe(k.itemId, k.qty).n + ',';
     sig += V.terrainV || 0;
     if (sig !== V.stackSig) {
       V.stackSig = sig;
-      carry.setStacks(s.stacks.filter((k) => !k.barrow).map((k) => { const d = describe(k.itemId, k.qty); if (d.scaleH) d.h *= d.scaleH; return { id: k.id, x: k.x, z: k.z, itemId: k.itemId, ...d }; }), (d) => {
+      carry.setStacks(s.stacks.filter((k) => !k.barrow && !k.carrier).map((k) => { const d = describe(k.itemId, k.qty); if (d.scaleH) d.h *= d.scaleH; return { id: k.id, x: k.x, z: k.z, itemId: k.itemId, ...d }; }), (d) => {
         if (performance.now() - V.lastLand > 140) { sounds.play('thud'); V.lastLand = performance.now(); G.cam.shake = Math.min(G.cam.shake + 0.03, 0.3); }
         G.burst(d.x, G.heightAt(d.x, d.z) + 0.1, d.z, 5, 0xb9a88a, 1.4, 0.8, 0.09, 0.5);
       });
@@ -1260,7 +1260,7 @@
       if (b && b.held) { const st = carry.nearest(reach.x, reach.z, 1.2, pickable) || carry.nearest(P.x, P.z, 2.0, pickable); return st ? { kind: 'bload', stack: st } : { kind: 'bdown' }; }
       const lk = s.stacks.find((q) => q.barrow && q.qty > 1e-6); if (b && (!c || (lk && lk.itemId === c.itemId)) && Math.hypot(b.x - P.x, b.z - P.z) < C.BARROW.reachM && Math.hypot(b.x - reach.x, b.z - reach.z) < 2.2) return lk ? { kind: 'bgrab', load: lk.id } : { kind: 'bgrab' };
     }
-    const pr = nearBuilding(P.x, P.z), stack = carry.nearest(reach.x, reach.z, 1.0, pickable) || (V.wantItem && carry.nearest(P.x, P.z, 2.1, wantedStack)) || carry.nearest(P.x, P.z, 2.1, pickable) || carry.nearest(P.x, P.z, 1.3);
+    const pr = nearBuilding(P.x, P.z), stack = carry.nearest(reach.x, reach.z, 1.0, pickable) || (V.wantItem && carry.nearest(P.x, P.z, 2.1, wantedStack)) || carry.nearest(P.x, P.z, 2.1, pickable) || carry.nearest(P.x, P.z, 1.3) || bedStack(c);
     if (c && c.itemId === LAD.itemId && !s.ladder) {
       if (pr) { const spot = ladderSpot(pr); if (spot) return { kind: 'lean', id: pr.id, spot }; return { kind: 'hint', text: 'Point at a wall: the ladder leans there', id: pr.id, drop: true }; }
     }
@@ -1277,14 +1277,53 @@
     { const soft = ladderCtx(false); if (soft) return soft; }
     if (stack) {
       if (C.SITE_SUPPLY.includes(stack.itemId)) return { kind: 'hint', text: plain(CAT[stack.itemId].name) + ': used up as you build' };
-      if (!c) return { kind: 'pick', stack };
+      if (!c) { const tr = !stack.carrier && window.__vehicles && window.__vehicles.carrierNear ? window.__vehicles.carrierNear(stack.x, stack.z, 4) : null; return tr ? { kind: 'pick', stack, trailer: tr } : { kind: 'pick', stack }; }
       if (c.itemId === stack.itemId) { const it = CAT[c.itemId], a = api.armful(s, c.itemId, Math.max(it.unit === 'each' ? 1 : 0, C.carryLimitKg(G.sim.state.sys.stock.tools, gesture()) / it.massKgPerUnit)); return a !== Infinity && a > c.qty + 1e-4 ? { kind: 'pick', stack, more: true } : { kind: 'back', stack }; }
       return { kind: 'swap', stack };
     }
     if (c) return pr ? { kind: 'hint', text: (c.itemId === 'door_prehung' || c.itemId === 'window_shed') && !api.stageOpen(pr, 'openings') ? (c.itemId === 'door_prehung' ? 'Wrap the wall before the door goes in' : 'Wrap the wall before the window goes in') : (c.itemId === 'door_prehung' || c.itemId === 'window_shed') ? 'Walk to the opening: it glows' : 'Nothing here needs ' + stackName(c.itemId) + ' yet', drop: true } : { kind: 'drop' };
     return null;
   }
-  function homeStack(itemId) { const P = G.player; let best = null, bd = 3; for (const k of S().stacks) if (k.itemId === itemId) { const d = Math.hypot(k.x - P.x, k.z - P.z); if (d < bd) { bd = d; best = k; } } return best; }
+  // a trailer's load within reach (it is drawn on the bed by the vehicles view, not as a pile): take an armful off it
+  const _bp = {};
+  function bedStack(c) {
+    const VV = window.__vehicles, P = G.player;
+    if (!VV) return null;
+    for (const k of S().stacks) {
+      if (k.carrier == null || (c && c.itemId !== k.itemId) || C.SITE_SUPPLY.includes(k.itemId) || !VV.bedPoint(k.carrier, _bp)) continue;
+      if (Math.hypot(_bp.x - reach.x, _bp.z - reach.z) < 1.3 || Math.hypot(_bp.x - P.x, _bp.z - P.z) < 1.7) return k;
+    }
+    return null;
+  }
+  // hold at a pile with a trailer by it: the press picks up an armful as always; still held, that armful goes onto the
+  // bed and the rest of the pile streams after it, about eight pieces a second, until you let go or the bed is full
+  const T_HOLD_S = 0.5;
+  function tickTHold(dt) {
+    const h = V.tHold;
+    if (!h) return;
+    if (!(V.mDown || G.keys.KeyE)) {
+      V.tHold = null;
+      if (h.n) flash(h.n + (h.n === 1 ? ' piece' : ' pieces') + ' of ' + stackName(h.itemId) + ' on the trailer');
+      return;
+    }
+    h.t += dt;
+    if (h.t < T_HOLD_S) return;
+    const c = S().carried;
+    if (!h.n && c && c.itemId === h.itemId) {
+      const P = G.player, r = cmd('carrierLoad', { hands: true, carrier: h.trailer, x: P.x, z: P.z });
+      if (r.ok) { window.__vehicles.flyFrom(h.trailer, { x: P.x, y: P.y + 1.3, z: P.z }); h.n++; sounds.play('thunk'); }
+    }
+    for (h.next -= dt; h.next <= 0; h.next += 0.125) {
+      const k = S().stacks.find((q) => q.id === h.stack);
+      if (!k) { V.tHold = null; V.mDown = false; flash('All of it is on the trailer'); return; }
+      const d = describe(k.itemId, k.qty);
+      window.__vehicles.flyFrom(h.trailer, { x: k.x, y: G.heightAt(k.x, k.z) + 0.25, z: k.z });
+      const r = cmd('carrierLoad', { stackId: k.id, carrier: h.trailer, qty: k.qty / Math.max(1, d.n) });
+      if (!r.ok) { V.tHold = null; V.mDown = false; flash(r.reason === 'full' ? 'The trailer is full' : r.reason === 'too far' ? 'Bring the trailer closer to the pile' : 'That cannot go on the trailer'); return; }
+      h.n++; if (h.n % 2) sounds.play('thunk');
+    }
+  }
+  function homeStack(itemId) { const P = G.player; let best = null, bd = 3; for (const k of S().stacks) if (k.itemId === itemId && !k.carrier) { const d = Math.hypot(k.x - P.x, k.z - P.z); if (d < bd) { bd = d; best = k; } } return best; }
   function putDown() {
     const c = S().carried; if (!c) return;
     const h = homeStack(c.itemId), P = G.player;
@@ -1332,6 +1371,7 @@
     else if (ctx.kind === 'cut') cutNext(ctx);
     else if (ctx.kind === 'hgrab') { V.horsesHeld = true; V.rev++; sounds.play('lift'); flash('Carry the sawhorses to the work; press again to set them down'); }
     else if (ctx.kind === 'hset') { const h = CS.horses; V.horsesHeld = false; if (h) cmd('moveHorses', { x: h.x, z: h.z, yaw: h.yaw }); sounds.play('thunk'); }
+    else if (ctx.kind === 'pick' && ctx.trailer) { V.tHold = { t: 0, n: 0, next: 0, stack: ctx.stack.id, itemId: ctx.stack.itemId, trailer: ctx.trailer }; pickUp(ctx.stack); }     // a tap picks up; held, it loads the trailer
     else if (ctx.kind === 'pick') pickUp(ctx.stack);
     else if (ctx.kind === 'back' || ctx.kind === 'drop' || (ctx.kind === 'hint' && ctx.drop)) putDown();
     else if (ctx.kind === 'swap') { putDown(); pickUp(ctx.stack); }
@@ -1580,7 +1620,8 @@
     else if (ctx.kind === 'sdrop') setPrompt('E', 'Put the scaffold down (point at a wall for a bay, or inside the frame for a tower)', '', null);
     else if (ctx.kind === 'sstrike') setPrompt('E', 'Take the scaffold down', '', null);
     else if (ctx.kind === 'hset') setPrompt('E', 'Set the sawhorses down here', '', null);
-    else if (ctx.kind === 'pick') setPrompt('E', (ctx.more ? 'Take more ' : 'Pick up ') + stackName(ctx.stack.itemId), '', null);
+    else if (ctx.kind === 'pick' && ctx.trailer) setPrompt('E', 'Tap: pick up ' + stackName(ctx.stack.itemId) + ' · Hold: load the trailer', V.tHold && V.tHold.n ? V.tHold.n + ' on' : '', V.tHold && !V.tHold.n ? Math.min(1, V.tHold.t / T_HOLD_S) : null);
+    else if (ctx.kind === 'pick') setPrompt('E', (ctx.more ? 'Take more ' : 'Pick up ') + stackName(ctx.stack.itemId) + (ctx.stack.carrier ? ' off the trailer' : ''), '', null);
     else if (ctx.kind === 'back') setPrompt('E', 'Put back the ' + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'swap') setPrompt('E', 'Swap for ' + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'drop') setPrompt(s.carried ? 'E' : '', s.carried ? 'Put down the ' + stackName(s.carried.itemId) : '', '', null);
@@ -1927,7 +1968,7 @@
       }
     }
     if (V.fTap) { V.fTap = false; if (!OFF[G.player.tool]) { press(V.ctx); V.ctx = context(); V.ctxSig = -1; } }   // what the press changed is read at once: a stale 'put down' with empty arms threw
-    tickBHold(dt); tickLadder(dt); tickScaffold(dt); tickRoof(dt); drawLadder(); tickMark(dt); drawBeacons(dt); drawBarrow(dt); tickStation(dt);
+    tickBHold(dt); tickTHold(dt); tickLadder(dt); tickScaffold(dt); tickRoof(dt); drawLadder(); tickMark(dt); drawBeacons(dt); drawBarrow(dt); tickStation(dt);
     if (!s.options.sandbox) tickWork(dt);
     glow(V.ctx); farGlow();
     {
@@ -2021,5 +2062,5 @@
     for (const mid of pl.inst) { const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid), set = !ln || pm.need - pm.got < 1e-6; if (!set && !holds(c, pr, mid)) continue; if (!m) return { mid, x: V.structs.get(pr.id).x, z: V.structs.get(pr.id).z, site: true }; const hw = C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null; worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); wM.lerpVectors(wA, wB, 0.5); const w = { x: wM.x, y: wM.y, z: wM.z }; wM.project(G.camera); return { mid, ...w, sx: (wM.x * 0.5 + 0.5) * reach.w, sy: (-wM.y * 0.5 + 0.5) * reach.h, set }; }
     return null;
   }
-  window.__construct = { redraw, asm, roof: RW, syncRoof, tryHop, ladderTop, ladderSpot, chalkLines: (id) => chalkLines(S().progress[id], geom(id)), scaffoldSpot, scaffold: SC, station: CS, press: (c) => press(c || V.ctx), beaconAt, finishPlace, nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };
+  window.__construct = { describe, redraw, asm, roof: RW, syncRoof, tryHop, ladderTop, ladderSpot, chalkLines: (id) => chalkLines(S().progress[id], geom(id)), scaffoldSpot, scaffold: SC, station: CS, press: (c) => press(c || V.ctx), beaconAt, finishPlace, nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };
 })();

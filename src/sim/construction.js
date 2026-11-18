@@ -3,7 +3,7 @@
 // src/sim/core/supply.js; the stages, texts, prices of missing items and rates are src/sim/content/construction.js.
 //
 // State, at sim.state.sys.construction:
-//   { dropPoint, orders, deliveries, stacks: [{ id, itemId, qty, x, z }], carried: { itemId, qty } | null, nextId, ledger,
+//   { dropPoint, orders, deliveries, stacks: [{ id, itemId, qty, x, z, barrow?, carrier? }], carried: { itemId, qty } | null, nextId, ledger,
 //     level: "guided" | "hands-on" | "piece"            (the default for new buildings),
 //     progress: { [structId]: { id, name, planId, x, z, r, level, stage, done, lines, members, tally, raised } },
 //     unlocked: [...], tutorial: { card, shed, seen: { [stage]: true }, done }, options: { sandbox, instant, cards, auto, mute }, finished }
@@ -17,6 +17,7 @@
 import { ITEMS } from './items.js';
 import * as SUP from './core/supply.js';
 import * as C from './content/construction.js';
+import { VEHICLE_KINDS } from './content/vehicles.js';
 
 const { round6, cents } = SUP;
 const LADDER_KEY = C.LADDER.stage + '|ladder';
@@ -460,7 +461,7 @@ function ensureLadder(ctx) {
     if (!any && !pr.done && Object.values(pr.lines).some((l) => l.ordered > 0) && (needsHeight(pr) || (pr.lines[LADDER_KEY] && pr.lines[LADDER_KEY].ordered > 0))) any = pr;
   }
   if (!any || isLadderAt(s)) return;
-  const near = s.stacks.find((k) => !k.barrow), at = near ? { x: near.x - 1.6, z: near.z } : dropOf(s, any);
+  const near = s.stacks.find((k) => !k.barrow && !k.carrier), at = near ? { x: near.x - 1.6, z: near.z } : dropOf(s, any);
   SUP.addToStacks(s, C.LADDER.itemId, 1, at.x, at.z, C.DELIVERY.layout);
   const L = s.ledger.ladder || (s.ledger.ladder = { bought: 0, used: 0, spent: 0 });
   L.bought = round6(L.bought + 1);
@@ -576,7 +577,7 @@ function rentScaffold(ctx, p) {
   }
   if (!pr) return { ok: false, reason: 'unknown building' };
   if (!pay(ctx, usd)) return { ok: false, reason: 'not enough money', costUsd: usd };
-  const at = s.stacks.find((k) => !k.barrow) || dropOf(s, pr);
+  const at = s.stacks.find((k) => !k.barrow && !k.carrier) || dropOf(s, pr);
   s.scaffold = { until: round6(ctx.state.t + days * 86400), x: round6(at.x + 1.8), z: round6(at.z - 1.6), set: null };
   ctx.emit('construction.scaffold', { rented: true, days });
   return { ok: true, costUsd: usd, until: s.scaffold.until };
@@ -635,7 +636,7 @@ function barrowLoad(ctx, p) {
   const s = ctx.s, b = s.barrow;
   if (!b || !b.held) return { ok: false, reason: 'not holding the wheelbarrow' };
   const from = p && p.hands ? null : s.stacks.find((k) => k.id === (p && p.stackId));
-  if (!p.hands && (!from || from.barrow)) return { ok: false, reason: 'no such stack' };
+  if (!p.hands && (!from || from.barrow || from.carrier)) return { ok: false, reason: 'no such stack' };
   const itemId = p.hands ? (s.carried && s.carried.itemId) : from.itemId;
   if (!itemId) return { ok: false, reason: 'nothing to load' };
   if (isSupply(itemId)) return { ok: false, reason: 'stays by the stacks' };
@@ -652,6 +653,61 @@ function barrowLoad(ctx, p) {
   if (load) load.qty = round6(load.qty + n);
   else s.stacks.push({ id: 's' + s.nextId++, itemId, qty: n, x: b.x, z: b.z, barrow: true });
   return { ok: true, itemId, qty: n };
+}
+
+// ---- a trailer's load: stacks flagged `carrier: unitId` that ride on a vehicle (the vehicles system's unit). They stay
+// ordinary stacks, so the ledger needs nothing new and the build draws from a trailer parked by the work as from any pile.
+// Loading moves material from a ground stack onto the bed up to the unit's capacity (its record's cargo.capKg); the page
+// moves the load with the unit (carrierMove) and tips it off as a ground stack (carrierUnload).
+const CARRIER_REACH_M = 6;           // stack to the trailer's axle: the page asks for the bed within 4 m of the pile
+const carrierStacks = (s, id) => s.stacks.filter((k) => k.carrier === id);
+const carrierKg = (s, id) => carrierStacks(s, id).reduce((n, k) => n + k.qty * item(k.itemId).massKgPerUnit, 0);
+function carrierUnit(ctx, id) {
+  const vs = ctx.get('vehicles'), u = vs && vs.units && vs.units[id];
+  if (!u) return null;
+  const k = VEHICLE_KINDS[u.kind];
+  return k && k.cargo ? { u, capKg: k.cargo.capKg } : null;
+}
+function carrierLoad(ctx, p) {
+  const s = ctx.s, id = p && p.carrier, cu = id != null ? carrierUnit(ctx, id) : null;
+  if (!cu) return { ok: false, reason: 'no such trailer' };
+  // from a ground stack, or (hands) what the arms hold, put on the bed
+  const from = p.hands ? (s.carried ? { itemId: s.carried.itemId, qty: s.carried.qty, x: p.x, z: p.z } : null) : s.stacks.find((k) => k.id === (p && p.stackId));
+  if (!from || from.barrow || from.carrier) return { ok: false, reason: p.hands ? 'nothing carried' : 'no such stack' };
+  if (isSupply(from.itemId)) return { ok: false, reason: 'stays by the stacks' };
+  if (!p.hands && Math.hypot(from.x - cu.u.x, from.z - cu.u.z) > CARRIER_REACH_M) return { ok: false, reason: 'too far' };
+  if (p.hands && Number.isFinite(p.x) && Math.hypot(p.x - cu.u.x, p.z - cu.u.z) > CARRIER_REACH_M) return { ok: false, reason: 'too far' };
+  const it = item(from.itemId), capKg = Math.min(cu.capKg, Number.isFinite(p.capKg) && p.capKg > 0 ? p.capKg : Infinity);
+  const room = capKg - carrierKg(s, id);
+  let n = Math.min(from.qty, room / it.massKgPerUnit, p.qty > 0 ? p.qty : Infinity);
+  if (it.unit === 'each') n = Math.floor(n + 1e-9);
+  n = round6(n);
+  if (!(n > 1e-6)) return { ok: false, reason: 'full' };
+  if (p.hands) { s.carried.qty = round6(s.carried.qty - n); if (s.carried.qty <= 1e-6) s.carried = null; }
+  else { from.qty = round6(from.qty - n); if (from.qty <= 1e-6) s.stacks = s.stacks.filter((k) => k !== from); }
+  const load = s.stacks.find((k) => k.carrier === id && k.itemId === from.itemId);
+  if (load) load.qty = round6(load.qty + n);
+  else s.stacks.push({ id: 's' + s.nextId++, itemId: from.itemId, qty: n, x: round6(cu.u.x), z: round6(cu.u.z), carrier: id });
+  return { ok: true, itemId: from.itemId, qty: n, kg: round6(carrierKg(s, id)), capKg };
+}
+function carrierMove(ctx, p) {
+  if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.z)) return { ok: false, reason: 'bad place' };
+  const list = carrierStacks(ctx.s, p.carrier);
+  for (const k of list) { k.x = round6(p.x); k.z = round6(p.z); }
+  return { ok: true, n: list.length };
+}
+// the load slides off the tipped bed (or is left where a trailer was taken away): ordinary stacks on the ground there
+function carrierUnload(ctx, p) {
+  const s = ctx.s, list = carrierStacks(s, p && p.carrier);
+  if (!list.length) return { ok: false, reason: 'empty' };
+  if (!Number.isFinite(p.x) || !Number.isFinite(p.z)) return { ok: false, reason: 'bad place' };
+  const cu = carrierUnit(ctx, p.carrier);
+  if (cu && Math.hypot(p.x - cu.u.x, p.z - cu.u.z) > CARRIER_REACH_M) return { ok: false, reason: 'too far' };
+  const out = [];
+  s.stacks = s.stacks.filter((k) => k.carrier !== p.carrier);
+  for (const k of list) { const st = SUP.addToStacks(s, k.itemId, k.qty, p.x, p.z, { ...C.DELIVERY.layout, mergeR: 1.6 }); if (st) out.push(st.id); }
+  ctx.emit('construction.unloaded', { carrier: p.carrier, stacks: out, x: p.x, z: p.z });
+  return { ok: true, stacks: out };
 }
 
 // cut the next piece (or the one named) at the sawhorses: its stock comes from the arms if they hold that lumber, else the
@@ -986,6 +1042,9 @@ export const constructionSystem = () => ({
       return { ok: true, anchor: c.s.anchors[p.structId] };
     },
     'construction.barrowGrab': barrowGrab,
+    'construction.carrierLoad': carrierLoad,
+    'construction.carrierMove': carrierMove,
+    'construction.carrierUnload': carrierUnload,
     'construction.barrowLoad': barrowLoad,
     'construction.barrowMove': (c, p) => { if (!c.s.barrow || !c.s.barrow.held) return { ok: false, reason: 'not held' }; barrowPlace(c.s, p.x, p.z, p.yaw); return { ok: true }; },
     'construction.barrowSet': (c, p) => { if (!c.s.barrow || !c.s.barrow.held) return { ok: false, reason: 'not held' }; barrowPlace(c.s, p && p.x, p && p.z, p && p.yaw); c.s.barrow.held = false; return { ok: true }; },
@@ -1034,5 +1093,5 @@ export const constructionSystem = () => ({
     'construction.setExtLines': setExtLines,
     'construction.use': useExt,
   },
-  api: { content: C, wantItem, nextCut, feelOf: (s) => C.feelOf(s), knows: (s, kind) => !!(s.learn && s.learn.known[C.learnGroup(kind)]), sheetSource, needsStock, stockNeed, stickSource, stickImbalance, cutList, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance },
+  api: { content: C, wantItem, nextCut, feelOf: (s) => C.feelOf(s), knows: (s, kind) => !!(s.learn && s.learn.known[C.learnGroup(kind)]), sheetSource, needsStock, stockNeed, stickSource, stickImbalance, cutList, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance, carrierKg },
 });
