@@ -2,7 +2,9 @@
 
 The single place to see where the V1 run stands. Updated by the orchestrator at every merge.
 
-**Standing orders (set 14 Nov 2026, 19:20 Pacific):** the owner is away for about 8 hours. Work through as many waves as possible without waiting for approval. Keep every merged wave playable on the live page, with its section in `docs/PLAYTEST.md`. Stop only for something that blocks all progress or an irreversible decision that could go either way.
+**Standing orders (set 14 Nov 2026, 19:20 Pacific): expired 14 Nov.** They said the owner was away for about 8 hours and to work through waves without waiting for approval. The owner is back and is playtesting; do not rely on them.
+
+**18 Nov 2026: new design round.** Ground and foundations, services rough-in, and vehicles. Design docs will land in `docs/design/` (the folder does not exist yet).
 
 ## How to playtest and critique
 
@@ -29,19 +31,19 @@ The scope roughly doubled after the first playtest. These rules put landing each
 
 | Wave | Iterations | State | Commit on `main` |
 |---|---|---|---|
-| A | 0 simulation spine | Merged, live | `68c7226` |
-| B | 1 weather, 2 materials, 2a build mode (first half) | Merged, live | see `git log` for "Wave B complete" |
-| C | 3 structure, 4 thermal, 6 electrical, 7 water, 13 chickens, 2a build mode (second half) | Water and electrical merged headless; the rest in progress | |
-| C-int | Partly done: real equipment catalog in the Equip tool, power and water running in play, a Home panel. Still owed: store pricing for equipment, overlays in the world, engine and game folders. Wave C made playable; files moved into engine and game folders: equipment catalog in the store, fixture placement wired to power and water, overlays for structure, heat, power and water | Not started | |
-| F2 | Garden controls rebuilt in the body with hands-on gestures (agent `a4c99fc4e093299f2`, `wt-f2-garden-hands`), after the owner's playtest | In progress | |
-| F1 | Merged, live; controls judged poor by the owner, being rebuilt as F2. **Farming, first playable: soil water, growth model, twelve crops, beds, sowing, watering, harvest, the first-salad card** (from owner feedback; `docs/FARMING.md`). Runs alongside wave C and D1 because it does not touch build mode | Not started | |
-| D1 | **2c construction and 2d store and plan book: the first shed, end to end** (from owner feedback) | In progress | |
-| D1b | 6a hook-ups: intuitive wiring and piping (from owner feedback), right after construction lands | Not started | |
-| D2 | 1a weather you can see, 5 heating and moisture, 5b camp and journal | Not started | |
-| D3 | 7a groundworks, 7b rented machines, 8 soil and irrigation, 14 chicken lifecycle | Not started | |
-| D4 | 5a interiors, 18 salvage and renovation | Not started | |
-| E | 9 crops, 19 contractors, 20 automation | Not started | |
-| F | 10 soil and compost, 11 greenhouse, 12 hydroponics, 15 goats, 16 kitchen | Not started | |
+| A | 0 simulation spine | Merged | `68c7226` (not in the shallow history; check `git log`) |
+| B | 1 weather, 2 materials, 2a build mode (first half) | Merged | see `git log` for "Wave B complete" |
+| C | 3 structure, 4 thermal, 6 electrical, 7 water, 13 chickens, 2a build mode (second half) | Merged | |
+| C-int | Real equipment catalog in the Equip tool, power and water running in play, a Home panel | Partly merged. Still owed: store pricing for equipment, overlays in the world (`src/overlays.js` does not exist), the engine and game folder tidy-up (not done) | |
+| F2 | Garden controls rebuilt in the body with hands-on gestures | Merged | |
+| F1 | Farming, first playable: soil water, growth model, twelve crops, beds, sowing, watering, harvest, the first-salad card (`docs/FARMING.md`) | Merged | |
+| D1 | 2c construction and 2d store and plan book: the first shed, end to end | Merged (known gaps in `docs/PLAYTEST.md`) | |
+| D1b | 6a hook-ups: intuitive wiring and piping | Partly merged: hands-on water (First Water) is in; electrical has no hands-on path | |
+| D2 | 1a weather you can see, 5 heating and moisture, 5b camp and journal | Partly merged: weather you can see and heat are in; camp and journal are not | |
+| D3 | 7a groundworks, 7b rented machines, 8 soil and irrigation, 14 chicken lifecycle | Partly merged: digging and landscaping (the Yard) are in; rented machines are not | |
+| D4 | 5a interiors, 18 salvage and renovation | Not started (a `flooring` branch is unmerged) | |
+| E | 9 crops, 19 contractors, 20 automation | Not started (the twelve crops came with F1) | |
+| F | 10 soil and compost, 11 greenhouse, 12 hydroponics, 15 goats, 16 kitchen | Partly merged: the kitchen (key K) came from another session; the rest is not started | |
 | G | 17 dairy and workshop, 21 inspector and blueprints | Not started | |
 | H | 22 integration | Not started | |
 

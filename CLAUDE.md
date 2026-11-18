@@ -11,7 +11,17 @@ A browser homestead builder (Stardew-style direction) on a Valheim-style voxel w
 
 ## Build and test
 - `npm install && sh build.sh` writes `dist/index.html`, one self-contained page.
-- Test headlessly before pushing: `npm test` (simulation, seconds) and `node test/page.smoke.mjs` (the built page: loads with no errors, build mode opens, Low and High quality work, saves survive a reload). After touching build mode also run `node test/build.smoke.mjs`.
+- `npm test` runs the headless simulation tests and takes about 3 minutes now, not seconds. While iterating, run one file: `node --test test/<name>.test.mjs`.
+- Browser smoke tests need the built page (`sh build.sh`) and Playwright. Run `node test/page.smoke.mjs` before pushing (the page loads with no errors, build mode opens, Low and High quality work, saves survive a reload). Then the one for what you touched:
+  - `test/build.smoke.mjs`: build mode (builds a small house by pointer; piece list, undo, save, phone controls).
+  - `test/plan-unbuilt.smoke.mjs`: plan mode (adding a door to an unbuilt design builds nothing).
+  - `test/construction-tools.smoke.mjs`: sawhorses, scaffolding, ladder, roof walking and the other construction tools.
+  - `test/water.smoke.mjs`: hands-on water (pump, kit parts, valve, tap).
+  - `test/garden.smoke.mjs`: the garden (key 5).
+  - `test/landscape.smoke.mjs`: the Yard (key 6): digging, paths, stone, pond.
+  - `test/chickens.smoke.mjs`: the chickens view.
+  - `test/physical-kitchen.smoke.mjs` (`test/cooking.smoke.mjs` runs the same): the kitchen.
+  - `test/shed.e2e.mjs` builds the tutorial shed from bare ground and is the gate before publishing; `test/shed.clumsy.mjs` is the clumsy-player version.
 
 ## The live page
 - The game page is the claude.ai artifact "Homestead" (formerly "World Engine Prototype"; slug `17909dd9-2610-496f-be32-0d354df886eb`).
