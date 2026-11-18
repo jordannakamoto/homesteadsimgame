@@ -92,7 +92,8 @@ export function netVolume(g) { let v = 0; for (const k in g.tiles) for (const h 
 // Take up to m3 from a round footprint centred on (x, z) (a blade's bite). If a loose layer lies at the centre the
 // bite takes the layer only (a scoop is gravel, or earth, never both). Returns { m3, s } (s: what was taken).
 // `bare`: the surface left where earth was taken; maxDepth: how deep the tool reaches below the untouched ground.
-export function cut(g, x, z, m3, { r = 0.17, bare = 'soil', maxDepth = 1.2, t = 0, clearF = 0 } = {}) {
+// `looseStays`: loose earth left over-steep by the cut is not settled here (the caller lets it slide, grain by grain)
+export function cut(g, x, z, m3, { r = 0.17, bare = 'soil', maxDepth = 1.2, t = 0, clearF = 0, looseStays = false } = {}) {
   const fp = footprint(g, x, z, r), A = area(g);
   if (!fp.length || !(m3 > 0)) return { m3: 0, s: bare };
   const ci = Math.round(x / g.step), cj = Math.round(z / g.step), layer = lAt(g, ci, cj) > 0.002 ? sAt(g, ci, cj) : 0;
@@ -107,7 +108,7 @@ export function cut(g, x, z, m3, { r = 0.17, bare = 'soil', maxDepth = 1.2, t = 
       if (!p[2]) continue;
       const [tile, n] = tileOf(g, p[0], p[1], true), h = tile.h[n] / 1000;
       let room = layer ? (tile.s[n] === layer ? tile.l[n] / 1000 : 0) : h + maxDepth;
-      const d = Math.max(0, Math.min(room, per * p[2]));
+      const d = Math.round(Math.max(0, Math.min(room, per * p[2])) * 1000) / 1000;   // whole millimetres, so what is taken is exact
       if (d > 0) {
         tile.h[n] = Math.round((h - d) * 1000);
         if (layer) { tile.l[n] = Math.max(0, tile.l[n] - Math.round(d * 1000)); if (tile.l[n] <= 1) { tile.l[n] = 0; tile.s[n] = code(g, bare); tile.t[n] = t; } }
@@ -120,7 +121,7 @@ export function cut(g, x, z, m3, { r = 0.17, bare = 'soil', maxDepth = 1.2, t = 
     if (!wsum) break;
   }
   g.rev++;
-  settle(g, x, z, r + 0.5);
+  settle(g, x, z, r + 0.5, REPOSE, 40, looseStays);
   return { m3: got, s: layer ? g.codes[layer] : 'soil' };
 }
 // Put m3 of loose material on a round footprint centred on (x, z). layer: laid on top (it thickens l; only on loose
@@ -131,8 +132,14 @@ export function fill(g, x, z, m3, { r = 0.22, surface = 'soil', layer = false, o
   if (!fp.length) return 0;
   const A = area(g), c = code(g, surface);
   let wsum = 0; for (const p of fp) wsum += p[2];
-  for (const [i, j, w] of fp) {
-    const [tile, n] = tileOf(g, i, j, true), d = Math.round(((m3 * w) / wsum / A) * 1000);
+  // whole millimetres that add up to the load (largest remainders get the odd millimetre), so nothing is rounded away
+  const want = fp.map((p) => ((m3 * p[2]) / wsum / A) * 1000), dd = want.map(Math.floor);
+  let left = Math.round((m3 / A) * 1000) - dd.reduce((a, b) => a + b, 0);
+  for (const k of want.map((v, k) => [v - Math.floor(v), k]).sort((a, b) => b[0] - a[0])) { if (left <= 0) break; dd[k[1]]++; left--; }
+  let put = 0;
+  for (let q = 0; q < fp.length; q++) {
+    const [i, j] = fp[q], [tile, n] = tileOf(g, i, j, true), d = dd[q];
+    put += d;
     tile.h[n] += d;
     if (d > 0) tile.f[n] |= LOOSE_BIT;
     if (layer && markF && tile.s[n] === 0) tile.f[n] |= markF;   // `markF`: flags for a layer laid straight on untouched ground (the caller's)
@@ -142,11 +149,46 @@ export function fill(g, x, z, m3, { r = 0.22, surface = 'soil', layer = false, o
   }
   g.rev++;
   if (spread) settle(g, x, z, r + 0.6);
-  return m3;
+  return (put / 1000) * A;              // what was actually put down (whole millimetres)
+}
+// The flowing layer (after Zhu and Bridson's two-layer sand: a static heightfield under a thin layer of rolling
+// grains). Loose ground steeper than its angle of repose sheds its surface: the excess at each over-steep point is
+// taken off the heightfield and handed back as grains for the caller to roll downhill, [x, z, m3, surface, dx, dz]
+// (dx, dz: the way down). Grains that come to rest are put back with fill(..., { spread: false }). Volume moves, it is
+// never lost: what is shed is the caller's until it lands.
+export function shed(g, x, z, r = 0.7, slope = REPOSE, maxM3 = 0.004) {
+  const s = g.step, A = area(g), i0 = Math.floor((x - r) / s), i1 = Math.ceil((x + r) / s), j0 = Math.floor((z - r) / s), j1 = Math.ceil((z + r) / s);
+  const lim = slope * s * 1000, soil = code(g, 'soil'), out = [];
+  let tot = 0;
+  for (let j = j0; j <= j1 && tot < maxM3; j++) for (let i = i0; i <= i1 && tot < maxM3; i++) {
+    const a = tileOf(g, i, j, false);
+    if (!a || a[0].s[a[1]] === 0) continue;
+    const [ta, na] = a, loose = (ta.f[na] & LOOSE_BIT) || ta.l[na] > 0;
+    if (!loose) continue;
+    let best = 0, bx = 0, bz = 0;
+    for (const [di, dj, dl] of OFF8) {
+      const b = tileOf(g, i + di, j + dj, false), hb = b ? b[0].h[b[1]] : 0;
+      if ((ta.f[na] ^ (b ? b[0].f[b[1]] : 0)) & WALL_BIT) continue;
+      const d = (ta.h[na] - hb - lim * dl) / dl;
+      if (d > best) { best = d; bx = di / dl; bz = dj / dl; }
+    }
+    if (best < 3) continue;
+    let mv = Math.round(best * 0.45);
+    if (ta.l[na] > 0) mv = Math.min(mv, ta.l[na]);
+    if (mv < 1) continue;
+    const name = g.codes[ta.s[na]];
+    ta.h[na] -= mv;
+    if (ta.l[na] > 0) { ta.l[na] -= mv; if (ta.l[na] <= 0) { ta.l[na] = 0; ta.s[na] = soil; } }
+    const m3 = (mv / 1000) * A;
+    out.push([i * s, j * s, m3, name, bx, bz]);
+    tot += m3;
+  }
+  if (out.length) g.rev++;
+  return out;
 }
 // Loose ground steeper than its angle of repose runs down (thermal erosion, iterated in the window round (x, z)).
 // Untouched turf never gives soil, and takes it only as a cover (it becomes loose soil). Volume is conserved.
-export function settle(g, x, z, r = 0.8, slope = REPOSE, iters = 40) {
+export function settle(g, x, z, r = 0.8, slope = REPOSE, iters = 40, firmOnly = false) {
   const s = g.step, i0 = Math.floor((x - r) / s), i1 = Math.ceil((x + r) / s), j0 = Math.floor((z - r) / s), j1 = Math.ceil((z + r) / s);
   const lim = slope * s * 1000, limFirm = Math.max(slope, FIRM) * s * 1000, soil = code(g, 'soil');
   for (let it = 0; it < iters; it++) {
@@ -155,6 +197,7 @@ export function settle(g, x, z, r = 0.8, slope = REPOSE, iters = 40) {
       const a = tileOf(g, i, j, false);
       if (!a || a[0].s[a[1]] === 0) continue;
       const loose = (a[0].f[a[1]] & LOOSE_BIT) || a[0].l[a[1]] > 0, la = loose ? lim : limFirm;
+      if (loose && firmOnly) continue;
       for (const [di, dj, dl] of OFF8) {
         const ha = a[0].h[a[1]], b = tileOf(g, i + di, j + dj, false), hb = b ? b[0].h[b[1]] : 0, d = ha - hb, lm = la * dl;
         if ((a[0].f[a[1]] ^ (b ? b[0].f[b[1]] : 0)) & WALL_BIT) continue;

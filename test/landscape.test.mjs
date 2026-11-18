@@ -203,3 +203,35 @@ test('a dug hole keeps its walls; the thrown earth is loose and slumps to a cone
   c(sim, 'landscape.dig', { x: 3.2, z: 2 }); c(sim, 'landscape.dump', { x: 2, z: 2 });
   assert.ok(reliefAt(g, 2, 2) > before + 0.05);
 });
+
+test('grains: a load poured into the air lands grain by grain; an over-steep heap sheds grains that roll down; nothing lost', () => {
+  const sim = makeSim();
+  const g = () => L(sim).grid;
+  assert.ok(c(sim, 'landscape.dig', { x: 2, z: 2 }).ok);
+  const m3 = L(sim).carry.m3;
+  assert.ok(c(sim, 'landscape.pour', { x: 3, z: 2 }).ok && L(sim).carry.m3 === 0);
+  // every grain lands on one spot: a steep spike
+  const n = 40;
+  c(sim, 'landscape.land', { pts: Array.from({ length: n }, () => [3, 2, m3 / n, 'soil']) });
+  // grains lodge as they land: no slope steeper than loose earth stands
+  let steep = 0; for (let i = 26; i < 40; i++) steep = Math.max(steep, Math.abs(reliefAt(g(), (i + 1) / 10, 2) - reliefAt(g(), i / 10, 2)) / 0.1);
+  assert.ok(steep < 0.85, 'landed slope ' + steep.toFixed(2));
+  // a loose spike (as if undercut) sheds grains that roll down until the slope holds
+  fill(g(), 5, 5, 0.02, { r: 0.11, spread: false });
+  const net0 = netVolume(g()), spike = reliefAt(g(), 5, 5);
+  for (let k = 0; k < 200; k++) {
+    const r = c(sim, 'landscape.shed', { x: 5, z: 5, r: 0.8 });
+    if (!r.pts.length) break;
+    c(sim, 'landscape.land', { pts: r.pts.map(([x, z, v, s, dx, dz]) => [x + dx * 0.15, z + dz * 0.15, v, s]) });
+  }
+  assert.ok(reliefAt(g(), 5, 5) < spike - 0.05, 'the spike slumped: ' + spike + ' -> ' + reliefAt(g(), 5, 5));
+  const air = Object.values(L(sim).air || {}).reduce((a, b) => a + b, 0);
+  assert.ok(Math.abs(netVolume(g()) + air - net0) < 1e-6, 'conserved: ' + netVolume(g()) + ' + ' + air);
+  assert.ok(air < 1e-3, 'next to nothing left in the air: ' + air);
+  // a bag spilt goes into the air, and lands where its grains come to rest
+  L(sim).things.b1 = { id: 'b1', k: 'bag', x: 6, z: 6, yaw: 0, y: 0, ax: 6, az: 6, on: null, sag: 0, m: 'woodchips', L: 56 };
+  const o = c(sim, 'landscape.open', { id: 'b1', spill: true });
+  assert.ok(o.ok && L(sim).air.woodchips > 0.05);
+  c(sim, 'landscape.land', { pts: [[6, 6, 0.056, 'woodchips']] });
+  assert.equal(landscapeRead.groundAt(sim.state, 6, 6).s, 'woodchips');
+});

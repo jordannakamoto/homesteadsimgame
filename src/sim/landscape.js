@@ -92,14 +92,16 @@ function dig(ctx, p = {}) {
   const x = +p.x, z = +p.z, pl = plantNear(s, x, z);
   if (pl) return fail('The ' + PLANTS[pl.k].name.toLowerCase() + ' is planted there. Lift it with your hands first.');
   const g = s.grid, i = pt(x), j = pt(z), wasTurf = EW.sAt(g, i, j) === 0, f0 = EW.fAt(g, i, j);
-  const res = EW.cut(g, x, z, SCOOP_M3 * (p.scale || s.scale || 1), { r: 0.24, t: hours(ctx), clearF: FLAG.TAMP1 | FLAG.TAMP2 });
+  const res = EW.cut(g, x, z, SCOOP_M3 * (p.scale || s.scale || 1), { r: 0.24, t: hours(ctx), clearF: FLAG.TAMP1 | FLAG.TAMP2, looseStays: true });
+  // a heap dug into at its foot is left over-steep: it slides (the view rolls it down grain by grain; else within the hour)
+  (s.unsettled ||= []).push([r3(x), r3(z)]); if (s.unsettled.length > 64) s.unsettled.shift();
   if (!(res.m3 > 1e-6)) return fail('That is as deep as a shovel will go here.');
   // the blade tears the turf at the lip of the hole: a narrow rim of bare earth (the walls themselves stand firm)
   EW.paint(g, x, z, 0.27, { surface: 'soil', t: hours(ctx), ok: (q) => q.s === EW.UNTOUCHED });
   const cutLiner = unline(ctx, s, x, z, 0.2);
   if (f0 & FLAG.FABRIC) EW.paint(g, x, z, 0.16, { clearF: FLAG.FABRIC });
   reseat(s);
-  s.carry = { m3: r4(res.m3), s: res.s };
+  s.carry = { m3: res.m3, s: res.s };                  // exact: what came out of the ground goes back in
   s.totals.dugM3 = r4(s.totals.dugM3 + res.m3);
   ctx.emit('landscape.dig', { m3: res.m3, s: res.s, turf: wasTurf });
   return { ok: true, m3: r4(res.m3), s: res.s, turf: wasTurf, liner: cutLiner, h: r3(EW.reliefAt(g, x, z)) };
@@ -118,6 +120,63 @@ function dump(ctx, p = {}) {
   ctx.emit('landscape.dump', { m3, s: surf });
   return { ok: true, m3, s: surf, h: r3(EW.reliefAt(s.grid, +p.x, +p.z)) };
 }
+// Grains in the air. A load thrown, a bag spilt or a slope that sheds becomes grains (the view rolls them); until a
+// grain comes to rest its earth is held here, by material, and returned to the ground where it lands.
+function airOf(s) { if (!s.air || typeof s.air !== 'object') s.air = {}; return s.air; }
+function addAir(s, surf, m3, x, z) { const a = airOf(s); a[surf] = (a[surf] || 0) + m3; s.airAt = { x: r3(x), z: r3(z) }; }
+// put earth from the air down at (x, z): one grain's worth
+function landOne(ctx, s, x, z, m3, surf, r) {
+  const a = airOf(s), have = a[surf] || 0, take = Math.min(have, m3);
+  if (!(take > 0)) return 0;
+  a[surf] = have - take; if (a[surf] <= 1e-9) delete a[surf];
+  const sf = SURFACES[surf], layer = !!(sf && sf.layer), into = sf && sf.fillSoil ? 'soil' : surf;
+  const put = EW.fill(s.grid, x, z, take, { r, surface: into, layer: layer && !sf.fillSoil, t: hours(ctx), markF: FLAG.TURF, spread: false });
+  // the grain's odd fraction of a millimetre stays in the air for the next one
+  if (Math.abs(take - put) > 1e-9) { a[surf] = Math.max(0, (a[surf] || 0) + take - put); if (a[surf] <= 1e-9) delete a[surf]; }
+  return put;
+}
+// The load on the shovel leaves it: into the air, to land as grains.
+function pour(ctx, p = {}) {
+  const s = ensure(ctx);
+  if (!(s.carry.m3 > 1e-6)) return fail('The shovel is empty.');
+  const m3 = s.carry.m3, surf = s.carry.s;
+  addAir(s, surf, m3, +p.x || 0, +p.z || 0);
+  s.carry = { m3: 0, s: '' };
+  s.totals.filledM3 = r4(s.totals.filledM3 + m3);
+  ctx.emit('landscape.pour', { m3, s: surf });
+  return { ok: true, m3, s: surf };
+}
+// Grains that came to rest: p.pts = [[x, z, m3, surface], ...].
+function land(ctx, p = {}) {
+  const s = ensure(ctx);
+  let n = 0;
+  for (const q of Array.isArray(p.pts) ? p.pts : []) {
+    const [x, z, m3, surf] = q;
+    if (!Number.isFinite(+x) || !Number.isFinite(+z) || !(+m3 > 0) || typeof surf !== 'string') continue;
+    // a grain's footprint always takes in at least one point; then it lodges into the surface (no spike of one grain)
+    if (landOne(ctx, s, +x, +z, +m3, surf, 0.11) > 0) { n++; EW.settle(s.grid, +x, +z, 0.22, EW.REPOSE, 3); }
+  }
+  if (n) reseat(s);
+  return { ok: true, n };
+}
+// Loose slopes round (x, z) steeper than they stand shed grains: returned for the view to roll downhill.
+function shedAt(ctx, p = {}) {
+  const s = ensure(ctx);
+  if (!finite(p)) return fail('Where?');
+  // a slope sheds only past what grains at rest can make (they stop under ~0.72), so it settles instead of churning
+  const out = EW.shed(s.grid, +p.x, +p.z, Math.min(1.2, +p.r || 0.7), EW.REPOSE * 1.15);
+  for (const [x, z, m3, surf] of out) addAir(s, surf, m3, x, z);
+  return { ok: true, pts: out.map((q) => [r3(q[0]), r3(q[1]), q[2], q[3], r3(q[4]), r3(q[5])]) };
+}
+// Finish settling round (x, z) at once (a slope the grains have worked on long enough).
+function settleAt(ctx, p = {}) { const s = ensure(ctx); if (!finite(p)) return fail('Where?'); EW.settle(s.grid, +p.x, +p.z, Math.min(1.2, +p.r || 0.7)); reseat(s); return { ok: true }; }
+// Anything still in the air (a save made mid-throw, a view that never landed it) comes down where it was going.
+function landAll(ctx, s) {
+  const a = airOf(s), at = s.airAt || { x: 0, z: 0 };
+  for (const surf of Object.keys(a)) { const m3 = a[surf]; if (m3 > 0) landOne(ctx, s, at.x, at.z, m3, surf, 0.3); delete s.air[surf]; }
+  EW.settle(s.grid, at.x, at.z, 1.2);
+}
+
 // Skim the turf off along a line of points (the blade slid under it): bare earth about 3 cm lower.
 const TURF_M = 0.03;
 function skim(ctx, p = {}) {
@@ -545,6 +604,8 @@ function open(ctx, p = {}) {
   if (!o || o.k !== 'bag') return fail('That is not a bag.');
   const m3 = (o.L || BAG_L) / 1000, sf = SURFACES[o.m];
   delete s.things[p.id];
+  // spilt: the contents go into the air at the bag, to come out as grains
+  if (p.spill) { addAir(s, o.m, m3, o.x, o.z); reseat(s); ctx.emit('landscape.open', { m: o.m, m3 }); return { ok: true, m: o.m, m3, x: o.x, z: o.z }; }
   if (sf && sf.fillSoil) EW.fill(s.grid, o.x, o.z, m3, { r: 0.3, surface: 'soil', t: hours(ctx) });
   else EW.fill(s.grid, o.x, o.z, m3, { r: 0.3, surface: o.m, layer: true, t: hours(ctx), markF: FLAG.TURF });
   reseat(s);
@@ -585,6 +646,8 @@ const STEP_TICKS = 60;
 function step(ctx) {
   const s = ctx.s;
   if (!s || s.v !== STATE_V) { ctx.s = fresh(); return; }
+  if (s.air && Object.keys(s.air).length) landAll(ctx, s);
+  if (s.unsettled && s.unsettled.length) { for (const [ux, uz] of s.unsettled) EW.settle(s.grid, ux, uz, 1.0); s.unsettled = []; }
   const g = s.grid, w = ctx.get('weather');
   const tempC = w ? w.tempC ?? 10 : 15, warm = tempC > 5;
   const dt = ctx.dt, lifeDt = ctx.lifeDt ?? ctx.dt, hr = hours(ctx);
@@ -667,6 +730,7 @@ export const landscape = {
     'landscape.plant': plant, 'landscape.lift': lift, 'landscape.move': move, 'landscape.setScale': setScale,
     'landscape.load': load, 'landscape.tip': tip, 'landscape.water': water, 'landscape.line': line, 'landscape.hose': hose,
     'landscape.deliver': deliver, 'landscape.open': open, 'landscape.moveThing': moveThing,
+    'landscape.pour': pour, 'landscape.land': land, 'landscape.shed': shedAt, 'landscape.settle': settleAt,
   },
 };
 

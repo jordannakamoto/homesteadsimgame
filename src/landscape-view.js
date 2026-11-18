@@ -65,10 +65,11 @@
   /* ================= the ground mesh: smooth, tile by tile ================= */
   const groundMat = new T.MeshLambertMaterial({ vertexColors: true });
   const tileViews = new Map();    // tile key -> { mesh, sig, quads }
+  let drawnSeen = 0, maskDue = false;
   const drawn = new Set();         // quad keys drawn (for the grass and the dig mask)
   const qKey = (i, j) => (i + 100000) * 200000 + (j + 100000);
   const COL = {
-    soil: new T.Color(0x5e4632), soilDry: new T.Color(0x86704f), loose: new T.Color(0xa0835c), damp: new T.Color(0x4a3a2c), firm: new T.Color(0x76604a), sod: new T.Color(0x56732f), sodDark: new T.Color(0x3f5a26),
+    soil: new T.Color(0x5e4632), soilDry: new T.Color(0x86704f), damp: new T.Color(0x2b1f16), dirtDark: new T.Color(0x34251a), dirtMid: new T.Color(0x4c3726), dirtLight: new T.Color(0x67503a), crust: new T.Color(0x7c6750), grit: new T.Color(0x8a7660), wall: new T.Color(0x6a4a30), firm: new T.Color(0x76604a), sod: new T.Color(0x56732f), sodDark: new T.Color(0x3f5a26),
     sprout: new T.Color(0x6f9a3a), skirt: new T.Color(0x3d2c1f), liner: new T.Color(0x232526), fabric: new T.Color(0x2e2f2c), fabricLine: new T.Color(0x45463f),
     gravel: new T.Color(0xa49d90), gravelDark: new T.Color(0x6f6a62), bark: new T.Color(0x5a3626), barkLight: new T.Color(0x8a5a3a), sand: new T.Color(0xd8c79a),
     rock: new T.Color(0x8c8478), rockDark: new T.Color(0x5f5a52), subsoil: new T.Color(0x9a7348),
@@ -79,6 +80,12 @@
   };
   for (const k in BASE) BASE[k] = BASE[k].map((h) => new T.Color(h));
   const _c = new T.Color(), _c2 = new T.Color();
+  // smooth value noise on the point grid (for patches of drier and darker earth, and lumps)
+  const vnoise = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+    const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1); return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v; };
+  const looseAt = (t, n) => (t.f[n] & EW.LOOSE_BIT) && t.s[n] !== 0;
+  // fresh loose earth stands in lumps: real height, a centimetre or two, fading out where it thins to nothing
+  const lumpOf = (t, n, i, j) => { if (!looseAt(t, n) || t.l[n] > 2) return 0; const k = clamp(t.h[n] / 30, 0, 1); return k * ((vnoise(i * 0.55 + 3, j * 0.55 + 9) - 0.5) * 0.028 + (hash(i * 3 + 1, j * 7 + 2) - 0.5) * 0.008); };
   // the colour of one point: its material grained by a fixed speckle, fabric or liner where bare, darker down a hole
   function pointColour(g, t, n, i, j, lifeH) {
     const r = hash(i * 7 + 3, j * 13 + 1), name = g.codes[t.s[n]], f = t.f[n], h = t.h[n] / 1000;
@@ -87,17 +94,20 @@
     else if (f & RD.FLAG.LINER) _c.copy(COL.liner).multiplyScalar(0.85 + 0.3 * r);
     else if (f & RD.FLAG.FABRIC) _c.copy((i + j) % 2 ? COL.fabric : COL.fabricLine);
     else {
-      _c.copy(COL.soil).lerp(COL.soilDry, 0.3 + 0.3 * hash(i + 11, j)).multiplyScalar(r < 0.08 ? 1.2 : r > 0.92 ? 0.78 : 0.96);
+      // topsoil: dark and rich, in patches of two or three tones, grit and darker crumbs through it
+      const n1 = vnoise(i * 0.23 + 1, j * 0.23 + 7), n2 = vnoise(i * 0.7 + 17, j * 0.7 + 5);
+      _c.copy(COL.dirtDark).lerp(COL.dirtMid, n1).lerp(COL.dirtLight, n2 * 0.45);
+      if (r < 0.07) _c.lerp(COL.grit, 0.6); else if (r > 0.93) _c.multiplyScalar(0.7);
       if (f & (RD.FLAG.TAMP1 | RD.FLAG.TAMP2)) _c.lerp(COL.firm, f & RD.FLAG.TAMP2 ? 0.6 : 0.3);   // tamped earth: smoother and paler
       if (name === 'lawn_sown') { const age = clamp((lifeH - t.t[n]) / (RD.LAWN.coverDays * 24), 0, 1); if (hash(i * 3 + 1, j * 5) < 0.15 + 0.85 * age) _c.lerp(COL.sprout, 0.35 + 0.5 * age); }
     }
     const bare = !(BASE[name] && t.l[n] > 2) && !(f & (RD.FLAG.LINER | RD.FLAG.FABRIC)) && name !== '';
-    // A hole reads as a hole and a heap as a heap: thrown earth is loose, dry and pale on top, crumbly; a hole is
-    // damp, cool and shadowed, the deeper the darker, with the redder subsoil showing in its walls.
-    if (bare && (f & EW.LOOSE_BIT) && h > -0.02) { _c.lerp(COL.loose, 0.55 + 0.2 * hash(i * 3, j + 4)); return _c.multiplyScalar(0.78 + clamp(h * 1.4, 0, 0.42)); }   // dark at the foot of a heap, pale at its top
+    // A heap of fresh earth dries on top first: pale crusty patches where it stands highest and the wind gets it.
+    // A hole is damp and in shade, darker the deeper, the lighter and redder subsoil showing in its walls.
+    if (bare && (f & EW.LOOSE_BIT) && h > 0.04) { const dry = clamp((h - 0.04) * 2.2, 0, 0.55) * clamp(vnoise(i * 0.4 + 31, j * 0.4 + 2) * 1.6 - 0.3, 0, 1); _c.lerp(COL.crust, dry); }
     if (h < -0.03 && bare) {
-      _c.lerp(COL.subsoil, clamp((-h - 0.03) * 4, 0, 0.55)).lerp(COL.damp, clamp(-h * 1.2, 0, 0.45));
-      return _c.multiplyScalar(1 - clamp(-h * 1.3, 0, 0.5));
+      _c.lerp(COL.wall, clamp((-h - 0.05) * 3, 0, 0.45) * (0.6 + 0.4 * vnoise(i * 0.5, j * 0.5 + 40))).lerp(COL.damp, clamp(-h * 1.1, 0, 0.5));
+      return _c.multiplyScalar(1 - clamp(-h * 1.1, 0, 0.45));
     }
     return _c.multiplyScalar(1 + clamp(h * 0.8, -0.25, 0));
   }
@@ -106,7 +116,7 @@
     const g = grid(), i0 = tx * TS, j0 = tz * TS, W = TS + 3;
     // the world height of every point in the tile and one beyond, for smooth normals
     const Y = new Float32Array(W * W);
-    for (let b = 0; b < W; b++) for (let a = 0; a < W; a++) { const i = i0 + a - 1, j = j0 + b - 1, x = i * STEP, z = j * STEP; Y[b * W + a] = G.heightAt(x, z) + EW.hAt(g, i, j) + 0.004; }
+    for (let b = 0; b < W; b++) for (let a = 0; a < W; a++) { const i = i0 + a - 1, j = j0 + b - 1, x = i * STEP, z = j * STEP, r = ptRef(g, i, j); Y[b * W + a] = G.heightAt(x, z) + EW.hAt(g, i, j) + 0.004 + (r ? lumpOf(r[0], r[1], i, j) : 0); }
     const y = (i, j) => Y[(j - j0 + 1) * W + (i - i0 + 1)];
     const quadOn = (i, j) => (workedAt(g, i, j) || workedAt(g, i + 1, j) || workedAt(g, i, j + 1) || workedAt(g, i + 1, j + 1)) && !bedTilledAt((i + 0.5) * STEP, (j + 0.5) * STEP);
     const pos = [], nor = [], col = [], quads = [];
@@ -154,7 +164,7 @@
     marble: { n: 1.1, geo: new T.OctahedronGeometry(1, 0), size: [0.016, 0.028], flat: 0.7, cols: [0xf3f1ec, 0xe2ded6, 0xd6d2c9] },
     lava: { n: 0.8, geo: new T.IcosahedronGeometry(1, 0), size: [0.022, 0.04], flat: 0.75, cols: [0x7e3a2a, 0x5c2a20, 0x96503a, 0x45231c] },
     woodchips: { n: 1.1, geo: new T.BoxGeometry(2.4, 0.3, 0.8), size: [0.02, 0.04], flat: 1, cols: [0xc19a66, 0xa47a4c, 0x8a6238, 0xd8b588] },
-    clod: { n: 1.4, geo: new T.IcosahedronGeometry(1, 0), size: [0.014, 0.034], flat: 0.75, cols: [0x8a6c4a, 0x7a5e40, 0xa8895f, 0x5e4632, 0x93774f, 0x5f8a3a] },
+    clod: { n: 1.4, geo: new T.IcosahedronGeometry(1, 0), size: [0.012, 0.04], flat: 0.8, cols: [0x3b2a1e, 0x4a3425, 0x56402d, 0x634a34, 0x2f2218, 0x6e543b, 0x765f47] },
     weed: { n: 1, geo: new T.ConeGeometry(0.6, 3, 3), size: [0.02, 0.035], flat: 1, cols: [0x4f7a2e, 0x5f8f36, 0x6b9a3c] },
   };
   for (const k in DETAIL) DETAIL[k].pos = DETAIL[k].geo.toNonIndexed().attributes.position.array;
@@ -166,7 +176,7 @@
         const u = hash(i * 31 + k + seed, j * 17), v = hash(j * 29 + k, i * 13 + 7 + seed), x = (i + u) * STEP, z = (j + v) * STEP;
         const yy = y(i, j) * (1 - u) * (1 - v) + y(i + 1, j) * u * (1 - v) + y(i, j + 1) * (1 - u) * v + y(i + 1, j + 1) * u * v;
         const sz = D.size[0] + (D.size[1] - D.size[0]) * hash(k * 7 + i, j * 3 + seed), yaw = hash(i + k * 3, j + k) * 6.28, cy = Math.cos(yaw), sy = Math.sin(yaw);
-        const cc = _c.setHex(D.cols[Math.floor(hash(k + i * 5, j * 11 + k) * D.cols.length)]), up = D === DETAIL.weed ? sz * 1.4 : sz * D.flat * 0.3;
+        const cc = _c.setHex(D.cols[Math.floor(hash(k + i * 5, j * 11 + k) * D.cols.length)]), up = D === DETAIL.weed ? sz * 1.4 : D === DETAIL.clod ? sz * 0.15 : sz * D.flat * 0.3;   // clods sit half into the earth
         for (let q = 0; q < src.length; q += 3) {
           const lx = src[q] * sz, ly = src[q + 1] * sz * D.flat, lz = src[q + 2] * sz * 0.8;
           pos.push(x + lx * cy - lz * sy, yy + up + ly, z + lx * sy + lz * cy);
@@ -179,7 +189,7 @@
       if (!r) continue;
       const [t, n] = r, D = DETAIL[g.codes[t.s[n]]];
       if (D && t.l[n] > 2) { const c = Math.floor(D.n) + (hash(i, j + 77) < D.n % 1 ? 1 : 0); if (c) scatter(D, i, j, c, 0); }
-      else if ((t.f[n] & EW.LOOSE_BIT) && g.codes[t.s[n]] === 'soil' && t.h[n] > -20) { const C = DETAIL.clod; scatter(C, i, j, 1 + (hash(i, j + 77) < 0.4 ? 1 : 0), 3); }   // clods on thrown earth
+      else if ((t.f[n] & EW.LOOSE_BIT) && g.codes[t.s[n]] === 'soil' && t.h[n] > 15) { const C = DETAIL.clod; scatter(C, i, j, 1 + (hash(i, j + 77) < 0.5 ? 1 : 0) + (t.h[n] > 120 && hash(i + 9, j) < 0.3 ? 1 : 0), 3); }   // clods on thrown earth
       const wd = (t.f[n] >> 4) & 7;
       if (wd) scatter(DETAIL.weed, i, j, Math.min(4, wd), 5);
     }
@@ -199,7 +209,8 @@
   }
   // which tiles changed since they were last built: a cheap fingerprint of each tile's arrays and its neighbours' edges
   const fp = (t) => { if (!t) return 0; let h = 0; for (let n = 0; n < t.h.length; n++) h = (h * 31 + t.h[n] * 7 + t.s[n] * 131 + t.l[n] * 3 + t.f[n] * 17) | 0; return h; };
-  function refreshGround(force) {
+  // `light`: just rebuild the changed tiles (several times a second while grains are landing); the mask and grass catch up
+  function refreshGround(force, light) {
     const g = grid(), lifeH = Math.round(G.sim.state.lifeT / 3600), bs = bedsSig();
     const hs = G.world ? G.world.edits.size + ':' + Math.floor(lifeH / 72) : '';
     if (!force && g.rev === groundRev && bs === bedSigSeen && hs === heightSig) return false;
@@ -220,6 +231,8 @@
     }
     drawn.clear();
     for (const v of tileViews.values()) for (const [i, j] of v.quads) drawn.add(qKey(i, j));
+    if (light) { if (drawn.size !== drawnSeen) { drawnSeen = drawn.size; maskDue = true; } return true; }
+    drawnSeen = drawn.size; maskDue = false;
     paintMask(true);
     hideGrass(true);
     return true;
@@ -246,6 +259,8 @@
 
   /* ================= grass: hidden on worked ground, back when the turf is ================= */
   const ZERO = new T.Matrix4().makeScale(0, 0, 0);
+  // a thin scatter of thrown earth over grass (the fringe of a heap): the grass still shows through it
+  const thinAt = (i, j) => { const r = ptRef(grid(), i, j); if (!r) return false; const [t, n] = r; return looseAt(t, n) && t.h[n] < 25 && t.h[n] > -5 && !t.l[n] && hash(i * 5 + 1, j * 3) < 0.7; };
   const grassRec = new WeakMap();   // mesh -> { list, orig: Float32Array, hid: Set, ver }
   const chunkHas = new Set(); let chunkRev = -1;
   function hideGrass(force) {
@@ -270,7 +285,7 @@
         list.forEach((gr, i) => {
           // the grass round worked ground is trampled back too, so the work reads clearly
           const x = c.ox + gr.lx, z = c.oz + gr.lz, qi = Math.floor(x / STEP), qj = Math.floor(z / STEP);
-          const hide = drawn.has(qKey(qi, qj)) || drawn.has(qKey(qi + 1, qj)) || drawn.has(qKey(qi - 1, qj)) || drawn.has(qKey(qi, qj + 1)) || drawn.has(qKey(qi, qj - 1));
+          const hide = (drawn.has(qKey(qi, qj)) || drawn.has(qKey(qi + 1, qj)) || drawn.has(qKey(qi - 1, qj)) || drawn.has(qKey(qi, qj + 1)) || drawn.has(qKey(qi, qj - 1))) && !thinAt(qi, qj);
           if (hide && !rec.hid.has(i)) { mesh.setMatrixAt(i, ZERO); rec.hid.add(i); n++; }
           else if (!hide && rec.hid.has(i)) { for (let j = 0; j < 16; j++) arr[i * 16 + j] = rec.orig[i * 16 + j]; rec.hid.delete(i); n++; }
         });
@@ -619,32 +634,129 @@
   //  keep holding and drag: the earth rides on the blade under your hand, and the character walks along if you pull
   //  past arm's reach; let go and it drops there (thrown, if it is a step or two away).
   //  A click without dragging drops it just beside the hole. Press a bag and the blade rips it open.
-  const clump = new T.Mesh(new T.IcosahedronGeometry(0.09, 1), new T.MeshLambertMaterial({ color: 0x5e4632 }));
-  clump.visible = false; clump.castShadow = true; G.scene.add(clump);
-  const flights = [];
-  const _bw = new T.Vector3();
-  function bladePos() { ITEM.shovel.obj.updateWorldMatrix(true, false); return _bw.set(0, 0.16, 0.06).applyMatrix4(ITEM.shovel.obj.matrixWorld); }
-  function placeClump(f, t) {
-    clump.position.set(f.x0 + (f.x1 - f.x0) * t, f.y0 + (f.y1 - f.y0) * t + Math.sin(Math.PI * t) * f.arc, f.z0 + (f.z1 - f.z0) * t);
-    clump.rotation.set(t * 5, t * 3, 0);
-    clump.scale.set(1 + 0.4 * t, 0.8 - 0.2 * t, 1 + 0.4 * t);
+  /* ---- grains: the flowing layer. Earth that is thrown, spilt or shed off a slope is a shower of grains (clods,
+     chips, pebbles) that fall, bounce, roll down the slope with the material's friction and come to rest; each grain
+     goes back into the ground where it stops (after Zhu and Bridson's two-layer sand). A slope still steeper than
+     loose earth stands sheds more grains, so heaps slump and spread grain by grain, visibly. ---- */
+  const GN = 900;
+  const grainGeo = new T.IcosahedronGeometry(1, 0);
+  { const p = grainGeo.attributes.position.array;          // lumpy, not a perfect solid
+    for (let i = 0; i < p.length; i += 3) { const k = 0.78 + 0.44 * hash(Math.round(p[i] * 40) + 7, Math.round(p[i + 1] * 40) * 3 + Math.round(p[i + 2] * 40) * 11); p[i] *= k; p[i + 1] *= k; p[i + 2] *= k; }
+    grainGeo.computeVertexNormals(); }
+  const grainMesh = new T.InstancedMesh(grainGeo, new T.MeshLambertMaterial(), GN);
+  grainMesh.count = 0; grainMesh.castShadow = true; grainMesh.receiveShadow = true; grainMesh.frustumCulled = false;
+  grainMesh.setColorAt(0, new T.Color()); G.scene.add(grainMesh);
+  const SOIL_COLS = [0x3b2a1e, 0x4a3425, 0x56402d, 0x634a34, 0x2f2218, 0x6e543b];
+  // per material: friction (about the tangent of its angle of repose), bounciness, colours, shape
+  const GRAIN = {
+    soil: { mu: 0.72, e: 0.12, cols: SOIL_COLS, shape: [1, 0.8, 1] },
+    bedmix: { mu: 0.7, e: 0.1, cols: [0x2f2219, 0x3b2a1e, 0x45311f], shape: [1, 0.8, 1] },
+    woodchips: { mu: 0.78, e: 0.08, cols: [0xc19a66, 0xa47a4c, 0x8a6238, 0xd8b588], shape: [1.7, 0.35, 0.9] },
+    bark: { mu: 0.78, e: 0.08, cols: [0x6a412c, 0x8a5a3a, 0x4e2e1f], shape: [1.6, 0.4, 1] },
+    sand: { mu: 0.65, e: 0.05, cols: [0xd8c79a, 0xc9b88a, 0xe2d4ac], shape: [1, 0.9, 1] },
+  };
+  const grainKind = (m) => GRAIN[m] || (DETAIL[m] ? (GRAIN[m] = { mu: 0.62, e: 0.3, cols: DETAIL[m].cols, shape: [1, 0.7, 0.9] }) : GRAIN.soil);
+  const grains = [];
+  const _gq = new T.Quaternion(), _ga = new T.Vector3(), _gm = new T.Matrix4(), _gs = new T.Vector3(), _gp = new T.Vector3(), _gc = new T.Color();
+  // one grain of m3 of material m at (x, y, z) moving (vx, vy, vz); `ground`: already rolling on the surface
+  function spawnGrain(x, y, z, vx, vy, vz, m3, m, { delay = 0, ground = false, turf = false } = {}) {
+    if (grains.length >= GN) return false;
+    const K = grainKind(m), r = clamp(Math.cbrt((3 * m3) / (4 * Math.PI)), 0.012, 0.06), q = new T.Quaternion().setFromEuler(E3.set(Math.random() * 6, Math.random() * 6, Math.random() * 6));
+    const col = turf && Math.random() < 0.18 ? 0x51702e : K.cols[Math.floor(Math.random() * K.cols.length)];
+    grains.push({ x, y, z, vx, vy, vz, r, m3, m, K, q, col, ground, still: 0, age: 0, delay, fade: -1, hops: 0 });
+    return true;
   }
-  function flyTick(dt) {
-    for (let k = flights.length - 1; k >= 0; k--) {
-      const f = flights[k];
-      f.t += dt / f.dur;
-      const t = Math.min(1, f.t);
-      clump.visible = true; placeClump(f, t);
-      if (t >= 1) { flights.splice(k, 1); clump.visible = flights.length > 0; f.land(); }
+  const grainBatch = [];
+  let groundMoved = false;
+  const slides = new Map();   // places where loose ground may still be too steep: key -> { x, z, quiet }
+  function grainStep(h) {
+    const g9 = 9.8, e = 0.05;
+    for (let k = grains.length - 1; k >= 0; k--) {
+      const g = grains[k];
+      if (g.delay > 0) { g.delay -= h; continue; }
+      if (g.fade >= 0) { g.fade += h; if (g.fade > 0.25) grains.splice(k, 1); continue; }
+      g.age += h;
+      if (!g.ground) {
+        g.vy -= g9 * h; g.x += g.vx * h; g.y += g.vy * h; g.z += g.vz * h;
+        const gy = surfaceAt(g.x, g.z);
+        if (g.y - g.r * 0.7 <= gy) {
+          // it hits the ground: bounce off the slope if it came in hard, else start rolling
+          const gx = (surfaceAt(g.x + e, g.z) - surfaceAt(g.x - e, g.z)) / (2 * e), gz = (surfaceAt(g.x, g.z + e) - surfaceAt(g.x, g.z - e)) / (2 * e), nl = Math.hypot(gx, 1, gz);
+          const nx = -gx / nl, ny = 1 / nl, nz = -gz / nl, vn = g.vx * nx + g.vy * ny + g.vz * nz;
+          g.y = gy + g.r * 0.7;
+          if (vn < -1.2 && g.hops < 2) { const j = (1 + g.K.e) * vn; g.vx -= j * nx; g.vy -= j * ny; g.vz -= j * nz; g.vx *= 0.7; g.vz *= 0.7; g.hops++; }
+          else { g.ground = true; g.vx *= 0.55; g.vz *= 0.55; g.vy = 0; }
+        }
+      } else {
+        // rolling: gravity down the slope, friction against it (Coulomb: stops where the slope is under its repose)
+        const gx = (surfaceAt(g.x + e, g.z) - surfaceAt(g.x - e, g.z)) / (2 * e), gz = (surfaceAt(g.x, g.z + e) - surfaceAt(g.x, g.z - e)) / (2 * e);
+        const sl = Math.hypot(gx, gz), n2 = 1 + sl * sl;
+        g.vx -= (g9 * gx / n2) * h; g.vz -= (g9 * gz / n2) * h;
+        const sp = Math.hypot(g.vx, g.vz), fr = (g.K.mu * g9 / Math.sqrt(n2)) * h;
+        if (sp <= fr) { g.vx = g.vz = 0; } else { g.vx -= (g.vx / sp) * fr; g.vz -= (g.vz / sp) * fr; }
+        const y0 = g.y;
+        g.x += g.vx * h; g.z += g.vz * h;
+        const gy = surfaceAt(g.x, g.z) + g.r * 0.7;
+        // off a lip (the ground falls away faster than it rolls): it drops
+        if (y0 - gy > 0.06) { g.ground = false; g.y = y0; g.vy = 0; }
+        else g.y = gy;
+        if (sp < 0.04) g.still += h; else g.still = 0;   // friction holds it: it has come to rest
+        if (g.still > 0.06 || g.age > 4) { g.fade = 0; grainBatch.push([+g.x.toFixed(3), +g.z.toFixed(3), g.m3, g.m]); }
+      }
+      // tumbling: rolls about the axis across its motion
+      const sp = Math.hypot(g.vx, g.vz);
+      if (sp > 1e-3) { _ga.set(g.vz / sp, 0, -g.vx / sp); g.q.premultiply(_gq.setFromAxisAngle(_ga, (sp * h) / g.r)); }
     }
   }
-  // the next press lands anything still in the air at once (one load on the blade at a time)
-  function landAll() { while (flights.length) { const f = flights.pop(); f.land(); } clump.visible = false; }
+  function grainTick(dt) {
+    if (!grains.length && !slides.size && !grainBatch.length) return;
+    const n = Math.max(1, Math.ceil(dt / (1 / 90)));
+    for (let i = 0; i < n; i++) grainStep(dt / n);
+    // grains at rest go back into the ground, and the ground round them may now be too steep
+    if (grainBatch.length) {
+      const pts = grainBatch.splice(0, grainBatch.length);
+      cmd('landscape.land', { pts });
+      groundMoved = true;
+      for (const [x, z] of pts) { const key = Math.round(x * 2) + ',' + Math.round(z * 2); if (!slides.has(key)) slides.set(key, { x: Math.round(x * 2) / 2, z: Math.round(z * 2) / 2, quiet: 0 }); }
+    }
+    // the slopes shed: too steep, the surface comes away and rolls down
+    for (const [key, sl] of slides) {
+      if (grains.length > GN - 60) break;
+      const res = cmd('landscape.shed', { x: sl.x, z: sl.z, r: 0.6 });
+      sl.age = (sl.age || 0) + dt;
+      if (sl.age > 4) { cmd('landscape.settle', { x: sl.x, z: sl.z, r: 0.7 }); groundMoved = true; slides.delete(key); continue; }   // long enough: let it finish
+      if (!res.ok || !res.pts.length) { sl.quiet += dt; if (sl.quiet > 0.4) slides.delete(key); continue; }
+      sl.quiet = 0; groundMoved = true;
+      // shed earth comes away in crumbs of a few hundred millilitres (neighbouring points together), never lost:
+      // a crumb with no room left in the pool goes straight back down where it was
+      const acc = new Map();
+      for (const [x, z, m3, m, dx, dz] of res.pts) {
+        const key = m + ':' + Math.round(x * 5) + ',' + Math.round(z * 5);
+        const a = acc.get(key) || { x: 0, z: 0, m3: 0, m, dx: 0, dz: 0 };
+        a.x += x * m3; a.z += z * m3; a.dx += dx * m3; a.dz += dz * m3; a.m3 += m3; acc.set(key, a);
+      }
+      for (const a of acc.values()) {
+        const x = a.x / a.m3, z = a.z / a.m3, dl = Math.hypot(a.dx, a.dz) || 1;
+        if (!spawnGrain(x, surfaceAt(x, z) + 0.02, z, (a.dx / dl) * 0.45, 0, (a.dz / dl) * 0.45, a.m3, a.m, { ground: true })) grainBatch.push([+x.toFixed(3), +z.toFixed(3), a.m3, a.m]);
+      }
+    }
+    // draw
+    let c = 0;
+    for (const g of grains) {
+      const k = g.fade >= 0 ? Math.max(0, 1 - g.fade / 0.25) : 1, sh = g.K.shape;
+      _gm.compose(_gp.set(g.x, g.y - (g.fade >= 0 ? g.r * 0.3 * (1 - k) : 0), g.z), g.q, _gs.set(g.r * sh[0] * k, g.r * sh[1] * k, g.r * sh[2] * k));
+      grainMesh.setMatrixAt(c, _gm); grainMesh.setColorAt(c, _gc.setHex(g.col)); c++;
+    }
+    grainMesh.count = c; grainMesh.instanceMatrix.needsUpdate = true; if (grainMesh.instanceColor) grainMesh.instanceColor.needsUpdate = true;
+  }
+  const grainsBusy = () => grains.length > 0;
+  const _bw = new T.Vector3();
+  function bladePos() { ITEM.shovel.obj.updateWorldMatrix(true, false); return _bw.set(0, 0.16, 0.06).applyMatrix4(ITEM.shovel.obj.matrixWorld); }
   const THROW = 3.5;                       // about as far as a shovelful carries
   const REACH = 1.15;                      // how far from you the blade can be held out
   const dig = { ph: '', t: 0, x: 0, z: 0, tx: 0, tz: 0, held: false, bag: null, fail: false, done: false, levered: false, bit: false };
   function bagAt(x, z) { let best = null, bd = 0.38; for (const o of Object.values(L().things)) if (o.k === 'bag') { const d = Math.hypot(o.x - x, o.z - z); if (d < bd) { best = o; bd = d; } } return best; }
-  const onBlade = () => loaded() && !flights.length;
+  const onBlade = () => loaded();
   // just beside the hole, on the far side from you
   function besideHole(x, z, out) {
     const P = G.player, d = Math.hypot(x - P.x, z - P.z) || 1, ux = (x - P.x) / d, uz = (z - P.z) / d;
@@ -666,10 +778,11 @@
     const x = dig.x, z = dig.z, y = surfaceAt(x, z);
     if (dig.bag) {
       const o = L().things[dig.bag];
-      const res = o ? cmd('landscape.open', { id: o.id }) : { ok: false, reason: 'The bag is gone.' };
+      const res = o ? cmd('landscape.open', { id: o.id, spill: true }) : { ok: false, reason: 'The bag is gone.' };
       if (!res.ok) { dig.fail = true; return sayS(res.reason); }
-      const hex = res.m === 'bedmix' ? 0x3f2c1f : matHex(res.m);
-      G.burst(x, y + 0.25, z, 30, hex, 2.2, 2.6, 0.06, 0.8);
+      // the bag splits and what was in it pours out and slides into a heap
+      const n = clamp(Math.round(res.m3 / 0.0008), 24, 80);
+      for (let k = 0; k < n; k++) { const a = Math.random() * 6.283, v = 0.1 + Math.random() * 0.45, rr = Math.random() * 0.18; if (!spawnGrain(x + Math.cos(a) * rr, y + 0.1 + Math.random() * 0.12, z + Math.sin(a) * rr, Math.cos(a) * v, 0.2 + Math.random() * 0.5, Math.sin(a) * v, res.m3 / n, res.m, { delay: Math.random() * 0.15 })) grainBatch.push([+x.toFixed(3), +z.toFixed(3), res.m3 / n, res.m]); }
       G.burst(x, y + 0.2, z, 8, 0xd8d0b8, 1.8, 2.2, 0.08, 0.7);         // shreds of the bag
       G.cam.shake = Math.min(G.cam.shake + 0.2, 0.45); G.juice.hitStop = 0.09;
       dirty = true;
@@ -677,9 +790,9 @@
     }
     if (isWater(x, z)) { dig.fail = true; return sayS('That is water.'); }
     // the blade bites: a jolt, a stop, crumbs kicked up
-    G.cam.shake = Math.min(G.cam.shake + 0.12, 0.45); G.juice.hitStop = 0.06;
+    G.cam.shake = Math.min(G.cam.shake + 0.03 + 0.14 * HARD, 0.45); G.juice.hitStop = 0.015 + 0.06 * HARD;
     const turf = !EW.sAt(grid(), Math.round(x / STEP), Math.round(z / STEP));
-    G.burst(x, y + 0.05, z, 7, turf ? 0x5e8a3a : 0x5a4230, 1.0, 1.6, 0.045, 0.45);
+    G.burst(x, y + 0.05, z, 3 + Math.round(7 * HARD), turf ? 0x5e8a3a : 0x4c3726, 1.0, 1.6, 0.045, 0.45);
   }
   function lever() {
     const x = dig.x, z = dig.z;
@@ -690,26 +803,40 @@
     if (res.turf) G.burst(x, y + 0.12, z, 6, 0x5e8a3a, 1.6, 2.6, 0.07, 0.7);
     G.cam.shake = Math.min(G.cam.shake + 0.06, 0.45);
     if (res.liner) sayS('You cut into the pond liner: the water ran out. The liner is back in your stock.', 5);
+    lastTurf = !!res.turf;
+    { const key = Math.round(x * 2) + ',' + Math.round(z * 2); slides.set(key, { x, z, quiet: 0 }); }   // dug at the foot of a heap: it may slide in
     setHeap(); tip(res.s === 'soil' ? 'dug' : 'scooped', res);
   }
+  let lastTurf = false;
+  // the load leaves the blade as a stream of grains aimed at (tx, tz): tipped off close by, thrown in an arc further
   function throwLoad(tx, tz) {
     if (!loaded()) return;
-    const c = L().carry, from = bladePos(), ty = surfaceAt(tx, tz), d = Math.hypot(tx - from.x, tz - from.z);
-    clump.material.color.setHex(matHex(c.s));
+    const c = L().carry, m3 = c.m3, m = c.s, from = bladePos().clone();
+    const res = cmd('landscape.pour', { x: tx, z: tz });
+    if (!res.ok) return;
     ITEM.shovel.heap.visible = false;
     G.cam.shake = Math.min(G.cam.shake + 0.04, 0.45);
-    // close by it is tipped off the blade; further it is thrown in an arc
-    flights.push({ x0: from.x, y0: from.y, z0: from.z, x1: tx, y1: ty + 0.05, z1: tz, t: 0, dur: 0.12 + d * 0.08, arc: d < 0.8 ? 0.05 : 0.2 + d * 0.16, land: () => {
-      const res = cmd('landscape.dump', { x: tx, z: tz });
-      if (!res.ok) { setHeap(); return; }
-      G.burst(tx, surfaceAt(tx, tz) + 0.12, tz, 14, matHex(res.s), 1.6, 1.4, 0.07, 0.6);
-      G.burst(tx, surfaceAt(tx, tz) + 0.04, tz, 8, matHex(res.s), 2.0, 0.6, 0.05, 0.45);
-      G.cam.shake = Math.min(G.cam.shake + 0.08, 0.45);
-      setHeap(); tip('tossed', res);
-    } });
+    const n = clamp(Math.round(m3 / 0.0006), 10, 60), per = m3 / n, d = Math.hypot(tx - from.x, tz - from.z), ty = surfaceAt(tx, tz);
+    const TT = d < 0.8 ? 0.22 : 0.28 + d * 0.07;
+    for (let k = 0; k < n; k++) {
+      const a = Math.random() * 6.283, rr = (0.06 + d * 0.05) * Math.sqrt(Math.random()), x1 = tx + Math.cos(a) * rr, z1 = tz + Math.sin(a) * rr;
+      const x0 = from.x + (Math.random() - 0.5) * 0.08, y0 = from.y + Math.random() * 0.05, z0 = from.z + (Math.random() - 0.5) * 0.08, T2 = TT * (0.9 + 0.2 * Math.random());
+      if (!spawnGrain(x0, y0, z0, (x1 - x0) / T2, (ty + 0.04 - y0) / T2 + 0.5 * 9.8 * T2, (z1 - z0) / T2, per, m, { delay: (k / n) * 0.12, turf: lastTurf && m === 'soil' })) grainBatch.push([+x1.toFixed(3), +z1.toFixed(3), per, m]);
+    }
+    tip('tossed', { s: m });
   }
   // the timeline of one scoop: in (0-0.12 s), bite, lever up (to 0.28 s), then carried while held, then tipped off
-  const T_BITE = 0.12, T_UP = 0.28, T_TIP = 0.24;
+  // How hard the ground is decides the stroke, as with a real spade: loose earth or chips take the blade at a push;
+  // firm ground wants a stamp; turf, matted with roots, a hard stamp and a jolt. Lifting is slower when it is heavy.
+  const T_TIP = 0.24;
+  let T_BITE = 0.12, T_UP = 0.28, HARD = 0.5;
+  function hardness(x, z) {
+    const g = grid(), i = Math.round(x / STEP), j = Math.round(z / STEP), sc = EW.sAt(g, i, j), f = EW.fAt(g, i, j), l = EW.lAt(g, i, j);
+    if (sc === 0) return 1;                                           // turf
+    if (l > 0.002 || (f & EW.LOOSE_BIT)) return 0.15;                // loose: thrown earth, chips, gravel
+    if (f & (RD.FLAG.TAMP1 | RD.FLAG.TAMP2)) return 0.85;              // packed
+    return 0.5 + clamp(-EW.hAt(g, i, j) * 0.5, 0, 0.3);               // firm, harder deeper down (subsoil, clay)
+  }
   function digTick(dt) {
     const P = G.player;
     if (!dig.ph) { P.lead = null; return; }
@@ -782,16 +909,16 @@
     return true;
   };
   const shovel = {
-    flying: () => flights.length > 0 || !!dig.ph,
+    flying: () => grainsBusy() || !!dig.ph,
     press(a) {
       act.kind = 'shovel';
       if (!owns('shovel') && !owns('spade')) { act.kind = ''; return sayS('You need a shovel.'); }
-      landAll();
-      if (dig.ph === 'tip' && !dig.done) { dig.done = true; throwLoad(dig.tx, dig.tz); landAll(); }
+      if (dig.ph === 'tip' && !dig.done) { dig.done = true; throwLoad(dig.tx, dig.tz); }
       const bag = bagAt(a.x, a.z);
       Object.assign(dig, { t: 0, held: true, fail: false, done: false, bit: false, levered: false, let: null, bag: null });
       if (onBlade()) { dig.ph = 'carry'; dig.x = a.x; dig.z = a.z; return; }   // already loaded: carry it
       dig.ph = 'in'; dig.x = bag ? bag.x : a.x; dig.z = bag ? bag.z : a.z; dig.bag = bag ? bag.id : null;
+      HARD = bag ? 0.2 : hardness(dig.x, dig.z); T_BITE = 0.07 + 0.11 * HARD; T_UP = T_BITE + 0.13 + 0.06 * HARD;
     },
     frame() {},
     release() {
@@ -1299,19 +1426,20 @@
   }, true);
 
   /* ================= every frame (cheap) and four times a second ================= */
-  let last = performance.now(), slow = 0;
+  let last = performance.now(), slow = 0, fastT = 0;
   function tick(t) {
     const dt = Math.min(0.1, (t - last) / 1000); last = t;
     const want = G.player.tool === 'yard';
     if (want !== on) { if (want) enter(); else leave(); }
     if (on) updateTag(H.aim);
     if (hoseMeshes.size) hoseSpray();
-    if (flights.length) flyTick(dt);
+    grainTick(dt);
+    if (groundMoved) { fastT += dt; if (fastT > 0.07) { fastT = 0; groundMoved = false; refreshGround(false, true); } }
     digTick(dt); markTick(dt);
     slow += dt;
     if (slow > 0.25 || dirty) {
       slow = 0; dirty = false;
-      refreshGround(false);
+      if (!refreshGround(false) && maskDue) { maskDue = false; paintMask(true); hideGrass(true); }
       paintMask(false);
       layoutStones();
       if ((plantT += 1) % 8 === 0) layoutPlants(true); else layoutPlants(false);
@@ -1328,6 +1456,6 @@
   window.__landscape = {
     relief, surfaceAt, tools: { shovel }, items: { shovel: ITEM.shovel }, setHeap, bindSay: (fn) => { shovelSay = fn; }, get rev() { return grid().rev; },
     maskAt: (x, z) => { const i = Math.floor(x / STEP) - maskI, j = Math.floor(z / STEP) - maskJ; return i >= 0 && j >= 0 && i < MN && j < MN ? maskData[j * MN + i] : -1; }, drawnAt: (x, z) => drawn.has(qKey(Math.floor(x / STEP), Math.floor(z / STEP))),
-    get on() { return on; }, get flying() { return flights.length > 0 || !!dig.ph; }, get dig() { return dig.ph; }, hold: (id) => H.hold(id), refresh: () => { dirty = true; refreshGround(true); layoutStones(); layoutPlants(true); }, tiles: () => tileViews.size,
+    get on() { return on; }, get flying() { return grainsBusy() || !!dig.ph || slides.size > 0; }, get dig() { return dig.ph; }, get grainN() { return grains.length; }, get slideN() { return slides.size; }, hold: (id) => H.hold(id), refresh: () => { dirty = true; refreshGround(true); layoutStones(); layoutPlants(true); }, tiles: () => tileViews.size,
   };
 })();
