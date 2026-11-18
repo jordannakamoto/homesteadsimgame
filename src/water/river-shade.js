@@ -21,6 +21,7 @@ export const RIVER_SHADE = /* glsl */ `
   uniform vec4 uWin;                       // the live simulation's window (x0, z0, x1, z1); x1 < x0 when there is none
   uniform samplerCube uEnv, uEnv2; uniform vec4 uEnvPos; uniform float uEnvMix;
   uniform sampler2D uRefl; uniform mat4 uReflMat; uniform vec4 uReflOn;   // the mirror (reflect-plane.js)
+  uniform float uCloud;                                  // how overcast it is (0-1)
   uniform sampler2D uRipTex; uniform vec4 uRipWin;      // the fine waves round the player (ripple-sim.js): x0, z0, size, on
   uniform vec4 uWake; uniform vec2 uWakeK;   // someone wading: where, the current past their legs (x, z); how deep, on          // the reflection probe (reflect-probe.js): where, and w on/off
   uniform vec4 uRip[24]; uniform vec2 uRipV[24], uRipD[24];   // ripples; the current that carries each; the way its maker was moving      // ripples, and the current that carries each one away                   // ripples: x, z, start time, strength
@@ -182,7 +183,10 @@ export const RIVER_SHADE = /* glsl */ `
     // what is reflected is smeared up and down (the long wavering reflections of a lake at eye level)
     float graze = 1.0 - ndv;
     fres *= mix(1.0, 0.55, smoothstep(0.1, 0.9, rough) * smoothstep(0.6, 0.95, graze));
-    fres = min(fres, mix(0.85, 0.65, rough));
+    fres = min(fres, mix(0.7, 0.5, rough));
+    // under an overcast sky the whole sky is one bright, even source: what the water reflects of it is real but
+    // soft, and the light coming up out of the water (lit from everywhere) holds its own against it
+    fres *= mix(1.0, 0.72, uCloud);
     // the shallow fringe by the banks: stirred-up silt, bits of leaf and scum, a film on the water; dull rather than
     // glossy, and cloudier
     float fringe = 1.0 - smoothstep(0.03, 0.2, d);

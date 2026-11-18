@@ -2925,6 +2925,8 @@ function updateStreams(dt) {
     u.uWetDepth.value += (lk.depth - u.uWetDepth.value) * k;
     u.uWetSpeed.value += (lk.speed - u.uWetSpeed.value) * k;
     u.uTurbid.value += (sw.turbidity - u.uTurbid.value) * k;
+    const wxs = sim.state.sys.weather;
+    u.uCloud.value += ((wxs ? wxs.cloud || 0 : 0) - u.uCloud.value) * k;
   }
   riverFalls.update(dt, player.x, player.z, { fx: waterFx, live: riverLive.on ? riverLive : null, wet: u.uWetSpeed.value });
   const wx = sim.state.sys.weather, wms = wx ? wx.windMs || 0 : 0, wd = wx ? wx.windDirRad || 0 : 0;
@@ -2964,6 +2966,7 @@ const motes = (() => {
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MOTES * 3), 3));
   const mat = new THREE.PointsMaterial({ color: 0xfff6c8, size: 0.16, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true });
   const p = new THREE.Points(g, mat); p.frustumCulled = false;
+  p.userData.noReflect = true;   // the motes (green fireflies at night) glare in the water's reflections
   scene.add(p);
   const seeds = [];
   const r = mulberry32(7);
