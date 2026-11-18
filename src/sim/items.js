@@ -16,6 +16,7 @@ import { ITEMS_GARDEN, GARDEN_CATEGORIES } from './content/garden-items.js';
 import { ITEMS_LANDSCAPE, LANDSCAPE_CATEGORIES } from './content/landscape.js';
 import { ITEMS_VEHICLES, VEHICLE_CATEGORIES } from './content/vehicles.js';
 import { ITEMS_SERVICES, SERVICE_ITEM_CATEGORIES } from './content/services.js';
+import { ITEMS_CONCRETE } from './content/concrete-items.js';
 import { openingItems, openingItemFromId } from './content/openings.js';
 
 export const ITEM_UNITS = Object.freeze(['each', 'm', 'm2', 'm3', 'kg', 'L']);
@@ -131,6 +132,9 @@ add({ id: 'flagstone_40', name: 'Flagstone 40 mm', category: 'stone', unit: 'm2'
 add({ id: 'gravel', name: 'Gravel (bulk)', category: 'stone', unit: 'm3', material: 'gravel', priceUsd: 50 });
 add({ id: 'concrete_mix', name: 'Concrete mix (dry)', category: 'stone', unit: 'kg', material: 'concrete', priceUsd: 0.19, blurb: 'Add water. Cures to concrete' });
 add({ id: 'mortar_mix', name: 'Mortar mix (dry)', category: 'stone', unit: 'kg', material: 'mortar', priceUsd: 0.22 });
+
+// forms for poured foundations: boards and stakes (src/sim/content/concrete-items.js)
+for (const g of ITEMS_CONCRETE) add(g);
 
 // ---- fasteners, by weight
 add({ id: 'nails_framing', name: 'Framing nails (galvanised)', category: 'fasteners', unit: 'kg', material: 'steel', priceUsd: 6.2 });

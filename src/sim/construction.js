@@ -207,6 +207,7 @@ export function stageSatisfied(pr, stage, seen = {}) {
 export function stageOpen(pr, stage) {
   const def = C.STAGE[stage];
   if (!def) return false;
+  if (pr.hold && pr.hold[stage]) return false;      // held by another system (green concrete: construction.setHold)
   const seen = {};
   return def.needs.every((n) => stageSatisfied(pr, n, seen));
 }
@@ -234,6 +235,7 @@ export function blocked(pr, id) {
   if (m.built) return 'already built';
   const def = C.STAGE[m.stage];
   if (!def) return 'not part of the build';
+  if (pr.hold && pr.hold[m.stage]) return pr.hold[m.stage];
   if (!stageOpen(pr, m.stage)) return 'stage not open';
   if (def.parentFirst) for (const o in pr.members) { const q = pr.members[o]; if (!q.built && q.parent === m.parent && def.parentFirst.includes(q.stage)) return 'frame not finished'; }
   if (def.flat && flatCurrent(pr, m.stage) !== m.parent) return 'one frame at a time';
@@ -528,6 +530,7 @@ function setPlan(ctx, p) {
   if (old) for (const k in old.raised) pr.raised[k] = true;
   if (old && old.ext) pr.ext = JSON.parse(JSON.stringify(old.ext));               // work another system tallies stays with the building
   if (old && old.extLines) pr.extLines = JSON.parse(JSON.stringify(old.extLines));
+  if (old && old.hold && Object.keys(old.hold).length) pr.hold = { ...old.hold };   // holds belong to another system (construction.setHold): a plan sent again keeps them
   if (!old) for (const st of C.STAGES) if (st.flat) for (const par of flatParents(pr, st.id)) if (frameReady(pr, st.id, par)) pr.raised[par] = true;
   retally(pr);
   if (!pr.lines[LADDER_KEY] && C.LADDER.with.some((st) => pr.tally[st] && pr.tally[st][1]) && item(C.LADDER.itemId)) {   // work at height is done from a ladder: it comes with the order
@@ -709,7 +712,7 @@ function install(ctx, p) {
   for (const id of p.memberIds || []) {
     const m = pr.members[id];
     const why = blocked(pr, id);
-    if (why) { out.refused.push({ id, reason: why, missing: why === 'support missing' ? supportMissing(pr, id) : undefined }); break; }
+    if (why) { out.refused.push({ id, reason: why, missing: why === 'support missing' ? supportMissing(pr, id) : undefined, held: m && pr.hold && pr.hold[m.stage] ? 1 : undefined }); break; }
     const ln = m.line ? pr.lines[m.line] : null;
     let need = round6(m.need - m.got), give = 0, cut = null, saw = null;
     let prep = false;
@@ -994,6 +997,25 @@ export const constructionSystem = () => ({
       for (const id of p.memberIds || []) { const m = pr.members[id]; if (!m || m.built || m.kind === 'site') continue; m.got = m.need; m.built = 1; pr.tally[m.stage][0]++; done.push(id); }
       if (done.length) refresh(c, c.s, pr);
       return { ok: done.length > 0, settled: done };
+    },
+    // another system holds stages of a building (green concrete holds framing): { structId, stage | stages, reason | null }
+    'construction.setHold': (c, p) => {
+      const pr = c.s.progress[p && p.structId], stages = p && (Array.isArray(p.stages) ? p.stages : [p.stage]);
+      if (!pr) return { ok: false, reason: 'unknown building' };
+      if (!stages.length || !stages.every((st) => C.STAGE[st])) return { ok: false, reason: 'unknown stage' };
+      if (!pr.hold) pr.hold = {};
+      for (const st of stages) if (p.reason) pr.hold[st] = String(p.reason); else delete pr.hold[st];
+      refresh(c, c.s, pr);
+      c.emit('construction.hold', { structId: pr.id, stages, reason: p.reason || null });
+      return { ok: true };
+    },
+    // another system uses up the building's material from its stacks (nearest (x, z) first), then from the inventory
+    // (the gravel base, bags of concrete mix): { itemId, qty, x?, z?, structId? } -> { ok, qty: what was drawn }
+    'construction.draw': (c, p) => {
+      if (!p || !item(p.itemId) || !(p.qty > 0)) return { ok: false, reason: 'nothing to draw' };
+      const pr = p.structId !== undefined ? c.s.progress[p.structId] : null, x = Number.isFinite(p.x) ? p.x : pr ? pr.x : 0, z = Number.isFinite(p.z) ? p.z : pr ? pr.z : 0;
+      const got = round6(drawSupply(c.s, p.stacksOnly ? null : c.get('stock'), p.itemId, round6(p.qty), x, z));
+      return { ok: got > 1e-9, qty: got, reason: got > 1e-9 ? undefined : 'none on site' };
     },
     'construction.dismantle': dismantle,
     'construction.setLevel': (c, p) => { if (!LEVELS.includes(p.level)) return { ok: false, reason: 'unknown level' }; const pr = c.s.progress[p.structId]; if (pr) pr.level = p.level; else c.s.level = p.level; return { ok: true }; },

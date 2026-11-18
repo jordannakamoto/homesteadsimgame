@@ -74,6 +74,21 @@ test('gradePad levels a site exactly as build mode always has', () => {
   }
 });
 
+test('a pad fills a hand-dug hole in its middle, even when its samples are only round its walls (A3)', () => {
+  const G = GC.makeGround(), fine = EW.makeGrid(), flat = () => 2;
+  EW.cut(fine, 21.5, 11.2, 0.15, { r: 0.3 });             // a hole in the middle of a 3 x 2.4 m shed plan
+  EW.cut(fine, 40, 12, 0.05, { r: 0.3 });                 // and one well away from it
+  const samples = [];                                     // wall ends, about a metre apart, as build mode sends them
+  for (let x = 20; x <= 23; x++) samples.push([x, 10], [x, 12.4]);
+  for (const z of [10.8, 11.6]) samples.push([20, z], [23, z]);
+  assert.ok(GC.reliefTotal(G, fine, 21.5, 11.2) < -0.3);
+  const v0 = GC.netVolume(G, fine), res = GC.gradePad(G, fine, flat, samples, 2.2, { core: 1.05, rim: 2.9 });
+  near(GC.reliefTotal(G, fine, 21.5, 11.2), 0.2, 0.02, 'the hole is gone: the middle is at pad level');
+  assert.equal(EW.hAt(fine, 215, 112), 0);
+  near(GC.netVolume(G, fine) - v0, res.fillM3 - res.cutM3, 1e-6, 'volume accounted');
+  assert.ok(GC.reliefTotal(G, fine, 40, 12) < -0.1, 'the hole outside the pad is left alone');
+});
+
 test('conform and trim measure and cut fine ground to an absolute level', () => {
   const G = GC.makeGround(), fine = EW.makeGrid(), R = { poly: [[1, 1], [3, 1], [3, 2], [1, 2]] };
   const y0 = GC.surfaceY(G, fine, tilt, 2, 1.5), target = y0 - 0.25;

@@ -32,7 +32,9 @@
   const RW = window.__roofwalk && window.__framing ? window.__roofwalk.create(G) : null;   // standing on a decked roof, clipped in at the ridge
   const FR = window.__framing, RWC = C.ROOFWALK || { slideK: 0.5, slideMps: 0.55, ropeM: 14, anchorReachM: 1.3, edgeM: 0.22, says: '' };
   const REACH = C.WORK.reachM;
-  const OFF = { build: 1, garden: 1, hands: 1 };       // other tools own the pointer while they are out
+  const OFF = { build: 1, garden: 1, hands: 1, site: 1 };       // other tools own the pointer while they are out
+  // a poured foundation built by hand (src/foundation-view.js) owns its building's site and foundation stages
+  const handBuilt = (id, pm) => (pm.stage === 'site' || pm.stage === 'foundation') && !!window.__foundation && window.__foundation.owns(id);
   const V = {
     sim: null, rev: 1, bv: -1, sel: null, structs: new Map(), geom: new Map(), plans: new Map(), planVer: new Map(), fresh: new Map(), flushing: [],
     working: null, auto: null, raise: null, ctx: null, fWas: false, idleT: 0, placing: null, pendingPlan: null, book: false, expand: null, quotes: {},
@@ -93,13 +95,14 @@
   // per building, per change: what can go in now (in order), which frame waits to be raised, and the panel's view of it
   function plan(id) {
     let p = V.plans.get(id);
-    if (p && p.rev === V.rev) return p;
+    const fo = !!window.__foundation && window.__foundation.owns(id);
+    if (p && p.rev === V.rev && p.fo === fo) return p;
     const pr = S().progress[id], g = geom(id);
     if (!pr || !g) return null;
-    const inst = api.installable(pr).filter((m) => g.byId.has(m) || pr.members[m].kind === 'site').sort((a, b) => (g.rank.get(a) || 0) - (g.rank.get(b) || 0));
+    const inst = api.installable(pr).filter((m) => (g.byId.has(m) || pr.members[m].kind === 'site') && !handBuilt(id, pr.members[m])).sort((a, b) => (g.rank.get(a) || 0) - (g.rank.get(b) || 0));
     let raise = null;
     for (const st of C.STAGES) if (st.flat && api.stageOpen(pr, st.id)) { const cur = api.flatCurrent(pr, st.id); if (cur && api.frameReady(pr, st.id, cur)) raise = cur; }
-    p = { rev: V.rev, inst, raise, view: api.buildingView(S(), id) };
+    p = { rev: V.rev, fo, inst, raise, view: api.buildingView(S(), id) };
     V.plans.set(id, p);
     return p;
   }
@@ -1081,7 +1084,7 @@
   function leftInStage(pr) {
     const g = geom(pr.id), pl = plan(pr.id);
     if (!g || !pl || !pl.view.next) return null;
-    const ids = Object.keys(pr.members).filter((k) => { const pm = pr.members[k]; return pm.stage === pl.view.next && !pm.built && pm.kind !== 'site' && g.byId.has(k); });
+    const ids = Object.keys(pr.members).filter((k) => { const pm = pr.members[k]; return pm.stage === pl.view.next && !pm.built && pm.kind !== 'site' && g.byId.has(k) && !handBuilt(pr.id, pm); });
     if (!ids.length || ids.length > 5) return null;
     const [ylo, yhi] = yRange(g), P = G.player, c = wB.set(g.cx, 0, g.cz).applyMatrix4(g.matrix), cx = c.x, cz = c.z, list = [], seen = [];
     let high = false;
@@ -1397,7 +1400,7 @@
     onCancel(j) { V.working = null; redraw(j.id); },
   });
   const vTmp = new T.Vector3();
-  const reason = (r, kind, mid) => r.reason === 'support missing' ? ((C.SUPPORT_SAYS[r.missing] || 'Set the supports') + ' first') : (kind === 'door' || kind === 'window') && (r.reason === 'stage not open' || r.reason === 'frame not finished') ? (r.reason === 'frame not finished' ? 'Frame the opening first' : 'Wrap the wall before the ' + kind + ' goes in') : ({ 'no material': 'You need ' + (r.itemId ? stackName(r.itemId) : 'material') + ' for that', 'wrong material': 'That needs ' + (r.itemId ? stackName(r.itemId) : 'something else'), 'no fasteners': 'Out of ' + (r.itemId ? low(CAT[r.itemId].name) : 'fasteners') + ': buy more in the Supplier (U)', 'stage not open': 'Not yet: an earlier stage comes first', 'cut first': 'Cut it at the sawhorses first', 'no sawhorses': 'The sawhorses come with the lumber', 'nothing to cut': 'Nothing left to cut' })[r.reason] || 'That cannot go in yet';
+  const reason = (r, kind, mid) => r.held ? r.reason : r.reason === 'support missing' ? ((C.SUPPORT_SAYS[r.missing] || 'Set the supports') + ' first') : (kind === 'door' || kind === 'window') && (r.reason === 'stage not open' || r.reason === 'frame not finished') ? (r.reason === 'frame not finished' ? 'Frame the opening first' : 'Wrap the wall before the ' + kind + ' goes in') : ({ 'no material': 'You need ' + (r.itemId ? stackName(r.itemId) : 'material') + ' for that', 'wrong material': 'That needs ' + (r.itemId ? stackName(r.itemId) : 'something else'), 'no fasteners': 'Out of ' + (r.itemId ? low(CAT[r.itemId].name) : 'fasteners') + ': buy more in the Supplier (U)', 'stage not open': 'Not yet: an earlier stage comes first', 'cut first': 'Cut it at the sawhorses first', 'no sawhorses': 'The sawhorses come with the lumber', 'nothing to cut': 'Nothing left to cut' })[r.reason] || 'That cannot go in yet';
   function autoCan(s, pr, mid, ln, c) {
     const pm = pr.members[mid], sn = api.stockNeed(s, pr, mid);
     if (pm.prep) return true;                   // cut and waiting at the sawhorses
@@ -1600,6 +1603,8 @@
     if (!v) return pr.done ? null : { k: pr.name, title: 'Waiting', line: 'Nothing can go in just now.' };
     const out = { k: pr.name + ' · ' + C.STAGE_ORDER.filter((q) => pl.view.stages.some((w) => w.id === q)).indexOf(v.id) + ' of ' + pl.view.stages.length + ' stages done', title: v.name, stage: v.id, what: v.what, why: v.why };
     out.k = pr.name + ' · stage ' + (pl.view.stages.indexOf(v) + 1) + ' of ' + pl.view.stages.length;
+    { const fh = (v.id === 'site' || v.id === 'foundation') && window.__foundation && window.__foundation.owns(pr.id) ? window.__foundation.hint(pr.id) : null;
+      if (fh) return { ...out, line: fh, target: at, btn: Object.values(pr.lines).every((l) => l.ordered <= 1e-9) && pl.view.toOrderUsd > 0 ? ['order:all', 'Order everything, ' + money(pl.view.toOrderUsd)] : null }; }
     if (Object.values(pr.lines).every((l) => l.ordered <= 1e-9) && pl.view.toOrderUsd > 0) return { ...out, line: 'Order the materials. While they are on their way, level the ground: stand on the plan and hold <kbd>E</kbd>.', btn: ['order:all', 'Order everything, ' + money(pl.view.toOrderUsd)], target: at };
     if (V.auto && V.auto.id === pr.id) return { ...out, line: (V.auto.guided ? 'Building. ' : 'Working until it is done. ') + '<kbd>E</kbd> stops.', target: at };
     if (pl.raise) return { ...out, line: 'The frame is ready. Stand by it and hold <kbd>E</kbd> to raise the wall.', target: at };
