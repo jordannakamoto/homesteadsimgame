@@ -502,6 +502,38 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 
 - The cord is invisible and its 30 m is a fixed number; no extension cords yet.
 
+## Services S1 — one connection compiler, and a store for runs in buildings
+
+**What is new**
+
+- Nothing to see yet: this is groundwork for in-wall wiring and plumbing. First Water (the kit pipes in the yard) now compiles through the new generic `src/sim/core/links.js` and must play exactly as before; its output was checked identical on 400 random pipe networks.
+- `src/sim/core/routes.js`: a generic store of runs on frames (a building), with nodes, bores, pulling, joins and segments as work steps. Not registered in the game yet (that is S2, with the content).
+
+**Try this**
+
+1. First Water: pump, fit kit parts from the barrel to the tap, open the valve, leave an end open. Flow, leaks and the valve should behave as before.
+
+**What's weak**
+
+- No player-facing change; routes become visible with S2/S3.
+
+## Vehicles V0 — the controller stack (no visible change)
+
+**What is new**
+
+- Nothing you should notice. Under the hood the engine now has one place that decides what body your input drives and what the camera follows (`src/engine/control.js`, `__game.control`). Vehicles (the ATV next) sit on it; cooking, ladders, scaffold, roof walking and the hands move onto it later.
+- Also exposed for add-ons: `__game.groundAt(x, z, y)` (the one ground read: terrain, shaped yard ground and built floors) and `__game.pushOut(o, rad)` (the circle push-out the player uses against trees, rocks and walls).
+
+**Try this (regression only)**
+
+1. Walk, sprint, jump, scroll the camera in and out: the same as before.
+2. Climb a ladder and a scaffold, walk on a roof, open the kitchen and cook, use the hands on the water kit: all the same as before.
+3. Console: `__game.control.top().id` is `'walk'`; `__game.control.canTake('seat')` says why a seat would be refused (e.g. `arms full`, `build mode`).
+
+**Known gaps**
+
+- Nothing uses it yet; the first user is the vehicle seat (V3).
+
 ## Vehicles, under the hood (branch `vehicles-v1v2-core`)
 
 - Nothing to drive yet: this is the drive model and the world's record of vehicles that the ATV (next slices) runs on. The page part lands in V3.
