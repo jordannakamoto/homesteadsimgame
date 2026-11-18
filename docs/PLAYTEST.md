@@ -486,6 +486,22 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 - Hold E at the sawhorses to cut piece after piece. Pieces for the frame lying on the deck now are cut first.
 - The guide sends you to the sawhorses when only cut-to-fit pieces are left in a stage, then back to the frame once they are cut. Guided building and "Work until done" still cut for you.
 
+## Services S0 — power tools see real power
+
+**What is new**
+
+- `window.__game.powerAvailable()` now asks the electrical solve instead of always saying no. A corded tool has power when a live load point (an outlet, a light, any wired load) with spare watts is within 30 m of you; with no load points wired at all it falls back to the main circuit's spare.
+- The circular saw at the sawhorses, power-tool work speed and the stock panel's "needs power" note all follow it.
+
+**Try this**
+
+1. Equip: a battery or generator, an inverter, a 15 A breaker and an outlet, wired together. Stand near the outlet with a circular saw owned: cutting at the sawhorses uses the saw.
+2. Walk more than 30 m from every outlet, or trip the breaker: the saw stops counting as powered. Console: `__game.powerAvailable()`, `__game.powerAvailable(1500)`.
+
+**What's weak**
+
+- The cord is invisible and its 30 m is a fixed number; no extension cords yet.
+
 ## Vehicles, under the hood (branch `vehicles-v1v2-core`)
 
 - Nothing to drive yet: this is the drive model and the world's record of vehicles that the ATV (next slices) runs on. The page part lands in V3.

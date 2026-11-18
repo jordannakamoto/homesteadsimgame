@@ -965,6 +965,36 @@ export function powerAvailableAt(state, pieceId) {
   return Math.max(0, watts);
 }
 
+// Where each site piece stands (x, z), memoised by the pieces array so a per-frame caller costs a lookup.
+const placeCache = new WeakMap();
+function placesOf(pieces) {
+  let m = placeCache.get(pieces);
+  if (!m) {
+    m = new Map();
+    for (const p of pieces) if (p && p.id && p.a) { const b = p.b || p.a; m.set(p.id, [(p.a.x + b.x) / 2, (p.a.z + b.z) / 2]); }
+    placeCache.set(pieces, m);
+  }
+  return m;
+}
+
+// Can a corded tool at (x, z) draw at least minW? True when a load point within cordM of it (a cord's
+// reach) has that much spare. With no load points at all, falls back to the main circuit's spare.
+export function powerNear(state, x, z, cordM = 30, minW = 1) {
+  const s = sysState(state); if (!s || !s.active) return false;
+  const ids = Object.keys(s.points || {});
+  if (!ids.length) return powerAvailableAt(state) >= minW;
+  const site = state && state.sys ? state.sys.site : null;
+  const places = site && Array.isArray(site.pieces) ? placesOf(site.pieces) : null;
+  if (!places) return false;
+  const r2 = cordM * cordM;
+  for (const id of ids) {
+    const at = places.get(id); if (!at) continue;
+    const dx = at[0] - x, dz = at[1] - z;
+    if (dx * dx + dz * dz <= r2 && powerAvailableAt(state, id) >= minW) return true;
+  }
+  return false;
+}
+
 // Pure data for the energy-flow overlay: flows per wire, state per device.
 export function overlayData(state) {
   const s = sysState(state);
