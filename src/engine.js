@@ -49,7 +49,7 @@ THREE.ShaderChunk.opaque_fragment += '\nif ( isnan( gl_FragColor.r + gl_FragColo
 // default), 'fsr' (AMD FSR 1: made for smooth, photoreal, anti-aliased images; on pixel textures it smears texel
 // edges into brush strokes) or 'sharp' (area-weighted nearest: every render pixel stays a crisp block, only the
 // seams between blocks are blended, the usual way to scale pixel art by uneven amounts).
-const LOOK = { ao: false, hudBlur: true, lightBloom: false, compactHdr: false, grassShadows: true, tuftShadow: true, drawOrder: true, farGrass: 'normal', rootShade: 1, grassClumps: true, grassBacklight: true, skyShade: true, sunFog: true, grassSheen: true, farBlend: true, crownShade: true, camFx: false, upscaler: 'bicubic', toneMap: 'aces', taa: false, edgeBelts: true, riverWater: 'live', waterTexel: 'smooth', bedStyle: 'voxel', waterReflect: 'probe', skyModel: 'physical', skyClouds: 'volume', cloudRes: 'half', nightSky: 'real', farLand: true, openSea: true, haze: 'normal' };
+const LOOK = { ao: false, hudBlur: true, lightBloom: false, compactHdr: false, grassShadows: true, tuftShadow: true, drawOrder: true, farGrass: 'normal', rootShade: 1, grassClumps: true, grassBacklight: true, skyShade: true, sunFog: true, grassSheen: true, farBlend: true, crownShade: true, camFx: false, upscaler: 'bicubic', toneMap: 'aces', taa: false, edgeBelts: true, riverWater: 'live', waterTexel: 'smooth', bedStyle: 'voxel', waterReflect: 'probe', skyModel: 'physical', skyClouds: 'volume', cloudRes: 'half', cloudStyle: 'soft', nightSky: 'real', farLand: true, openSea: true, haze: 'normal' };
 const LOOK_KEY = 'homestead:look';
 try { const s = JSON.parse(localStorage.getItem(LOOK_KEY) || 'null'); if (s) for (const k in LOOK) if (typeof s[k] === typeof LOOK[k]) LOOK[k] = s[k]; } catch (e) { /* no storage */ }
 const saveLook = () => { try { localStorage.setItem(LOOK_KEY, JSON.stringify(LOOK)); } catch (e) { /* no storage */ } };
@@ -2803,7 +2803,7 @@ const nightSky = createNightSky({ scene, camera, sky: skyDome });
 const SKYF = { eq: new THREE.Matrix3(), eqInv: new THREE.Matrix3(), moon: new THREE.Vector4(0, -1, 0, 0), age: 0 };
 const HAZE = { light: 1.7, normal: 1, heavy: 0.5 };
 function applySkyLook() {
-  skyDome.setOptions({ model: LOOK.skyModel, clouds: LOOK.skyClouds, night: LOOK.nightSky });
+  skyDome.setOptions({ model: LOOK.skyModel, clouds: LOOK.skyClouds, night: LOOK.nightSky, cloudStyle: LOOK.cloudStyle });
   skyDome.setCloudScale(LOOK.cloudRes === 'full' ? 1 : LOOK.cloudRes === 'quarter' ? 0.25 : 0.5);
   nightSky.setOn(LOOK.nightSky === 'real');
   farLand.setOn(LOOK.farLand); farLand.setOpenSea(LOOK.openSea); farLand.setHaze(LOOK.haze === 'heavy' ? 0.55 : LOOK.haze === 'light' ? 0.12 : 0.3);
@@ -3395,7 +3395,7 @@ function setLook(key, value) {
   if (key === 'taa') { applyGfx(); resize(); }
   if (key === 'riverWater') riverLive.setMode(value === 'baked' ? 'bed' : value);
   if (key === 'waterReflect') { if (value === 'simple') { reflectProbe.setOn(false); reflectPlane.setOn(false); reflectPlane2.setOn(false); } reflectProbe.setDetail(value === 'full'); reflectPlane.setDetail(value === 'full'); reflectPlane2.setDetail(value === 'full'); }
-  if (['skyModel', 'skyClouds', 'cloudRes', 'nightSky', 'farLand', 'openSea', 'haze'].includes(key)) applySkyLook();
+  if (['skyModel', 'skyClouds', 'cloudStyle', 'cloudRes', 'nightSky', 'farLand', 'openSea', 'haze'].includes(key)) applySkyLook();
   if (key === 'bedStyle') U.bedVox.value = value === 'real' ? 0 : value === 'voxelFine' ? 2 : 1;
   if (key === 'waterTexel') { riverWater.uniforms.uTPM.value = value === 'ground' ? 6.4 : 25.6; riverWater.uniforms.uSnap.value = value === 'smooth' ? 0 : 1; }      // MSAA off or back on, and the resolve path
   if (key === 'toneMap') {
@@ -3536,6 +3536,8 @@ const gfxPanel = (() => {
       h('div', { className: 'hint', textContent: 'Physical works the sky out from how air and haze scatter sunlight: the blue, the pale horizon, the glow round the sun and the colours of sunrise and sunset, which also tint the distance haze. Painted is the earlier two-colour sky.' }),
       seg('Clouds', [['volume', 'Volumetric'], ['flat', 'Flat'], ['off', 'Off']], LOOK.skyClouds === 'layered' ? 'volume' : LOOK.skyClouds === 'heaped' ? 'flat' : LOOK.skyClouds, (v) => setLook('skyClouds', v)),
       h('div', { className: 'hint', textContent: 'Volumetric: clouds with depth, worked out by marching through a cloud layer 1.3 to 3 km up: flat bases, billowed tops, lit through themselves from the sun, silver-edged toward it, glowing pink from below at sunset. Flat: the cheaper painted heaps. Both have thin cirrus high up. Cover follows the weather.' }),
+      seg('Cloud style', [['soft', 'Soft'], ['defined', 'Defined']], LOOK.cloudStyle, (v) => setLook('cloudStyle', v)),
+      h('div', { className: 'hint', textContent: 'Soft: thinner clouds with wisps all round their edges, blending into the sky and the haze. Defined: denser heaps with clearer outlines.' }),
       seg('Cloud resolution', [['full', 'Full'], ['half', 'Half'], ['quarter', 'Quarter']], LOOK.cloudRes, (v) => setLook('cloudRes', v)),
       h('div', { className: 'hint', textContent: 'Volumetric clouds are worked out apart from the rest of the frame at this share of its resolution and enlarged smoothly: soft things lose little by it. Half costs a quarter of Full.' }),
       seg('Night sky', [['real', 'Real stars'], ['simple', 'Simple'], ['off', 'Off']], LOOK.nightSky, (v) => setLook('nightSky', v)),
@@ -4733,7 +4735,7 @@ window.__game = {
     toneMap: (v) => { if (['aces', 'agxlook', 'agx', 'neutral'].includes(v)) setLook('toneMap', v); return LOOK.toneMap; },
     // the sky: __game.look.sky({ model: 'physical'|'painted', clouds: 'layered'|'heaped'|'off', night: 'real'|'simple'|'off',
     //   farLand: bool, openSea: bool, haze: 'light'|'normal'|'heavy' }); returns the current settings
-    sky: (o = {}) => { const map = { cloudRes: 'cloudRes', model: 'skyModel', clouds: 'skyClouds', night: 'nightSky', farLand: 'farLand', openSea: 'openSea', haze: 'haze' }; for (const k in o) if (map[k]) setLook(map[k], o[k]); return { model: LOOK.skyModel, clouds: LOOK.skyClouds, night: LOOK.nightSky, farLand: LOOK.farLand, openSea: LOOK.openSea, haze: LOOK.haze }; },
+    sky: (o = {}) => { const map = { cloudStyle: 'cloudStyle', cloudRes: 'cloudRes', model: 'skyModel', clouds: 'skyClouds', night: 'nightSky', farLand: 'farLand', openSea: 'openSea', haze: 'haze' }; for (const k in o) if (map[k]) setLook(map[k], o[k]); return { model: LOOK.skyModel, clouds: LOOK.skyClouds, night: LOOK.nightSky, farLand: LOOK.farLand, openSea: LOOK.openSea, haze: LOOK.haze }; },
     // stand the camera at [x, y, z] looking at [x, y, z] (6 numbers), or null to give it back
     debugView: (v) => { debugView = v && v.length === 6 ? v.slice() : null; },
     skyFrame: () => ({ moon: SKYF.moon.toArray(), age: SKYF.age, eqInv: SKYF.eqInv.toArray() }),

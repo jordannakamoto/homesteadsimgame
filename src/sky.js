@@ -46,6 +46,7 @@ export const SKY_NOISE_GLSL = /* glsl */ `
   uniform sampler2D uCloudNoise;
   uniform highp sampler3D uNoise3;
   uniform float uFrame;
+  uniform float uSoft;                    // the cloud style: 0 defined, 1 soft (thinner, wispier, more blended)
   const float C_BASE = 1.4, C_TOP = 4.6;   // heaps up to about 3 km tall: fair-weather cumulus to towering congestus
   float remap(float v, float a, float b, float c, float d) { return c + (v - a) / (b - a) * (d - c); }
   // where clouds may be (the weather map, as Red Dead's cloud map): fields tens of kilometres across with open sky
@@ -83,7 +84,8 @@ export const SKY_NOISE_GLSL = /* glsl */ `
     // and a finer octave still, for crisp edges
     float e2 = textureLod(uNoise3, q * 2.3 + vec3(0.3, t * 0.003, 0.7), 0.0).g;
     det = mix(det, mix(1.0 - e2, e2, clamp(h * 4.0, 0.0, 1.0)), 0.3);
-    d = remap(d, det * 0.55 * fine_k, 1.0, 0.0, 1.0);
+    det = mix(det, 1.0 - df, 0.45 * uSoft);                       // soft: wisps all round, not just at the base
+    d = remap(d, det * mix(0.55, 0.75, uSoft) * fine_k, 1.0, 0.0, 1.0);
     return clamp(d, 0.0, 1.0) * cov;
   }
   // distance to height hk along a ray rising dy, and the height at distance t (curved Earth)
@@ -213,7 +215,7 @@ const SKY_COMMON = /* glsl */ `
             // (scaled so a cloud's sunlit face sits just under white: brighter, every lit face tone-maps to the same flat
             // white and the cloud loses its shading)
             vec3 S = uSunHi * sunL * 0.17 + amb;
-            float st = exp(-den * 55.0 * dt);   // dense enough for a definite edge, thin enough that light comes through
+            float st = exp(-den * mix(55.0, 28.0, uSoft) * dt);   // dense enough for a definite edge, thin enough that light comes through
             L += T * S * (1.0 - st);
             tw += t * T * (1.0 - st); tws += T * (1.0 - st);
             T *= st;
@@ -285,7 +287,7 @@ export function createSkyDome({ scene, camera, renderer, water, U, SEA = 0 }) {
     uSunDir: water.uSunDir, uSunCol: water.uSunCol, uAmb: water.uAmb, uSky: water.uSky, uZenith: water.uZenith, uDeep: water.uDeep, uTime: U.time,
     uView: { value: view.texture }, uHz: { value: null }, uMW: { value: mwTex }, uCloudNoise: { value: cloudNoise }, uNoise3: { value: cloudNoise3 },
     uCloudTex: { value: null }, uScreen: { value: new THREE.Vector2(1, 1) }, uMainCam: { value: 0 }, uDust: { value: 1024 }, uInvVP: { value: new THREE.Matrix4() }, uCamPos: { value: new THREE.Vector3() },
-    uPrevTex: { value: null }, uPrevVP: { value: new THREE.Matrix4() }, uHist: { value: 0 }, uFrame: { value: 0 },
+    uPrevTex: { value: null }, uPrevVP: { value: new THREE.Matrix4() }, uHist: { value: 0 }, uFrame: { value: 0 }, uSoft: { value: 1 },
     uTrueSun: { value: new THREE.Vector3(0, 1, 0) }, uSunLo: { value: new THREE.Color() }, uSunHi: { value: new THREE.Color() }, uSunCi: { value: new THREE.Color() },
     uCloud: { value: 0.3 }, uGrey: { value: 0 }, uNight: { value: 0 }, uDay: { value: 1 }, uWind: { value: new THREE.Vector2() }, uWindOff: { value: new THREE.Vector2() },
     uFogC: { value: new THREE.Color() }, uFog: { value: new THREE.Vector3(60, 1000, 1) }, uCamY: { value: 10 }, uSea: { value: SEA },
@@ -511,10 +513,10 @@ ${SKY_COMMON}      void main() {
         if (cl.a < 0.001) return vec4(0.0);
         vec3 cc = cl.rgb / cl.a;
         cc = mix(cc, mix(uSky, uZenith, 0.25) * 0.9, uGrey * 0.6);
-        cc = mix(cc, skyAbove(d), 1.0 - exp(-tMid / 22.0));    // far clouds fade into the haze
+        cc = mix(cc, skyAbove(d), 1.0 - exp(-tMid / mix(22.0, 15.0, uSoft)));    // far clouds fade into the haze
         // stored premultiplied (colour times cover): enlarged and blended over frames, the empty sky round a cloud
         // then adds nothing, where straight colour would bleed its black in as a dark rim
-        float a = cl.a * smoothstep(0.0, 0.07, d.y);
+        float a = pow(cl.a, mix(1.0, 1.4, uSoft)) * smoothstep(0.0, 0.07, d.y);   // (soft: thin parts more see-through)
         return vec4(min(cc * 0.5, vec3(1.0)) * a, a);
       }`,
   });
@@ -575,7 +577,8 @@ ${SKY_COMMON}      void main() {
     // the cloud pass's share of the frame's resolution: 1, 0.5 or 0.25
     setCloudScale(k) { cloudScale = k; },
     setHorizon(tex) { uniforms.uHz.value = tex; },
-    setOptions({ model, clouds, night }) {
+    setOptions({ model, clouds, night, cloudStyle }) {
+      if (cloudStyle) uniforms.uSoft.value = cloudStyle === 'defined' ? 0 : 1;
       const v = uniforms.uOpt.value;
       if (model in MODEL) v.x = MODEL[model];
       if (clouds in CLOUDS) v.y = CLOUDS[clouds];
