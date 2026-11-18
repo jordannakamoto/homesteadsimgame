@@ -385,7 +385,8 @@
     pos.needsUpdate = true;
     guide.material.color.setHex(lined ? 0xc8e6a0 : 0xf0dca0); guide.material.opacity = 0.2 + 0.35 * (1 - best.d / GUIDE_M);
     guide.visible = true;
-    if (best.d <= (h.latchM || 0.4)) {
+    if (L.dropped === best.Lt.id) { if (best.d > 0.6) L.dropped = null; else return; }   // just unhitched: drive clear first
+    if (best.d <= (h.latchM || 0.4) && backing) {
       if (lined && Math.abs(b.u) < 1.5) latch(L, best.Lt);
       else if (!lined && warnT <= 0) { say('Line the trailer up straighter to hitch it.', 1.4); warnT = 1.4; }
     }
@@ -408,7 +409,7 @@
     syncNow(L);
     const r = G.sim.commandNow('vehicles.unhitch', { id: L.id });
     if (!r.ok) return r;
-    L.towL = null; Lt.bedWant = false;
+    L.towL = null; Lt.bedWant = false; L.dropped = Lt.id;
     park(Lt, S().units[Lt.id]);
     G.cam.shake = Math.min(0.3, G.cam.shake + 0.04);
     say('Unhitched.', 1.5);
