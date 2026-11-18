@@ -14,7 +14,9 @@ export function createReflectProbe({ renderer, scene, hide = [], uniforms }) {
   const SIZE = 128;
   const mk = () => new THREE.WebGLCubeRenderTarget(SIZE, { type: THREE.HalfFloatType, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter });
   const targets = [mk(), mk()];
-  const cube = new THREE.CubeCamera(0.1, 90, targets[0]);
+  // its near plane is 2.5 m out: what is right beside the probe (the bank you stand on, lit by your light) is not
+  // what water further off would reflect
+  const cube = new THREE.CubeCamera(2.5, 90, targets[0]);
   let face = 0, on = false, fresh = true, back = 1, fade = 1, every = 4, tick = 0;
   const pos = new THREE.Vector3(), want = new THREE.Vector3();
   // uniforms.uEnv shows targets[shown], uEnv2 the other; uEnvMix fades from the first to the second

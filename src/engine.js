@@ -2356,6 +2356,10 @@ const pm = {};
         const haft = mk(0.04, 0.04, 0.46, 0x7a5230); haft.position.set(0, -0.5, 0.16);
         const head = mk(0.035, 0.17, 0.11, 0x9aa2a8); head.position.set(0, -0.545, 0.34);
         arm.add(haft, head); pm.hatchet = [haft, head];
+        // a framing hammer, out while there is nailing to do (P.hammer, set by construction)
+        const hh = mk(0.035, 0.035, 0.34, 0x8a5a32); hh.position.set(0, -0.5, 0.13);
+        const hd = mk(0.045, 0.15, 0.05, 0x5f666c); hd.position.set(0, -0.53, 0.3);
+        hh.visible = hd.visible = false; arm.add(hh, hd); pm.hammer = [hh, hd];
       }
       continue;
     }
@@ -3820,6 +3824,7 @@ function updatePlayer(dt) {
   let mx = fwx * iz + rxw * ix, mz = fwz * iz + rzw * ix;
   const ml = Math.hypot(mx, mz);
   if (ml > 1) { mx /= ml; mz /= ml; }                           // an analogue stick may ask for less than full speed
+  if (ml < 0.05 && P.lead) { mx = P.lead.x; mz = P.lead.z; }      // an add-on may lead the walk (a shovel load pulled past reach)
   const swimming = heightAt(P.x, P.z) < -0.75;
   const alt = !!(keys.AltLeft || keys.AltRight);
   const armed = P.tool === 'axe';
@@ -4078,6 +4083,7 @@ function updatePlayer(dt) {
     else if (P.work.kind === 'carry') armR = -2.0 + armR * 0.2;
     else if (P.work.kind === 'saw') { armR = -1.25 + 0.5 * Math.sin(P.work.k * Math.PI * 2); armL = -0.85; lean = 0.38; }
   }
+  if (pm.hammer && (pm.hammer[0].visible !== !!P.hammer)) { const h = !!P.hammer; pm.hammer[0].visible = pm.hammer[1].visible = h; pm.hatchet[0].visible = pm.hatchet[1].visible = !h; }
   if (P.handPose) { armL = P.handPose.l; armR = P.handPose.r; lean += P.handPose.lean || 0; }   // hands-on work poses the arms (set by add-ons)
   pm.legL.rotation.x = legL; pm.legR.rotation.x = legR;
   pm.armL.rotation.x = armL; pm.armR.rotation.x = armR;

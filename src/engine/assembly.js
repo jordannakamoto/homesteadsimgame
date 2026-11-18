@@ -148,6 +148,8 @@
         L.far.instanceMatrix.needsUpdate = true;
         if (L.far.instanceColor) L.far.instanceColor.needsUpdate = true;
       },
+      // where a member's box is drawn just now, in its layer (for tests)
+      drawnAt(key, id, memberId) { const t = things.get(key), L = t && t.layers.get(id), n = L && L.at.get(memberId); if (n === undefined) return null; L.solid.getMatrixAt(n, m4); return [m4.elements[12], m4.elements[13], m4.elements[14]]; },
       // where a member is in the world right now (its middle), for sparks and dust
       worldOf(key, id, m, out) {
         const t = things.get(key), L = t && t.layers.get(id);

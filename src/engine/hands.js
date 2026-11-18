@@ -303,7 +303,7 @@
     if (trophy.obj) { G.pm.root.remove(trophy.obj); trophy.obj = null; }
     if (shown) { G.pm.root.remove(shown); shown = null; }
     if (saved) { G.cam.dist = saved.dist; if (saved.pitchSet == null) G.cam.pitch = saved.pitch; saved = null; }
-    G.player.pace = 0; G.player.faceHold = null; G.handPose = null;
+    G.player.pace = 0; G.player.faceHold = null; G.player.lead = null; G.handPose = null;
     if (G.pm.hatchet) for (const m of G.pm.hatchet) m.visible = true;
     mark.visible = false; reachRing.visible = false;
     cfg = null; cur = null; ptr.turning = false;

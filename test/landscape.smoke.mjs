@@ -1,6 +1,6 @@
 // Browser test of the yard through real input: node test/landscape.smoke.mjs  (needs dist/index.html and Playwright)
-// Key 6 takes up the yard tools. A click with the shovel is one whole stroke: it digs a scoop and throws it to the
-// marker (set with a right-click); holding keeps digging. Chips come as bags, dragged by hand and ripped open. A drag skims turf; the path is tamped, covered with fabric and
+// Key 6 takes up the yard tools. The shovel: press to dig a scoop, drag it where it goes, let go to drop it; a click
+// drops it beside the hole. Chips come as bags, dragged by hand and ripped open by the shovel. A drag skims turf; the path is tamped, covered with fabric and
 // gravel; cobbles go down in a band; cut stone stacks into a wall with a capstone; a garden box is set and filled; a
 // lavender goes in a dug hole; the barrow fills and tips; a pond is lined and filled; the garden's bar has the trowel
 // and shovel; everything survives a reload. SHOTS=dir saves a screenshot.
@@ -35,21 +35,19 @@ const L = () => G(() => { const s = __game.sim.state.sys.landscape; return { til
 const rel = (A) => G((p) => __game.landscape.reliefAt(__game.sim.state, p.x, p.z), A);
 const ground = (A) => G((p) => __game.landscape.groundAt(__game.sim.state, p.x, p.z), A);
 
-// the shovel: one click, one whole stroke (wind up, in, lever, throw), and the earth lands at the ring
+// the shovel: press where the blade goes in, drag the scoop where it goes, let go; a click drops it beside the hole
 await hold('shovel');
-const right = async (A) => { const a = await scr(A.x, A.z); await page.mouse.move(a.x, a.y); await wait(80); await page.mouse.click(a.x, a.y, { button: 'right' }); await wait(250); };
-const strokeAt = async (A) => { await click(A); await landed(); };
-await right(at(-0.8, 1.2));
-check('a right-click sets where the earth goes', !!(await G(() => __landscape.mark)));
-await click(at(0.4, 1.2));
-check('a click starts a stroke', (await G(() => __landscape.stroke)) >= 0);
-await landed();
+const scoop = async (A, B) => { await drag(A, B, 10, 250); await landed(); };
+const dig1 = async (A) => { await click(A); await landed(); };
+await scoop(at(0.4, 1.2), at(-0.8, 1.2));
 let s = await L();
-check('the stroke digs a scoop and throws it; earth is neither made nor lost', s.carry === 0 && s.tiles > 0 && Math.abs(s.net) < 2e-4, 'net ' + s.net.toFixed(5));
-// hold the button: stroke after stroke
-{ const a = await scr(at(0.4, 1.2).x, at(0.4, 1.2).z); await page.mouse.move(a.x, a.y); await page.mouse.down(); for (let k = 0; k < 40 && (await G(() => __game.sim.state.sys.landscape.totals.dugM3 || 0)) < 0.12; k++) await wait(250); await page.mouse.up(); await landed(); }
+check('a scoop is dug, carried and dropped; earth is neither made nor lost', s.carry === 0 && s.tiles > 0 && Math.abs(s.net) < 2e-4, 'net ' + s.net.toFixed(5));
+for (let i = 0; i < 4; i++) await scoop(at(0.4, 1.2), at(-0.8, 1.2));
 const hole = await rel(at(0.4, 1.2)), heap = await rel(at(-0.8, 1.2));
-check('holding keeps digging: a round hole, and a heap at the marker', hole < -0.12 && heap > 0.1, Math.round(hole * 100) + ' cm, +' + Math.round(heap * 100) + ' cm');
+check('scoop after scoop: a round hole, and a heap where they were dropped', hole < -0.12 && heap > 0.1, Math.round(hole * 100) + ' cm, +' + Math.round(heap * 100) + ' cm');
+const net0 = (await L()).net;
+await dig1(at(0.4, 1.2));
+check('a plain click digs and drops it beside the hole', (await L()).carry === 0 && Math.abs((await L()).net - net0) < 2e-4);
 check('the shaped ground is drawn and the terrain lets it through', await G(() => __landscape.tiles() > 0));
 // bags: set down, dragged by hand, ripped open by the shovel, scooped to the marker
 await G(() => { const st = __game.sim.state.sys.stock; st.items.wood_chips = 2 * 56; });
@@ -63,17 +61,15 @@ await hold('hands');
 const moved = (await bags()).find((o) => o.id === bl[1].id);
 check('hands drag a bag across the yard', moved && Math.hypot(moved.x - bl[1].x, moved.z - bl[1].z) > 0.5, moved ? (Math.hypot(moved.x - bl[1].x, moved.z - bl[1].z)).toFixed(2) + ' m' : 'gone');
 await hold('shovel');
-await strokeAt({ x: bl[0].x, z: bl[0].z });
-await landed();
+await dig1({ x: bl[0].x, z: bl[0].z });
 check('a shovel stroke rips a bag open into a heap of chips', (await bags()).length === 1 && (await ground({ x: bl[0].x, z: bl[0].z }))?.s === 'woodchips');
 const bed = at(-1.7, 1.6);
-await right(bed);
-await strokeAt({ x: bl[0].x, z: bl[0].z });
-check('scooped off the heap and thrown to the marker', (await ground(bed))?.s === 'woodchips', JSON.stringify(await ground(bed)));
+await scoop({ x: bl[0].x, z: bl[0].z }, bed);
+check('scooped off the heap and dragged to the bed', (await ground(bed))?.s === 'woodchips', JSON.stringify(await ground(bed)));
 // a path, put in properly: skim, tamp, fabric, gravel
 await landed();
-{ const a = await scr(at(1.0, 0.6).x, at(1.0, 0.6).z), b = await scr(at(1.0, 1.8).x, at(1.0, 1.8).z); await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, { steps: 12 }); await wait(300); await page.mouse.up(); await wait(300); }
-check('dragging the shovel along the grass skims the turf', (await ground(at(1.0, 1.2)))?.s === 'soil');
+await hold('sod'); await drag(at(1.0, 0.6), at(1.0, 1.8), 12, 300);
+check('the turf cutter strips the turf', (await ground(at(1.0, 1.2)))?.s === 'soil');
 await hold('tamper'); await drag(at(1.0, 0.7), at(1.0, 1.7), 10, 900);
 check('the tamper firms it', ((await ground(at(1.0, 0.7))) || {}).tamped >= 1 || ((await ground(at(1.0, 1.7))) || {}).tamped >= 1);
 await hold('fabric'); await drag(at(1.0, 0.7), at(1.0, 1.7), 16, 900);
@@ -100,8 +96,7 @@ const spot = at(0.3, 2.0);
 await hold('plant:lavender'); await click(spot);
 check('a plant needs a hole', (await L()).plants === 0);
 await hold('shovel');
-await right(at(-0.3, 2.4));
-for (let i = 0; i < 4 && (await rel(spot)) > -0.11; i++) await strokeAt(spot);
+for (let i = 0; i < 4 && (await rel(spot)) > -0.11; i++) await scoop(spot, at(-0.3, 2.4));
 await hold('plant:lavender'); await click(spot);
 check('dug a hole and planted the lavender in it', (await L()).plants === 1);
 // barrow and a pond
