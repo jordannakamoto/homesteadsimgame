@@ -18,7 +18,7 @@ await page.goto(file, { waitUntil: 'domcontentloaded', timeout: 120000 }); await
 await G(() => { __game.lockQuality(); __game.setQuality('low'); });
 await frames(5);
 const st = await G(() => ({ s: __game.sim.state.sys.vehicles, P: { x: __game.player.x, z: __game.player.z } }));
-const ids = Object.keys(st.s.units);
+const ids = Object.keys(st.s.units).filter((k) => st.s.units[k].kind === 'atv');     // the trailer given with it is a second unit
 check('a new world has the starter ATV, once', st.s.starter && ids.length === 1, JSON.stringify(st.s.units[ids[0]] || {}).slice(0, 160));
 const id = ids[0];
 
@@ -59,7 +59,7 @@ await page.keyboard.press('Digit1');
 // reload: parked where it was left; then seated at save time comes back seated
 await G(() => __game.saveGame());
 await page.reload({ waitUntil: 'domcontentloaded', timeout: 120000 }); await page.waitForTimeout(8000); await frames(3);
-const back = await G((id) => ({ u: __game.sim.state.sys.vehicles.units[id], n: Object.keys(__game.sim.state.sys.vehicles.units).length }), id);
+const back = await G((id) => ({ u: __game.sim.state.sys.vehicles.units[id], n: Object.values(__game.sim.state.sys.vehicles.units).filter((q) => q.kind === 'atv').length }), id);
 check('reload keeps it where it was left, and no second starter', back.n === 1 && Math.abs(back.u.x - off.u.x) < 1e-3 && Math.abs(back.u.z - off.u.z) < 1e-3, JSON.stringify(back.u).slice(0, 120));
 await G((id) => __vehicles.mount(id), id); await frames(30);
 await G(() => __game.saveGame());

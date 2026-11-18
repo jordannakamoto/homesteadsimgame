@@ -218,9 +218,8 @@
     if (!spot) { given = null; wait = 2; return; }     // nowhere clear yet: try again in a moment
     sim.commandNow('vehicles.add', { kind: 'atv', x: spot.x, z: spot.z, yaw: spot.yaw, starter: true });
   });
-  // ---- for now the small trailer comes with the ATV (new worlds and old saves, once): loose, parked beyond the ATV
-  // on the side away from you (clear of where a first building and its deliveries go), its tongue toward the ATV, so
-  // swinging round and backing onto it is the first thing to try. V9 moves it to the supplier.
+  // ---- for now the small trailer comes with the ATV (new worlds and old saves, once): loose, parked alongside it on
+  // the side away from you, so swinging round and backing onto it is the first thing to try. V9 moves it to the supplier.
   let gifted = null, giftWait = 0;
   G.stepHooks.push((dt) => {
     const sim = G.sim, s = sim.state.sys.vehicles;
@@ -229,19 +228,18 @@
     if (!atvId || V.driven() === atvId) { giftWait = 2; return; }
     gifted = sim;
     const a = s.units[atvId], P = G.player, from = Math.hypot(P.x - a.x, P.z - a.z) > 1 ? { x: P.x, z: P.z } : { x: a.x - Math.sin(a.yaw), z: a.z - Math.cos(a.yaw) };
-    // beyond the ATV as seen from you, within about 70 degrees of straight on, nearest first
-    const base = Math.atan2(a.x - from.x, a.z - from.z);
+    // alongside the ATV on its far side from you and a little ahead, parallel to it: clear of its path, of where you
+    // start and of a first building's deliveries
+    const fx = Math.sin(a.yaw), fz = Math.cos(a.yaw), rx = Math.cos(a.yaw), rz = -Math.sin(a.yaw);
+    const side = (a.x - from.x) * rx + (a.z - from.z) * rz >= 0 ? 1 : -1;
     let spot = null;
-    for (const r of [5, 6.5, 8, 10]) {
-      for (const off of [0, 0.4, -0.4, 0.8, -0.8, 1.2, -1.2]) {
-        const x = a.x + Math.sin(base + off) * r, z = a.z + Math.cos(base + off) * r;
-        if ((spot = V.findSpot(x, z, { rMin: 0, rMax: 0.01, rad: 1.0, n: 1 }))) break;
-      }
-      if (spot) break;
+    for (const [lat, fwd] of [[3.5, 2], [3.5, 0.5], [5, 2], [5, 3.5], [3.5, 3.5], [6.5, 1]]) {
+      const x = a.x + rx * side * lat + fx * fwd, z = a.z + rz * side * lat + fz * fwd;
+      if ((spot = V.findSpot(x, z, { rMin: 0, rMax: 0.01, rad: 1.0, n: 1 }))) { spot.yaw = a.yaw; break; }
     }
     spot = spot || V.findSpot(a.x, a.z, { rMin: 4, rMax: 12, rad: 0.9 });
     if (!spot) { gifted = null; giftWait = 3; return; }
-    const r = sim.commandNow('vehicles.add', { kind: 'trailer_small', x: spot.x, z: spot.z, yaw: Math.atan2(a.x - spot.x, a.z - spot.z), once: 'trailer' });
+    const r = sim.commandNow('vehicles.add', { kind: 'trailer_small', x: spot.x, z: spot.z, yaw: spot.yaw, once: 'trailer' });
     if (r.ok && !localStorage.getItem('veh:toldTrailer')) { localStorage.setItem('veh:toldTrailer', '1'); V.say('A small trailer came with the ATV. Back the ATV onto its tongue to hitch it.', 5); }
   });
 })();
