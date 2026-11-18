@@ -69,7 +69,7 @@ export function createNightSky({ scene, camera, sky }) {
   const su = sky.uniforms;
   const uniforms = {
     uEqW: { value: new THREE.Matrix3() }, uLimit: { value: 6 }, uVis: { value: 0 }, uScale: { value: 1 },
-    uTime: su.uTime, uCloud: su.uCloud, uWindOff: su.uWindOff, uOpt: su.uOpt, uCloudNoise: su.uCloudNoise,
+    uTime: su.uTime, uCloud: su.uCloud, uWindOff: su.uWindOff, uOpt: su.uOpt, uCloudNoise: su.uCloudNoise, uNoise3: su.uNoise3,
   };
   const mat = new THREE.ShaderMaterial({
     uniforms, transparent: true, depthWrite: false, depthTest: true, blending: THREE.AdditiveBlending, fog: false,
@@ -84,7 +84,8 @@ export function createNightSky({ scene, camera, sky }) {
         float air = 1.0 / max(d.y + 0.025, 0.02);
         float m = mag + 0.12 * (air - 1.0);
         float f = pow(10.0, -0.4 * (m - uLimit + 1.0));      // flux relative to the faintest seen
-        float tw = 1.0 + (0.12 + 0.5 * smoothstep(0.5, 0.05, d.y)) * sin(uTime * (9.0 + fract(mag * 37.0) * 9.0) + mag * 91.0);
+        // a gentle twinkle, mostly low down where the air is thick (strong and fast, it reads as flickering specks)
+        float tw = 1.0 + (0.03 + 0.22 * smoothstep(0.35, 0.03, d.y)) * sin(uTime * (2.2 + fract(mag * 37.0) * 2.5) + mag * 91.0);
         float b = clamp(f, 0.0, 3.0) * tw * uVis * smoothstep(uLimit + 0.3, uLimit - 0.6, m) * smoothstep(-0.01, 0.06, d.y);
         vCol = scol * mix(vec3(1.0), vec3(1.0, 0.75, 0.5), smoothstep(0.35, 0.03, d.y)) * b;
         vec4 p = projectionMatrix * viewMatrix * vec4(cameraPosition + d * 280.0, 1.0);
