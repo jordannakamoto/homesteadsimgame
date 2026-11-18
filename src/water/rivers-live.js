@@ -27,7 +27,7 @@
 import * as THREE from 'three';
 import { RIVER_SHADE } from './river-shade.js';
 
-const CELL = 0.25, STEP_DT = 1 / 120, MAX_STEPS = 3, SHIFT_M = 8, G = 9.81;
+const CELL = 0.25, STEP_DT = 1 / 120, MAX_STEPS = 3, SHIFT_M = 2, G = 9.81;   // the window follows in 2 m steps, so its edge creeps rather than jumps
 const NOFEED = -1e4;
 
 export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt }) {
@@ -280,7 +280,14 @@ export function createRiverLive({ renderer, river, scene, CS, heightAt, chunkAt 
         // into a trench, a flooded bed) the simulation's is all there is.
         vec4 fdT = texelFetch(uFeed, clamp(ivec2((q - uOrg) / uCell), ivec2(0), ivec2(uN - 1)), 0);
         vec2 vel = fdT.r > -1000.0 ? mix(fdT.ba * uWetSpeed, s.gb, 0.2) : s.gb;
-        vec4 c = shadeRiver(q, cell, vWorld, vel, d, s.a);
+        // how close dry land is: depths a little way off in eight directions
+        for (int k = 0; k < 8; k++) {
+          float an = float(k) * 0.785, rr = 0.5 + 0.45 * float(k / 4);
+          vec2 o = vec2(cos(an), sin(an)) * rr;
+          ivec2 ci = clamp(ivec2((q + o - uOrg) / uCell), ivec2(0), ivec2(uN - 1));
+          bankNear = max(bankNear, (1.0 - smoothstep(0.004, 0.03, texelFetch(uState, ci, 0).r)) * (1.0 - rr / 1.6));
+        }
+                vec4 c = shadeRiver(q, cell, vWorld, vel, d, s.a);
         gl_FragColor = c;
         #include <tonemapping_fragment>
         #include <colorspace_fragment>

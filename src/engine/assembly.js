@@ -36,9 +36,11 @@
       let L = t.layers.get(id);
       if (L && L.cap < cap) { dropLayer(t, id); L = null; }
       if (!L) {
-        L = { cap, dots: null, group: new T.Group(), solid: new T.InstancedMesh(look.geo, look.mat, cap), glow: new T.InstancedMesh(look.geo, glowMat, cap), at: new Map(), list: [], pivot: new T.Vector3(), lift: new T.Vector3(0, 1, 0), angle: 0, axis: new T.Vector3(1, 0, 0) };
+        L = { cap, dots: null, group: new T.Group(), solid: new T.InstancedMesh(look.geo, (t.mats && t.mats.mat) || look.mat, cap), glow: new T.InstancedMesh(look.geo, glowMat, cap), at: new Map(), list: [], pivot: new T.Vector3(), lift: new T.Vector3(0, 1, 0), angle: 0, axis: new T.Vector3(1, 0, 0) };
         L.solid.castShadow = L.solid.receiveShadow = true;
         L.solid.count = L.glow.count = 0;
+        // members the look draws with its other material (lap siding): their own mesh, the same box
+        if (look.alt) { L.alt = new T.InstancedMesh(look.geo, (t.mats && t.mats.alt) || look.alt.mat, cap); L.alt.castShadow = L.alt.receiveShadow = true; L.alt.count = 0; L.alt.frustumCulled = false; L.group.add(L.alt); }
         L.solid.frustumCulled = L.glow.frustumCulled = false;
         L.glow.renderOrder = 4;
         L.group.add(L.solid, L.glow);
@@ -50,10 +52,18 @@
     function dropLayer(t, id) {
       const L = t.layers.get(id);
       if (!L) return;
-      t.root.remove(L.group); L.solid.dispose(); L.glow.dispose(); L.dots && L.dots.dispose(); L.far && L.far.dispose(); t.layers.delete(id);
+      t.root.remove(L.group); L.solid.dispose(); L.alt && L.alt.dispose(); L.glow.dispose(); L.dots && L.dots.dispose(); L.far && L.far.dispose(); t.layers.delete(id);
     }
     const local = (L, m, out, grow, h, dir) => { matrixOf(m, out, grow, dir ? v.set(dir[0], dir[1], dir[2]) : L.lift, h); out.elements[12] -= L.pivot.x; out.elements[13] -= L.pivot.y; out.elements[14] -= L.pivot.z; return out; };
     return {
+      // the materials this thing's pieces are drawn with ({ mat, alt }), in place of the look's (a building's own, cut open
+      // when you are inside it); null goes back to the look's
+      setMats(key, mats) {
+        const t = thing(key);
+        if (t.mats === mats || (t.mats && mats && t.mats.mat === mats.mat && t.mats.alt === mats.alt)) return;
+        t.mats = mats;
+        for (const L of t.layers.values()) { L.solid.material = (mats && mats.mat) || look.mat; if (L.alt) L.alt.material = (mats && mats.alt) || look.alt.mat; }
+      },
       setFrame(key, matrix) { const t = thing(key); t.root.matrix.copy(matrix); t.root.matrixWorldNeedsUpdate = true; },
       remove(key) { const t = things.get(key); if (!t) return; for (const id of [...t.layers.keys()]) dropLayer(t, id); G.scene.remove(t.root); things.delete(key); },
       keys: () => [...things.keys()],
@@ -76,25 +86,31 @@
       // the members drawn solid in a layer (all of them, each time: a layer is small)
       setSolid(key, id, members, cap) {
         const L = layer(key, id, Math.max(cap || 0, members.length, 16));
-        L.at.clear(); L.list = members;
+        L.at.clear(); L.list = members; L.slot = [];
+        let ns = 0, na = 0;
         members.forEach((m, n) => {
           L.at.set(m.id, n);
-          L.solid.setMatrixAt(n, local(L, m, m4, 0, 0));
+          const alt = !!(L.alt && look.alt.test(m)), mesh = alt ? L.alt : L.solid, i = alt ? na++ : ns++;
+          L.slot[n] = [mesh, i];
+          mesh.setMatrixAt(i, local(L, m, m4, 0, 0));
           // a member may carry its own shade (tone 0..1, vary: how far it strays), so it looks the same wherever it is drawn
           const k = look.colorOf(m), s = m.tone !== undefined ? 1 - (m.vary ?? 0.1) + 2 * (m.vary ?? 0.1) * m.tone : /^siding/.test(m.col || '') ? 0.98 + 0.04 * ((n * 7919) % 13) / 13 : 0.92 + 0.16 * ((n * 7919) % 13) / 13;
-          L.solid.setColorAt(n, c.setRGB(k[0] * s, k[1] * s, k[2] * s));
+          mesh.setColorAt(i, c.setRGB(k[0] * s, k[1] * s, k[2] * s));
         });
-        L.solid.count = members.length;
-        L.solid.instanceMatrix.needsUpdate = true;
-        if (L.solid.instanceColor) L.solid.instanceColor.needsUpdate = true;
+        for (const [mesh, k] of [[L.solid, ns], [L.alt, na]]) {
+          if (!mesh) continue;
+          mesh.count = k; mesh.instanceMatrix.needsUpdate = true;
+          if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+        }
       },
       // hold one solid member h metres clear of its seat (it is being knocked in)
       // dir (optional): a vector to hold it away along, in place of "up" (a board slides in along its wall)
       lift(key, id, memberId, h, dir) {
         const L = layer(key, id), n = L.at.get(memberId);
         if (n === undefined) return;
-        L.solid.setMatrixAt(n, local(L, L.list[n], m4, 0, h, dir));
-        L.solid.instanceMatrix.needsUpdate = true;
+        const [mesh, i] = L.slot[n];
+        mesh.setMatrixAt(i, local(L, L.list[n], m4, 0, h, dir));
+        mesh.instanceMatrix.needsUpdate = true;
       },
       // a sheet laid out along its width: only the first fraction f of it (from its low end along n) is there; it is held h clear along dir
       unfurl(key, id, memberId, f, h, dir) {
@@ -103,8 +119,9 @@
         const mm = L.list[n], e = local(L, mm, m4, 0, h, dir).elements, sh = -(1 - f) * mm.section.d / 2;
         e[4] *= f; e[5] *= f; e[6] *= f;
         e[12] += mm.n[0] * sh; e[13] += mm.n[1] * sh; e[14] += mm.n[2] * sh;
-        L.solid.setMatrixAt(n, m4);
-        L.solid.instanceMatrix.needsUpdate = true;
+        const [mesh, i] = L.slot[n];
+        mesh.setMatrixAt(i, m4);
+        mesh.instanceMatrix.needsUpdate = true;
       },
       // nail points: small boxes that ride with the layer. list: [{ p: [x, y, z], k: 0 (bright, waiting) | 1 (driven, dark) }]
       setDots(key, id, list) {
@@ -149,7 +166,7 @@
         if (L.far.instanceColor) L.far.instanceColor.needsUpdate = true;
       },
       // where a member's box is drawn just now, in its layer (for tests)
-      drawnAt(key, id, memberId) { const t = things.get(key), L = t && t.layers.get(id), n = L && L.at.get(memberId); if (n === undefined) return null; L.solid.getMatrixAt(n, m4); return [m4.elements[12], m4.elements[13], m4.elements[14]]; },
+      drawnAt(key, id, memberId) { const t = things.get(key), L = t && t.layers.get(id), n = L && L.at.get(memberId); if (n === undefined) return null; L.slot[n][0].getMatrixAt(L.slot[n][1], m4); return [m4.elements[12], m4.elements[13], m4.elements[14]]; },
       // where a member is in the world right now (its middle), for sparks and dust
       worldOf(key, id, m, out) {
         const t = things.get(key), L = t && t.layers.get(id);

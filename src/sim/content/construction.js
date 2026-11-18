@@ -106,7 +106,7 @@ export const learnGroup = (kind) => LEARN.group[kind] || null;
 
 // ---- how each item sits in a stack and in the arms: the page draws these forms.
 export function itemForm(itemId) {
-  if (/^lumber_|^glulam/.test(itemId)) return 'lumber';
+  if (/^(cut_)?lumber_|^glulam/.test(itemId)) return 'lumber';
   if (/^(floor|tile)_/.test(itemId)) return 'carton';
   if (/^carpet_/.test(itemId) || /^underlay_/.test(itemId)) return 'roll';
   if (itemId === 'backer_board') return 'sheet';
@@ -160,6 +160,17 @@ export function packSheets(areas, held = [], sheetA = SHEET.areaM2, minKeep = SH
 // scrap. A saw cut takes kerfM. A piece longer than the longest stock is spliced from two in the plan (src/framing.js).
 export const STICK = Object.freeze({ stocksM: Object.freeze([2.4, 3.0, 3.6, 4.2, 4.8, 5.4, 6.0]), kerfM: 0.003, minKeepM: 0.3, ft: Object.freeze({ 2.4: 8, 3: 10, 3.6: 12, 4.2: 14, 4.8: 16, 5.4: 18, 6: 20 }) });
 export const isStickItem = (itemId) => /^lumber_/.test(itemId);
+// ---- what comes cut from the yard and what you cut yourself. Lumberyards sell studs precut and cut plates, joists and beams
+// to length on the order, so most pieces arrive ready to go in. The cuts a carpenter really makes on site are the short and
+// fitted pieces and the angled ones: posts cut to height once the piers are level, blocking, cripples under sills and over
+// headers, gable studs, rafters and hips with their plumb cuts and seat cuts, and any stub under stubM. Those are bought as stock sticks and cut at the sawhorses as a job of their own;
+// each cut piece goes into the arms (an armful at most) or onto the horses.
+export const SITE_CUT = Object.freeze({ kinds: Object.freeze(['block', 'cripple', 'rafter', 'hip', 'post']), armful: 6, shortM: 1.5, stubM: 0.6,
+  says: 'Cut it at the sawhorses first', why: 'Posts, blocking, cripples and rafters are cut on site, to fit; everything else comes cut to length from the yard' });
+export const isSiteCut = (kind, len) => SITE_CUT.kinds.includes(kind) || (len > 0 && len < SITE_CUT.stubM) || ((kind === 'stud' || kind === 'jack') && len > 0 && len < SITE_CUT.shortM);
+// the pieces cut at the sawhorses from a lumber item, carried and stacked like any other item
+export const cutItemOf = (itemId) => 'cut_' + itemId;
+export const isCutItem = (itemId) => /^cut_lumber_/.test(itemId);
 // the stock length a new stick for a piece this long is bought as
 export function stockFor(len, stocks = STICK.stocksM) {
   for (const L of stocks) if (L >= len - 1e-9) return L;

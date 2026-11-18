@@ -356,7 +356,9 @@ function cross(ox, oz, dx, dz, len, e, tol = 0.2) {
 }
 
 const BAY_ROLES = { cavity: 1, infill: 1, 'joist-bay': 1, 'rafter-bay': 1, insulation: 1 };
-const MEMBER_KINDS = { stud: 1, plate: 1, header: 1, joist: 1, rafter: 1, sheathing: 1, membrane: 1, cladding: 1, roofing: 1, insulation: 1, lining: 1, brace: 1 };
+const MEMBER_KINDS = { stud: 1, plate: 1, header: 1, joist: 1, rafter: 1, sheathing: 1, membrane: 1, cladding: 1, roofing: 1, insulation: 1, lining: 1, brace: 1,
+  // the finish floor and its trim: dead weight on the floor they sit on (src/flooring.js, src/trim.js)
+  paving: 1, underlay: 1, backer: 1, plank: 1, tile: 1, grout: 1, tackstrip: 1, pad: 1, carpet: 1, threshold: 1, stool: 1, casing: 1, apron: 1, baseboard: 1, shoe: 1, crown: 1 };
 const LINE_GROUND = { skid: 1, stemwall: 1 }, AREA_GROUND = { foundation: 1, slab: 1, footing: 1 };
 function layerPa(layers) { let s = 0; if (layers) for (const l of layers) { const m = material(l.material); if (m && m.class !== 'fluid') s += m.densityKgM3 * num(l.thickness, 0) * G; } return s; }
 function bayOf(layers) { let best = null; if (layers && layers.length > 1) for (const l of layers) { const m = material(l.material); if ((BAY_ROLES[l.role] || (m && (m.class === 'fluid' || m.class === 'insulation'))) && l.thickness >= 0.05 && (!best || l.thickness > best.thickness)) best = l; } return best; }

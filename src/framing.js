@@ -218,29 +218,31 @@
     return "glulam";
   };
   // Siding: lap boards in even courses CH tall, each course one board along the wall, broken only at openings; a trim
-  // board at each end. The boards lean a few degrees (bottom out) so each course throws a shadow line on the one below.
+  // board at each end and round every opening. The boards are drawn flat to the wall, one course above the next: the lap
+  // itself (the shadow line under each butt edge, the lit edge) is painted by the siding material (lapMat in build.js),
+  // which stays crisp at any distance where a real lean of a few degrees broke up into shadow-map blocks.
   const CH = 0.18,
     TRIM_W = 0.09,
-    LEAN = (5 * Math.PI) / 180,
-    LAP = 0.025;
+    LEAN = 0,
+    LAP = 0;
   function sidingCourses(out, id, c) {
     const [ux, uz] = c.u,
       col = c.mat === "dark" ? "sidingDark" : "siding",
       upV = [-c.out[0] * Math.sin(LEAN), Math.cos(LEAN), -c.out[2] * Math.sin(LEAN)],
-      common = { thickness: T.clad, col, out: c.out, u: [ux, uz] };
+      common = { thickness: T.clad, col, out: c.out, u: [ux, uz] }, trimC = { ...common, col: "trim" };
     // trim round every door and window: two jambs and a head (and a sill under a window), 90 x 20 mm, flat to the wall; the siding butts into it
     const tw0 = c.trim === false ? 0 : TRIM_W, W = TRIM_W, tmid = c.off + 0.006;
     for (const q of c.openings || []) {
       const y0 = q.door ? q.y0 : q.y0 - W, y1 = q.y1 + W,
         bits = [[Math.max(tw0, q.s0 - W), q.s0, y0, y1], [q.s1, Math.min(c.L - tw0, q.s1 + W), y0, y1], [Math.max(tw0, q.s0 - W), Math.min(c.L - tw0, q.s1 + W), q.y1, y1]];
       if (!q.door) bits.push([Math.max(tw0, q.s0 - W), Math.min(c.L - tw0, q.s1 + W), q.y0 - W, q.y0]);
-      for (const [xa, xb, ya, yb] of bits) if (xb - xa > 0.02 && yb - ya > 0.02) M(out, id("ot"), "cladding", "trim", "cladding", c.parent, c.mat || "timber", 0.02, xb - xa, c.at((xa + xb) / 2, ya, tmid), c.at((xa + xb) / 2, yb, tmid), [ux, 0, uz], { ...common, area: r3((xb - xa) * (yb - ya)), row: -1 });
+      for (const [xa, xb, ya, yb] of bits) if (xb - xa > 0.02 && yb - ya > 0.02) M(out, id("ot"), "cladding", "trim", "cladding", c.parent, c.mat || "timber", 0.02, xb - xa, c.at((xa + xb) / 2, ya, tmid), c.at((xa + xb) / 2, yb, tmid), [ux, 0, uz], { ...trimC, area: r3((xb - xa) * (yb - ya)), row: -1 });
     }
     // corner trim: a vertical board at each end of the wall
-    if (c.trim !== false) for (const [s0, s1] of [[0, TRIM_W], [c.L - TRIM_W, c.L]]) M(out, id("tr"), "cladding", "trim", "cladding", c.parent, c.mat || "timber", 0.02, TRIM_W, c.at((s0 + s1) / 2, c.y0, c.off + 0.006), c.at((s0 + s1) / 2, c.y1, c.off + 0.006), [ux, 0, uz], { ...common, area: r3(TRIM_W * (c.y1 - c.y0)), row: -1 });
+    if (c.trim !== false) for (const [s0, s1] of [[0, TRIM_W], [c.L - TRIM_W, c.L]]) M(out, id("tr"), "cladding", "trim", "cladding", c.parent, c.mat || "timber", 0.02, TRIM_W, c.at((s0 + s1) / 2, c.y0, c.off + 0.006), c.at((s0 + s1) / 2, c.y1, c.off + 0.006), [ux, 0, uz], { ...trimC, area: r3(TRIM_W * (c.y1 - c.y0)), row: -1 });
     // board and batten: boards about 0.25 m wide running bottom to top, a 50 mm batten over each joint; built board by board, left to right
     if (c.vfree && c.mat === "batten") {
-      const BW = 0.25, BT = 0.016, BAT = 0.05, BATT = 0.01, tw = c.trim === false ? 0 : TRIM_W,
+      const BW = 0.25, BT = 0.016, BAT = 0.05, BATT = 0.008, tw = c.trim === false ? 0 : TRIM_W,
         nb = Math.max(1, Math.round((c.L - 2 * tw) / BW)), wd = (c.L - 2 * tw) / nb;
       for (let k = 0; k < nb; k++) {
         const ka = tw + k * wd, kb = ka + wd, cuts = [ka, ...(c.vbreaks || []).filter((x) => x > ka + 0.03 && x < kb - 0.03), kb].sort((p, q) => p - q);
@@ -249,7 +251,7 @@
           if (xb - xa < 0.04) continue;
           for (const [ya, yb] of c.vfree(xa, xb)) if (yb - ya > 0.1) M(out, id("vb"), "cladding", "vboards", "cladding", c.parent, c.mat, BT, xb - xa, c.at((xa + xb) / 2, ya, c.off + 0.004), c.at((xa + xb) / 2, yb, c.off + 0.004), [ux, 0, uz], { ...common, thickness: BT, area: r3((xb - xa) * (yb - ya)), row: k });
         }
-        if (k) for (const [ya, yb] of c.vfree(ka - BAT / 2, ka + BAT / 2)) if (yb - ya > 0.1) M(out, id("bt"), "cladding", "batten", "cladding", c.parent, c.mat, BATT, BAT, c.at(ka, ya, c.off + 0.018), c.at(ka, yb, c.off + 0.018), [ux, 0, uz], { ...common, thickness: BATT, area: r3(BAT * (yb - ya)), row: k });
+        if (k) for (const [ya, yb] of c.vfree(ka - BAT / 2, ka + BAT / 2)) if (yb - ya > 0.1) M(out, id("bt"), "cladding", "batten", "cladding", c.parent, c.mat, BATT, BAT, c.at(ka, ya, c.off + 0.016), c.at(ka, yb, c.off + 0.016), [ux, 0, uz], { ...common, thickness: BATT, area: r3(BAT * (yb - ya)), row: k });
       }
       return;
     }
@@ -682,7 +684,9 @@
         let gn = 0;
         sidingCourses(out, (c) => g.id + "." + c + gn++, { u: [ux, uz], out: [nrm[0] * o, 0, nrm[2] * o], mat: g.mat, parent: g.id, y0: g.y0, y1: g.y1 || g.y0 + 1, trim: false, off: o * (0.0445 + T.osb + 0.012), L,
           at: (q, y, off) => [g.a[0] + ux * q + nrm[0] * (off || 0), y, g.a[1] + uz * q + nrm[2] * (off || 0)],
-          spans: (ya) => { let lo = -1, hi = -1; for (let q = 0; q <= L + 1e-6; q += 0.02) if (gt(q) > ya + 0.1) { lo < 0 && (lo = q); hi = q; } return lo >= 0 && hi - lo > 0.1 ? [[lo, hi]] : []; } });
+          spans: (ya) => { let lo = -1, hi = -1; for (let q = 0; q <= L + 1e-6; q += 0.02) if (gt(q) > ya + 0.1) { lo < 0 && (lo = q); hi = q; } return lo >= 0 && hi - lo > 0.1 ? [[lo, hi]] : []; },
+          // board and batten goes on up the gable: each vertical board stops under the rake (at the lower of its two top corners)
+          vfree: (xa, xb) => { const top = Math.min(gt(xa), gt(xb)); return top > g.y0 + 0.1 ? [[g.y0, top]] : []; } });
       }
       void o;
     }

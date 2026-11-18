@@ -402,7 +402,7 @@ Water, electricity and room heat are merged and tested headlessly. They become p
 
 ## Digging and landscaping (Yard, key 6)
 
-The ground is a physical thing now: a smooth surface you shape 10 cm at a time, not a grid. Undisturbed earth is firm: a hole keeps its steep sides (only a wall steeper than about 60 degrees crumbles at the lip). What you throw is loose: it lands in a round heap and slides down until it holds at its natural slope, fills a hole you throw it into, and stays loose until you tamp it. Holes look damp, dark and deeper-darker; heaps look pale, dry and crumbly with clods on them. Everything is put in the way it really is.
+The ground is a physical thing now: a smooth surface you shape 10 cm at a time, not a grid, with a layer of rolling grains on top of it (after Zhu and Bridson's two-layer sand model). Undisturbed earth is firm: a hole keeps its steep sides. What you throw leaves the blade as a shower of clods that bounce, tumble and roll down the slope with the friction of the material, and goes into the ground grain by grain where each one stops, so a heap's shape comes from the physics, not a formula. Dig into the foot of a heap and it slides in: the over-steep face sheds grains that roll down until it stands. A bag ripped open slumps out beside itself. How hard the ground is decides the stroke: loose earth or chips take the blade at a push, firm ground wants a stamp, turf a hard stamp and a jolt. Fresh earth is dark and rich in two or three tones, lumpy, with clods half sunk in it and grass still showing where it thins out; a heap dries paler on top; holes are damp and dark with lighter subsoil in the walls.
 
 **The tools and how they move**
 
@@ -459,6 +459,24 @@ The ground is a physical thing now: a smooth surface you shape 10 cm at a time, 
 - **Blows you can see.** A set piece stands nearly twice as proud as before, so each blow visibly drives it down, and the last one seats it with a bright spark.
 
 Try: lay the subfloor by hand from the default camera; nail a wall frame lying on the deck.
+
+## Cut to length at the yard; you cut the fitted pieces (branch `cuts`)
+
+- Most lumber comes cut to length on the order: precut studs, plates, joists, beams and headers. Carry them in and they fly from your arms into place: no trip to the saw and back.
+- The cuts a carpenter really makes on site are yours to make, as a job of their own: posts cut to height, cripples, gable studs, rafters, blocking, and any stub under 60 cm. Point at the sawhorses and press E once per piece: the stick is sawn there and the piece goes into your arms (six at most; with full arms it waits on the horses). Then carry them in and each goes where it was cut for.
+- The Build panel lists precut pieces as "36 × cut to 2.61 m"; what you cut yourself is still bought as stock sticks ("8 × 12 ft").
+- "Work until done" and guided building still cut for you.
+
+## Siding that looks like siding (branch `cuts`)
+
+- Finished walls showed the old voxel wall (planks with a dark beam every metre) fighting the siding boards at the same depth: the brick-and-stripe look. A wall clad with boards now keeps its body behind them, so only the siding shows, with slim corner posts hidden inside the trim.
+- Lap siding is drawn flat, course on course, with the lap painted by its own material: a crisp shadow line under each butt edge and a lit bottom edge. No more shadow-map blocks from leaning boards.
+- Corner and opening trim is painted white; plain siding is a soft grey-green, dark siding a deep brown. Nail heads don't show on finished siding (it is blind-nailed).
+- Board and batten carries on up the gables as vertical boards; the battens sit tight on the boards.
+
+## The dollhouse cut opens the siding too (branch `dollhouse`)
+
+- Inside a building, the stretch of wall between the camera and you opens as before, and now its siding boards (and the framing, wrap and anything else drawn as pieces) open with it. Each building draws its pieces with its own copy of the materials, cut by the same planes as its walls, in build mode's drawing and in the construction view's.
 
 ## Flooring: finished floors laid by hand (branch `flooring`)
 

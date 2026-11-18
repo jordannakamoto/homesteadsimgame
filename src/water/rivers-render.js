@@ -16,7 +16,7 @@ export function createRiverWater({ U, sea, CS, P, SEA }) {
   const su = sea.uniforms;
   const uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
     uTurbid: { value: 1 }, uSnap: { value: 0 }, uTPM: { value: 12.8 }, uFoamTex: { value: null },
-    uRipTex: { value: null }, uRipWin: { value: new THREE.Vector4(0, 0, 1, 0) }, uWake: { value: new THREE.Vector4() }, uWakeK: { value: new THREE.Vector2() }, uRefl: { value: null }, uReflMat: { value: new THREE.Matrix4() }, uReflOn: { value: new THREE.Vector4(0, 0, 0, 0) }, uEnv: { value: null }, uEnv2: { value: null }, uEnvMix: { value: 0 }, uEnvPos: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uCloud: { value: 0 }, uRain: { value: 0 }, uRipTex: { value: null }, uRipWin: { value: new THREE.Vector4(0, 0, 1, 0) }, uWake: { value: new THREE.Vector4() }, uWakeK: { value: new THREE.Vector2() }, uRefl: { value: null }, uReflMat: { value: new THREE.Matrix4() }, uReflOn: { value: new THREE.Vector4(0, 0, 0, 0) }, uEnv: { value: null }, uEnv2: { value: null }, uEnvMix: { value: 0 }, uEnvPos: { value: new THREE.Vector4(0, 0, 0, 0) },
     uRip: { value: Array.from({ length: 24 }, () => new THREE.Vector4(0, 0, -100, 0)) }, uRipV: { value: Array.from({ length: 24 }, () => new THREE.Vector2()) }, uRipD: { value: Array.from({ length: 24 }, () => new THREE.Vector2()) }, uSkyMap: { value: null }, uSkyK: { value: 1 }, uTex: { value: null },
     uWin: { value: new THREE.Vector4(1, 1, 0, 0) }, uWetDepth: { value: 1 }, uWetSpeed: { value: 1 },
   }]);

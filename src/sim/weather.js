@@ -83,7 +83,11 @@ const K_SOLAR = 0.0036 / HOUR;         // K/s of warming per W/m2 of global irra
 const LW_CLEAR = 1.2 / HOUR;           // K/s of net long-wave cooling of the shallow night-time layer, clear sky
 // By day the cooling is spread through a deep mixed layer, so it changes the air near the ground far less.
 const lwDepth = (clearGhi) => 1 - 0.65 * clamp(clearGhi / 200, 0, 1);
-const CLOUD_SLOPE = 2.2, CLOUD_LEAD = 1.5, CLOUD_NOISE = 0.6;
+const CLOUD_SLOPE = 2.2, CLOUD_NOISE = 0.6;
+// how far ahead of the rain the cloud comes, in units of the frontal index: in winter a front's cloud deck spreads far
+// ahead of it and lingers behind (long grey spells), in summer the sky between systems is mostly fair, sun with
+// some cloud (Burlington: about 70% of December days cloudy against about 30% of July days)
+const CLOUD_LEAD_WINTER = 1.55, CLOUD_LEAD_SUMMER = 1.15;
 const P_MEAN = 1015, P_PER_F = 10;     // hPa
 const TAU_SOIL = 45 * DAY;             // deep soil (about 1 m) lags the air by about a month and a half
 const DDF = 3.5 / DAY;                 // degree-day melt factor, mm w.e. per C per second
@@ -167,9 +171,10 @@ export function climateModel(climateId, latitudeDeg) {
   // monthly tables belong to the climate's hemisphere; south of the equator they shift by six months
   const shift = Math.sign(latitudeDeg || 1) === Math.sign(c.latitudeDeg) ? 0 : 6;
   const L = lagged(insolation(latitudeDeg), fit.tauDays);
-  const seasonalC = new Float64Array(DAYS_IN_YEAR), offsetC = new Float64Array(DAYS_IN_YEAR), theta = new Float64Array(DAYS_IN_YEAR);
+  const seasonalC = new Float64Array(DAYS_IN_YEAR), offsetC = new Float64Array(DAYS_IN_YEAR), theta = new Float64Array(DAYS_IN_YEAR), lead = new Float64Array(DAYS_IN_YEAR);
   for (let d = 0; d < DAYS_IN_YEAR; d++) seasonalC[d] = fit.a + fit.b * L[d];
   const tMin = Math.min(...seasonalC), tMax = Math.max(...seasonalC);
+  for (let d = 0; d < DAYS_IN_YEAR; d++) { const su = (seasonalC[d] - tMin) / Math.max(1e-6, tMax - tMin); lead[d] = CLOUD_LEAD_WINTER + (CLOUD_LEAD_SUMMER - CLOUD_LEAD_WINTER) * su; }
   const site = { latitudeDeg };
   // quadrature nodes for the cloud climatology: f and the cloud noise, both N(0, 1)
   const nodes = []; for (let i = -16; i <= 16; i++) { const x = i * 0.25; nodes.push([x, normPdf(x) * 0.25]); }
@@ -184,7 +189,7 @@ export function climateModel(climateId, latitudeDeg) {
     // climatological means of the cloud factors (cloud follows f relative to this day's threshold)
     let et = 0, el = 0, w = 0;
     for (const [f, pf] of nodes) for (const [n, pn] of cnodes) {
-      const cl = logistic(CLOUD_SLOPE * (f - theta[d] + CLOUD_LEAD) + CLOUD_NOISE * n), p = pf * pn;
+      const cl = logistic(CLOUD_SLOPE * (f - theta[d] + lead[d]) + CLOUD_NOISE * n), p = pf * pn;
       et += p * cloudTransmission(cl); el += p * lwFactor(cl); w += p;
     }
     // the boundary layer's mean departure from the air mass under average sky: removed so that the
@@ -193,7 +198,7 @@ export function climateModel(climateId, latitudeDeg) {
   }
   // deep soil: the same lag applied to the seasonal temperature, for a new world's starting value
   const soilC = lagged(Array.from(seasonalC), TAU_SOIL / DAY);
-  const m = { climate: c, fit, shift, seasonalC, offsetC, theta, soilC, tMin, tMax };
+  const m = { climate: c, fit, shift, seasonalC, offsetC, theta, lead, soilC, tMin, tMax };
   models.set(key, m);
   return m;
 }
@@ -215,7 +220,7 @@ function freshState(site, t, rng) {
   const M = climateModel(s.site.climate, s.site.latitudeDeg), x = dayOfYear(t) + dayFraction(t);
   s.gen.blC = atDay(M.offsetC, x);
   s.groundTempC = atDay(M.soilC, x);
-  s.cloud = logistic(CLOUD_SLOPE * (s.gen.f * F_SCALE - atDay(M.theta, x) + CLOUD_LEAD));
+  s.cloud = logistic(CLOUD_SLOPE * (s.gen.f * F_SCALE - atDay(M.theta, x) + atDay(M.lead, x)));
   diagnose(s, t, M, 0);
   return s;
 }
@@ -262,7 +267,7 @@ function step(ctx) {
   const ru = Math.exp(-dt / TAU_GUST); G.gust = G.gust * ru + Math.sqrt(1 - ru * ru) * rng.normal();
   const f = G.f * F_SCALE, theta = atDay(M.theta, x);
   // cloud
-  const target = logistic(CLOUD_SLOPE * (f - theta + CLOUD_LEAD) + CLOUD_NOISE * G.cloudNoise);
+  const target = logistic(CLOUD_SLOPE * (f - theta + atDay(M.lead, x)) + CLOUD_NOISE * G.cloudNoise);
   s.cloud += (target - s.cloud) * (1 - Math.exp(-dt / TAU_CLOUD));
   // sunlight on the ground under this cloud
   const clear = clearSkyIrradiance(t, s.site);

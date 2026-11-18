@@ -37,8 +37,8 @@ const ground = (A) => G((p) => __game.landscape.groundAt(__game.sim.state, p.x, 
 
 // the shovel: press where the blade goes in, drag the scoop where it goes, let go; a click drops it beside the hole
 await hold('shovel');
-const scoop = async (A, B) => { await drag(A, B, 10, 250); await landed(); };
-const dig1 = async (A) => { await click(A); await landed(); };
+const scoop = async (A, B) => { await drag(A, B, 10, 250); await wait(300); await landed(); };
+const dig1 = async (A) => { await click(A); await wait(300); await landed(); };
 await scoop(at(0.4, 1.2), at(-0.8, 1.2));
 let s = await L();
 check('a scoop is dug, carried and dropped; earth is neither made nor lost', s.carry === 0 && s.tiles > 0 && Math.abs(s.net) < 2e-4, 'net ' + s.net.toFixed(5));
@@ -47,7 +47,7 @@ const hole = await rel(at(0.4, 1.2)), heap = await rel(at(-0.8, 1.2));
 check('scoop after scoop: a round hole, and a heap where they were dropped', hole < -0.12 && heap > 0.1, Math.round(hole * 100) + ' cm, +' + Math.round(heap * 100) + ' cm');
 const net0 = (await L()).net;
 await dig1(at(0.4, 1.2));
-check('a plain click digs and drops it beside the hole', (await L()).carry === 0 && Math.abs((await L()).net - net0) < 2e-4);
+{ const l = await L(), air = await G(() => Object.values(__game.sim.state.sys.landscape.air || {}).reduce((a, b) => a + b, 0)); check('a plain click digs and drops it beside the hole (earth on the ground or still in the air: none lost)', l.carry === 0 && Math.abs(l.net + air - net0) < 2e-4, JSON.stringify({ c: l.carry, d: l.net - net0, air })); }
 check('the shaped ground is drawn and the terrain lets it through', await G(() => __landscape.tiles() > 0));
 // bags: set down, dragged by hand, ripped open by the shovel, scooped to the marker
 await G(() => { const st = __game.sim.state.sys.stock; st.items.wood_chips = 2 * 56; });
