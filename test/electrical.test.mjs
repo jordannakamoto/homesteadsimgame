@@ -1,7 +1,7 @@
 // Electrical: checked against hand calculations, datasheet relationships and conservation. node --test test/
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createGameSim, calendar as C, DAY, HOUR, ITEMS, FIXTURES_ELECTRICAL as CAT, powerAvailableAt, electricalOverlay } from '../src/sim/index.js';
+import { createGameSim, calendar as C, DAY, HOUR, ITEMS, FIXTURES_ELECTRICAL as CAT, powerAvailableAt, powerNear, electricalOverlay } from '../src/sim/index.js';
 import { planeOfArray, ocvAt } from '../src/sim/electrical.js';
 import { fixture, link, setSite, house } from './helpers/pieces.mjs';
 
@@ -408,4 +408,21 @@ test('electrical code keeps to the simulation rules (no clocks, no Math.random)'
     const src = readFileSync(new URL('../src/sim/' + f, import.meta.url), 'utf8').replace(/\/\/.*$/gm, '');
     assert.ok(!/Math\.random|Date\.|new Date|performance\.now/.test(src), f);
   }
+});
+
+test('powerNear: a corded tool runs within reach of a live outlet, not beyond it, and not off a tripped breaker', () => {
+  const sim = createGameSim(21);
+  assert.equal(powerNear(sim.state, 0, 0), false, 'nothing built: no power');
+  const b = fixture('bat_lfp_48v_5kwh', { settings: { socStart: 0.9 } }), inv = fixture('inv_48v_6000w'), br = fixture('breaker_15a');
+  const out = fixture('outlet_120v', { x: 40, z: 10, settings: { ratedW: 0 } });
+  setSite(sim, [b, inv, br, out, wire(b, 'dc', inv, 'dc', '2/0', 1), wire(inv, 'ac', br, 'line', 12, 1), wire(br, 'load', out, 'power', 12, 5)]);
+  sim.runTicks(2);
+  assert.ok(powerAvailableAt(sim.state, out.id) > 1000);
+  assert.equal(powerNear(sim.state, 45, 12), true, 'next to the outlet');
+  assert.equal(powerNear(sim.state, 40 + 29, 10), true, 'at the end of a 30 m cord');
+  assert.equal(powerNear(sim.state, 0, 0), false, 'too far from any outlet');
+  assert.equal(powerNear(sim.state, 0, 0, 50), true, 'a longer cord reaches');
+  assert.equal(powerNear(sim.state, 45, 12, 30, 1e6), false, 'more than the circuit can give');
+  E(sim).breakers[br.id].tripped = true;
+  assert.equal(powerNear(sim.state, 45, 12), false, 'a tripped breaker cuts the outlet');
 });
