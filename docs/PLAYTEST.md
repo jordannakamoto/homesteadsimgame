@@ -634,3 +634,32 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 - No tool or supply check yet: the drill, cable and staples are free until S8 (supply lines in the Build panel). Drains are not worked by hand yet (S11).
 - The drill is only a model at the hole, not in the character's hand; the hammer for boxes is a pose only. No sound.
 - Walls are not checked for being in the way of the pointer: you can aim at a dot through a lined wall (covered runs cannot be worked, though).
+
+## Services S8 — rough-in and trim-out are stages of the building
+
+**What is new**
+
+- The Build panel lists **Rough-in** after Gutters and **Trim-out** after Lining, but only for a building with cable or pipe planned in it. With nothing planned (the shed) nothing changes: no new stages, insulation as before.
+- Rough-in has its own shopping lines, worked out from what is planned: 14/2 or 12/2 cable and blue or red PEX by the metre (each run plus 30 cm spare at each box for cable, 20 cm for PEX), wall and ceiling boxes, cable or PEX staples, nail plates (two per hole near a stud face), crimp rings (one per PEX end). Order them like any stage; they come as stacks. Staples, plates and rings sit by the stacks and are used up (never carried).
+- The hands draw on them: nailing a box takes a box, pulling takes the metres pulled with their staples and plates, crimping takes a ring. They come from the spool in your arms if you carry it, otherwise from the stacks. Short of something, the gesture stops and says "Out of 14/2 nm cable: order the rough-in in the Build panel (L)". Sandbox: free.
+- **Insulation waits for rough-in** while runs are planned. **Close up anyway** (Build panel, or the note on the left) leaves whatever is not roughed in out of the stage; it stays as plan lines.
+- **Do it for me** on Rough-in drills, pulls and crimps every run and nails every box of that building, from the stacks. On Trim-out it puts an outlet in each wall box, a light in each ceiling box, a breaker in each slot (devices by hand are S9b).
+- **Lining covers the runs:** once a wall's lining is on, the runs inside it cannot be worked. A marker on such a run (Hands, F) says the wall is closed: **hold** on it to open the wall. Its lining and batts come off (the whole face: lining is one piece per wall), the books stay straight, and the stages go back to wanting them.
+- Unlocks: finishing a cabin opens `services:in-wall` (nothing is gated on it yet).
+
+**Try this**
+
+1. Cabin plan, framed and roofed (sandbox off). F, 1, plan an outlet circuit. Open the Build panel (L): Rough-in after Gutters, with cable, boxes, staples and plates. Order it.
+2. Fix the boxes, drill, pull and crimp by hand (S7). Watch the Rough-in count climb; Insulation opens when it is done.
+3. Or plan a second circuit and press **Close up anyway**: insulation opens and the new circuit stays as a plan.
+4. Line a wall with a run in it, plan another run through it: the marker says it is closed; hold on it to open the wall.
+5. Console: `__game.sim.commandNow('services.auto', { structId: <id>, stage: 'rough-in' })`, `'services.defer'`, `'services.openWall', { structId, host: '<wall id>' }`; `__game.sim.state.sys.services.want` shows the lines the Build panel was told.
+
+**What's weak**
+
+- Trim-out has no shopping lines yet (outlets, switches, lights, breakers come with S9b) and no hands: only "Do it for me". A cabin with services planned is not finished until trim-out is done.
+- Planning cable into a finished building reopens it (Rough-in and Trim-out appear), and finishing it again counts as a second finish.
+- Spools are drawn from the stacks wherever you stand, like nails; carrying one only decides where it comes from.
+- Floors do not cover runs (a crawl space is reachable from below); a ceiling's lining does.
+- Drains and vents have no lines and no hands yet (S11): "Do it for me" fits them.
+- The shed gate (`test/shed.e2e.mjs`) fails on current `main` and on this branch alike (the hand-building loop keeps picking up the wrong stack at the foundation, 10 checks); it is not caused by S8.

@@ -129,6 +129,7 @@
       if (!type.startsWith('construction.')) return;
       V.rev++;
       if (type === 'construction.delivered') { say('Your delivery has arrived.', 'good'); note('Delivery', 'Your materials are at the delivery spot.'); }
+      if (type === 'construction.dismantled' && data && S().progress[data.structId]) reconcile(data.structId);   // a wall opened from Hands (services)
     });
   }
   function syncPlans() {
@@ -1264,6 +1265,7 @@
       const pl = plan(pr.id);
       if (pl) {
         if (pl.raise) return { kind: 'raise', id: pr.id, parent: pl.raise };
+        if (!pl.inst.length && pl.view.next && C.STAGE[pl.view.next].by && !c && !stack) return { kind: 'hint', text: C.STAGE[pl.view.next].hint || C.STAGE[pl.view.next].name, id: pr.id };
         const mine = usable(pr, pl, c);
         if (pr.level === 'guided' || s.options.auto) { if (pl.inst.length && !(stack && !c && pr.level !== 'guided' && !mine.length && false)) return { kind: 'auto', id: pr.id, q: pl.inst, stage: pr.members[pl.inst[0]].stage, guided: pr.level === 'guided' }; }
         else { const near = carry.nearest(reach.x, reach.z, 0.9, pickable), h = near && !(c && wantsHere(pr, pl, c)) ? null : aimHands(pr); if (h && (h.kind === 'hands' || !stack)) return h.kind === 'hands' ? h : ladderCtx(false) || h; }
@@ -1351,8 +1353,18 @@
     if (!pr) return;
     if (!stage) { const pl = plan(id); stage = pl && pl.inst.length ? pr.members[pl.inst[0]].stage : pl && pl.raise ? 'wall-frame' : null; }
     if (!stage) return;
+    if (C.STAGE[stage] && C.STAGE[stage].by) { byAuto(id, stage); return; }      // tallied by another system: it does the work
     V.auto = { id, stage, guided: !!guided, wait: 0 };
     V.sel = id;
+  }
+  // a stage another system does (services: rough-in, trim-out): "do it for me" is its command, using what is on the stacks
+  function byAuto(id, stage) {
+    const by = C.STAGE[stage].by, name = by + '.auto';
+    const r = G.sim.handlers.has(name) ? G.sim.commandNow(name, { structId: id, stage }) : { ok: false, reason: 'not here' };
+    V.rev++; G.markStockDirty && G.markStockDirty();
+    if (r.ok) { say(C.STAGE[stage].name + ': done for you' + (r.covered ? '. ' + r.covered + ' in closed walls wait: open them from Hands (F)' : '.'), 'good'); sounds.play('seat'); }
+    else say(r.reason === 'no material' ? 'Out of ' + stackName(r.itemId) + ': order the stage in the Build panel' : r.reason === 'Open this wall first' ? 'Those runs are inside closed walls: open the wall from Hands (F) first' : r.reason === 'rough-in first' ? 'Rough-in comes first' : 'Nothing to do there', 'bad');
+    return r;
   }
   function stopAuto(why) { if (!V.auto) return; V.auto = null; W.job && W.cancel(); if (V.raise) V.raise.hold = false; if (why) flash(why); V.rev++; }
 
@@ -1591,6 +1603,11 @@
     if (Object.values(pr.lines).every((l) => l.ordered <= 1e-9) && pl.view.toOrderUsd > 0) return { ...out, line: 'Order the materials. While they are on their way, level the ground: stand on the plan and hold <kbd>E</kbd>.', btn: ['order:all', 'Order everything, ' + money(pl.view.toOrderUsd)], target: at };
     if (V.auto && V.auto.id === pr.id) return { ...out, line: (V.auto.guided ? 'Building. ' : 'Working until it is done. ') + '<kbd>E</kbd> stops.', target: at };
     if (pl.raise) return { ...out, line: 'The frame is ready. Stand by it and hold <kbd>E</kbd> to raise the wall.', target: at };
+    if (C.STAGE[v.id] && C.STAGE[v.id].by) {         // done by another system's hands (services): no pieces to nail here
+      if (v.status === 'not-ordered' && v.toOrderUsd > 0) return { ...out, line: 'Order the materials for this stage.', btn: ['order:' + v.id, 'Order this stage, ' + money(v.toOrderUsd)] };
+      if (v.status === 'ordered') { const d = s.deliveries[0], mins = d ? Math.max(1, Math.ceil((d.dueT - G.sim.state.t) / 60)) : 1; return { ...out, line: 'Your delivery arrives in about ' + mins + ' min of game time.' + (G.speed === 0 ? ' Time is paused.' : ''), wait: true }; }
+      return { ...out, line: C.STAGE[v.id].hint || '', btn: ['auto:' + v.id, 'Do it for me'], btn2: v.id === 'rough-in' ? ['svdefer', 'Close up anyway'] : null, target: at };
+    }
     const first = pl.inst.find((id) => pr.members[id].stage === v.id) || pl.inst[0], ln = first ? lineOf(pr, first) : null;
     const have = (itemId) => s.stacks.some((k) => k.itemId === itemId) || (s.carried && s.carried.itemId === itemId);
     if (ln && !have(ln.itemId)) {
@@ -1698,6 +1715,7 @@
       else if (nx.toOrderUsd > 0 && nx.status === 'not-ordered') h += `<button type="button" class="go" data-act="order:${nx.id}">Order this stage, ${money(nx.toOrderUsd)}</button>`;
       else if (nx.status === 'ordered') h += `<button type="button" disabled>Delivery on its way</button>`;
       else if (V.auto && V.auto.id === pr.id) h += `<button type="button" class="go" data-act="stop">Stop working</button>`;
+      else if (C.STAGE[nx.id].by) h += `<button type="button" class="go" data-act="auto:${nx.id}" title="${esc(C.STAGE[nx.id].hint || '')}">Do it for me: ${esc(low(nx.name))}</button>` + (nx.id === 'rough-in' ? `<button type="button" data-act="svdefer" title="What is not roughed in stays planned and leaves this stage, so the walls can be closed">Close up anyway</button>` : '');
       else if (pr.level === 'guided') h += `<button type="button" class="go" data-act="auto:${nx.id}">${esc(nx.verb)}</button>`;
       else h += `<button type="button" class="go" data-act="auto:${nx.id}" title="Your character keeps working this stage, fetching from the stacks. F stops.">Work until done: ${esc(low(nx.name))}</button>`;
       if (!Object.values(pr.lines).every((l) => l.ordered <= 1e-9) && v.toOrderUsd > (nx.status === 'not-ordered' ? nx.toOrderUsd : 0) + 1) h += `<button type="button" data-act="order:all">Order everything, ${money(v.toOrderUsd)}</button>`;
@@ -1719,7 +1737,8 @@
         if (q.lines.length) h += '<span class="mats">' + q.lines.map((l) => `<span>${esc(plain(l.label))}${l.count > 1 ? ' × ' + l.count : ''}</span><i title="${l.sticks ? esc(num(l.qty) + ' m of lumber in stock lengths') : ''}">${l.sticks && l.sticks.length ? l.sticks.map((c) => c.pre ? c.n + ' × cut to ' + mm(c.lenM) : c.n + ' × ' + c.ft + ' ft').join(', ') : num(l.qty) + (UNIT[l.unit] || '')}</i><i>${money(l.costUsd)}</i><em>${esc(l.why)}</em>`).join('') + '</span>';
         let act = '';
         if (!q.complete && q.toOrderUsd > 0 && !isNext) act += `<button type="button" data-act="order:${q.id}">Order this stage, ${money(q.toOrderUsd)}</button>`;
-        if ((q.built > 0 || q.complete) && !V.auto) act += `<button type="button" data-act="apart:${q.id}" title="The material goes back on the stacks">Take this stage apart</button>`;
+        if (q.id === 'rough-in' && !q.complete) act += `<button type="button" data-act="svdefer" title="What is not roughed in stays planned and leaves this stage">Close up anyway</button>`;
+        if ((q.built > 0 || q.complete) && !V.auto && !C.STAGE[q.id].by) act += `<button type="button" data-act="apart:${q.id}" title="The material goes back on the stacks">Take this stage apart</button>`;
         if (act) h += `<span class="act">${act}</span>`;
       }
       h += '</li>';
@@ -1772,6 +1791,7 @@
     else if (k === 'rent' && pr) { const r = cmd('rentScaffold', { structId: pr.id, days: +arg }); if (r.ok) { say('Scaffolding rented for ' + money(r.costUsd) + '. The bundle is by your stacks: take it and point at a wall.', 'good'); sounds.play('seat'); } else say(r.reason === 'not enough money' ? 'Not enough money: that costs ' + money(r.costUsd) + '.' : 'Cannot rent that now.', 'bad'); }
     else if (k === 'unrent') { if (SC && SC.on()) SC.release(); cmd('returnScaffold'); say('The scaffolding goes back to the yard.', 'good'); }
     else if (k === 'stop') stopAuto();
+    else if (k === 'svdefer' && pr && G.sim.handlers.has('services.defer')) { const r = G.sim.commandNow('services.defer', { structId: pr.id }); say(r.ok && r.deferred ? 'Closed up anyway: what was not roughed in stays planned. Insulation can go in.' : 'Nothing left to rough in.', r.ok ? 'good' : 'bad'); }
     else if (k === 'level' && pr) { cmd('setLevel', { structId: pr.id, level: arg }); cmd('setLevel', { level: arg }); stopAuto(); }
     else if (k === 'feelp') { cmd('setFeel', { preset: arg }); }
     else if (k === 'feelr') { cmd('setFeel', { reset: true }); }

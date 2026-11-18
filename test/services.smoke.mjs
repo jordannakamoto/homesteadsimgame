@@ -50,6 +50,19 @@ await page.mouse.move(box.screen.x, box.screen.y); await frames(3);
 check('aiming at a pale box says two clicks', /twice/.test(await hint()), await hint());
 await page.mouse.down(); await page.mouse.up(); await frames(2);
 await page.mouse.down(); await page.mouse.up(); await frames(2);
+// nothing ordered yet: the box is not there to nail (S8: rough-in material comes through the Build panel)
+check('with nothing ordered, the box stays planned', await G((id) => __game.sim.state.sys.routes.nodes[id].state === 'planned', box.node));
+const ord = await G((frame) => {
+  const sim = __game.sim; sim.state.sys.stock.money = 1e5;
+  sim.commandNow('construction.setOption', { key: 'instant', value: true }); sim.commandNow('services.sync');
+  const v = sim.systems.find((q) => q.name === 'construction').api.buildingView(sim.state.sys.construction, frame), st = v && v.stages.find((q) => q.id === 'rough-in');
+  const r = sim.commandNow('construction.order', { structId: frame, stage: 'rough-in' });
+  return { ok: r.ok, reason: r.reason, stage: !!st, after: v ? v.stages.map((q) => q.id).slice(v.stages.findIndex((q) => q.id === 'rough-in') - 1, v.stages.findIndex((q) => q.id === 'rough-in') + 2).join() : '', cable: sim.state.sys.construction.stacks.filter((k) => k.itemId === 'nm_cable_14_2').reduce((n, k) => n + k.qty, 0) };
+}, (await G((id) => __game.sim.state.sys.routes.runs[id].frame, RUN)));
+check('the Build panel lists rough-in after the gutters; ordering it brings the cable', ord.ok && ord.stage && /^gutters,rough-in,insulation$/.test(ord.after) && ord.cable > 2, JSON.stringify(ord));
+await page.mouse.move(box.screen.x, box.screen.y); await frames(3);
+await page.mouse.down(); await page.mouse.up(); await frames(2);
+await page.mouse.down(); await page.mouse.up(); await frames(2);
 check('two clicks nail the box', await G((id) => __game.sim.state.sys.routes.nodes[id].state === 'set', box.node));
 const box2 = await G(() => __servicesHands.where('box'));
 if (box2) { await page.mouse.move(box2.screen.x, box2.screen.y); await frames(3); for (let i = 0; i < 2; i++) { await page.mouse.down(); await page.mouse.up(); await frames(2); } }
@@ -94,6 +107,7 @@ for (let k = 0; k < 2; k++) {
 }
 const st = await G((id) => { const r = __game.sim.state.sys.routes.runs[id]; return { joined: r.joined, state: r.state }; }, RUN);
 check('both ends clamped: the run is roughed in', st.joined.a && st.joined.b && st.state === 'roughed', JSON.stringify(st));
+check('the box, the cable, staples and plates were drawn from the stacks; the books balance', await G(() => { const s = __game.sim.state.sys.construction, pr = Object.values(s.progress).find((p) => Object.values(p.lines).some((l) => l.ext)), u = (it) => Object.values(pr.lines).filter((l) => l.itemId === it).reduce((n, l) => n + l.used, 0); return u('elec_box_wall') === 2 && u('nm_cable_14_2') > 2 && u('cable_staple') > 0 && Object.keys(__game.sim.systems.find((q) => q.name === 'construction').api.imbalance(s)).length === 0; }));
 await shot('3-roughed');
 check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 await browser.close();

@@ -27,10 +27,10 @@ export const STAGES = Object.freeze([
   { id: 'gutters', name: 'Gutters', needs: ['roofing', 'cladding'], verb: 'Hang the gutters', what: 'From the ladder or scaffold: gutters along the eaves, falling a little toward a downspout at one end.', why: 'They catch the rain off the roof and carry it away from the foundation, or into a rain barrel.' },
   // rough-in and trim-out are tallied by the services system (src/sim/services.js) through construction.setExternal: `by` names
   // it. A stage with nothing in it counts as complete, so a building with no cable or pipe planned goes on exactly as before.
-  { id: 'rough-in', name: 'Rough-in', needs: ['roofing', 'sheathing'], by: 'services', verb: 'Run the pipes and cables', what: 'Drill the studs, pull cable and pipe to each box and stub.', why: 'Everything inside a wall goes in while you can still see the studs.' },
+  { id: 'rough-in', name: 'Rough-in', needs: ['roofing', 'sheathing'], by: 'services', hint: 'Rough-in: Hands (F), then pick Power or Water', verb: 'Run the pipes and cables', what: 'Drill the studs, pull cable and pipe to each box and stub.', why: 'Everything inside a wall goes in while you can still see the studs.' },
   { id: 'insulation', name: 'Insulation', needs: ['roofing', 'sheathing', 'rough-in'], verb: 'Insulate', what: 'Fill the spaces between studs and rafters with batts.', why: 'Slows heat leaving in winter and coming in during summer.' },
   { id: 'lining', name: 'Lining', needs: ['insulation'], verb: 'Finish the inside', what: 'Fix boards or panels inside, and lay the floor boards.', why: 'Covers the insulation and makes a finished room.' },
-  { id: 'trim-out', name: 'Trim-out', needs: ['lining'], by: 'services', verb: 'Fit the devices and fixtures', what: 'Outlets, switches and lights into their boxes; breakers into the panel; taps and fixtures onto their stubs.', why: 'The wall is finished now, so what you touch goes on its face.' },
+  { id: 'trim-out', name: 'Trim-out', needs: ['lining'], by: 'services', hint: 'Trim-out: Do it for me, in the Build panel (L)', verb: 'Fit the devices and fixtures', what: 'Outlets, switches and lights into their boxes; breakers into the panel; taps and fixtures onto their stubs.', why: 'The wall is finished now, so what you touch goes on its face.' },
 ]);
 export const STAGE = Object.freeze(Object.fromEntries(STAGES.map((s) => [s.id, s])));
 export const STAGE_ORDER = Object.freeze(STAGES.map((s) => s.id));

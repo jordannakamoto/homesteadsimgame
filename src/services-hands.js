@@ -8,7 +8,12 @@
              it holding on: the cable follows through the holes. Let go anywhere; how far it got is kept (`pulled`).
              Staples tick in behind it and nail plates go on over holes near a stud face, by themselves.
      Crimp   hold on an end until the ring closes (PEX) or the cable is clamped in its box: a green flash.
+     Open    a run inside a wall that is lined: hold on the marker to take the wall's lining (and the batts behind it) off,
+             through services.openWall. The whole wall face comes off: lining is one piece per wall for now.
    All of it goes through routes.work and routes.setNode: this file owns no truth. Drains (fitted in lengths) are S11.
+   Material: a box, the metres pulled with their staples and nail plates, and a crimp ring are drawn from the Build panel's
+   rough-in lines (construction.use): from the arms when you carry that spool or coil, else the stacks. Short: the gesture
+   stops and says what to order. Sandbox, or a building not under construction: free.
    Content: knows cable and pipe; reaches the game through __reach, __game (sim, powerAvailable, burst) and reads the
    routes and services systems. Console: __servicesHands.summary(), .targets(), .where(kind), .screen(x, y, z).
    Cost: hands off, a version compare a frame (staples and plates are a few instanced boxes, rebuilt only when the
@@ -19,6 +24,7 @@
   const T = G.THREE, P = G.player;
   const RS = () => G.sim.state.sys.routes, SS = () => G.sim.state.sys.services || {};
   const sysApi = (n) => { const d = G.sim.systems.find((s) => s.name === n); return d ? d.api : null; };
+  const SV0 = () => sysApi('services');
   const cmd = (n, p) => { try { return G.sim.commandNow(n, p) || { ok: true }; } catch (e) { console.warn('services-hands: ' + n + ' failed: ' + e.message); return { ok: false, reason: e.message }; } };
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const hex = (c) => parseInt(String(c).slice(1), 16);
@@ -26,6 +32,23 @@
   const gesture = () => { const c = G.sim.state.sys.construction, g = c && c.options && c.options.gesture; return Number.isFinite(g) && g > 0 ? g : 3; };
   const powered = () => { try { return !!(G.powerAvailable && G.powerAvailable()); } catch (e) { return false; } };
   const planBusy = () => !!(window.__servicesPlan && window.__servicesPlan.mode);
+  // material for a piece of work, { itemId: qty }, from the building's rough-in lines. short(frame, need) -> null when there
+  // is enough (or nothing is counted), else what is missing; take(frame, need) draws it.
+  const CN = () => G.sim.state.sys.construction;
+  const counts = () => G.sim.handlers.has('construction.use');
+  const fromFor = (itemId, qty) => { const c = CN() && CN().carried; return c && c.itemId === itemId && c.qty + 1e-6 >= qty ? 'carried' : 'stacks'; };
+  function short(frame, need) {
+    if (!counts() || frame == null || !Object.keys(need).length) return null;
+    cmd('services.sync');                                    // the lines reach the Build panel before anything is drawn on them
+    for (const [itemId, qty] of Object.entries(need)) {
+      const r = cmd('construction.use', { structId: frame, itemId, qty, from: fromFor(itemId, qty), check: true });
+      if (!r.ok && r.reason !== 'not in the plan') return { itemId, qty, have: r.have || 0 };
+    }
+    return null;
+  }
+  function take(frame, need) { if (counts() && frame != null) for (const [itemId, qty] of Object.entries(need)) cmd('construction.use', { structId: frame, itemId, qty, from: fromFor(itemId, qty) }); G.markStockDirty && G.markStockDirty(); }
+  const itemName = (itemId) => { const a = sysApi('construction'), it = a && a.catalog && a.catalog[itemId]; return it ? it.name.replace(/ with ground$/, '') : itemId; };
+  const shortWords = (m) => 'Out of ' + itemName(m.itemId).toLowerCase() + ': order the rough-in in the Build panel (L).';
 
   // feel: seconds per hole (corded with power near, on the battery without), sweep half-width by the gesture setting,
   // how fast cable comes off the spool, how long a crimp is held
@@ -72,7 +95,8 @@
     const fresh = simRef !== G.sim;
     cKey = key; simRef = G.sim;
     const W = (frame, p) => A.worldOf(R, frame, p);
-    const out = { bores: [], boxes: [], pulls: [], ends: [], staples: [], plates: [], rings: [], runs: {} };
+    const out = { bores: [], boxes: [], pulls: [], ends: [], opens: [], staples: [], plates: [], rings: [], runs: {} };
+    const openBy = {};
     const endsBy = {};
     for (const id of Object.keys(R.runs).sort()) {
       const run = R.runs[id], cls = SV.classes[run.cls];
@@ -95,6 +119,9 @@
           const t = endsBy[n.id] || (endsBy[n.id] = { node: n.id, kind: n.kind, w: W(n.frame, n.at), items: [], cls: run.cls });
           t.items.push({ run: id, end: e });
         }
+      } else if (rs.next && SV.coveredHosts) {           // work left inside a closed wall: a place to open it
+        const hosts = SV.coveredHosts(G.sim.state, id);
+        for (const h of hosts) if (!openBy[run.frame + '|' + h]) openBy[run.frame + '|' + h] = { frame: run.frame, host: h, run: id, w: polyAt(wp, cum, L / 2).p };
       }
       // what is fixed along the part pulled so far
       const upTo = run.pulled * L, every = STAPLE_M[run.cls] || 1;
@@ -118,6 +145,7 @@
       }
     }
     out.ends = Object.values(endsBy);
+    out.opens = Object.values(openBy);
     for (const n of Object.values(R.nodes)) {
       if (n.state !== 'planned' || n.stray || !BOX_KINDS[n.kind]) continue;
       out.boxes.push({ node: n.id, kind: n.kind, w: W(n.frame, n.at), frame: n.frame });
@@ -237,6 +265,7 @@
     for (const b of c.boxes) consider('box', b, b.w, 0.08);
     for (const p of c.pulls) consider('pull', p, p.w, 0.1);
     for (const e of c.ends) consider('end', e, e.w, 0.08);
+    for (const o of c.opens) consider('open', o, o.w, 0.14);
     if (best) return best;
     if (far) return { sv: 'far', score: 0.4 + far.d, x: far.w[0], y: far.w[1], z: far.w[2], w: far.w, what: far.sv };
     return null;
@@ -261,6 +290,7 @@
       const w = WORDS[h.obj.cls] || WORDS.cable, n = h.obj.items.length;
       return '<b>Hold</b> to ' + w.join + (n > 1 ? ' (' + n + ' ends here)' : '');
     }
+    if (h.sv === 'open') return 'This run is inside a closed wall.  <b>Hold</b> to open the wall: its lining and batts come off (the whole face)';
     return '';
   }
 
@@ -376,8 +406,11 @@
   }
   function commitPull(R) {
     const I = act.info, to = act.head >= I.L - 0.02 ? 1 : act.head / I.L;
+    const run = RS().runs[act.run], need = run && SV0() && to > run.pulled ? SV0().workCost(run, 'pull', { from: run.pulled, to }) : {}, miss = short(I.frame, need);
+    if (miss) { R.say(shortWords(miss), 2.8); act.head = act.committed; act = null; live.count = 0; spool.visible = false; return; }
     popOK = true;
     const r = cmd('routes.work', { id: act.run, what: 'pull', to });
+    if (r.ok && r.done) take(I.frame, need);
     act.committed = act.head;
     if (!r.ok) { R.say('Cannot pull: ' + r.reason, 2); act = null; live.count = 0; spool.visible = false; return; }
     if (to >= 1) {
@@ -425,7 +458,11 @@
     if (k >= 1 && !act.doneAll) {
       act.doneAll = true;
       let n = 0;
-      for (const it of e.items) { const r = cmd('routes.work', { id: it.run, what: 'join', end: it.end }); if (r.ok && r.done) n++; }
+      const Rr0 = RS(), costs = e.items.map((it) => (Rr0.runs[it.run] && SV0() ? SV0().workCost(Rr0.runs[it.run], 'join', { end: it.end }) : {})), need = {};
+      for (const c of costs) for (const [k, q] of Object.entries(c)) need[k] = (need[k] || 0) + q;
+      const fr = Rr0.runs[e.items[0].run] && Rr0.runs[e.items[0].run].frame, miss = short(fr, need);
+      if (miss) { R.say(shortWords(miss), 2.6); act = null; aim.visible = false; return; }
+      e.items.forEach((it, i) => { const r = cmd('routes.work', { id: it.run, what: 'join', end: it.end }); if (r.ok && r.done) { n++; take(fr, costs[i]); } });
       flash(e.w, 0.09); G.burst(e.w[0], e.w[1], e.w[2], 7, GREEN, 0.7, 0.9, 0.025, 0.35);
       if (G.juice) G.juice.hitStop = 0.04;
       G.cam.shake = Math.min(G.cam.shake + 0.05, 0.3);
@@ -438,13 +475,36 @@
     }
   }
 
+  // opening a wall: pry the lining off; the whole face comes away (services.openWall: construction.dismantle on it)
+  const OPEN_S = 0.9;
+  function tickOpen(dt, R) {
+    const o = act.target;
+    act.t += dt;
+    const k = Math.min(1, act.t / OPEN_S);
+    R.pose(-1.4 - Math.sin(act.t * 11) * 0.12, -1.3, 0.12, 0.1);
+    aim.visible = true; aim.position.set(o.w[0], o.w[1], o.w[2]); aim.lookAt(G.camera.position);
+    aim.scale.setScalar(1.6 - 0.6 * k); aim.material.color.set(0xd8d0c0);
+    if (act.chip = (act.chip || 0) + dt, act.chip > 0.12) { act.chip = 0; G.burst(o.w[0], o.w[1], o.w[2], 2, 0xe8e4dc, 0.6, 0.6, 0.03, 0.3); }
+    if (act.hit) act.hit.hintDown = 'Opening the wall...  keep holding';
+    if (k >= 1 && !act.doneAll) {
+      act.doneAll = true;
+      const r = cmd('services.openWall', { structId: o.frame, host: o.host });
+      if (r.ok) {
+        G.burst(o.w[0], o.w[1], o.w[2], 14, 0xe8e4dc, 1.4, 1.4, 0.05, 0.6);
+        G.cam.shake = Math.min(G.cam.shake + 0.08, 0.3);
+        G.markStockDirty && G.markStockDirty();
+        R.say('Wall opened: the lining and batts are off. Finish the run, then insulate and line it again.', 3.5);
+      } else R.say(r.reason === 'something stands on it' ? 'Take off what is fixed to this wall first.' : 'Cannot open it: ' + r.reason, 2.5);
+    }
+  }
+
   /* ================= the reach user ================= */
   RCH.use({
     id: 'services-hands',
     near(px, pz) {
       const c = scan(); if (!c) return false;
       const by = (w) => Math.hypot(w[0] - px, w[2] - pz) < 6;
-      return c.bores.some((b) => by(b.w)) || c.boxes.some((b) => by(b.w)) || c.pulls.some((p) => by(p.w)) || c.ends.some((e) => by(e.w));
+      return c.bores.some((b) => by(b.w)) || c.boxes.some((b) => by(b.w)) || c.pulls.some((p) => by(p.w)) || c.ends.some((e) => by(e.w)) || c.opens.some((o) => by(o.w));
     },
     hover(R) {
       if (R.held || planBusy()) { hovered = null; return null; }
@@ -463,7 +523,10 @@
       if (hit.sv === 'box') {
         const b = hit.obj, now = performance.now(), what = BOX_KINDS[b.kind];
         if (tap && tap.node === b.node && now - tap.t < 8000) {
+          const node = RS().nodes[b.node], need = node && SV0() ? SV0().nodeCost(node) : {}, miss = short(b.frame, need);
+          if (miss) { tap = null; heldBox.visible = false; R.say(shortWords(miss), 2.6); return; }
           const r = cmd('routes.setNode', { id: b.node, state: 'set' });
+          if (r.ok) take(b.frame, need);
           tap = null; heldBox.visible = false;
           if (!r.ok) { R.say('Cannot fix it: ' + r.reason, 2); return; }
           R.pose(-2.5, -0.9, 0.14, 0.09);
@@ -489,6 +552,7 @@
         return;
       }
       if (hit.sv === 'end') { act = { kind: 'crimp', hit, target: hit.obj, t: 0, doneAll: false }; return; }
+      if (hit.sv === 'open') { act = { kind: 'open', hit, target: hit.obj, t: 0, doneAll: false }; return; }
     },
     move() {},
     release(hit, R, cancelled) {
@@ -503,6 +567,7 @@
         if (!act.doneAll && !cancelled) R.say('Hold until it ' + (act.target.cls === 'supply' ? 'closes' : 'clamps') + '.', 1.4);
         act = null; aim.visible = false;
       }
+      if (act && act.kind === 'open') { if (!act.doneAll && !cancelled) R.say('Hold until the lining comes off.', 1.4); act = null; aim.visible = false; }
     },
     secondary() { if (tap) { tap = null; heldBox.visible = false; return true; } return false; },
     frame(dt, R) {
@@ -514,6 +579,7 @@
       if (act && act.kind === 'drill') tickDrill(dt, R);
       else if (act && act.kind === 'pull') tickPull(dt, R);
       else if (act && act.kind === 'crimp') tickCrimp(dt, R);
+      else if (act && act.kind === 'open') tickOpen(dt, R);
       if (!act) {
         queued.count = 0;
         const h = R.on && !R.held && !planBusy() ? hovered : null;
@@ -521,7 +587,7 @@
         if (h && h.sv !== 'far') {
           aim.visible = true; aim.position.set(h.w[0], h.w[1], h.w[2]); aim.lookAt(G.camera.position);
           aim.scale.setScalar(1 + Math.sin(performance.now() / 160) * 0.12);
-          aim.material.color.set(h.sv === 'bore' ? 0xffd23a : h.sv === 'box' ? 0x8fc0ff : h.sv === 'pull' ? (h.obj.info.colour) : 0xd08a3a);
+          aim.material.color.set(h.sv === 'bore' ? 0xffd23a : h.sv === 'box' ? 0x8fc0ff : h.sv === 'pull' ? (h.obj.info.colour) : h.sv === 'open' ? 0xd8d0c0 : 0xd08a3a);
         } else aim.visible = false;
       } else if (act.kind !== 'drill') drill.visible = false;
       if (tap && (!R.on || performance.now() - tap.t > 8000)) { tap = null; heldBox.visible = false; }
@@ -548,9 +614,9 @@
   const screen = (x, y, z) => { _s.set(x, y, z).project(G.camera); const r = document.getElementById('view').getBoundingClientRect(); return { x: r.left + (_s.x * 0.5 + 0.5) * r.width, y: r.top + (-_s.y * 0.5 + 0.5) * r.height }; };
   window.__servicesHands = {
     summary, workLine, screen,
-    targets: () => { const c = scan(); return c ? { bores: c.bores.map((b) => ({ run: b.run, index: b.index, w: b.w, reach: inReach(b.w) })), boxes: c.boxes.map((b) => ({ node: b.node, w: b.w })), pulls: c.pulls.map((p) => ({ run: p.run, pulled: p.pulled, w: p.w, L: p.info.L })), ends: c.ends.map((e) => ({ node: e.node, w: e.w, items: e.items })) } : null; },
+    targets: () => { const c = scan(); return c ? { bores: c.bores.map((b) => ({ run: b.run, index: b.index, w: b.w, reach: inReach(b.w) })), boxes: c.boxes.map((b) => ({ node: b.node, w: b.w })), pulls: c.pulls.map((p) => ({ run: p.run, pulled: p.pulled, w: p.w, L: p.info.L })), ends: c.ends.map((e) => ({ node: e.node, w: e.w, items: e.items })), opens: c.opens.map((o) => ({ frame: o.frame, host: o.host, run: o.run, w: o.w })) } : null; },
     // where a kind of work is, in the world and on the screen: 'bore' | 'box' | 'pull' | 'end' (the first in reach), or a path point of a run
-    where(kind, i = 0) { const t = this.targets(); if (!t) return null; const list = { bore: t.bores, box: t.boxes, pull: t.pulls, end: t.ends }[kind] || []; const o = list[i]; return o ? { ...o, screen: screen(o.w[0], o.w[1], o.w[2]) } : null; },
+    where(kind, i = 0) { const t = this.targets(); if (!t) return null; const list = { bore: t.bores, box: t.boxes, pull: t.pulls, end: t.ends, open: t.opens }[kind] || []; const o = list[i]; return o ? { ...o, screen: screen(o.w[0], o.w[1], o.w[2]) } : null; },
     pathOf: (runId) => { const I = scan() && C.runs[runId]; return I ? { wp: I.wp, L: I.L } : null; },
     fixings: () => ({ staples: staples.count, plates: plates.count, rings: rings.count }),
     get busy() { return act ? act.kind : null; },
