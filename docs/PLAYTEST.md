@@ -518,3 +518,18 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 **Known gaps**
 
 - Nothing uses it yet; the first user is the vehicle seat (V3).
+
+## Ground A1 — smaller saves (branch `ground-a1a2`)
+
+**What is new**
+
+- Dug and shaped ground (the Yard, key 6) is stored packed in the save: about 1-2 KB per 3.2 m patch instead of about 17 KB. A big dug yard no longer runs into the browser's storage limit. Old saves load as before (save version 2).
+- Autosave no longer copies the whole simulation first, so the 20 s autosave hitch is smaller.
+
+**Try this**
+
+1. Console: `__game.saveSize()` gives `{ bytes, plainBytes }` (stored size versus plain JSON). Dig a large area in the Yard, check again, reload: everything is where you left it.
+
+**What's weak**
+
+- Packing a very large dug area (300 patches) takes about 30 ms once per autosave.
