@@ -64,6 +64,15 @@ export function sunPosition(t, site) {
   return { elevationRad, azimuthRad };
 }
 
+// The sun's hour angle (radians, negative in the morning), by local solar time with the equation of time: with the
+// sun's right ascension it gives the sidereal time, which sets the stars (the renderer's night sky).
+export function solarHourAngleRad(t) {
+  const o = orbit(t);
+  return ((dayFraction(t) * 24 + o.eotMin / 60) - 12) * 15 * RAD;
+}
+// days since world time 0 began, counted from 1 January of the first year (for the moon's phase and the stars)
+export const absoluteDays = (t) => absDay(t) + dayFraction(t);
+
 // Sunrise and sunset as the almanac defines them: the upper limb on the horizon, with refraction
 // (centre of the disc at -0.833 degrees). Clock hours of the day containing t.
 const H0_ALT = -0.833 * RAD;

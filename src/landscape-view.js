@@ -792,10 +792,20 @@
     const turf = !EW.sAt(grid(), Math.round(x / STEP), Math.round(z / STEP));
     G.burst(x, y + 0.05, z, 3 + Math.round(7 * HARD), turf ? 0x5e8a3a : 0x4c3726, 1.0, 1.6, 0.045, 0.45);
   }
-  function lever() {
+  // a bite of earth onto the blade: the first one with the stamp (`m3`), then more as it is pushed further in (`add`)
+  function lever(m3, add) {
     const x = dig.x, z = dig.z;
-    const res = cmd('landscape.dig', { x, z });
-    if (!res.ok) { dig.fail = true; return sayS(res.reason); }
+    const res = cmd('landscape.dig', { x, z, m3, add });
+    if (!res.ok) { if (!add) { dig.fail = true; sayS(res.reason); } return null; }
+    dig.load = res.load; dig.cap = res.cap;
+    if (add) {
+      // the blade goes deeper: earth crumbles in from the rim of the hole
+      const y = surfaceAt(x, z);
+      for (let q = 0; q < 3; q++) { const a = Math.random() * 6.283, r = 0.3 + Math.random() * 0.08; spawnGrain(x + Math.cos(a) * r, y + 0.1, z + Math.sin(a) * r, -Math.cos(a) * 0.5, 0.2, -Math.sin(a) * 0.5, 0.0003, res.s, { cosmetic: true }); }
+      G.burst(x, y + 0.04, z, 2, res.s === 'soil' ? 0x4c3726 : matHex(res.s), 0.8, 1.0, 0.04, 0.35);
+      setHeap();
+      return res;
+    }
     const y = surfaceAt(x, z);
     G.burst(x, y + 0.12, z, 12, res.s === 'soil' ? 0x5a4230 : matHex(res.s), 1.6, 2.8, 0.07, 0.6);
     if (res.turf) G.burst(x, y + 0.12, z, 6, 0x5e8a3a, 1.6, 2.6, 0.07, 0.7);
@@ -803,6 +813,7 @@
     lastTurf = !!res.turf;
     { const key = Math.round(x * 2) + ',' + Math.round(z * 2); slides.set(key, { x, z, quiet: 0 }); }   // dug at the foot of a heap: it may slide in
     setHeap(); tip(res.s === 'soil' ? 'dug' : 'scooped', res);
+    return res;
   }
   let lastTurf = false;
   // the load leaves the blade as a stream of grains aimed at (tx, tz): tipped off close by, thrown in an arc further
@@ -825,7 +836,7 @@
   // How hard the ground is decides the stroke, as with a real spade: loose earth or chips take the blade at a push;
   // firm ground wants a stamp; turf, matted with roots, a hard stamp and a jolt. Lifting is slower when it is heavy.
   const T_TIP = 0.24;
-  let T_BITE = 0.12, T_UP = 0.28, HARD = 0.5;
+  let T_BITE = 0.12, HARD = 0.5;
   function hardness(x, z) {
     const g = grid(), i = Math.round(x / STEP), j = Math.round(z / STEP), sc = EW.sAt(g, i, j), f = EW.fAt(g, i, j), l = EW.lAt(g, i, j);
     if (sc === 0) return 1;                                           // turf
@@ -833,26 +844,54 @@
     if (f & (RD.FLAG.TAMP1 | RD.FLAG.TAMP2)) return 0.85;              // packed
     return 0.5 + clamp(-EW.hAt(g, i, j) * 0.5, 0, 0.3);               // firm, harder deeper down (subsoil, clay)
   }
+  // The scoop: the blade is stamped in (it bites and takes about half a blade), then sinks further while you hold
+  // the button still, taking more as it goes (faster in loose earth, slowly through turf and clay), until the blade
+  // is full. Drag and it levers up and comes with you; let go and it levers up and drops beside the hole.
+  const T_LIFT = 0.16;
   function digTick(dt) {
     const P = G.player;
-    if (!dig.ph) { P.lead = null; return; }
+    if (!dig.ph) { if (!push.on) P.lead = null; return; }
     const sp = G.juice && G.juice.hitStop > 0 ? 0.12 : 1;
     dig.t += dt * sp;
+    const a = H.aim, moved = Math.hypot((a.gx ?? a.x) - dig.x, (a.gz ?? a.z) - dig.z) > 0.18;
     if (dig.ph === 'in') {
-      if (!dig.bit && dig.t >= T_BITE) { dig.bit = true; bite(); }
-      if (dig.bag || dig.fail) { if (dig.t >= T_UP) dig.ph = ''; return; }
-      if (!dig.levered && dig.t >= T_BITE + 0.04) { dig.levered = true; lever(); if (dig.fail) { dig.t = T_BITE; return; } }
-      if (dig.t >= T_UP) {
-        if (dig.held) dig.ph = 'carry';
-        else { besideHole(dig.x, dig.z, _ts); if (dig.let) { dig.tx = dig.let[0]; dig.tz = dig.let[1]; } else { dig.tx = _ts[0]; dig.tz = _ts[1]; } dig.ph = 'tip'; dig.t = 0; }
+      if (!dig.bit && dig.t >= T_BITE) {
+        dig.bit = true; bite();
+        if (dig.bag || dig.fail) { dig.ph = 'lift'; dig.t = 0; return; }
+        if (!lever(SCOOP_M3 * (L().scale || 1) * 0.5, false)) { dig.ph = 'lift'; dig.t = 0; return; }
+        dig.ph = 'sink'; dig.t = 0; dig.next = 0;
       }
+      return;
+    }
+    if (dig.ph === 'sink') {
+      // still held and not dragged: the blade goes on in
+      if (dig.held && !moved) {
+        dig.next -= dt;
+        if (dig.next <= 0 && dig.load < dig.cap - 1e-6) {
+          dig.next = 0.07;
+          const rate = dig.cap / (0.35 + 0.65 * HARD);                // a full blade in 0.45 s (loose) to 1 s (turf)
+          if (!lever(rate * 0.07, true)) dig.load = dig.cap;           // something else under the blade: that is all
+        }
+        return;
+      }
+      dig.ph = 'lift'; dig.t = 0;
+      if (!dig.held && dig.let == null && moved) dig.let = dropSpot([0, 0]);
+      return;
+    }
+    if (dig.ph === 'lift') {
+      if (dig.t < T_LIFT) return;
+      if (!loaded()) { dig.ph = ''; return; }
+      if (dig.held) { dig.ph = 'carry'; return; }
+      besideHole(dig.x, dig.z, _ts);
+      if (dig.let) { dig.tx = dig.let[0]; dig.tz = dig.let[1]; } else { dig.tx = _ts[0]; dig.tz = _ts[1]; }
+      dig.ph = 'tip'; dig.t = 0; dig.done = false;
       return;
     }
     if (dig.ph === 'carry') {
       if (!loaded()) { dig.ph = ''; return; }
       dropSpot(_ts); dig.tx = _ts[0]; dig.tz = _ts[1];
       // pulled past arm's reach: the character walks after your hand
-      const a = H.aim, gx = a.gx ?? a.x, gz = a.gz ?? a.z, d = Math.hypot(gx - P.x, gz - P.z);
+      const gx = a.gx ?? a.x, gz = a.gz ?? a.z, d = Math.hypot(gx - P.x, gz - P.z);
       P.lead = d > 1.9 ? { x: ((gx - P.x) / d) * Math.min(1, (d - 1.9) / 0.8), z: ((gz - P.z) / d) * Math.min(1, (d - 1.9) / 0.8) } : null;
       return;
     }
@@ -874,6 +913,17 @@
   }
   let bob = 0;
   ITEM.shovel.anim = (o, pm, toLocal, dt) => {
+    if (patA.on) {
+      // raised and brought down flat: a slap with the back of the blade
+      const P = G.player, k = patA.t < 0.11 ? ease(patA.t / 0.11) : 1 - ease((patA.t - 0.11) / 0.19);
+      within(toLocal(patA.x, surfaceAt(patA.x, patA.z), patA.z, _D));
+      o.position.set(_D.x, _D.y + 0.04 + 0.32 * (patA.t < 0.11 ? 1 - k : 1 - k), _D.z);
+      _Hn.set(0.05, 1.0 + 0.25 * (1 - k), 0.22);
+      o.quaternion.setFromUnitVectors(_UP, _dir.subVectors(_Hn, o.position).normalize());
+      pm.armL.rotation.x = pm.armR.rotation.x = -0.8 - 0.6 * (1 - k); pm.body.rotation.x += 0.25 * k;
+      P.faceHold = Math.atan2(patA.x - P.x, patA.z - P.z);
+      return true;
+    }
     if (push.on) {
       // the blade flat on the ground in front, handle low, leaning into it
       const P = G.player;
@@ -888,14 +938,17 @@
     if (!dig.ph) return false;
     const P = G.player, t = dig.t;
     let arm, lean = 0, leg = 0, face;
-    if (dig.ph === 'in') {
+    if (dig.ph === 'in' || dig.ph === 'sink' || dig.ph === 'lift') {
       within(toLocal(dig.x, surfaceAt(dig.x, dig.z), dig.z, _D));
-      // driven in from above, then levered up and back toward you
-      const kIn = ease(t / T_BITE), kUp = ease((t - T_BITE - 0.02) / (T_UP - T_BITE - 0.02));
+      // stamped in from above; pushed on in while held (deeper as it fills, rocking a little); levered up and back
+      const full = dig.cap ? clamp(dig.load / dig.cap, 0, 1) : 0;
+      const kIn = dig.ph === 'in' ? ease(t / T_BITE) : 1, kUp = dig.ph === 'lift' ? ease(t / T_LIFT) : 0;
+      const sink = dig.ph === 'in' ? 0 : 0.12 * full * (1 - kUp), rock = dig.ph === 'sink' ? 0.03 * Math.sin(dig.t * 22) : 0;
       const back = 0.18 * kUp, d = Math.hypot(_D.x, _D.z) || 1;
-      _B.set(_D.x - (_D.x / d) * back, _D.y + 0.38 - 0.54 * kIn + 0.5 * kUp, _D.z - (_D.z / d) * back);
-      _Hn.set(0.05, 1.38 - 0.36 * kIn - 0.14 * kUp + 0.12 * kUp, 0.18 + 0.16 * kIn - 0.2 * kUp);
-      arm = -1.7 + 0.7 * kIn + 0.15 * kUp; lean = 0.32 * kIn - 0.2 * kUp; leg = -0.55 * Math.sin(Math.PI * Math.min(1, t / T_BITE));
+      _B.set(_D.x - (_D.x / d) * back, _D.y + 0.38 - 0.54 * kIn - sink + 0.62 * kUp, _D.z - (_D.z / d) * back);
+      _Hn.set(0.05 + rock, 1.38 - 0.36 * kIn - 0.1 * full * (1 - kUp) - 0.02 * kUp, 0.18 + 0.16 * kIn - 0.2 * kUp);
+      arm = -1.7 + 0.7 * kIn + 0.15 * kUp; lean = 0.32 * kIn + 0.08 * full * (1 - kUp) - 0.2 * kUp;
+      leg = dig.ph === 'in' ? -0.55 * Math.sin(Math.PI * Math.min(1, t / T_BITE)) : dig.ph === 'sink' ? -0.35 * (1 - full) : 0;   // a boot on the blade
       face = Math.atan2(dig.x - P.x, dig.z - P.z);
     } else {
       // carried: the blade, loaded, held out over where it will drop; tipped: a flick up and over
@@ -923,7 +976,7 @@
   const push = { on: false, x: 0, z: 0, level: 0, load: 0, s: 'soil', moved: 0, crumb: 0 };
   function pushPress(a) {
     if (isWater(a.x, a.z)) return sayS('That is water.');
-    Object.assign(push, { on: true, x: a.x, z: a.z, level: relief(a.x, a.z) - BITE, load: 0, moved: 0, crumb: 0 });
+    Object.assign(push, { on: true, x: a.x, z: a.z, level: relief(a.x, a.z) - BITE, load: 0, moved: 0, crumb: 0, t0: performance.now() });
     G.juice.hitStop = 0.02;
   }
   function pushFrame(a, dt) {
@@ -954,22 +1007,39 @@
   function pushRelease() {
     if (!push.on) return;
     push.on = false; G.player.lead = null;
-    // the ridge left in front of the blade settles, grain by grain
+    // a right-click without a drag: the back of the blade patted down on the spot
+    if (push.moved < 0.02 && performance.now() - push.t0 < 450) { patA.on = true; patA.t = 0; patA.x = push.x; patA.z = push.z; patA.done = false; return; }
+    // the blade lifts: the ridge it was holding slumps back, and then settles grain by grain
+    if (push.moved > 0) cmd('landscape.settle', { x: push.x, z: push.z, r: 0.9 });
     const key = Math.round(push.x * 2) + ',' + Math.round(push.z * 2); slides.set(key, { x: push.x, z: push.z, quiet: 0 });
     if (push.moved > 0.3) tip('pushed');
   }
+  // The back of the blade patted down (a right-click): lumps go, the slope stays, and the earth is firmed.
+  const patA = { on: false, t: 0, x: 0, z: 0, done: false };
+  function patTick(dt) {
+    if (!patA.on) return;
+    patA.t += dt;
+    if (!patA.done && patA.t >= 0.11) {
+      patA.done = true;
+      const res = cmd('landscape.pat', { x: patA.x, z: patA.z });
+      const y = surfaceAt(patA.x, patA.z);
+      if (!res.ok) sayS(res.reason);
+      else { G.juice.hitStop = 0.035; G.burst(patA.x, y + 0.03, patA.z, 6, 0x6e543b, 1.4, 0.5, 0.04, 0.35); groundMoved = true; tip('patted'); }
+    }
+    if (patA.t >= 0.3) patA.on = false;
+  }
   const shovel = {
-    flying: () => grainsBusy() || !!dig.ph || push.on,
+    flying: () => grainsBusy() || !!dig.ph || push.on || patA.on,
     press(a) {
       act.kind = 'shovel';
       if (!owns('shovel') && !owns('spade')) { act.kind = ''; return sayS('You need a shovel.'); }
-      if (a.alt) { if (!dig.ph) pushPress(a); return; }
+      if (a.alt) { if (!dig.ph && !patA.on) pushPress(a); return; }
       if (dig.ph === 'tip' && !dig.done) { dig.done = true; throwLoad(dig.tx, dig.tz); }
       const bag = bagAt(a.x, a.z);
       Object.assign(dig, { t: 0, held: true, fail: false, done: false, bit: false, levered: false, let: null, bag: null });
       if (onBlade()) { dig.ph = 'carry'; dig.x = a.x; dig.z = a.z; return; }   // already loaded: carry it
       dig.ph = 'in'; dig.x = bag ? bag.x : a.x; dig.z = bag ? bag.z : a.z; dig.bag = bag ? bag.id : null;
-      HARD = bag ? 0.2 : hardness(dig.x, dig.z); T_BITE = 0.07 + 0.11 * HARD; T_UP = T_BITE + 0.13 + 0.06 * HARD;
+      HARD = bag ? 0.2 : hardness(dig.x, dig.z); T_BITE = 0.07 + 0.11 * HARD; dig.load = 0; dig.cap = SCOOP_M3 * (L().scale || 1);
     },
     frame(a, dt) { if (push.on) pushFrame(a, dt); },
     release() {
@@ -978,7 +1048,7 @@
       if (push.on) return pushRelease();
       dig.held = false;
       if (dig.ph === 'carry') { dropSpot(_ts); dig.tx = _ts[0]; dig.tz = _ts[1]; dig.ph = 'tip'; dig.t = 0; dig.done = false; }
-      else if (dig.ph === 'in') {
+      else if (dig.ph === 'in' || dig.ph === 'sink' || dig.ph === 'lift') {
         // let go before the scoop was up: it goes where you let go (beside the hole if you did not move)
         const a = H.aim, gx = a.gx ?? a.x, gz = a.gz ?? a.z;
         if (Math.hypot(gx - dig.x, gz - dig.z) >= 0.35) dig.let = dropSpot([0, 0]);
@@ -1011,7 +1081,7 @@
     const carrying = dig.ph === 'carry' || dig.ph === 'tip';
     if (carrying) { tx = dig.tx; tz = dig.tz; size = 1.15; col = 0xffe08a; op = 0.9; }
     else if (push.on) { tx = push.x; tz = push.z; size = 1.0; col = 0xd8c8a8; op = 0.6; }
-    else if (dig.ph === 'in') { tx = dig.x; tz = dig.z; size = 1.35; col = 0xffffff; op = 0.5; }
+    else if (dig.ph === 'in' || dig.ph === 'sink' || dig.ph === 'lift') { tx = dig.x; tz = dig.z; size = 1.35; col = 0xffffff; op = 0.5; }
     else {
       const bag = bagAt(a.x, a.z);
       if (bag) { tx = bag.x; tz = bag.z; size = 1.5; col = 0xffb35c; op = 0.9; }              // the blade will rip this
@@ -1244,7 +1314,7 @@
     else {
       const id = held();
       if (id === 'store') h = 'Pick what to buy. Things you own appear on the bar.';
-      else if (id === 'shovel') h = loaded() ? '<b>' + litres(L().carry.m3) + ' L</b> on the shovel: <b>press and drag</b> it where it goes, let go to drop it.' : '<b>Press</b> to dig a scoop, <b>drag</b> it where it goes, <b>let go</b> to drop it. <b>Right-drag</b>: the flat of the blade, to push earth and spread it. <b>Press a bag</b> to rip it open. (Middle-drag turns the view.)';
+      else if (id === 'shovel') h = loaded() ? '<b>' + litres(L().carry.m3) + ' L</b> on the shovel: <b>press and drag</b> it where it goes, let go to drop it.' : '<b>Press</b> to dig (hold to push the blade deeper), <b>drag</b> the load where it goes, <b>let go</b> to drop it. <b>Right-drag</b> pushes earth with the flat of the blade; <b>right-click</b> pats it down. <b>Q E</b> or middle-drag turn the view, the <b>wheel</b> zooms (shift tilts).';
       else if (id === 'sod') h = '<b>Drag</b> along the grass to cut the turf off in a strip.';
       else if (id === 'barrow') h = L().barrow.m3 > 1e-6 ? '<b>' + litres(L().barrow.m3) + ' L</b> in the barrow. <b>Click</b> to shovel in more, <b>drag down</b> to tip it all out.' : '<b>Click</b> to shovel a scoop into the barrow. When it is full, walk it over and <b>drag down</b> to tip it out.';
       else if (id === 'can') h = '<b>Hold and drag down</b> to pour over new plants: water them in, and keep them moist for three weeks while they root. Fill the can at the pump or the stream.';
@@ -1277,7 +1347,8 @@
   function tip(what, res) {
     if (told[what]) return;
     told[what] = 1;
-    if (what === 'dug') sayS(litres(res.m3) + ' L on the blade. Drag it where you want it and let go: a heap, a hill, a bank. Pull past your reach and you walk with it.', 6);
+    if (what === 'dug') sayS('Hold still and the blade goes deeper, for a full load. Then drag it where you want it and let go: a heap, a hill, a bank.', 6);
+    else if (what === 'patted') sayS('Patted down with the back of the blade: the lumps are gone and the earth is firm. Pat a bank to shape it, or a bed to level it.', 6);
     else if (what === 'pushed') sayS('The flat of the blade pushes loose earth ahead of it and fills the hollows it passes. Push from beside a heap to flatten it; drag from its top to spread it out.', 6);
     else if (what === 'scooped') sayS((SURFACES[res.s] ? SURFACES[res.s].name : res.s) + ' on the blade. Drag it to the bed and let go. Rake it level after.', 6);
     else if (what === 'tossed') sayS('Loose earth slides down until it holds at its natural slope. Rake it level, or keep heaping.', 5);
@@ -1458,7 +1529,7 @@
   function enter() {
     on = true; document.body.classList.add('gardening', 'yarding'); bar.hidden = false; shovelSay = null;
     mySlots = slotList();
-    H.open({ bar: toolsEl, reach: 2.0, camDist: 7.5, camPitch: 1.22, pace: 0.55, tipPx: 90, liftPx: 70, slots: mySlots, held: lastHeld, onHold, press, frame, release, alt: (cur) => !!cur && cur.id === 'shovel' });
+    H.open({ bar: toolsEl, reach: 2.0, camDist: 7.5, camPitch: 0.98, camFree: true, pace: 0.55, tipPx: 90, liftPx: 70, slots: mySlots, held: lastHeld, onHold, press, frame, release, alt: (cur) => !!cur && cur.id === 'shovel' });
     onHold(held()); setHeap();
   }
   function leave() {
@@ -1486,7 +1557,7 @@
     if (hoseMeshes.size) hoseSpray();
     grainTick(dt);
     if (groundMoved) { fastT += dt; if (fastT > 0.07) { fastT = 0; groundMoved = false; refreshGround(false, true); } }
-    digTick(dt); markTick(dt);
+    digTick(dt); patTick(dt); markTick(dt);
     slow += dt;
     if (slow > 0.25 || dirty) {
       slow = 0; dirty = false;

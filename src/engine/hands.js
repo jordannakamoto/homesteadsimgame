@@ -55,6 +55,7 @@
   const gp = { x: 0, y: 0, z: 0 };
   let cfg = null, cur = null, slots = [], slotSig = '', barEl = null;
   let saved = null;      // camera distance and pitch before opening
+  let zoomK = 1;         // the stance's own zoom (the wheel, where the stance asks for it)
   const trophy = { obj: null, t: 0, secs: 0, done: null };
 
   /* ---------------- markers ---------------- */
@@ -134,7 +135,7 @@
     if (cfg && cfg.release) cfg.release(aim, cur);
   }
   const fingers = new Map();
-  const turn = (mx, my) => { G.cam.yaw -= mx * 0.005; G.cam.pitch = clamp(G.cam.pitch + my * 0.004, 0.5, 1.35); if (saved) saved.pitchSet = G.cam.pitch; };
+  const turn = (mx, my) => { G.cam.yaw -= mx * 0.005; G.cam.pitch = clamp(G.cam.pitch + my * 0.004, cfg && cfg.camFree ? 0.35 : 0.5, 1.35); if (saved) saved.pitchSet = G.cam.pitch; };
   window.addEventListener('pointerdown', (e) => {
     if (!cfg || e.target !== canvas) return;
     e.stopImmediatePropagation(); e.preventDefault();
@@ -192,7 +193,14 @@
   window.addEventListener('pointercancel', up, true);
   canvas.addEventListener('pointerleave', () => { if (cfg && !aim.down) ptr.inside = false; });
   window.addEventListener('wheel', (e) => {
-    if (!cfg || e.target !== canvas || !slots.length) return;
+    if (!cfg || e.target !== canvas) return;
+    // a stance with a free camera: the wheel zooms (shift: tilts); otherwise it steps through what is in hand
+    if (cfg.camFree) {
+      e.stopImmediatePropagation(); e.preventDefault();
+      if (e.shiftKey) turn(0, e.deltaY * 0.25); else zoomK = clamp(zoomK * Math.exp(e.deltaY * 0.0012), 0.4, 2.4);
+      return;
+    }
+    if (!slots.length) return;
     e.stopImmediatePropagation(); e.preventDefault();
     const i = slots.indexOf(cur), n = slots.length;
     hold(slots[(i + (e.deltaY > 0 ? 1 : n - 1)) % n].id);
@@ -232,7 +240,9 @@
     reachRing.visible = true; reachRing.position.set(P.x, P.y + 0.06, P.z); reachRing.scale.setScalar(cfg.reach || 1.5);
 
     // the camera comes in close while the hands work
-    if (saved) { const k = 1 - Math.exp(-5 * dt); G.cam.dist += ((cfg.camDist || 8) - G.cam.dist) * k; }
+    if (saved) { const k = 1 - Math.exp(-5 * dt); G.cam.dist += ((cfg.camDist || 8) * zoomK - G.cam.dist) * k; }
+    // Q and E turn the view (a free camera)
+    if (cfg.camFree && G.keys) { const ty = (G.keys.KeyQ ? 1 : 0) - (G.keys.KeyE ? 1 : 0); if (ty) turn(-ty * 340 * dt, 0); }
 
     // arms, and the thing in them
     const it = cur && cur.item, o = shown;
@@ -293,7 +303,7 @@
     if (cfg) close();
     cfg = c; barEl = c.bar || null; slotSig = '';
     if (document.pointerLockElement) document.exitPointerLock();
-    saved = { dist: G.cam.dist, pitch: G.cam.pitch, pitchSet: null };
+    saved = { dist: G.cam.dist, pitch: G.cam.pitch, pitchSet: null }; zoomK = 1;
     if (c.camPitch) G.cam.pitch = c.camPitch;
     G.player.pace = c.pace || 0.5;
     G.handPose = tick;

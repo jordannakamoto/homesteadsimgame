@@ -188,7 +188,8 @@ export function shed(g, x, z, r = 0.7, slope = REPOSE, maxM3 = 0.004) {
 }
 // Loose ground steeper than its angle of repose runs down (thermal erosion, iterated in the window round (x, z)).
 // Untouched turf never gives soil, and takes it only as a cover (it becomes loose soil). Volume is conserved.
-export function settle(g, x, z, r = 0.8, slope = REPOSE, iters = 40, firmOnly = false) {
+// `mask(i, j)`: only points it accepts give or take (a blade face that earth cannot flow back through)
+export function settle(g, x, z, r = 0.8, slope = REPOSE, iters = 40, firmOnly = false, mask = null) {
   const s = g.step, i0 = Math.floor((x - r) / s), i1 = Math.ceil((x + r) / s), j0 = Math.floor((z - r) / s), j1 = Math.ceil((z + r) / s);
   const lim = slope * s * 1000, limFirm = Math.max(slope, FIRM) * s * 1000, soil = code(g, 'soil');
   for (let it = 0; it < iters; it++) {
@@ -198,7 +199,9 @@ export function settle(g, x, z, r = 0.8, slope = REPOSE, iters = 40, firmOnly = 
       if (!a || a[0].s[a[1]] === 0) continue;
       const loose = (a[0].f[a[1]] & LOOSE_BIT) || a[0].l[a[1]] > 0, la = loose ? lim : limFirm;
       if (loose && firmOnly) continue;
+      if (mask && !mask(i, j)) continue;
       for (const [di, dj, dl] of OFF8) {
+        if (mask && !mask(i + di, j + dj)) continue;
         const ha = a[0].h[a[1]], b = tileOf(g, i + di, j + dj, false), hb = b ? b[0].h[b[1]] : 0, d = ha - hb, lm = la * dl;
         if ((a[0].f[a[1]] ^ (b ? b[0].f[b[1]] : 0)) & WALL_BIT) continue;
         if (d <= lm + 1) continue;
@@ -275,8 +278,47 @@ export function push(g, x0, z0, x1, z1, level, { w = 0.45, t = 0 } = {}) {
     for (const [i, j] of ahead) { const d = each + (left > 0 ? 1 : 0); if (left > 0) left--; if (d > 0) put(i, j, d); }
     total = 0;
   } else if (total > 0) { const i = Math.round(x1 / st), j = Math.round(z1 / st); put(i, j, total); total = 0; }
+  // the ridge in front of the blade is loose earth: it slumps to its angle of repose at once (never a wall or a spire)
+  settle(g, x1 + ux * AHEAD * 0.5, z1 + uz * AHEAD * 0.5, half + 0.35, REPOSE, 14, false, (i, j) => (i * st - x0) * ux + (j * st - z0) * uz > L + st * 0.3);   // behind it is the blade
+  // and the sides of the cut it leaves behind slump into it (the blade face holds the ridge, not the channel's walls)
+  settle(g, (x0 + x1) / 2, (z0 + z1) / 2, L / 2 + half + 0.35, REPOSE, 10, false, (i, j) => (i * st - x0) * ux + (j * st - z0) * uz < L - st * 0.3);
   g.rev++;
   return { m3: (most > 0 ? [...load.values()].reduce((a, b) => a + b, 0) : 0) / 1000 * A, s: surf };
+}
+// The back of a shovel patted down on worked ground: within r the surface is drawn toward the plane that best fits it
+// (lumps go, the slope stays), by k (0..1), and loose earth there is firmed so it stays put. Volume is conserved.
+export function pat(g, x, z, r = 0.32, k = 0.85) {
+  const st = g.step, pts = [];
+  for (let j = Math.floor((z - r) / st); j <= Math.ceil((z + r) / st); j++) for (let i = Math.floor((x - r) / st); i <= Math.ceil((x + r) / st); i++) {
+    const dx = i * st - x, dz = j * st - z;
+    if (dx * dx + dz * dz > r * r) continue;
+    const t = tileOf(g, i, j, false);
+    if (!t) continue;
+    const [tl, n] = t;
+    if (tl.s[n] === 0 || (tl.f[n] & WALL_BIT)) continue;             // worked ground (not turf, not a box wall)
+    pts.push([tl, n, dx, dz, tl.h[n]]);
+  }
+  if (pts.length < 4) return 0;
+  // least squares plane h = a + b dx + c dz
+  let sx = 0, sz = 0, sh = 0, sxx = 0, szz = 0, sxz = 0, sxh = 0, szh = 0;
+  const N = pts.length;
+  for (const [, , dx, dz, h] of pts) { sx += dx; sz += dz; sh += h; sxx += dx * dx; szz += dz * dz; sxz += dx * dz; sxh += dx * h; szh += dz * h; }
+  const mx = sx / N, mz = sz / N, mh = sh / N, cxx = sxx / N - mx * mx, czz = szz / N - mz * mz, cxz = sxz / N - mx * mz, cxh = sxh / N - mx * mh, czh = szh / N - mz * mh;
+  const det = cxx * czz - cxz * cxz, b = det > 1e-12 ? (cxh * czz - czh * cxz) / det : 0, c = det > 1e-12 ? (czh * cxx - cxh * cxz) / det : 0;
+  // move each point toward the plane by k, in whole millimetres that add back to nothing
+  const want = pts.map(([, , dx, dz, h]) => k * (mh + b * (dx - mx) + c * (dz - mz) - h));
+  const dd = want.map(Math.round);
+  let err = dd.reduce((a2, v) => a2 + v, 0);
+  for (let q = 0; err !== 0 && q < dd.length * 2; q++) { const n2 = q % dd.length; const s2 = Math.sign(err); dd[n2] -= s2; err -= s2; }
+  let moved = 0;
+  pts.forEach(([tl, n], q) => {
+    tl.h[n] += dd[q];
+    if (tl.l[n] > 0) tl.l[n] = Math.max(0, tl.l[n] + Math.min(0, dd[q]));
+    else tl.f[n] &= ~LOOSE_BIT;                      // patted earth is firm: it stays where it was put
+    moved += Math.abs(dd[q]);
+  });
+  g.rev++;
+  return (moved / 1000) * area(g);
 }
 // Smooth loose ground in a round footprint toward its neighbours (a rake), keeping its volume. k: 0..1 a pass.
 export function relax(g, x, z, r = 0.35, k = 0.5) {

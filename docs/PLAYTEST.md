@@ -406,8 +406,10 @@ The ground is a physical thing now: a smooth surface you shape 10 cm at a time, 
 
 **The tools and how they move**
 
-- **Shovel.** The mouse is your hand on the shovel. Press where the blade should go in: it bites (a stop and crumbs, harder in turf) and levers up a scoop from a bite about 70 cm across. Keep holding and drag: the loaded blade follows your hand, a ring shows where it will land, and dots show the arc if it will be thrown. Let go and it drops there. Pull past arm's reach and your character walks after your hand. A plain click drops the scoop beside the hole. Press a bag to rip it open. No screen shake.
-- **The flat of the blade (right-drag).** Drag it along the ground: loose earth in its way is pushed ahead of it, hollows it passes are filled from what it pushes, and what is left drops where you let go. The blade only goes down as you push (it starts a few centimetres into the ground where you press and follows the ground down), so pushed into a heap from beside it, it bulldozes the heap along; dragged off the top of a heap, it spreads it out. Firm ground and turf are not cut. The middle button turns the view while the shovel is out.
+- **Shovel.** The mouse is your hand on the shovel. Press where the blade should go in: it is stamped in (a stop and crumbs; quick in loose earth, a hard stamp in turf) and takes about half a blade. Hold still and it goes on sinking, deeper and fuller (faster in loose earth, slowly through turf and clay), with earth crumbling in from the rim. Drag and it levers up and comes with you: a ring shows where it will land, dots show the arc if it will be thrown, and you walk after your hand past arm's reach. Let go and it drops there; a plain click drops it beside the hole. Press a bag to rip it open. No screen shake.
+- **The flat of the blade (right-drag).** Drag it along the ground: loose earth in its way is pushed ahead of it, hollows it passes are filled from what it pushes, and what is left drops where you let go. The blade only goes down as you push (it starts a few centimetres into the ground where you press and follows the ground down), so pushed into a heap from beside it, it bulldozes the heap along; dragged off the top of a heap, it spreads it out. The ridge it pushes slumps as it goes and the sides of its track fall in behind it, so nothing stands up in walls or spires. Firm ground and turf are not cut.
+- **Pat it down (right-click).** The back of the blade slapped on the spot: lumps go, the slope stays, and the earth is firm (it no longer slides). Pat a bank to shape it, or a bed to level it.
+- **The view.** Q and E turn it, the wheel zooms, shift and the wheel tilt it, and the middle button drags it round. The yard opens on a lower view so the shape of the ground reads.
 - **Cut turf.** The shovel held flat: drag along the grass to strip the turf off in a strip.
 - **Materials arrive as things.** Wood chips, bark and bed soil come in 56 L bags set down in front of you (a ring marks the spot, and the store closes so you see them): drag one with your hands, rip it open with the shovel, then scoop the heap where it goes. Gravel, crushed stone, sand and the rest are tipped in a heap. Chips thrown straight on grass work, but the grass comes up through them in a week or two; fabric under them stops it.
 - **Wheelbarrow.** Click to shovel a scoop in (up to 100 L); walk it over and drag down to tip it out.
@@ -540,3 +542,40 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 - What exists: an ATV and a small trailer as records (`VEHICLE_KINDS`), gasoline, a 20 L fuel can and the trailer in the catalog (new "Vehicles and fuel" category), and a `vehicles` sim system: parked poses, fuel, seats, hitches, rentals.
 - Try from the console: `__game.sim.commandNow('vehicles.add', { kind: 'atv', x: __game.player.x + 3, z: __game.player.z })`, then look at `__game.sim.state.sys.vehicles`. `__game.vehicleCore` has the drive model (`createBody`, `stepBody`, `headingControl`).
 - Weak: no feel tuning yet (the numbers are from the design, checked only headless); towing a trailer while reversing is purely kinematic; no damage, no rollover by design.
+
+## Ground A1 — smaller saves (branch `ground-a1a2`)
+
+**What is new**
+
+- Dug and shaped ground (the Yard, key 6) is stored packed in the save: about 1-2 KB per 3.2 m patch instead of about 17 KB. A big dug yard no longer runs into the browser's storage limit. Old saves load as before (save version 2).
+- Autosave no longer copies the whole simulation first, so the 20 s autosave hitch is smaller.
+
+**Try this**
+
+1. Console: `__game.saveSize()` gives `{ bytes, plainBytes }` (stored size versus plain JSON). Dig a large area in the Yard, check again, reload: everything is where you left it.
+
+**What's weak**
+
+- Packing a very large dug area (300 patches) takes about 30 ms once per autosave.
+
+## Services S2 + S3 — cable and pipe in buildings feed the real power and water; X shows them
+
+**What is new**
+
+- Runs in a building (the `routes` store from S1) now count: a finished cable from a panel slot to a box with a light lights it, through a breaker that appears in the slot at trim-out; a finished PEX run from a tank to a stub with a tap runs water indoors; an uncapped stub or an uncrimped end sprays. Electrical and water stay the judges (system `services`, `src/sim/services.js`).
+- Corded tools also find power at an outlet on one of these circuits.
+- The runs are drawn where they ride in the frame (`src/engine/routes.js`): full colour as far as they are pulled, pale beyond (a plan line), yellow dots where a hole is still to drill.
+- X (outside build mode) cycles Off, Power, Water (`src/overlays.js`): the runs show through the walls, cable green to red by load and grey when dead; water blue, red, brown, orange where it leaks.
+
+**Try this**
+
+1. Place a cabin (or any building) and finish its walls, stand near it, then in the console: `__servicesView.sample()`. A 14/2 cable runs from a wall box through two studs to a switch-height box, and a planned PEX run sits lower down with its holes still to drill.
+2. Press X: Power, then Water, then off. The sample cable is grey in Power (nothing feeds it); the PEX is dim in Water.
+3. `__servicesView.clearSample()` takes it out. `__servicesView.info('sample:cable')` says where the run is up to in plain words.
+4. A whole circuit from the console (a panel on a generator first, with Equip): add a `slot` node with `ref: { piece: <panel id>, port: 'b1' }`, a box, a `routes.addRun` with `cls: 'cable'`, `routes.work` it through, `routes.setNode` the box `{ key: 'device', value: 'light_ceiling' }` and both nodes `{ state: 'trimmed' }`. The light draws 9 W (`__game.sim.state.sys.electrical.loads`).
+
+**What's weak**
+
+- No planning or gestures yet (S5 to S7): runs come only from the console. The sample sets the building's frame once; frames do not follow a moved building until the plan UI syncs them.
+- Overlay colours are per run, not per segment, and there are no moving dashes yet (S12). Drains and vents compile but nothing drains through them indoors yet (S11).
+- A switch box is just a box: switching what it controls comes with trim-out (S9b).

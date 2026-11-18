@@ -17,6 +17,9 @@ import { structure } from './structure.js';
 import { garden } from './garden.js';
 import { landscape } from './landscape.js';
 import { createPartsSystem } from './core/parts.js';
+import { createRoutesSystem } from './core/routes.js';
+import { services, servicesGuard } from './services.js';
+import { SERVICE_CLASSES } from './content/services.js';
 import { plumbingSystem } from './plumbing.js';
 import { createVehicleSystem } from './core/vehicles.js';
 import { VEHICLE_KINDS, IMPLEMENT_KINDS, VEHICLE_HOOKS, VEHICLE_SURFACES } from './content/vehicles.js';
@@ -57,6 +60,8 @@ export { compileLinks } from './core/links.js';
 export { createRoutesSystem, runState as routeRunState, toNeutral as routesToNeutral, worldOf as routeWorldOf, pathLength } from './core/routes.js';
 export { plumbingSystem, compilePlumbing } from './plumbing.js';
 export * from './content/plumbing-parts.js';
+export { services, servicesSystem, compileServices, servicesGuard, runInfo as serviceRunInfo, overlayData as servicesOverlay } from './services.js';
+export { SERVICE_CLASSES, SERVICE_SPECS, NODE_KINDS as SERVICE_NODE_KINDS, DEVICES as SERVICE_DEVICES, FIXTURES_SERVICES, PRESETS_M as SERVICE_PRESETS_M } from './content/services.js';
 export * as vehicleCore from './core/vehicles.js';
 export { VEHICLE_KINDS, IMPLEMENT_KINDS, ITEMS_VEHICLES, FUEL_ITEM, VEHICLE_SURFACES } from './content/vehicles.js';
 
@@ -68,7 +73,9 @@ const partsSystem = createPartsSystem({ name: 'parts', stepM: PLUMBING_STEP_M, k
 // Vehicles (generic mechanism, homestead records): parked poses, fuel, seats, hitches, rentals. The page drives them.
 const vehicles = createVehicleSystem({ name: 'vehicles', kinds: VEHICLE_KINDS, implementKinds: IMPLEMENT_KINDS, hooks: VEHICLE_HOOKS, surfaces: VEHICLE_SURFACES });
 const plumbing = plumbingSystem({ kinds: PLUMBING_KINDS, mates: PLUMBING_MATES, stepM: PLUMBING_STEP_M, material: PLUMBING_PIPE, kit: STARTER_KIT });
-export const GAME_SYSTEMS = [weather, streams, stockSystem(), siteSystem(), structure, electrical, partsSystem, plumbing, water, thermal, cookingSystem(), chickensSystem(), physicalKitchenSystem(), landscape, garden, constructionSystem(), vehicles];
+// Runs in buildings (generic routes with services content), compiled by services before electrical and water read them.
+const routesSystem = createRoutesSystem({ name: 'routes', classes: SERVICE_CLASSES, guard: servicesGuard });
+export const GAME_SYSTEMS = [weather, streams, stockSystem(), siteSystem(), structure, routesSystem, services, electrical, partsSystem, plumbing, water, thermal, cookingSystem(), chickensSystem(), physicalKitchenSystem(), landscape, garden, constructionSystem(), vehicles];
 
 export function createGameSim(seed, opts = {}) {
   return createSim({ seed, systems: GAME_SYSTEMS, ...opts });

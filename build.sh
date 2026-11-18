@@ -8,11 +8,11 @@ min() { npx esbuild "src/$1.js" --minify-whitespace --charset=utf8 --log-level=w
 npx esbuild src/engine.js --bundle --minify --format=iife --target=es2020 --charset=utf8 --legal-comments=inline --log-level=warning > dist/engine.min.js
 mkdir -p dist/engine
 npx esbuild src/openings-global.js --bundle --minify --format=iife --target=es2020 --log-level=warning > dist/openings-global.min.js
-for m in framing build buildui engine/hands engine/carry engine/assembly engine/cutstation engine/scaffold engine/roofwalk engine/vehicles construct-view garden-view landscape-view touch nature fxpost fxhost fx stock-view weather-view chickens-view utilities-view engine/reach engine/parts opening-hands water-hands game/vehicles-atv; do min $m --legal-comments=eof; done
+for m in framing build buildui engine/hands engine/carry engine/assembly engine/cutstation engine/scaffold engine/roofwalk engine/vehicles construct-view garden-view landscape-view touch nature fxpost fxhost fx stock-view weather-view chickens-view utilities-view engine/reach engine/parts opening-hands water-hands engine/routes overlays services-view game/vehicles-atv; do min $m --legal-comments=eof; done
 python3 - <<'P'
 r = lambda p: open(p, encoding='utf-8').read()
 h, t, g = r('template/head.html'), r('template/tail.html'), r('dist/engine.min.js')
-b = '\n'.join(r('dist/%s.min.js' % m) for m in ['openings-global', 'framing', 'build', 'buildui', 'engine/hands', 'engine/carry', 'engine/assembly', 'engine/cutstation', 'engine/scaffold', 'engine/roofwalk', 'engine/vehicles', 'construct-view', 'garden-view', 'landscape-view', 'touch', 'nature', 'fxpost', 'fxhost', 'fx', 'stock-view', 'weather-view', 'chickens-view', 'utilities-view', 'engine/reach', 'engine/parts', 'opening-hands', 'water-hands', 'game/vehicles-atv'])
+b = '\n'.join(r('dist/%s.min.js' % m) for m in ['openings-global', 'framing', 'build', 'buildui', 'engine/hands', 'engine/carry', 'engine/assembly', 'engine/cutstation', 'engine/scaffold', 'engine/roofwalk', 'engine/vehicles', 'construct-view', 'garden-view', 'landscape-view', 'touch', 'nature', 'fxpost', 'fxhost', 'fx', 'stock-view', 'weather-view', 'chickens-view', 'utilities-view', 'engine/reach', 'engine/parts', 'opening-hands', 'water-hands', 'engine/routes', 'overlays', 'services-view', 'game/vehicles-atv'])
 assert '</script' not in g and '</script' not in b
 open('dist/index.html', 'w', encoding='utf-8').write(h + '<script>' + g + '</script>\n<script>' + b + t)
 print('dist/index.html', len(h + g + b + t))

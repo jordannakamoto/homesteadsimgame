@@ -9,7 +9,7 @@
 // grid point, so a step only works out the new strip along the far edge.
 import * as THREE from 'three';
 
-const CELL = 8, HALF = 400, NV = (2 * HALF) / CELL + 1, MASK = 32;
+const CELL = 8, HALF = 400, NV = (2 * HALF) / CELL + 1, MASK = 32, HZ = 128;
 
 export function createFarLand({ scene, baseHeight, forestAt, chunks, CS, SEA, PAL, smoothstep }) {
   const cache = new Map();
@@ -18,6 +18,8 @@ export function createFarLand({ scene, baseHeight, forestAt, chunks, CS, SEA, PA
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(colr, 3));
   geo.setAttribute('canopy', new THREE.BufferAttribute(canopy, 1));
+  const wet = new Float32Array(NV * NV);
+  geo.setAttribute('wet', new THREE.BufferAttribute(wet, 1));
   const idx = new Uint32Array((NV - 1) * (NV - 1) * 6);
   let q = 0;
   for (let j = 0; j < NV - 1; j++) for (let i = 0; i < NV - 1; i++) {
@@ -31,20 +33,26 @@ export function createFarLand({ scene, baseHeight, forestAt, chunks, CS, SEA, PA
   const maskData = new Uint8Array(MASK * MASK);
   const maskTex = new THREE.DataTexture(maskData, MASK, MASK, THREE.RedFormat, THREE.UnsignedByteType);
   maskTex.magFilter = maskTex.minFilter = THREE.NearestFilter;
-  const uMask = { value: maskTex }, uMaskOrg = { value: new THREE.Vector3(0, 0, CS) }, uFade = { value: new THREE.Vector2(240, 385) };
+  // round the horizon: is the far edge sea (255) or land (0)? The sky dome draws open sea past the far land only where
+  // the sea carries on
+  const hzData = new Uint8Array(HZ), hzTex = new THREE.DataTexture(hzData, HZ, 1, THREE.RedFormat, THREE.UnsignedByteType);
+  hzTex.magFilter = hzTex.minFilter = THREE.LinearFilter; hzTex.wrapS = THREE.RepeatWrapping;
+  const uMask = { value: maskTex }, uMaskOrg = { value: new THREE.Vector3(0, 0, CS) }, uFade = { value: new THREE.Vector2(240, 385) }, uHaze = { value: 0.3 };
+  let openSea = true;
 
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
   mat.onBeforeCompile = (sh) => {
-    sh.uniforms.uMask = uMask; sh.uniforms.uMaskOrg = uMaskOrg; sh.uniforms.uFade = uFade;
+    sh.uniforms.uMask = uMask; sh.uniforms.uMaskOrg = uMaskOrg; sh.uniforms.uFade = uFade; sh.uniforms.uHaze = uHaze;
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float canopy;\nvarying vec3 vFarW;\nvarying float vCanopy;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFarW = (modelMatrix * vec4(transformed, 1.0)).xyz; vCanopy = canopy;');
+      .replace('#include <common>', '#include <common>\nattribute float canopy;\nattribute float wet;\nvarying vec3 vFarW;\nvarying float vCanopy;\nvarying float vWet;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFarW = (modelMatrix * vec4(transformed, 1.0)).xyz; vCanopy = canopy; vWet = wet;');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-uniform sampler2D uMask; uniform vec3 uMaskOrg; uniform vec2 uFade;
-varying vec3 vFarW; varying float vCanopy;
+uniform sampler2D uMask; uniform vec3 uMaskOrg; uniform vec2 uFade; uniform float uHaze;
+varying vec3 vFarW; varying float vCanopy; varying float vWet;
 float farHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }`)
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+if (vFarW.y < ${SEA.toFixed(2)} + 0.02) discard;   // the sea (and land across it, sunk): the sky dome's open sea shows there
 {
   vec2 cc = floor(vFarW.xz / uMaskOrg.z) - uMaskOrg.xy;
   if (cc.x >= 0.0 && cc.y >= 0.0 && cc.x < ${MASK}.0 && cc.y < ${MASK}.0 && texture2D(uMask, (cc + 0.5) / ${MASK}.0).r > 0.5) discard;
@@ -57,9 +65,9 @@ float farHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.545
   diffuseColor.rgb *= mix(0.94 + 0.12 * n2, 0.72 + 0.42 * n, smoothstep(0.1, 0.6, vCanopy));
 }`)
       .replace('#include <fog_fragment>', THREE.ShaderChunk.fog_fragment.replace('vec3 fogTint = fogColor;',
-        'fogFactor = max(fogFactor, smoothstep(uFade.x, uFade.y, vFogDepth));\n\tvec3 fogTint = fogColor;'));
+        'fogFactor = max(max(fogFactor, uHaze * smoothstep(90.0, 380.0, vFogDepth)), smoothstep(uFade.x, uFade.y, vFogDepth));\n\tvec3 fogTint = fogColor;'));
   };
-  mat.customProgramCacheKey = () => 'far-land-1';
+  mat.customProgramCacheKey = () => 'far-land-5';
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false; mesh.castShadow = false; mesh.receiveShadow = false;
   mesh.renderOrder = 1;                              // after the near world, so most of it is hidden by depth
@@ -91,15 +99,64 @@ float farHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.545
     return e;
   }
 
-  let cgx = null, cgz = null, maskKey = '';
+  let cgx = null, cgz = null, maskKey = '', cmx = 0, cmz = 0;
   function rebuild(gx0, gz0) {
     for (let j = 0; j < NV; j++) for (let i = 0; i < NV; i++) {
       const v = j * NV + i, e = point(gx0 + i, gz0 + j);
       pos[v * 3] = (gx0 + i) * CELL; pos[v * 3 + 1] = e[0]; pos[v * 3 + 2] = (gz0 + j) * CELL;
       colr[v * 3] = e[1]; colr[v * 3 + 1] = e[2]; colr[v * 3 + 2] = e[3]; canopy[v] = e[4];
     }
+    // the sea, and any land across it: only the land you are on (and whatever of it is loaded) stays
+    const land = (v) => pos[v * 3 + 1] - canopy[v] * 11 + 0.6 > SEA + 0.15;
+    const seen = new Uint8Array(NV * NV), stack = [];
+    const c0x = Math.floor(cmx / CS), c0z = Math.floor(cmz / CS);
+    for (let j = 0; j < NV; j++) for (let i = 0; i < NV; i++) {
+      const v = j * NV + i, x = pos[v * 3], z = pos[v * 3 + 2];
+      const near = Math.abs(Math.floor(x / CS) - c0x) <= 4 && Math.abs(Math.floor(z / CS) - c0z) <= 4;
+      if (near && land(v)) { seen[v] = 1; stack.push(v); }
+    }
+    while (stack.length) {
+      const v = stack.pop(), i = v % NV, j = (v - i) / NV;
+      for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const ii = i + a, jj = j + b;
+        if (ii < 0 || jj < 0 || ii >= NV || jj >= NV) continue;
+        const w = jj * NV + ii;
+        if (!seen[w] && land(w)) { seen[w] = 1; stack.push(w); }
+      }
+    }
+    // and land across a wide water (more than about 90 m of it, looking out from where you are) goes too: past
+    // the shore the view opens onto sea all the way to the horizon
+    const BINS = 720, cut = new Float32Array(BINS), mid0 = (NV - 1) / 2;
+    for (let b = 0; b < BINS; b++) {
+      const ang = (b + 0.5) / BINS * Math.PI * 2 - Math.PI, cx = Math.cos(ang), cz = Math.sin(ang);
+      let run = 0; cut[b] = 1e9;
+      for (let r = 0; r <= HALF; r += 4) {
+        const i = Math.round(mid0 + cx * r / CELL), j = Math.round(mid0 + cz * r / CELL);
+        if (i < 0 || j < 0 || i >= NV || j >= NV) break;
+        if (land(j * NV + i)) run = 0; else if ((run += 4) > 90) { cut[b] = r - run; break; }
+      }
+    }
+    for (let j = 0; j < NV; j++) for (let i = 0; i < NV; i++) {
+      const v = j * NV + i, dx = i - mid0, dz = j - mid0;
+      const b = Math.min(BINS - 1, Math.floor((Math.atan2(dz, dx) + Math.PI) / (Math.PI * 2) * BINS));
+      wet[v] = !land(v) || (openSea && (!seen[v] || Math.hypot(dx, dz) * CELL > cut[b])) ? 1 : 0;
+    }
+    // sunk under the water, so a shore slopes into the sea and is cut cleanly at the waterline
+    for (let v = 0; v < NV * NV; v++) if (wet[v]) { pos[v * 3 + 1] = SEA - 4; canopy[v] = 0; }
+    // the horizon mask: sea where most of the outer ring in that direction is wet
+    const mid = (NV - 1) / 2;
+    for (let a = 0; a < HZ; a++) {
+      const ang = (a + 0.5) / HZ * Math.PI * 2 - Math.PI;
+      let n = 0, w = 0;
+      for (let r = mid * 0.82; r < mid; r += 1.5) {
+        const i = Math.round(mid + Math.cos(ang) * r), j = Math.round(mid + Math.sin(ang) * r);
+        n++; w += wet[j * NV + i];
+      }
+      hzData[a] = w / n > 0.5 ? 255 : 0;
+    }
+    hzTex.needsUpdate = true;
     geo.computeVertexNormals();
-    geo.attributes.position.needsUpdate = geo.attributes.color.needsUpdate = geo.attributes.canopy.needsUpdate = true;
+    geo.attributes.position.needsUpdate = geo.attributes.color.needsUpdate = geo.attributes.canopy.needsUpdate = geo.attributes.wet.needsUpdate = true;
     // forget points well behind
     if (cache.size > NV * NV * 2) for (const k of cache.keys()) {
       const [a, b] = k.split(',').map(Number);
@@ -116,14 +173,20 @@ float farHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.545
     uMaskOrg.value.set(c0x, c0z, CS);
   }
   return {
-    mesh,
+    mesh, horizon: hzTex,
+    // the far land's centre (the horizon mask is round it)
+    get centre() { return [(cgx + (NV - 1) / 2) * CELL, (cgz + (NV - 1) / 2) * CELL]; },
     // once a frame: re-centre in 32 m steps, refresh the mask when the loaded chunks change
     update(px, pz) {
       const gx = Math.round(px / 32) * (32 / CELL) - (NV - 1) / 2, gz = Math.round(pz / 32) * (32 / CELL) - (NV - 1) / 2;
-      if (gx !== cgx || gz !== cgz) { cgx = gx; cgz = gz; rebuild(gx, gz); }
+      if (gx !== cgx || gz !== cgz) { cgx = gx; cgz = gz; cmx = px; cmz = pz; rebuild(gx, gz); }
       updateMask(px, pz);
     },
     setOn(v) { mesh.visible = v; },
+    // leave out land across wide water (the open sea horizon), or keep it
+    setOpenSea(v) { if (v !== openSea) { openSea = v; cgx = cgz = null; } },
+    // how much of the way into the haze the far land goes besides the fog (0.3 normal)
+    setHaze(k) { uHaze.value = k; },
     reset() { cache.clear(); cgx = cgz = null; maskKey = ''; },
   };
 }
