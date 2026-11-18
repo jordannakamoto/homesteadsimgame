@@ -4,6 +4,8 @@
 // Text follows docs/CONSTRUCTION.md. The mechanisms that use this are src/sim/core/supply.js (orders,
 // stacks, carrying) and src/sim/construction.js (the system); the page's add-on reads it for its wording.
 
+import { SERVICE_SUPPLY } from './services.js';
+
 // ---- stages, in the order a building is raised. `needs`: the stages it stands on. `parentFirst`: stages whose
 // members of the same wall or gable must be in first. `flat`: its frames are put together lying down, one at a
 // time, and then raised.
@@ -23,8 +25,12 @@ export const STAGES = Object.freeze([
   { id: 'openings', name: 'Windows and doors', needs: ['wrap'], verb: 'Set the door and windows', what: 'Set the window in its opening and hang the door.', why: 'Light, a way in, and they close the building up.' },
   { id: 'cladding', name: 'Cladding', needs: ['openings'], verb: 'Put on the siding', what: 'Nail siding boards over the wrap.', why: 'Protects the wall from weather and sun.' },
   { id: 'gutters', name: 'Gutters', needs: ['roofing', 'cladding'], verb: 'Hang the gutters', what: 'From the ladder or scaffold: gutters along the eaves, falling a little toward a downspout at one end.', why: 'They catch the rain off the roof and carry it away from the foundation, or into a rain barrel.' },
-  { id: 'insulation', name: 'Insulation', needs: ['roofing', 'sheathing'], verb: 'Insulate', what: 'Fill the spaces between studs and rafters with batts.', why: 'Slows heat leaving in winter and coming in during summer.' },
+  // rough-in and trim-out are tallied by the services system (src/sim/services.js) through construction.setExternal: `by` names
+  // it. A stage with nothing in it counts as complete, so a building with no cable or pipe planned goes on exactly as before.
+  { id: 'rough-in', name: 'Rough-in', needs: ['roofing', 'sheathing'], by: 'services', hint: 'Rough-in: Hands (F), then pick Power or Water', verb: 'Run the pipes and cables', what: 'Drill the studs, pull cable and pipe to each box and stub.', why: 'Everything inside a wall goes in while you can still see the studs.' },
+  { id: 'insulation', name: 'Insulation', needs: ['roofing', 'sheathing', 'rough-in'], verb: 'Insulate', what: 'Fill the spaces between studs and rafters with batts.', why: 'Slows heat leaving in winter and coming in during summer.' },
   { id: 'lining', name: 'Lining', needs: ['insulation'], verb: 'Finish the inside', what: 'Fix boards or panels inside, and lay the floor boards.', why: 'Covers the insulation and makes a finished room.' },
+  { id: 'trim-out', name: 'Trim-out', needs: ['lining'], by: 'services', hint: 'Trim-out: Do it for me, in the Build panel (L)', verb: 'Fit the devices and fixtures', what: 'Outlets, switches and lights into their boxes; breakers into the panel; taps and fixtures onto their stubs.', why: 'The wall is finished now, so what you touch goes on its face.' },
 ]);
 export const STAGE = Object.freeze(Object.fromEntries(STAGES.map((s) => [s.id, s])));
 export const STAGE_ORDER = Object.freeze(STAGES.map((s) => s.id));
@@ -49,7 +55,7 @@ export const LINE_ITEM = Object.freeze({
   window: { itemId: 'window_shed', each: true, label: 'Window' },
 });
 // Lines that are not carried: they sit by the stacks and are used up as the work goes on.
-export const SITE_SUPPLY = Object.freeze(['nails_framing', 'screws_wood', 'screws_structural']);
+export const SITE_SUPPLY = Object.freeze(['nails_framing', 'screws_wood', 'screws_structural', ...SERVICE_SUPPLY]);
 
 // ---- items the main catalog lacks (the orchestrator merges these into src/sim/items.js). Real figures.
 export const ITEMS_CONSTRUCTION = Object.freeze({
@@ -266,7 +272,7 @@ export const PLAN_BOOK = Object.freeze({
 export const UNLOCKS = Object.freeze([
   { when: 'start', opens: ['plan:tent', 'plan:shed', 'found:pier-blocks', 'method:stick-frame', 'roof:metal', 'roof:shingle'], says: '' },
   { when: 'plan:shed', opens: ['plan:cabin', 'plan:draw', 'choice:windows', 'choice:insulation', 'fixture:wood-stove'], says: 'The small cabin plan, drawing your own plans, window and insulation choices, the wood stove' },
-  { when: 'plan:cabin', opens: ['found:piers', 'found:slab', 'plan:larger', 'method:timber-frame', 'fixture:power', 'fixture:water'], says: 'Concrete piers and slabs, larger plans, timber frame, power and water equipment' },
+  { when: 'plan:cabin', opens: ['found:piers', 'found:slab', 'plan:larger', 'method:timber-frame', 'fixture:power', 'fixture:water', 'services:in-wall'], says: 'Concrete piers and slabs, larger plans, timber frame, power and water equipment, cable and pipe inside the walls' },
   { when: 'buildings:2', opens: ['method:log', 'found:stemwall', 'plan:a-frame'], says: 'Log construction, stem-wall foundations, the A-frame' },
 ]);
 export const ALL_UNLOCKS = Object.freeze([...new Set(UNLOCKS.flatMap((u) => u.opens))]);

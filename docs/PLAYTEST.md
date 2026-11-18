@@ -603,3 +603,81 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 
 - Macro (1 m) cuts and fills are blocky next to the 10 cm hand-dug ground, and a machine-sized cut wipes hand-dug detail under it (by design: it absorbs it).
 - Build mode's site cut still goes through the old path (slice A3 routes it through `ground.grade`).
+
+## Services S5 + S6 — plan cable and pipe through the frame in two clicks
+
+**What is new**
+
+- A router finds the way a run takes through a building's frame (`src/sim/core/routefind.js` over channels read from the framing members, `src/sim/content/frame-channels.js`): up and down beside a stud, sideways through the studs at outlet height, waist height or near the top, up through the top plates and over the ceiling joists, or down through the bottom plate into a joist bay and along or across the joists (hung under them over a crawl space). Openings block their bays: a window keeps the bays under its sill and over its header; a header is never bored.
+- Holes are sized and checked to code: a bearing stud loses at most 40% of its depth (IRC R602.6), a joist a third and never within 2 in of an edge (R502.8.1), a top plate half its width; a hole nearer than 1-1/4 in (cable) or 1-1/2 in (pipe) to the stud face gets a nail plate (NEC 300.4, IRC P2603.2.1). A 2 in drain will not go through 2x4 studs or 2x8 joists, and says so.
+- A drain only ever runs downhill and falls 2 cm a metre (1 cm for 3 in and up, IPC 704.1); it starts high in a joist bay to have room. Too long a run for the floor's depth is refused in plain words.
+- Planning by hand (`src/services-plan.js`). Hands (F) near a framed building shows Power, Cold, Hot, Waste (keys 1 to 4). Places a run can start glow: a breaker panel (its next free breaker), a tank, pump or heater, a box, a stub, a drain exit. Click one, or a stud to start fresh. Aim at the frame: a ghost box or stub snaps beside the nearest stud at the preset height; the wheel steps the preset (outlet 0.40 m, switch 1.20 m, counter 1.10 m on 12/2, ceiling light; sink, toilet, shower; sink drain, toilet and shower floor drains, out of the building). The route draws itself in dashes with a dot at every hole (silver where a nail plate goes) and the hint line reads like "14/2 cable, 4.5 m, 11 holes, through the studs". R tries another way (up to three). Drag the dashes to pin a point the route must pass; right-click unpins. Click plans it, and the new box is the next start, so a circuit is a chain of clicks. Right-click steps back.
+- Runs ride on their building's frame, now kept in step with where the building stands: a moved building takes its runs along.
+
+**Try this**
+
+1. Set down the cabin plan (Build, Plans) and stand inside its walls. F, then 1. Click a stud low on one wall (a new outlet box), aim at another wall: watch the dashes, press R a couple of times, click. Click on round the room.
+2. Wheel to Switch and plan a box at 1.2 m beside the door; wheel to Ceiling light and aim at the floor under where the light should be.
+3. Press 4 (Waste). Wheel to Sink drain, click a stud on an outside wall, wheel to Out of the building, aim low at an outside wall: the drain drops into the floor and falls to the exit. On a building on skids (no crawl space), a sink drain run far across the floor is refused when the joists are not deep enough for its fall; over the cabin's crawl space it hangs under the joists instead.
+4. With a panel placed on a wall (Equip), its glow is breaker 1; the run you plan from it becomes that breaker's circuit.
+5. Console: `__servicesPlan.plan('power', [x, y, z], [x, y, z], 'outlet')` plans between two frame-local points; `__game.routes.find(...)` and `__game.routes.channelsFor(structId)` are the router and the channels.
+
+**What's weak**
+
+- Clicking the middle of a planned run to branch from it is not there yet. Vents are not planned (S11).
+- Water equipment standing in the yard cannot be routed to: the line in from outside comes with the ground work (S13). Start supply from a stub, or from a tank or heater inside the building.
+- The cost of a hole is a guess (worth 40 cm of extra run), so the first route sometimes goes over the top where an electrician would bore straight through; R shows the others.
+- Planned runs are not yet worked (drill, pull, crimp: S7) and the Build panel does not list rough-in yet (S8).
+
+## Services S7 — rough-in by hand: drill, fix boxes, pull, clamp and crimp
+
+**What is new**
+
+- Planned cable and PEX runs are now put in by hand (`src/services-hands.js`, Hands F, with no Power/Cold/Hot/Waste mode picked). The hint line near a building lists what is left: "Rough-in: 2 boxes to fix, 5 holes to drill, 1 run to pull, 2 ends to crimp."
+- **Boxes and stub-outs:** a planned one is drawn pale. Click it twice: hold it to the stud, then nail it (puff, hammer pose); it turns solid.
+- **Drill:** hold the button on a yellow dot and sweep along the wall. Every dot the pointer passes within reach is queued and drilled in turn: the drill sits in the hole, chips fly, the dot goes dark. The sweep is wider with a higher per-gesture setting (Build panel, 1x to 4x). With power near (`powerAvailable`) a hole takes 0.2 s, on the battery 0.5 s. A quick flick still catches the dots between frames.
+- **Pull:** hold the cable (or PEX) end at the start of the run; a spool or coil sits on the floor beside it and turns as it pays out. Drag along the run, or walk along it holding on: the cable follows through the holes (at most 3 m/s, never backwards, only within reach). Let go anywhere; progress is kept. Staples tick in behind it (within 20 cm of each end, then every 1.2 m for cable, NEC 334.30; every 0.8 m for PEX, IRC P2605.1), and steel nail plates go over the holes that need them as the run passes.
+- **Clamp / crimp:** hold on an end until the ring closes (PEX) or the cable is clamped in its box: the ring darkens, green flash. Every end waiting at that box goes at once. The first finished run gets the overhead "Roughed in!" beat.
+
+**Try this**
+
+1. Cabin plan, stand inside. F, 1, plan an outlet circuit of two or three boxes (right-click to leave planning).
+2. With no mode picked, click each pale box twice. Hold on the first yellow dot and sweep along the wall.
+3. Grab the cable end at the first box and drag it along to the next box, or hold on and walk. Then hold on each end.
+4. `__servicesHands.summary()` counts the work near you; `__servicesHands.targets()` lists it. `node test/services.smoke.mjs` does all of the above with the pointer.
+
+**What's weak**
+
+- An end that sits on a box still to fix is aimed as the box: fix the box first, then clamp.
+- No tool or supply check yet: the drill, cable and staples are free until S8 (supply lines in the Build panel). Drains are not worked by hand yet (S11).
+- The drill is only a model at the hole, not in the character's hand; the hammer for boxes is a pose only. No sound.
+- Walls are not checked for being in the way of the pointer: you can aim at a dot through a lined wall (covered runs cannot be worked, though).
+
+## Services S8 — rough-in and trim-out are stages of the building
+
+**What is new**
+
+- The Build panel lists **Rough-in** after Gutters and **Trim-out** after Lining, but only for a building with cable or pipe planned in it. With nothing planned (the shed) nothing changes: no new stages, insulation as before.
+- Rough-in has its own shopping lines, worked out from what is planned: 14/2 or 12/2 cable and blue or red PEX by the metre (each run plus 30 cm spare at each box for cable, 20 cm for PEX), wall and ceiling boxes, cable or PEX staples, nail plates (two per hole near a stud face), crimp rings (one per PEX end). Order them like any stage; they come as stacks. Staples, plates and rings sit by the stacks and are used up (never carried).
+- The hands draw on them: nailing a box takes a box, pulling takes the metres pulled with their staples and plates, crimping takes a ring. They come from the spool in your arms if you carry it, otherwise from the stacks. Short of something, the gesture stops and says "Out of 14/2 nm cable: order the rough-in in the Build panel (L)". Sandbox: free.
+- **Insulation waits for rough-in** while runs are planned. **Close up anyway** (Build panel, or the note on the left) leaves whatever is not roughed in out of the stage; it stays as plan lines.
+- **Do it for me** on Rough-in drills, pulls and crimps every run and nails every box of that building, from the stacks. On Trim-out it puts an outlet in each wall box, a light in each ceiling box, a breaker in each slot (devices by hand are S9b).
+- **Lining covers the runs:** once a wall's lining is on, the runs inside it cannot be worked. A marker on such a run (Hands, F) says the wall is closed: **hold** on it to open the wall. Its lining and batts come off (the whole face: lining is one piece per wall), the books stay straight, and the stages go back to wanting them.
+- Unlocks: finishing a cabin opens `services:in-wall` (nothing is gated on it yet).
+
+**Try this**
+
+1. Cabin plan, framed and roofed (sandbox off). F, 1, plan an outlet circuit. Open the Build panel (L): Rough-in after Gutters, with cable, boxes, staples and plates. Order it.
+2. Fix the boxes, drill, pull and crimp by hand (S7). Watch the Rough-in count climb; Insulation opens when it is done.
+3. Or plan a second circuit and press **Close up anyway**: insulation opens and the new circuit stays as a plan.
+4. Line a wall with a run in it, plan another run through it: the marker says it is closed; hold on it to open the wall.
+5. Console: `__game.sim.commandNow('services.auto', { structId: <id>, stage: 'rough-in' })`, `'services.defer'`, `'services.openWall', { structId, host: '<wall id>' }`; `__game.sim.state.sys.services.want` shows the lines the Build panel was told.
+
+**What's weak**
+
+- Trim-out has no shopping lines yet (outlets, switches, lights, breakers come with S9b) and no hands: only "Do it for me". A cabin with services planned is not finished until trim-out is done.
+- Planning cable into a finished building reopens it (Rough-in and Trim-out appear), and finishing it again counts as a second finish.
+- Spools are drawn from the stacks wherever you stand, like nails; carrying one only decides where it comes from.
+- Floors do not cover runs (a crawl space is reachable from below); a ceiling's lining does.
+- Drains and vents have no lines and no hands yet (S11): "Do it for me" fits them.
+- The shed gate (`test/shed.e2e.mjs`) fails on current `main` and on this branch alike (the hand-building loop keeps picking up the wrong stack at the foundation, 10 checks); it is not caused by S8.

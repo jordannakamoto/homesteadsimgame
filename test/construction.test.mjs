@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { createGameSim, createSim, stockSystem, supply as SUP, ITEMS, ITEMS_CONSTRUCTION, makeSave, readSave } from '../src/sim/index.js';
 import * as K from '../src/sim/construction.js';
 import * as C from '../src/sim/content/construction.js';
+import { workCost } from '../src/sim/content/services.js';
 
 const shed = JSON.parse(readFileSync(new URL('./helpers/shed-plan.json', import.meta.url), 'utf8'));
 const near = (a, b, e = 1e-6) => Math.abs(a - b) < e;
@@ -499,4 +500,159 @@ test('scaffolding is rented by the day, set up along a wall, taken down, and col
   assert.ok(sim.commandNow('construction.rentScaffold', { days: 1 }).ok);       // one more day
   sim.runTicks(Math.ceil((3 * 86400) / 60) + 2);
   assert.equal(s.scaffold, null);
+});
+
+// ---------------------------------------------------------------- services in the walls (rough-in, trim-out: S8)
+// A small walled box: roofed and sheathed (sent as built), two walls to insulate and line. Cable and pipe are planned
+// on its frame through the routes commands, as services-plan.js does.
+function walled(seed = 11) {
+  const sim = createGameSim(seed);
+  sim.state.sys.stock.money = 5000;
+  sim.commandNow('construction.setOption', { key: 'instant', value: true });
+  const members = [{ id: 'rf', stage: 'roofing', kind: 'roofing', parent: 'r1', built: true }, { id: 'sh', stage: 'sheathing', kind: 'sheathing', parent: 'w1', built: true }];
+  for (const w of ['w1', 'w2']) members.push({ id: w + '.b1', stage: 'insulation', kind: 'batt', parent: w }, { id: w + '.b2', stage: 'insulation', kind: 'batt', parent: w }, { id: w + '.ln', stage: 'lining', kind: 'gypsum', parent: w });
+  const lines = [
+    { key: 'insulation|ins', stage: 'insulation', itemId: 'ins_fibreglass_89', qty: 4, unit: 'm2', label: 'Batts', members: [['w1.b1', 1], ['w1.b2', 1], ['w2.b1', 1], ['w2.b2', 1]] },
+    { key: 'lining|gyp', stage: 'lining', itemId: 'gypsum_13', qty: 2, unit: 'each', label: 'Wall panels', members: [['w1.ln', 2.5], ['w2.ln', 2.5]] },
+  ];
+  assert.ok(sim.commandNow('construction.setPlan', { structId: 9, name: 'Box', x: 20, z: 20, r: 2, members, lines }).ok);
+  const R = (n, p) => { const r = sim.commandNow('routes.' + n, p); assert.notEqual(r && r.ok, false, n + ': ' + (r && r.reason)); return r; };
+  R('setFrames', { frames: { 9: { x: 20, y: 0, z: 20, yaw: 0 } } });
+  return { sim, R, P: () => cs(sim).progress[9] };
+}
+// a cable from a panel slot to a wall box through two studs of w1 (one hole near the face), and a cold PEX run in w2
+function plan(R) {
+  const slot = R('addNode', { kind: 'slot', frame: '9', at: [0, 1.2, 0] }).id;
+  const box = R('addNode', { kind: 'box', frame: '9', at: [2, 0.4, 0], host: { parent: 'w1' } }).id;
+  const cable = R('addRun', { cls: 'cable', spec: 'cable_nm_14_2', a: slot, b: box, path: [[0, 1.2, 0], [0, 0.4, 0], [2, 0.4, 0]], hosts: ['w1'], bores: [{ at: [0.6, 0.4, 0], parent: 'w1.s1', plate: 1 }, { at: [1.2, 0.4, 0], parent: 'w1.s2' }] }).id;
+  const tank = R('addNode', { kind: 'port', frame: '9', at: [0, 0.5, 2] }).id;
+  const stub = R('addNode', { kind: 'stub_supply', frame: '9', at: [2, 0.5, 2], host: { parent: 'w2' }, set: { capped: true } }).id;
+  const pex = R('addRun', { cls: 'supply', spec: 'pex_12_blue', a: tank, b: stub, path: [[0, 0.5, 2], [2, 0.5, 2]], hosts: ['w2'], bores: [{ at: [1, 0.5, 2], parent: 'w2.s1' }] }).id;
+  return { slot, box, cable, tank, stub, pex };
+}
+const lineOf = (P, itemId) => Object.values(P.lines).find((l) => l.itemId === itemId && l.ext);
+
+test('services: no runs planned, insulation goes on as before and there is no rough-in stage', () => {
+  const { sim, P } = walled();
+  sim.runTicks(2);
+  const v = K.buildingView(cs(sim), 9);
+  assert.ok(!v.stages.some((q) => q.id === 'rough-in' || q.id === 'trim-out'), v.stages.map((q) => q.id).join());
+  assert.ok(K.stageOpen(P(), 'insulation'), 'nothing planned: insulation is open');
+  assert.equal(C.STAGE_ORDER.indexOf('rough-in'), C.STAGE_ORDER.indexOf('gutters') + 1);
+  assert.equal(C.STAGE_ORDER.indexOf('trim-out'), C.STAGE_ORDER.indexOf('lining') + 1);
+  assert.ok(C.UNLOCKS.find((u) => u.when === 'plan:cabin').opens.includes('services:in-wall'));
+});
+
+test('services: planned runs make a rough-in stage with its own lines; insulation waits; ordered, roughed in, covered, opened again; the books balance', () => {
+  const { sim, R, P } = walled();
+  const ids = plan(R);
+  sim.runTicks(1);
+  let v = K.buildingView(cs(sim), 9);
+  const ri = v.stages.find((q) => q.id === 'rough-in');
+  assert.ok(ri && ri.total > 0 && ri.built === 0, 'the Build panel lists rough-in');
+  assert.deepEqual(v.stages.map((q) => q.id).filter((q) => ['rough-in', 'insulation', 'lining', 'trim-out'].includes(q)), ['rough-in', 'insulation', 'lining', 'trim-out']);
+  // 2.8 m of path + 0.3 m spare at each box; 2 staples, 2 nail plates on the hole near the face; one box; 2 m + 0.4 of PEX and 2 rings
+  assert.ok(near(lineOf(P(), 'nm_cable_14_2').qty, 3.4)); assert.equal(lineOf(P(), 'cable_staple').qty, 2); assert.equal(lineOf(P(), 'nail_plate').qty, 2);
+  assert.equal(lineOf(P(), 'elec_box_wall').qty, 1); assert.ok(near(lineOf(P(), 'pex_coil_12_blue').qty, 2.4)); assert.equal(lineOf(P(), 'crimp_ring_12').qty, 2);
+  assert.ok(lineOf(P(), 'cable_staple').supply && lineOf(P(), 'crimp_ring_12').supply && !lineOf(P(), 'nm_cable_14_2').supply, 'small supplies stay by the stacks');
+  assert.equal(K.stageOpen(P(), 'insulation'), false, 'insulation waits for the rough-in');
+  assert.equal(K.blocked(P(), 'w1.b1'), 'stage not open');
+  // "do it for me" before anything has come: refused, nothing changes
+  const v0 = sim.state.sys.routes.version;
+  const no = sim.commandNow('services.auto', { structId: 9, stage: 'rough-in' });
+  assert.equal(no.ok, false); assert.equal(no.reason, 'no material'); assert.equal(sim.state.sys.routes.version, v0);
+  // order the stage: cable, PEX, boxes and the small supplies come as stacks
+  const m0 = money(sim), o = sim.commandNow('construction.order', { structId: 9, stage: 'rough-in' });
+  assert.ok(o.ok, o.reason); assert.ok(near(m0 - money(sim), o.costUsd, 1e-6) && o.costUsd > 5);
+  assert.ok(near(SUP.stackQty(cs(sim), 'nm_cable_14_2'), 3.4) && SUP.stackQty(cs(sim), 'crimp_ring_12') === 2);
+  // carry the spool and pull part of the cable by hand: drawn from the arms
+  const sp = cs(sim).stacks.find((k) => k.itemId === 'nm_cable_14_2');
+  assert.ok(sim.commandNow('construction.pickUp', { stackId: sp.id }).ok);
+  R('work', { id: ids.cable, what: 'bore', n: 2 });
+  const half = workCost(sim.state.sys.routes.runs[ids.cable], 'pull', { from: 0, to: 0.5 });
+  assert.deepEqual(half, { nm_cable_14_2: 1.7, cable_staple: 1, nail_plate: 2 }, 'half the run: 1.4 m and the spare at the panel, a staple, the plates on the hole near the face');
+  R('work', { id: ids.cable, what: 'pull', to: 0.5 });
+  const use = sim.commandNow('construction.use', { structId: 9, itemId: 'nm_cable_14_2', qty: half.nm_cable_14_2, from: 'carried' });
+  assert.ok(use.ok && near(use.used, 1.7), use.reason);
+  for (const it of ['cable_staple', 'nail_plate']) assert.ok(sim.commandNow('construction.use', { structId: 9, itemId: it, qty: half[it], from: 'stacks' }).ok);
+  assert.ok(near(lineOf(P(), 'nm_cable_14_2').used, 1.7));
+  assert.equal(sim.commandNow('construction.use', { structId: 9, itemId: 'nail_plate', qty: 1, from: 'stacks', check: true }).reason, 'no material', 'both plates are on');
+  assert.deepEqual(SUP.imbalance(cs(sim)), {});
+  assert.ok(sim.commandNow('construction.putDown', { x: 22, z: 20 }).ok);
+  // the rest by "do it for me": every run drilled, pulled and joined, the box nailed; the material used up exactly
+  const a = sim.commandNow('services.auto', { structId: 9, stage: 'rough-in' });
+  assert.ok(a.ok, JSON.stringify(a));
+  sim.runTicks(1);
+  assert.ok(K.stageComplete(P(), 'rough-in') && K.stageOpen(P(), 'insulation'), 'roughed in: insulation is open');
+  for (const it of ['nm_cable_14_2', 'cable_staple', 'nail_plate', 'elec_box_wall', 'pex_coil_12_blue', 'crimp_ring_12']) assert.ok(near(lineOf(P(), it).used, lineOf(P(), it).qty), it + ' used ' + lineOf(P(), it).used + ' of ' + lineOf(P(), it).qty);
+  assert.ok(near(SUP.stackQty(cs(sim), 'nm_cable_14_2'), 1 - 1, 1e-6) || SUP.stackQty(cs(sim), 'nm_cable_14_2') < 1e-6, 'the spool is used up');
+  assert.deepEqual(SUP.imbalance(cs(sim)), {});
+  // insulate and line w1: the cable in it is covered, and a new run planned there cannot be worked on
+  assert.ok(sim.commandNow('construction.order', { structId: 9, stage: 'all' }).ok);
+  assert.ok(sim.commandNow('construction.install', { structId: 9, memberIds: ['w1.b1', 'w1.b2', 'w2.b1', 'w2.b2'], from: 'stacks' }).ok);
+  assert.ok(sim.commandNow('construction.install', { structId: 9, memberIds: ['w1.ln'], from: 'stacks' }).ok);
+  sim.runTicks(1);
+  assert.ok(sim.state.sys.services.covered[ids.cable] && !sim.state.sys.services.covered[ids.pex], 'only the run in the lined wall is covered');
+  const box2 = R('addNode', { kind: 'box', frame: '9', at: [1.6, 1.2, 0], host: { parent: 'w1' } }).id;
+  const late = R('addRun', { cls: 'cable', spec: 'cable_nm_14_2', a: ids.box, b: box2, path: [[2, 0.4, 0], [1.6, 0.4, 0], [1.6, 1.2, 0]], hosts: ['w1'], bores: [{ at: [1.8, 0.4, 0], parent: 'w1.s3' }] }).id;
+  sim.runTicks(1);
+  assert.equal(sim.commandNow('routes.work', { id: late, what: 'bore', n: 1 }).reason, 'Open this wall first');
+  assert.equal(K.stageComplete(P(), 'rough-in'), false, 'the new run is rough-in work again');
+  // open the wall: the lining and batts of w1 come off (the batts of w2 stay), the run is uncovered
+  const op = sim.commandNow('services.openWall', { structId: 9, host: 'w1' });
+  assert.ok(op.ok, op.reason); assert.deepEqual(op.removed.sort(), ['w1.b1', 'w1.b2', 'w1.ln']);
+  assert.ok(!sim.state.sys.services.covered[late]);
+  assert.ok(sim.commandNow('routes.work', { id: late, what: 'bore', n: 1 }).ok);
+  assert.deepEqual(SUP.imbalance(cs(sim)), {});
+  assert.deepEqual(K.sheetImbalance(cs(sim)), {});
+});
+
+test('services: "Close up anyway" leaves unfinished runs out of the tally; trim-out by "do it for me" finishes the building', () => {
+  const { sim, R, P } = walled(12);
+  const ids = plan(R);
+  sim.runTicks(1);
+  assert.equal(K.stageOpen(P(), 'insulation'), false);
+  const d = sim.commandNow('services.defer', { structId: 9 });
+  assert.ok(d.ok && d.deferred >= 3, JSON.stringify(d));
+  assert.ok(K.stageOpen(P(), 'insulation'), 'closed up anyway: insulation is open');
+  assert.ok(sim.state.sys.routes.runs[ids.cable], 'the run stays, as a plan line');
+  assert.ok(!K.buildingView(cs(sim), 9).stages.some((q) => q.id === 'rough-in' && q.total > 0));
+  // undo, rough it in, and finish
+  assert.ok(sim.commandNow('services.defer', { structId: 9, undo: true }).ok);
+  assert.equal(K.stageOpen(P(), 'insulation'), false);
+  assert.ok(sim.commandNow('construction.order', { structId: 9, stage: 'all' }).ok);
+  assert.ok(sim.commandNow('services.auto', { structId: 9, stage: 'rough-in' }).ok);
+  sim.runTicks(1);
+  assert.ok(sim.commandNow('construction.install', { structId: 9, memberIds: ['w1.b1', 'w1.b2', 'w2.b1', 'w2.b2', 'w1.ln', 'w2.ln'], from: 'stacks' }).ok);
+  sim.runTicks(1);
+  assert.equal(P().done, false, 'trim-out is still to do');
+  assert.ok(K.stageOpen(P(), 'trim-out'));
+  const t = sim.commandNow('services.auto', { structId: 9, stage: 'trim-out' });
+  assert.ok(t.ok, t.reason);
+  sim.runTicks(1);
+  assert.ok(K.stageComplete(P(), 'trim-out') && P().done, 'finished');
+  assert.equal(sim.state.sys.routes.nodes[ids.box].set.device, 'outlet_120v');
+  assert.deepEqual(SUP.imbalance(cs(sim)), {});
+});
+
+test('construction.setExternal and setExtLines on their own: a stage tallied outside, lines kept through a new plan, sandbox uses are free', () => {
+  const { sim, P } = walled(13);
+  assert.equal(sim.commandNow('construction.setExternal', { structId: 9, stage: 'nope', built: 0, total: 1 }).reason, 'unknown stage');
+  assert.ok(sim.commandNow('construction.setExternal', { structId: 9, stage: 'rough-in', built: 1, total: 4 }).ok);
+  assert.deepEqual(P().tally['rough-in'], [1, 4]);
+  assert.ok(sim.commandNow('construction.setExtLines', { structId: 9, source: 'test', lines: [{ stage: 'rough-in', itemId: 'nm_cable_12_2', qty: 10, label: 'Cable' }] }).ok);
+  assert.ok(near(K.quoteStage(P(), 'rough-in').costUsd, 20));
+  assert.ok(sim.commandNow('construction.order', { structId: 9, stage: 'rough-in' }).ok);
+  // the plan is sent again (build mode changed something): the outside tally and lines stay, ordered and all
+  const again = { structId: 9, name: 'Box', x: 20, z: 20, r: 2, members: Object.entries(P().members).map(([id, m]) => ({ id, stage: m.stage, kind: m.kind, parent: m.parent, built: !!m.built })), lines: [] };
+  assert.ok(sim.commandNow('construction.setPlan', again).ok);
+  assert.deepEqual(P().tally['rough-in'], [1, 4]);
+  assert.equal(lineOf(P(), 'nm_cable_12_2').ordered, 10);
+  // fewer metres wanted than were used: the line stays at what went in
+  assert.ok(sim.commandNow('construction.use', { structId: 9, itemId: 'nm_cable_12_2', qty: 6, from: 'stacks' }).ok);
+  assert.ok(sim.commandNow('construction.setExtLines', { structId: 9, source: 'test', lines: [] }).ok);
+  assert.equal(lineOf(P(), 'nm_cable_12_2').qty, 6);
+  assert.deepEqual(SUP.imbalance(cs(sim)), {});
+  assert.ok(sim.commandNow('construction.setOption', { key: 'sandbox', value: true }).ok);
+  assert.ok(sim.commandNow('construction.use', { structId: 9, itemId: 'nm_cable_12_2', qty: 100, from: 'stacks' }).free);
 });

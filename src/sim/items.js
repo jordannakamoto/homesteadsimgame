@@ -15,6 +15,7 @@ import { INGREDIENTS, foodId } from './food-catalog.js';
 import { ITEMS_GARDEN, GARDEN_CATEGORIES } from './content/garden-items.js';
 import { ITEMS_LANDSCAPE, LANDSCAPE_CATEGORIES } from './content/landscape.js';
 import { ITEMS_VEHICLES, VEHICLE_CATEGORIES } from './content/vehicles.js';
+import { ITEMS_SERVICES, SERVICE_ITEM_CATEGORIES } from './content/services.js';
 import { openingItems, openingItemFromId } from './content/openings.js';
 
 export const ITEM_UNITS = Object.freeze(['each', 'm', 'm2', 'm3', 'kg', 'L']);
@@ -37,6 +38,7 @@ export const ITEM_CATEGORIES = Object.freeze([
   ...GARDEN_CATEGORIES,
   ...LANDSCAPE_CATEGORIES,
   ...VEHICLE_CATEGORIES,
+  ...SERVICE_ITEM_CATEGORIES,
 ]);
 export const isToolCategory = (c) => c === 'tools_hand' || c === 'tools_power';
 
@@ -171,6 +173,9 @@ for (const g of ITEMS_LANDSCAPE) add(g);
 
 // ---- vehicles: fuel, the fuel can and the trailer (src/sim/content/vehicles.js)
 for (const g of ITEMS_VEHICLES) add(g);
+
+// ---- cable and pipe inside the walls: spools, coils, boxes, staples, plates, rings (src/sim/content/services.js)
+for (const g of ITEMS_SERVICES) add(g);
 
 // Read-only. A made-to-order door or window (any size off the store's list) is not listed but is made from its id the
 // first time it is asked for, the same every time, so saves and orders that name one keep working.

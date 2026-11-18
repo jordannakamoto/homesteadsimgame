@@ -22,7 +22,8 @@
         const A = svApi(), sp = A.specs[run.spec] || {}, cls = A.classes[run.cls] || {};
         return { colour: parseInt(String(sp.colour || cls.colour || '#cccccc').slice(1), 16), radiusM: sp.radiusM || 0.008 };
       },
-      node(n) { const l = NODE_LOOK[n.kind]; return l ? { colour: l[0], sizeM: l[1] } : { colour: 0x9a9a9a, sizeM: 0.06 }; },
+      // a box or stub still to fix is drawn pale, like a planned run (services-hands nails it)
+      node(n) { const l = NODE_LOOK[n.kind] || [0x9a9a9a, 0.06]; return { colour: n.state === 'planned' && n.kind !== 'slot' && n.kind !== 'port' && n.kind !== 'exit' ? new T.Color(l[0]).lerp(new T.Color(0xffffff), 0.55).getHex() : l[0], sizeM: l[1] }; },
       bore: { todo: 0xffd23a, done: 0x2a2018 },
     },
   });
