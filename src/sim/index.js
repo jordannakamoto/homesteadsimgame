@@ -18,6 +18,8 @@ import { garden } from './garden.js';
 import { landscape } from './landscape.js';
 import { createPartsSystem } from './core/parts.js';
 import { plumbingSystem } from './plumbing.js';
+import { createVehicleSystem } from './core/vehicles.js';
+import { VEHICLE_KINDS, IMPLEMENT_KINDS, VEHICLE_HOOKS } from './content/vehicles.js';
 import { PLUMBING_KINDS, PLUMBING_MATES, PLUMBING_STEP_M, PLUMBING_PIPE, STARTER_KIT } from './content/plumbing-parts.js';
 
 export * from './sim.js';
@@ -55,14 +57,18 @@ export { compileLinks } from './core/links.js';
 export { createRoutesSystem, runState as routeRunState, toNeutral as routesToNeutral, worldOf as routeWorldOf, pathLength } from './core/routes.js';
 export { plumbingSystem, compilePlumbing } from './plumbing.js';
 export * from './content/plumbing-parts.js';
+export * as vehicleCore from './core/vehicles.js';
+export { VEHICLE_KINDS, IMPLEMENT_KINDS, ITEMS_VEHICLES, FUEL_ITEM } from './content/vehicles.js';
 
 // Systems are added here, in dependency order, as the iterations land. Electrical runs before water
 // so a pump's request for power is answered in the same minute; the garden runs after water, whose draws it uses,
 // and after the landscape, whose shape of the ground it reads.
 // Kit parts fitted by hand (generic), then plumbing, which compiles them for water, which runs after both.
 const partsSystem = createPartsSystem({ name: 'parts', stepM: PLUMBING_STEP_M, kinds: PLUMBING_KINDS, mates: PLUMBING_MATES });
+// Vehicles (generic mechanism, homestead records): parked poses, fuel, seats, hitches, rentals. The page drives them.
+const vehicles = createVehicleSystem({ name: 'vehicles', kinds: VEHICLE_KINDS, implementKinds: IMPLEMENT_KINDS, hooks: VEHICLE_HOOKS });
 const plumbing = plumbingSystem({ kinds: PLUMBING_KINDS, mates: PLUMBING_MATES, stepM: PLUMBING_STEP_M, material: PLUMBING_PIPE, kit: STARTER_KIT });
-export const GAME_SYSTEMS = [weather, streams, stockSystem(), siteSystem(), structure, electrical, partsSystem, plumbing, water, thermal, cookingSystem(), chickensSystem(), physicalKitchenSystem(), landscape, garden, constructionSystem()];
+export const GAME_SYSTEMS = [weather, streams, stockSystem(), siteSystem(), structure, electrical, partsSystem, plumbing, water, thermal, cookingSystem(), chickensSystem(), physicalKitchenSystem(), landscape, garden, constructionSystem(), vehicles];
 
 export function createGameSim(seed, opts = {}) {
   return createSim({ seed, systems: GAME_SYSTEMS, ...opts });
