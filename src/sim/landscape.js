@@ -92,12 +92,12 @@ function dig(ctx, p = {}) {
   const x = +p.x, z = +p.z, pl = plantNear(s, x, z);
   if (pl) return fail('The ' + PLANTS[pl.k].name.toLowerCase() + ' is planted there. Lift it with your hands first.');
   const g = s.grid, i = pt(x), j = pt(z), wasTurf = EW.sAt(g, i, j) === 0, f0 = EW.fAt(g, i, j);
-  const res = EW.cut(g, x, z, SCOOP_M3 * (p.scale || s.scale || 1), { r: 0.24, t: hours(ctx), clearF: FLAG.TAMP1 | FLAG.TAMP2, looseStays: true });
+  const res = EW.cut(g, x, z, SCOOP_M3 * (p.scale || s.scale || 1), { r: 0.34, t: hours(ctx), clearF: FLAG.TAMP1 | FLAG.TAMP2, looseStays: true });
   // a heap dug into at its foot is left over-steep: it slides (the view rolls it down grain by grain; else within the hour)
   (s.unsettled ||= []).push([r3(x), r3(z)]); if (s.unsettled.length > 64) s.unsettled.shift();
   if (!(res.m3 > 1e-6)) return fail('That is as deep as a shovel will go here.');
   // the blade tears the turf at the lip of the hole: a narrow rim of bare earth (the walls themselves stand firm)
-  EW.paint(g, x, z, 0.27, { surface: 'soil', t: hours(ctx), ok: (q) => q.s === EW.UNTOUCHED });
+  EW.paint(g, x, z, 0.37, { surface: 'soil', t: hours(ctx), ok: (q) => q.s === EW.UNTOUCHED });
   const cutLiner = unline(ctx, s, x, z, 0.2);
   if (f0 & FLAG.FABRIC) EW.paint(g, x, z, 0.16, { clearF: FLAG.FABRIC });
   reseat(s);
@@ -167,6 +167,20 @@ function shedAt(ctx, p = {}) {
   const out = EW.shed(s.grid, +p.x, +p.z, Math.min(1.2, +p.r || 0.7), EW.REPOSE * 1.15);
   for (const [x, z, m3, surf] of out) addAir(s, surf, m3, x, z);
   return { ok: true, pts: out.map((q) => [r3(q[0]), r3(q[1]), q[2], q[3], r3(q[4]), r3(q[5])]) };
+}
+// The flat of the shovel pushed along the ground (a step of a right-button drag): loose earth above `level` is pushed
+// ahead, low spots are filled from it. See EW.push.
+function pushCmd(ctx, p = {}) {
+  const s = ensure(ctx);
+  if (!shovelOk(ctx)) return fail('You need a shovel.');
+  const v = [p.x0, p.z0, p.x1, p.z1].map(Number);
+  if (!v.every(Number.isFinite)) return fail('Where?');
+  if (Math.hypot(v[2] - v[0], v[3] - v[1]) > 0.5) return fail('Too far in one push.');
+  const pl = plantNear(s, v[2], v[3]);
+  if (pl) return fail('The ' + PLANTS[pl.k].name.toLowerCase() + ' is in the way.');
+  const res = EW.push(s.grid, v[0], v[1], v[2], v[3], Number.isFinite(+p.level) ? +p.level : 0, { w: 0.45, t: hours(ctx) });
+  reseat(s);
+  return { ok: true, m3: res.m3, s: res.s };
 }
 // Finish settling round (x, z) at once (a slope the grains have worked on long enough).
 function settleAt(ctx, p = {}) { const s = ensure(ctx); if (!finite(p)) return fail('Where?'); EW.settle(s.grid, +p.x, +p.z, Math.min(1.2, +p.r || 0.7)); reseat(s); return { ok: true }; }
@@ -730,7 +744,7 @@ export const landscape = {
     'landscape.plant': plant, 'landscape.lift': lift, 'landscape.move': move, 'landscape.setScale': setScale,
     'landscape.load': load, 'landscape.tip': tip, 'landscape.water': water, 'landscape.line': line, 'landscape.hose': hose,
     'landscape.deliver': deliver, 'landscape.open': open, 'landscape.moveThing': moveThing,
-    'landscape.pour': pour, 'landscape.land': land, 'landscape.shed': shedAt, 'landscape.settle': settleAt,
+    'landscape.pour': pour, 'landscape.land': land, 'landscape.shed': shedAt, 'landscape.settle': settleAt, 'landscape.push': pushCmd,
   },
 };
 
