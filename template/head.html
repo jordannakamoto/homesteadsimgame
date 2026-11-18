@@ -322,7 +322,9 @@ body.touch #bpieces button, body.touch #bsnap, body.touch #bdone, body.touch #bs
 body.touch #bundo, body.touch #bredo { min-width: 44px; min-height: 40px; justify-content: center; }
 body.touch #blevel button { min-width: 36px; justify-content: center; }
 body.touch #bfree { min-height: 40px; }
-body.touch #tools { bottom: max(6px, env(safe-area-inset-bottom)); gap: 5px; padding: 5px; }
+body.touch #tools { bottom: max(6px, env(safe-area-inset-bottom)); gap: 5px; padding: 5px; max-width: calc(100vw - 12px); box-sizing: border-box; overflow-x: auto; scrollbar-width: none; }
+body.touch #tools::-webkit-scrollbar { display: none; }
+body.touch #tools button { flex: none; }
 body.touch #tools button { min-width: 54px; padding: 7px 6px; }
 body.touch #tools button .name { font-size: 14px; }
 @media (max-width: 520px) {
