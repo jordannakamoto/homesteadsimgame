@@ -1389,8 +1389,6 @@
     fireplace: { name: "Fireplace", cat: 1, cosy: 3, wall: 0.38, light: [0.7, 1.3], col: [[-0.5, 0, 0.5, 0]] },
     campfire: { name: "Campfire", cat: 1, light: [0.5, 1.2], col: PT },
     brazier: { name: "Brazier", cat: 1, cosy: 1, light: [1.1, 1], col: PT },
-    torch: { name: "Standing torch", cat: 1, light: [1.8, 0.9] },
-    sconce: { name: "Wall torch", cat: 1, cosy: 1, wall: 0.15, light: [1.8, 0.8] },
     candles: { name: "Candle stand", cat: 1, cosy: 1, light: [1.5, 0.6] },
     chandelier: { name: "Chandelier", cat: 1, cosy: 1, light: [-1.1, 1.1] },
     lamppost: { name: "Lamp post", cat: 1, light: [2.2, 1.2], col: PT },
@@ -1398,7 +1396,6 @@
     barrel: { name: "Barrel", cat: 2, col: PT },
     crate: { name: "Crate", cat: 2, col: PT },
     sacks: { name: "Sacks", cat: 2, col: PT },
-    anvil: { name: "Anvil", cat: 2, col: PT },
     haybale: { name: "Hay bale", cat: 2, col: [[-0.3, 0, 0.3, 0]] },
     woodpile: { name: "Wood pile", cat: 2, col: [[-0.45, 0, 0.45, 0]] },
     trough: { name: "Water trough", cat: 2, col: [[-0.5, 0, 0.5, 0]] },
@@ -1718,23 +1715,6 @@
         flame(0, 0.88, 0, 0.85);
         break;
       }
-      case "torch": {
-        for (let k = 0; k < 4; k++) rock([Math.cos(k * 1.6) * 0.13, 0.06, Math.sin(k * 1.6) * 0.13], 0.11, 0.08, 0.1, k);
-        lg([0, 0, 0], [0.03, 1.55, 0], 0.045, 0.03, BARK, 6);
-        m.cyl([0.03, 1.5, 0], [0.035, 1.72, 0], 0.045, 0.065, 7, shade(FUR, 0.5), shade(FUR, 0.7));
-        rod([0.03, 1.56, 0], [0.03, 1.6, 0], 0.062, IRON, 7);
-        flame(0.035, 1.72, 0, 0.6);
-        break;
-      }
-      case "sconce": {
-        m.abox(-0.05, 1.3, -0.15, 0.05, 1.5, -0.12, IRON);
-        rod([0, 1.4, -0.13], [0, 1.36, 0.02], 0.016, IRON);
-        ringBand([0, 1.33, 0.04], 0.045, 0.05, IRON, 6);
-        lg([0, 1.22, 0.0], [0, 1.74, 0.09], 0.03, 0.035, BARK, 6);
-        m.cyl([0, 1.7, 0.083], [0, 1.84, 0.107], 0.04, 0.055, 6, shade(FUR, 0.5), shade(FUR, 0.7));
-        flame(0, 1.85, 0.11, 0.5);
-        break;
-      }
       case "candles": {
         for (let k = 0; k < 3; k++) rod([0, 0.12, 0], [Math.cos((k / 3) * TAU) * 0.2, 0, Math.sin((k / 3) * TAU) * 0.2], 0.018, IRON);
         rod([0, 0.1, 0], [0, 1.2, 0], 0.02, IRON, 6);
@@ -1840,17 +1820,6 @@
         sack(0.24, 0, -0.06, 0.22, 0.2, 0.22, 2, 0.15);
         m.ball([0.02, 0.5, 0.03], 0.3, 0.13, 0.2, j(SK, 3), { lat: 4, lon: 8 });
         m.ball([0.08, 0.14, 0.32], 0.2, 0.13, 0.15, j(SK, 4), { lat: 3, lon: 7 });
-        break;
-      }
-      case "anvil": {
-        m.cyl([0, 0, 0], [0, 0.5, 0], 0.29, 0.26, 10, shade(BARK, 0.8), BARK, END);
-        ringBand([0, 0.36, 0], 0.275, 0.05, IRON, 10);
-        m.frust(0, 0, 0.5, 0.6, 0.2, 0.13, 0.13, 0.09, IRON);
-        m.frust(0, 0, 0.6, 0.72, 0.1, 0.07, 0.13, 0.09, shade(IRON, 0.9));
-        bm([-0.26, 0.79, 0], [0.24, 0.79, 0], 0.2, 0.14, shade(IRON, 1.15), 0.15);
-        m.cyl([0.24, 0.79, 0], [0.52, 0.83, 0], 0.07, 0.012, 7, shade(IRON, 1.1), shade(IRON, 1.3));
-        lg([-0.2, 0.89, -0.03], [0.14, 0.89, 0.07], 0.018, 0.018, OAK, 5);
-        bm([-0.25, 0.9, -0.09], [-0.2, 0.9, 0.03], 0.07, 0.07, shade(IRON, 0.8));
         break;
       }
       case "haybale": {
