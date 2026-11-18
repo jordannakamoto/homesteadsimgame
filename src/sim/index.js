@@ -58,6 +58,8 @@ export * from './fixtures.js';
 export { createPartsSystem, ROTATIONS as PART_ROTATIONS, rotationTo } from './core/parts.js';
 export { compileLinks } from './core/links.js';
 export { createRoutesSystem, runState as routeRunState, toNeutral as routesToNeutral, worldOf as routeWorldOf, pathLength } from './core/routes.js';
+export { find as routeFind } from './core/routefind.js';
+export { channelsFor as frameChannelsFor, channelsFromMembers as frameChannels } from './content/frame-channels.js';
 export { plumbingSystem, compilePlumbing } from './plumbing.js';
 export * from './content/plumbing-parts.js';
 export { services, servicesSystem, compileServices, servicesGuard, runInfo as serviceRunInfo, overlayData as servicesOverlay } from './services.js';

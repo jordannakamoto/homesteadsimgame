@@ -13,7 +13,7 @@ import { createWaterFx } from './water/water-fx.js';
 import { createReflectProbe } from './water/reflect-probe.js';
 import { createReflectPlane } from './water/reflect-plane.js';
 import { createRippleSim } from './water/ripple-sim.js';
-import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, stringifySave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork, powerNear, vehicleCore } from './sim/index.js';
+import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, stringifySave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork, powerNear, vehicleCore, routeFind, frameChannelsFor } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -4588,6 +4588,8 @@ window.__game = {
   },
   treeGeo, pineLite: pineLiteGeo, markStockDirty: () => { hudDirty = true; },
   garden: gardenRead, landscape: landscapeRead, earthwork, vehicleCore,
+  // runs through a building's frame (src/sim/core/routefind.js over src/sim/content/frame-channels.js)
+  routes: { find: routeFind, channelsFor: (structId) => frameChannelsFor(structId, window.__build) },
   // the landscape view's hooks: the ground it shapes is walked on, and shows through the terrain where dug
   setRelief: (fn) => { reliefFn = fn; }, digMask: { win: DIG.uDigWin, enable: enableDigMask },
   handPose: null, sea: SEA,
