@@ -16,6 +16,8 @@ import { constructionSystem } from './construction.js';
 import { structure } from './structure.js';
 import { garden } from './garden.js';
 import { landscape } from './landscape.js';
+import { groundSystem } from './ground.js';
+import { FLAG as LANDSCAPE_FLAG } from './content/landscape.js';
 import { createPartsSystem } from './core/parts.js';
 import { plumbingSystem } from './plumbing.js';
 import { PLUMBING_KINDS, PLUMBING_MATES, PLUMBING_STEP_M, PLUMBING_PIPE, STARTER_KIT } from './content/plumbing-parts.js';
@@ -39,6 +41,7 @@ export { CROPS, CROP_IDS } from './content/crops.js';
 export { landscape, landscapeRead, reliefAt, plantSize } from './landscape.js';
 export { SURFACES, THINGS, PLANTS as NURSERY, SCOOP_M3, SCOOP_SCALES, ITEMS_LANDSCAPE } from './content/landscape.js';
 export * as earthwork from './core/earthwork.js';
+export { groundSystem, groundRead, setGroundBase } from './ground.js';
 export { SOILS, AMENDMENTS, MULCH } from './content/soils.js';
 export { ITEMS_GARDEN } from './content/garden-items.js';
 export { findRooms, roomAt, compassName } from './rooms.js';
@@ -60,7 +63,7 @@ export * from './content/plumbing-parts.js';
 // Kit parts fitted by hand (generic), then plumbing, which compiles them for water, which runs after both.
 const partsSystem = createPartsSystem({ name: 'parts', stepM: PLUMBING_STEP_M, kinds: PLUMBING_KINDS, mates: PLUMBING_MATES });
 const plumbing = plumbingSystem({ kinds: PLUMBING_KINDS, mates: PLUMBING_MATES, stepM: PLUMBING_STEP_M, material: PLUMBING_PIPE, kit: STARTER_KIT });
-export const GAME_SYSTEMS = [weather, streams, stockSystem(), siteSystem(), structure, electrical, partsSystem, plumbing, water, thermal, cookingSystem(), chickensSystem(), physicalKitchenSystem(), landscape, garden, constructionSystem()];
+export const GAME_SYSTEMS = [weather, streams, stockSystem(), siteSystem(), structure, electrical, partsSystem, plumbing, water, thermal, cookingSystem(), chickensSystem(), physicalKitchenSystem(), groundSystem({ tampBits: [LANDSCAPE_FLAG.TAMP1, LANDSCAPE_FLAG.TAMP2] }), landscape, garden, constructionSystem()];
 
 export function createGameSim(seed, opts = {}) {
   return createSim({ seed, systems: GAME_SYSTEMS, ...opts });

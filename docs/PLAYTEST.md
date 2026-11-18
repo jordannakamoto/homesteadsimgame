@@ -533,3 +533,21 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 **What's weak**
 
 - Packing a very large dug area (300 patches) takes about 30 ms once per autosave.
+
+## Ground A2 — one ground in the simulation (branch `ground-a1a2`)
+
+**What is new**
+
+- Nothing should look different. Terrain height edits (the brush, the starting well's levelled spot, build mode's site cut) are now part of the simulation's save (save version 3) instead of a side list in the engine, and there is one command API for moving earth at any scale, ready for machines and foundations.
+- Old saves load with their levelled sites and dug terrain.
+
+**Try this (console)**
+
+1. `p = __game.player; y = __game.heightAt(p.x + 6, p.z) - 0.5; __game.ground.cmd('grade', { samples: [[p.x + 6, p.z], [p.x + 9, p.z]], targetY: y, core: 1.5, rim: 3.5 })`: a sunken pad appears beside you. Reload: it is still there.
+2. `__game.ground.cmd('cut', { x: p.x + 4, z: p.z + 4, r: 2, m3: 3 })` (machine-sized bite) and `__game.ground.cmd('fill', { x: p.x - 4, z: p.z, r: 2, m3: 3 })`.
+3. Use the old terrain brush and build a site as before; `__game.ground.verify()` should report `tiles: 0`.
+
+**What's weak**
+
+- Macro (1 m) cuts and fills are blocky next to the 10 cm hand-dug ground, and a machine-sized cut wipes hand-dug detail under it (by design: it absorbs it).
+- Build mode's site cut still goes through the old path (slice A3 routes it through `ground.grade`).

@@ -221,10 +221,12 @@ export function settle(g, x, z, r = 0.8, slope = REPOSE, iters = 40, firmOnly = 
 // passes are filled from what it pushes, up to the level; what is left is dropped as a ridge just ahead of the blade,
 // where the next push picks it up again. Firm ground and turf are not cut. Volume is conserved. Returns
 // { m3: what is now in front of the blade, s: its surface }.
-export function push(g, x0, z0, x1, z1, level, { w = 0.45, t = 0 } = {}) {
+// `level` may also be a function (x, z) -> relief metres, for a blade held at one height over uneven untouched ground.
+export function push(g, x0, z0, x1, z1, level, { w = 0.45, t = 0, ahead: AHEAD = 0.14 } = {}) {
   const st = g.step, A = area(g), L = Math.hypot(x1 - x0, z1 - z0);
   if (L < 1e-4) return { m3: 0, s: '' };
-  const ux = (x1 - x0) / L, uz = (z1 - z0) / L, half = w / 2, lv = Math.round(level * 1000), AHEAD = 0.14;
+  const ux = (x1 - x0) / L, uz = (z1 - z0) / L, half = w / 2, lvAt = typeof level === 'function' ? (i, j) => Math.round(level(i * st, j * st) * 1000) : null;
+  let lv = lvAt ? 0 : Math.round(level * 1000);
   const xs = [x0, x1, x1 + ux * AHEAD], zs = [z0, z1, z1 + uz * AHEAD];
   const i0 = Math.floor((Math.min(...xs) - half) / st), i1 = Math.ceil((Math.max(...xs) + half) / st);
   const j0 = Math.floor((Math.min(...zs) - half) / st), j1 = Math.ceil((Math.max(...zs) + half) / st);
@@ -242,6 +244,7 @@ export function push(g, x0, z0, x1, z1, level, { w = 0.45, t = 0 } = {}) {
     const r = tileOf(g, i, j, false);
     if (!r) continue;
     const [tl, n] = r, loose = (tl.f[n] & LOOSE_BIT) || tl.l[n] > 0;
+    if (lvAt) lv = lvAt(i, j);
     if (!loose || tl.s[n] === 0 || tl.h[n] <= lv) continue;
     // a layer (chips, gravel) comes off on its own, down to what is under it; loose earth down to the level
     const name = tl.l[n] > 0 ? g.codes[tl.s[n]] : 'soil', take = tl.l[n] > 0 ? Math.min(tl.h[n] - lv, tl.l[n]) : tl.h[n] - lv;
@@ -264,6 +267,7 @@ export function push(g, x0, z0, x1, z1, level, { w = 0.45, t = 0 } = {}) {
   for (const [i, j] of swept) {
     if (total <= 0) break;
     const r = tileOf(g, i, j, false), h = r ? r[0].h[r[1]] : 0;
+    if (lvAt) lv = lvAt(i, j);
     if (h >= lv) continue;
     const d = Math.min(lv - h, total);
     put(i, j, d); total -= d;
