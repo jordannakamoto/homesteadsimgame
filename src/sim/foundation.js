@@ -4,20 +4,25 @@
 // it is green (construction.setHold).
 //
 // B1 is the skeleton: state, foundation.setPlan / forget, foundation.debugPour (sandbox: the pour happens now), the
-// cure step and the gates. The hands-on steps (layout, dig, base, forms, rebar, pour, finish, strip) come in B2-B8.
+// cure step and the gates. B2 adds the layout and the dig: setPlan takes the corners and the dig regions from the
+// page, foundation.stake closes the string lines, foundation.check reads the dig from the ground (and finishes the
+// building's site stage when it is down to the line), foundation.trim is the flat of the shovel along a stroke.
+// The other hands-on steps (base, forms, rebar, pour, finish, strip) come in B3-B8.
 //
 // state sys.foundation = { v: 1, nextId, jobs: { [id]: job }, carry: null, machines: {} }
-// job = { id, owner: { structId } | null, type, x, z, yaw, topY, step, layout, roughIn, elements: [element], pour,
+// job = { id, owner: { structId } | null, type, x, z, yaw, topY, step, layout, digs: [{ poly, targetY, frac }], roughIn, elements: [element], pour,
 //         held: reason | null, baseIds: [construction member ids of the gravel base] }
 // element = { id, kind, memberIds, w, botY, topY, volM3, dig, base, forms, rebar, bolts, pour, finish, cure }
 // events: 'foundation.gate' { jobId, gate } when a gate opens; 'foundation.cured' { jobId } when it is followed no more.
 import * as CU from './core/cure.js';
 import * as CC from './content/concrete.js';
+import { groundRead } from './ground.js';
 
 const STEPS = ['layout', 'excavate', 'base', 'forms', 'rebar', 'roughin', 'pour', 'finish', 'cure', 'strip', 'done'];
 const fail = (reason) => ({ ok: false, reason });
 const num = (v) => typeof v === 'number' && Number.isFinite(v);
 const r6 = (v) => Math.round(v * 1e6) / 1e6;
+const okPt = (q) => Array.isArray(q) && num(q[0]) && num(q[1]);
 
 export function freshFoundation() { return { v: 1, nextId: 1, jobs: {}, carry: null, machines: {} }; }
 function ensure(ctx) {
@@ -109,6 +114,53 @@ function envOf(ctx) {
   return { airC: w.tempC, windMs: w.windMs, rh: w.humidity, rainMmH: w.rainMmH };
 }
 
+// ------------------------------------------------------------------------------------------------ layout and dig (B2)
+function digFrac(job) {
+  const d = job.digs || [];
+  if (!d.length) return 1;
+  let a = 0, f = 0;
+  for (const q of d) { const A = Math.abs(polyArea(q.poly)); a += A; f += A * (q.frac || 0); }
+  return a > 0 ? f / a : 1;
+}
+function polyArea(P) { let A = 0; for (let a = 0, b = P.length - 1; a < P.length; b = a++) A += (P[b][0] + P[a][0]) * (P[b][1] - P[a][1]); return A / 2; }
+function strokeRect(x0, z0, x1, z1, w) {
+  const L = Math.hypot(x1 - x0, z1 - z0) || 1e-6, ux = (x1 - x0) / L, uz = (z1 - z0) / L, h = w / 2, nx = -uz * h, nz = ux * h, e = 0.05;
+  const ax = x0 - ux * e, az = z0 - uz * e, bx = x1 + ux * e, bz = z1 + uz * e;
+  return [[ax + nx, az + nz], [bx + nx, bz + nz], [bx - nx, bz - nz], [ax - nx, az - nz]];
+}
+// Sutherland-Hodgman: any simple polygon clipped by a convex one
+export function clipConvex(subject, clip) {
+  let out = subject.map((q) => [q[0], q[1]]);
+  const sgn = polyArea(clip) >= 0 ? -1 : 1;     // polyArea is negative for an anticlockwise (x right, z up) outline
+  for (let k = 0; k < clip.length && out.length; k++) {
+    const A = clip[k], B = clip[(k + 1) % clip.length], inp = out;
+    const side = (q) => sgn * ((B[0] - A[0]) * (q[1] - A[1]) - (B[1] - A[1]) * (q[0] - A[0]));
+    out = [];
+    for (let i = 0; i < inp.length; i++) {
+      const P = inp[i], Q = inp[(i + 1) % inp.length], sp = side(P), sq = side(Q);
+      if (sp >= 0) out.push(P);
+      if ((sp >= 0) !== (sq >= 0)) { const t = sp / (sp - sq); out.push([P[0] + (Q[0] - P[0]) * t, P[1] + (Q[1] - P[1]) * t]); }
+    }
+  }
+  return out;
+}
+const inPoly = (P, x, z) => { let ins = false; for (let a = 0, b = P.length - 1; a < P.length; b = a++) if ((P[a][1] > z) !== (P[b][1] > z) && x < ((P[b][0] - P[a][0]) * (z - P[a][1])) / (P[b][1] - P[a][1]) + P[a][0]) ins = !ins; return ins; };
+// where a trim stroke's earth ends up: on along the stroke until it is out of every dig, then a little further
+function spoilSpot(job, x0, z0, x1, z1, out) {
+  const L = Math.hypot(x1 - x0, z1 - z0), ux = L > 1e-6 ? (x1 - x0) / L : 1, uz = L > 1e-6 ? (z1 - z0) / L : 0;
+  let x = x1, z = z1;
+  for (let k = 0; k < 400 && (job.digs || []).some((d) => inPoly(d.poly, x, z)); k++) { x += ux * 0.05; z += uz * 0.05; }
+  return [r6(x + ux * out), r6(z + uz * out)];
+}
+// the building's site stage is the dig: finish its site members (no material) when the dig is done
+function finishSite(ctx, job) {
+  if (!job.owner) return;
+  const cs = ctx.get('construction'), pr = cs && cs.progress && cs.progress[job.owner.structId];
+  if (!pr) return;
+  const ids = Object.keys(pr.members).filter((id) => pr.members[id].kind === 'site' && !pr.members[id].built);
+  if (ids.length) call(ctx, 'construction.install', { structId: job.owner.structId, memberIds: ids, from: 'stacks' });
+}
+
 export const foundationSystem = ({ cure = CC.CURE, every = CC.CURE_EVERY } = {}) => ({
   name: 'foundation',
   every,
@@ -158,6 +210,21 @@ export const foundationSystem = ({ cure = CC.CURE, every = CC.CURE_EVERY } = {})
       for (const e of elements) { const o = old.get(e.id); if (o) for (const k of KEEP) e[k] = o[k]; }
       job.type = type; job.elements = elements; job.baseIds = baseIds;
       for (const k of ['x', 'z', 'yaw', 'topY']) if (num(p[k])) job[k] = p[k];
+      // B2: where the corners go (world x, z) and what is dug to which level ({ poly, targetY } in world metres)
+      if (p.corners !== undefined) {
+        if (!(Array.isArray(p.corners) && p.corners.length >= 3 && p.corners.length <= 64 && p.corners.every(okPt))) return fail('bad corners');
+        const was = job.layout.corners, same = was.length === p.corners.length && was.every((c, k) => Math.hypot(c[0] - p.corners[k][0], c[1] - p.corners[k][1]) < 0.05);
+        if (!same) {
+          job.layout = { corners: p.corners.map((c) => [r6(c[0]), r6(c[1]), 0]), closed: false, squareOk: false };
+          if (job.step === 'excavate') job.step = 'layout';
+        }
+      }
+      if (p.digs !== undefined) {
+        if (!(Array.isArray(p.digs) && p.digs.length <= 64 && p.digs.every((d) => d && num(d.targetY) && Array.isArray(d.poly) && d.poly.length >= 3 && d.poly.length <= 256 && d.poly.every(okPt)))) return fail('bad digs');
+        const old2 = job.digs || [];
+        job.digs = p.digs.map((d, k) => ({ poly: d.poly.map((q) => [r6(q[0]), r6(q[1])]), targetY: r6(d.targetY), frac: old2[k] && Math.abs(old2[k].targetY - d.targetY) < 1e-4 ? old2[k].frac : 0 }));
+      }
+      if (!job.digs) job.digs = [];
       if (pr && !num(p.x)) { job.x = pr.x; job.z = pr.z; }
       applyHolds(ctx, job);
       return { ok: true, jobId: job.id, elements: elements.length };
@@ -170,6 +237,68 @@ export const foundationSystem = ({ cure = CC.CURE, every = CC.CURE_EVERY } = {})
       delete s.jobs[job.id];
       return { ok: true };
     },
+    // Layout (B2): a corner stake driven and the string tied to it. When every corner is staked the loop is closed:
+    // the strings go up on batter boards and digging can start. { jobId | structId, corner }
+    'foundation.stake'(ctx, p = {}) {
+      const s = ensure(ctx), job = jobOf(s, p);
+      if (!job) return fail('no such job');
+      if (job.step !== 'layout') return fail('already laid out');
+      const c = job.layout.corners[p.corner];
+      if (!c) return fail('no such corner');
+      if (c[2]) return { ok: true, already: true, closed: job.layout.closed };
+      c[2] = 1;
+      const closed = job.layout.corners.every((q) => q[2]);
+      if (closed) { job.layout.closed = true; job.layout.squareOk = true; job.step = 'excavate'; ctx.emit('foundation.step', { jobId: job.id, step: job.step }); }
+      return { ok: true, closed };
+    },
+    // How much of the dig is down to the line (read from the ground). At DIG.done the excavation is finished: the
+    // building's site stage is done with it and the job moves on to its base. { jobId | structId }
+    'foundation.check'(ctx, p = {}) {
+      const s = ensure(ctx), job = jobOf(s, p);
+      if (!job) return fail('no such job');
+      if (job.step === 'layout' && !job.layout.corners.length) job.step = 'excavate';
+      if (job.step !== 'excavate') return { ok: true, step: job.step, frac: digFrac(job) };
+      const D = CC.DIG;
+      let n = 0, high = 0, low = 0;
+      for (const d of job.digs || []) {
+        const r = groundRead.conform(ctx.state, { poly: d.poly }, d.targetY, D.tolUpM, D.tolDownM, D.cellM);
+        d.frac = r.n ? r6(1 - r.high.length / r.n) : 1;
+        n += r.n; high += r.high.length; low += r.low.length;
+      }
+      const frac = n ? 1 - high / n : 1;
+      for (const e of job.elements) e.dig.frac = r6(frac);
+      let advanced = false;
+      if (frac >= D.done) {
+        job.step = 'base'; advanced = true;
+        finishSite(ctx, job);
+        ctx.emit('foundation.step', { jobId: job.id, step: job.step });
+      }
+      return { ok: true, step: job.step, frac: r6(frac), low: n ? r6(low / n) : 0, advanced };
+    },
+    // The flat of the shovel trims along a stroke down to the line (only once most of it is dug), and the earth it
+    // takes is pushed out past the edge of the dig. { jobId | structId, x0, z0, x1, z1, w? }
+    'foundation.trim'(ctx, p = {}) {
+      const s = ensure(ctx), job = jobOf(s, p), D = CC.DIG;
+      if (!job) return fail('no such job');
+      if (![p.x0, p.z0, p.x1, p.z1].every(num)) return fail('no stroke');
+      if (job.step !== 'excavate') return fail('not digging');
+      if (digFrac(job) < D.trimFrom) return fail('Dig more of it first: trim when most of the amber is gone');
+      const L = Math.hypot(p.x1 - p.x0, p.z1 - p.z0);
+      if (L > D.maxStrokeM) return fail('too far in one stroke');
+      const w = num(p.w) && p.w > 0 && p.w <= 1 ? p.w : D.bladeW, rect = strokeRect(p.x0, p.z0, p.x1, p.z1, w);
+      let m3 = 0;
+      for (const d of job.digs || []) {
+        const poly = clipConvex(d.poly, rect);
+        if (poly.length < 3) continue;
+        const r = call(ctx, 'ground.trim', { region: { poly }, targetY: d.targetY });
+        if (r && r.ok) m3 += r.m3;
+      }
+      if (m3 > 1e-7) {
+        const [sx, sz] = spoilSpot(job, p.x0, p.z0, p.x1, p.z1, D.spoilOutM);
+        call(ctx, 'ground.fill', { x: sx, z: sz, r: 0.3, m3 });
+      }
+      return { ok: true, m3: r6(m3) };
+    },
     // Sandbox and tests: every element is poured now (the foundation members are finished in construction) and
     // starts to cure from now; framing on it waits for the frame gate.
     'foundation.debugPour'(ctx, p = {}) {
@@ -181,6 +310,7 @@ export const foundationSystem = ({ cure = CC.CURE, every = CC.CURE_EVERY } = {})
         e.cure = CU.newCure(ctx.t, { setH20: CC.SET_H20 * CC.WORKABLE_SCALE });
       }
       job.step = 'cure';
+      finishSite(ctx, job);
       if (job.owner) {
         const ids = [...job.baseIds, ...job.elements.flatMap((e) => e.memberIds)];
         if (ids.length) call(ctx, 'construction.settle', { structId: job.owner.structId, memberIds: ids });
@@ -207,6 +337,6 @@ export const foundationRead = {
     const j = F(state).jobs[jobId];
     if (!j) return null;
     const g = gatesOf(j);
-    return { id: j.id, type: j.type, step: j.step, held: j.held, strength: g.strength, gates: Object.fromEntries(CC.GATE_ORDER.map((k) => [k, g[k]])), elements: j.elements.map((e) => ({ id: e.id, kind: e.kind, volM3: e.volM3, poured: !!e.cure, strength: e.cure ? e.cure.strength : 0 })) };
+    return { id: j.id, type: j.type, step: j.step, held: j.held, corners: j.layout.corners.map((c) => [c[0], c[1], !!c[2]]), closed: j.layout.closed, dig: digFrac(j), trimFrom: CC.DIG.trimFrom, strength: g.strength, gates: Object.fromEntries(CC.GATE_ORDER.map((k) => [k, g[k]])), elements: j.elements.map((e) => ({ id: e.id, kind: e.kind, volM3: e.volM3, poured: !!e.cure, strength: e.cure ? e.cure.strength : 0 })) };
   },
 };

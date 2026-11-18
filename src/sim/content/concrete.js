@@ -49,3 +49,21 @@ export const ELEMENT_OF = Object.freeze({ slab: 'slab', stemwall: 'wall', pier: 
 // How often the cure is stepped (sim ticks of 60 s) and when it stops being followed: 28 days equivalent.
 export const CURE_EVERY = 10;
 export const CURE_DONE_EQH = 28 * 24;
+
+// Layout and digging to the line (slice B2). Heights are world metres; fractions are of the dig region's area.
+export const DIG = Object.freeze({
+  tolUpM: 0.02,       // ground this far above the line still counts as dug (a flat shovel's tolerance)
+  tolDownM: 0.04,     // dug deeper than this shows as too deep (the gravel base makes it up)
+  cellM: 0.2,         // how finely the dig is checked
+  trimFrom: 0.85,     // once this much is down to the line, the flat of the shovel trims the rest with push strokes
+  done: 0.97,         // dug: the excavation step is finished and the site stage of the building with it
+  bladeW: 0.3,        // the swath one trim stroke cuts
+  spoilOutM: 0.35,    // trimmed earth is pushed this far past the edge of the dig
+  maxStrokeM: 4,      // one trim command covers at most this much of a stroke
+});
+export const LAYOUT = Object.freeze({ batterOutM: 0.9, stakeAboveM: 0.06 });
+export const STEP_SAYS = Object.freeze({
+  layout: 'Lay out the corners with string lines first',
+  excavate: 'Dig to the strings: the amber is ground still too high',
+  base: 'Dug to the line. The gravel base goes in next',
+});
