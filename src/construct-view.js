@@ -455,7 +455,8 @@
       if (!pts) continue;
       const cv = COVER[pm.stage];
       if (pm.built && cv && pr.tally[cv] && api.stageComplete(pr, cv)) continue;
-      if (pm.built && (pm.kind === 'roofing' || pm.stage === 'flooring')) continue;      // a course's nails are under the course above; a floor's are hidden in its tongues and joints
+      if (pm.built && pm.kind === 'roofing') continue;      // a course's nails are under the course above
+      if (pm.stage === 'flooring') continue;                 // no nail heads on a floor: wood is nailed through its tongue (hidden by the next board), the rest is not nailed at all
       const b = V.blows[mid], flat = C.STAGE[pm.stage].flat && g.walls.has(pm.parent) && !pr.raised[pm.parent], layer = flat ? pm.parent : 'main', h = pm.built ? 0 : PROUD * (1 - (b ? b.n / b.of : 0));
       let list = by.get(layer);
       if (!list) by.set(layer, (list = []));
@@ -1019,7 +1020,7 @@
     if (pm.kind === 'site' || !m) { strikeNow(ctx, ni); return; }      // a shovel stroke lands at once
     // the hammer winds up and comes down; the blow lands at contact (tickBlow). One still in the air lands first.
     if (V.blow && !V.blow.hit) strikeNow(V.blow.ctx, V.blow.ni);
-    V.blow = { ctx, ni, t: 0, hit: false };
+    V.blow = { ctx, ni, t: 0, hit: false, pose: pm.stage === 'flooring' ? floorPose(pm.kind, m && m.type) : 'hammer' };
   }
   const CONTACT_S = 0.1, BLOW_S = 0.26;
   function tickBlow(dt) {
@@ -1030,6 +1031,14 @@
     if (bl.t >= BLOW_S) V.blow = null;
   }
   // the arm through a blow: k 1 is the hammer down. A wind-up behind the head, a snap down, a short recoil
+  // what the body does for each blow on a floor: a mallet for nailed and click boards (on the nailer or the tapping block),
+  // staples and finish nails; hands pressing a tile down into its thinset; a sponge wiped across grout; a knee into the kicker
+  function floorPose(kind, type) {
+    if (kind === 'tile' || kind === 'paving' || kind === 'backer' || kind === 'threshold' || (kind === 'underlay' && type !== 'rosin')) return 'press';
+    if (kind === 'grout') return 'wipe';
+    if (kind === 'carpet') return 'kick';
+    return 'hammer';
+  }
   function blowK(t) {
     if (t < 0.07) return 0.35 - 0.6 * ease(t / 0.07);
     if (t < CONTACT_S) return -0.25 + 1.35 * ((t - 0.07) / (CONTACT_S - 0.07));
@@ -1498,13 +1507,22 @@
     const P = G.player, pose = V.pose || (V.pose = { kind: '', k: 0 });
     if (V.cutNow) { pose.kind = 'saw'; pose.k = V.cutNow.k; P.faceTarget = Math.atan2(V.cutNow.x - P.x, V.cutNow.z - P.z); }
     else if (V.raise && !V.raise.landed) pose.kind = 'lift';
-    else if (V.blow) { pose.kind = 'hammer'; pose.k = blowK(V.blow.t); }
+    else if (V.blow) { pose.kind = V.blow.pose || 'hammer'; pose.k = pose.kind === 'hammer' ? blowK(V.blow.t) : Math.min(1, V.blow.t / BLOW_S); }
     else if (W.job) { pose.kind = 'hammer'; const ph = Math.min(1, W.t / C.WORK.beatS); pose.k = ph < 0.2 ? 1.05 - 0.6 * ease(ph / 0.2) : ph < 0.8 ? 0.45 - 0.7 * ease((ph - 0.2) / 0.6) : -0.25 + 1.3 * ((ph - 0.8) / 0.2); }
     else if (V.poseT > 0) { V.poseT -= dt; pose.kind = V.poseKind; pose.k = Math.min(1, 1 - V.poseT / 0.24 + 0.35); }
     else pose.kind = s.carried ? 'carry' : '';
     P.work = pose.kind ? pose : null;
+    // kneel for work near the ground, as people do: a floor, a sill, a pier block, a cut on the deck
+    let low = !!(V.cutNow && V.cutNow.low);
+    if (!low && ctx && ctx.kind === 'hands' && ctx.mid && (V.blow || W.job || V.handT < 1.2)) {
+      const g = geom(ctx.id), m = g && g.byId.get(ctx.mid);
+      const pr = S().progress[ctx.id], pm = pr && pr.members[ctx.mid];
+      if (m && pm) { const hw = C.STAGE[pm.stage].flat && g.walls.has(pm.parent) && !pr.raised[pm.parent] ? g.walls.get(pm.parent) : null; worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); low = Math.max(wA.y, wB.y) - P.y < 0.45; }
+    }
+    P.kneel = low ? 1 : 0;
     // the hammer is in the hand while there is nailing to do here, the hatchet otherwise
-    P.hammer = pose.kind === 'hammer' || (!!ctx && ctx.kind === 'hands' && (ctx.act === 'nail' || V.handT < 1.5));
+    const pmc = ctx && ctx.kind === 'hands' && S().progress[ctx.id] && S().progress[ctx.id].members[ctx.mid], gmc = pmc && pmc.stage === 'flooring' && geom(ctx.id) && geom(ctx.id).byId.get(ctx.mid);
+    P.hammer = pose.kind === 'hammer' || (!!ctx && ctx.kind === 'hands' && (ctx.act === 'nail' || V.handT < 1.5) && !(pmc && pmc.stage === 'flooring' && floorPose(pmc.kind, gmc && gmc.type) !== 'hammer'));
     // hand finished pieces back to build mode once the hammer rests
     V.idleT = W.job ? 0 : V.idleT + dt;
     if (V.idleT > 0.45) for (const [id, f] of V.fresh) if (f.size && !V.flushing.some((q) => q.id === id)) flush(id);

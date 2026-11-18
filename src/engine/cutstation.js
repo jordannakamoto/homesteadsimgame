@@ -115,7 +115,7 @@
         else { saw.position.set(j.cx + w[0] * sw * 0.12, j.cy + 0.09 - dn + 0.03 * sw, j.cz + w[1] * sw * 0.12); saw.rotation.set(0.6, j.yaw + Math.PI / 2, 0); }
         const n = Math.floor(k * j.strokes * 2);
         if (n !== j.last) { j.last = n; G.burst(j.cx, j.cy - 0.03, j.cz, j.power ? 4 : 2, j.dust === undefined ? 0xe8d9b0 : j.dust, 0.35, 0.25, 0.035, 0.45); }
-        return { x: j.cx, z: j.cz, k: stroke };
+        return { x: j.cx, z: j.cz, k: stroke, low: !j.onHorses };
       }
       if (j.off && !j.dropped) {                          // the offcut falls away: kept ones go to the pile, short ones are scrap
         j.dropped = true; saw.visible = false;

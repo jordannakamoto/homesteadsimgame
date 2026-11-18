@@ -725,7 +725,7 @@
         b[i].rotation.set(rx, 0, g.rotation.z + side * 0.13 * relax);
         b[i + 1].rotation.x = -(0.1 + 0.4 * relax) - Math.min(1.3, Math.max(0, -g.position.z) * 5.5);
       });
-      [[r.legL, 7], [r.legR, 9]].forEach(([g, i]) => { const rx = g.rotation.x; b[i].rotation.x = rx; b[i + 1].rotation.x = 0.06 + Math.max(0, -rx) * 0.9 + Math.max(0, rx) * 0.3; });
+      [[r.legL, 7], [r.legR, 9]].forEach(([g, i]) => { const rx = g.rotation.x; b[i].rotation.x = rx; b[i + 1].rotation.x = g.userData.knee !== undefined ? g.userData.knee : 0.06 + Math.max(0, -rx) * 0.9 + Math.max(0, rx) * 0.3; });
       if (r.head) b[2].rotation.copy(r.head.rotation);
       if (st.flash && st.flash.emissive) st.mat.emissive.copy(st.flash.emissive);
     }

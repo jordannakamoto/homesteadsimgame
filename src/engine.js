@@ -4082,8 +4082,20 @@ function updatePlayer(dt) {
     else if (P.work.kind === 'lift') { armL = armR = -2.5; lean = -0.12; }
     else if (P.work.kind === 'carry') armR = -2.0 + armR * 0.2;
     else if (P.work.kind === 'saw') { armR = -1.25 + 0.5 * Math.sin(P.work.k * Math.PI * 2); armL = -0.85; lean = 0.38; }
+    else if (P.work.kind === 'press') { const d = Math.sin(clamp(P.work.k, 0, 1) * Math.PI); armL = armR = -0.9 - 0.25 * d; lean = 0.42 + 0.14 * d; }        // both hands bearing down on the work
+    else if (P.work.kind === 'wipe') { armR = -0.85; armL = -0.4; lean = 0.45; twist = 0.35 * Math.sin(clamp(P.work.k, 0, 1) * Math.PI * 2); }          // a sponge swept across
+    else if (P.work.kind === 'kick') { const d = Math.sin(clamp(P.work.k, 0, 1) * Math.PI); armL = armR = -0.8; lean = 0.25; legR = -0.9 * d; }        // a knee driven into the kicker
   }
   if (pm.hammer && (pm.hammer[0].visible !== !!P.hammer)) { const h = !!P.hammer; pm.hammer[0].visible = pm.hammer[1].visible = h; pm.hatchet[0].visible = pm.hatchet[1].visible = !h; }
+  // kneeling for low work (P.kneel 0..1, set by add-ons): hips down, the left foot planted ahead, the right knee on the ground
+  P.kneelK = (P.kneelK || 0) + ((P.kneel && sp < 0.6 && !P.air ? 1 : 0) - (P.kneelK || 0)) * (1 - Math.exp(-9 * dt));
+  if (P.kneelK > 0.01) {
+    const k = P.kneelK;
+    pm.body.position.y -= 0.34 * k;
+    legL += (-1.45 - legL) * k; legR += (0.12 - legR) * k;
+    lean += 0.12 * k;
+    pm.legR.userData.knee = 0.1 + 1.45 * k; pm.legL.userData.knee = 0.06 + 1.45 * 0.9 * k + 0.1 * k;
+  } else if (pm.legR.userData.knee !== undefined) { delete pm.legR.userData.knee; delete pm.legL.userData.knee; }
   if (P.handPose) { armL = P.handPose.l; armR = P.handPose.r; lean += P.handPose.lean || 0; }   // hands-on work poses the arms (set by add-ons)
   pm.legL.rotation.x = legL; pm.legR.rotation.x = legR;
   pm.armL.rotation.x = armL; pm.armR.rotation.x = armR;

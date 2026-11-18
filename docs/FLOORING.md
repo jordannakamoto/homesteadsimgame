@@ -31,7 +31,7 @@ Every floor then gets baseboard round its walls, broken at the doorways, and an 
 
 - Only the row being laid glows; a blue chalk line marks its leading edge.
 - Set (click): a board slides along its row and sits a finger proud; a click board comes in angled; a tile drops onto its bed with a puff of thinset; rolls unroll; grout sweeps along its row; trim slides along the wall.
-- Fasten (strike, or hold and drag): nails through the tongue, taps with the block, a rubber-mallet beat, staples, knee kicks, sponge wipes. Each closes the gap or settles the piece a little.
+- Fasten (strike, or hold and drag), each the real motion and never a nail head on show: only solid wood is nailed, through the tongue with the mallet on the floor nailer, where the next board hides the nail. Click boards are tapped tight with a block and mallet; tile is pressed down into its thinset with both hands; grout is wiped with a sponge; carpet is kicked tight with the knee kicker. Each blow closes the gap or settles the piece a little.
 - Boards and tiles cut to fit go through the saw first (tiles on the wet saw), and the cut piece arcs to its place.
 - After two of a kind by hand the kind is learned: hold and drag along the row and they go in as you pass.
 - Moments: "First row down", "Every tile set", "Floor down".

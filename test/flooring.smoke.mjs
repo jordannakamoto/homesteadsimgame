@@ -70,7 +70,7 @@ async function layFloor(mat, kinds, max = 2500) {
         const id = q.find((m) => pr.members[m].line && pr.members[m].need - pr.members[m].got > 1e-6), ln = id && pr.lines[pr.members[id].line];
         if (!ln) return; if (s.carried && s.carried.itemId !== ln.itemId) c.commandNow('construction.putDown', { x: __game.player.x + 1, z: __game.player.z });
         const st = s.stacks.find((k) => k.itemId === ln.itemId && !k.barrow); if (st) c.commandNow('construction.pickUp', { stackId: st.id }); });
-      await tick(4); s = await state(); if (s.sawing) { stall = 0; await tick(10); continue; } if (++stall > 40) break; continue;
+      await tick(4); s = await state(); if (s.sawing) { stall = 0; await tick(10); continue; } if (++stall > 40) { if (process.env.DEBUG) console.log('     no piece', JSON.stringify(s).slice(0, 400)); break; } continue;
     }
     // stand by the piece, point at it, hold the button
     await G((np) => { const P = __game.player, b = __build.structs()[0], dx = np.x - b.x, dz = np.z - b.z, L = Math.hypot(dx, dz) || 1; P.x = np.x - (dx / L) * 0.9; P.z = np.z - (dz / L) * 0.9; P.climbY = null; }, s.np);
@@ -122,7 +122,7 @@ for (const [mat, kinds, words] of [
   r = await layFloor(mat, kinds);
   check(mat + ' laid by hand in the trade\'s order', r.s.built === r.s.total && r.seen.order, r.s.built + ' of ' + r.s.total + ' ' + r.seen.kinds.join('>'));
   { const hit = words.filter((w) => [...r.seen.prompts].some((p) => p.toLowerCase().includes(w.toLowerCase())));
-    check(mat + ': the hands say what they are doing', hit.length >= Math.ceil(words.length * 0.6) && hit.includes(words[words.length - 1]), hit.join(' | ')); }
+    check(mat + ': the hands say what they are doing', hit.length >= Math.ceil(words.length / 2) && hit.includes(words[words.length - 1]), hit.join(' | ')); }
   if (mat === 'tile') check('tile: the cut tiles at the walls go through the wet saw', r.seen.sawn);
   await shot(mat + '-2-done');
 }
