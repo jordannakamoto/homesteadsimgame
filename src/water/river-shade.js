@@ -22,6 +22,25 @@ export const RIVER_SHADE = /* glsl */ `
   uniform samplerCube uEnv, uEnv2; uniform vec4 uEnvPos; uniform float uEnvMix;
   uniform sampler2D uRefl; uniform mat4 uReflMat; uniform vec4 uReflOn;   // the mirror (reflect-plane.js)
   uniform float uCloud;                                  // how overcast it is (0-1)
+  uniform float uRain;                                   // how hard it is raining (0-1)
+  float bankNear = 0.0;                                  // set by the caller: how close dry land is (0-1)
+  vec3 wHash(vec2 p) { vec3 q = vec3(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)), dot(p, vec2(419.2, 371.9))); return fract(sin(q) * 43758.5453); }
+  // rain on the water: every drop a small ring spreading and fading, scattered everywhere (two sizes of cell, each
+  // cell's drop landing at its own moment)
+  vec2 rainSlope(vec2 q, float k) {
+    vec2 g = vec2(0.0);
+    for (int L = 0; L < 2; L++) {
+      float sc = L == 0 ? 3.5 : 6.5;
+      vec2 p = q * sc + float(L) * 13.7, i = floor(p), f = fract(p);
+      vec3 h = wHash(i);
+      if (h.z > k) continue;
+      float t = fract(uTime * (0.8 + 0.4 * h.y) + h.x * 7.0);
+      vec2 dd = f - (0.25 + 0.5 * h.xy); float r = length(dd) + 1e-4;
+      float x = (r - t * 0.42) / 0.05;
+      g += dd / r * (x * exp(-x * x)) * (1.0 - t) * (1.0 - t) * 0.45;
+    }
+    return g;
+  }
   uniform sampler2D uRipTex; uniform vec4 uRipWin;      // the fine waves round the player (ripple-sim.js): x0, z0, size, on
   uniform vec4 uWake; uniform vec2 uWakeK;   // someone wading: where, the current past their legs (x, z); how deep, on          // the reflection probe (reflect-probe.js): where, and w on/off
   uniform vec4 uRip[24]; uniform vec2 uRipV[24], uRipD[24];   // ripples; the current that carries each; the way its maker was moving      // ripples, and the current that carries each one away                   // ripples: x, z, start time, strength
@@ -173,6 +192,8 @@ export const RIVER_SHADE = /* glsl */ `
         foamIn = max(foamIn, smoothstep(0.35, 1.0, length(rg)) * 0.35);
       }
     }
+    // rain: rings everywhere, and a rougher surface that blurs and weakens the reflections
+    if (uRain > 0.01) { g += rainSlope(q, uRain); rough = min(1.0, rough + 0.35 * uRain); }
     if (uSnap > 0.5) g = floor(g * 8.0 + 0.5) / 8.0;                // pixel style: ripples as facets
     vec3 N = normalize(vec3(-g.x, 1.0, -g.y));
     vec3 V = normalize(cameraPosition - world);
@@ -189,7 +210,7 @@ export const RIVER_SHADE = /* glsl */ `
     fres *= mix(1.0, 0.72, uCloud);
     // the shallow fringe by the banks: stirred-up silt, bits of leaf and scum, a film on the water; dull rather than
     // glossy, and cloudier
-    float fringe = 1.0 - smoothstep(0.03, 0.3, d);
+    float fringe = max(1.0 - smoothstep(0.03, 0.3, d), bankNear);    // shallow, or close to the bank
     fres *= mix(1.0, 0.22, fringe) * (1.0 - 0.45 * film);
     float skyVis = mix(1.0, texture2D(uSkyMap, (q + 0.5) / 512.0).r, uSkyK);
     vec3 R = reflect(-V, N); R.y = abs(R.y);
