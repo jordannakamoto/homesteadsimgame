@@ -36,7 +36,7 @@ export const RIVER_SHADE = /* glsl */ `
       if (h.z > k) continue;
       float t = fract(uTime * (0.8 + 0.4 * h.y) + h.x * 7.0);
       vec2 dd = f - (0.25 + 0.5 * h.xy); float r = length(dd) + 1e-4;
-      float x = (r - t * 0.42) / 0.05;
+      float x = (r - t * 0.24) / 0.04;                          // kept inside its cell, or it would be cut at the cell's edge
       g += dd / r * (x * exp(-x * x)) * (1.0 - t) * (1.0 - t) * 0.45;
     }
     return g;
@@ -118,7 +118,7 @@ export const RIVER_SHADE = /* glsl */ `
     d = max(d, 0.0);
     vec2 fd = sp > 0.01 ? v / sp : vec2(1.0, 0.0), fn = vec2(-fd.y, fd.x);
     // flow maps (Vlachos): two layers half a phase apart, the phase offset in patches to hide the pulse
-    float ph = uTime * 0.32 + texture2D(uTex, floor(q / 4.0) * 0.173).b;
+    float ph = uTime * 0.32 + snoise(vec3(q * 0.12, 7.0)) * 0.5;   // a smooth offset: a blocky one left seams
     float t0 = fract(ph), t1 = fract(ph + 0.5), wb = abs(1.0 - 2.0 * t0);
     // The surface: no repeating texture (that is what read as a diamond pattern), but noise built in the current's
     // own frame, so its shapes lie along the flow and move with it, and change as they go:
@@ -150,8 +150,10 @@ export const RIVER_SHADE = /* glsl */ `
     vec2 uvA = r1 * q * 0.22 - v * t0 * 0.4, uvB = r2 * q * 0.22 - v * t1 * 0.4 + 0.37;
     g += (mix(texture2D(uTex, uvA).rg, texture2D(uTex, uvB).rg, wb) - 0.5) * 0.12 * (0.25 + rough);
     // the finest ruffle, too small to take differences of: tilts each spot a little at random
-    vec3 rq = vec3((q - v * s0 * 1.2) * 9.0, uTime * 1.7);
-    g += vec2(snoise(rq), snoise(rq + 31.7)) * 0.006 * rough;
+    // (every lookup carried by the flow blends both phases: one layer alone jumps back where its phase wraps,
+    // and the jump shows as a fine seam running across the water)
+    vec3 rqA = vec3(cpA * 9.0, uTime * 1.7), rqB = vec3(cpB * 9.0, uTime * 1.7);
+    g += mix(vec2(snoise(rqA), snoise(rqA + 31.7)), vec2(snoise(rqB), snoise(rqB + 31.7)), sw) * 0.006 * rough;
     // Where the water is disturbed (a step, a leg, something dropped in) it sloshes: a patch of short, choppy, broken
     // waves that spreads out and dies down, with only a faint, broken ring running ahead of it; real disturbed water
     // does not make clean circles. Each disturbance gives an envelope; one chop field, carried by the current and
@@ -172,10 +174,9 @@ export const RIVER_SHADE = /* glsl */ `
       ringG += dp / dd * (x * exp(-x * x)) * amp * 0.3 / (1.0 + dd * 2.0);
     }
     if (slosh > 0.001 || dot(ringG, ringG) > 1e-6) {
-      vec3 cq = vec3((q - v * s0 * 1.2) * 5.5, uTime * 3.2);
-      vec2 chop = vec2(snoise(cq), snoise(cq + 23.1));
-      vec3 cq2 = vec3((q - v * s0 * 1.2) * 13.0, uTime * 5.0 + 4.0);
-      chop += 0.5 * vec2(snoise(cq2), snoise(cq2 + 11.7));
+      vec3 cqA = vec3(cpA * 5.5, uTime * 3.2), cqB = vec3(cpB * 5.5, uTime * 3.2);
+      vec2 chop = mix(vec2(snoise(cqA), snoise(cqA + 23.1)), vec2(snoise(cqB), snoise(cqB + 23.1)), sw);
+      chop += 0.5 * mix(vec2(snoise(cqA * 2.3), snoise(cqA * 2.3 + 7.0)), vec2(snoise(cqB * 2.3), snoise(cqB * 2.3 + 7.0)), sw);
       g += chop * min(slosh, 1.2) * 0.42 + ringG * (0.55 + 0.45 * chop.x);
       foamIn = max(foamIn, smoothstep(0.5, 1.2, slosh) * 0.25);
     }
@@ -260,7 +261,7 @@ export const RIVER_SHADE = /* glsl */ `
     float nh = max(dot(N, H), 0.0);
     // glints: the sun caught on the crests of the ripples, so they ride along with the water and swell and fade
     // with the waves rather than winking at random; a slow, flow-carried field picks which crests catch it
-    float sparkle = smoothstep(0.5, 0.85, snoise(vec3((q - v * s0 * 1.2) * 4.0, uTime * 0.6)) * 0.5 + 0.5) * smoothstep(0.3, 0.9, rough);
+    float sparkle = smoothstep(0.5, 0.85, mix(snoise(vec3(cpA * 4.0, uTime * 0.6)), snoise(vec3(cpB * 4.0, uTime * 0.6)), sw) * 0.5 + 0.5) * smoothstep(0.3, 0.9, rough);
     vec3 glint = uSunCol * (pow(nh, 160.0) * 0.4 + pow(sd, 400.0) * 0.5) * sparkle * skyVis * step(line, R.y) * (1.0 - fringe) * (1.0 - film);   // only glints on broken water, no wide sheen; none where the reflection is trees
     float path = d * (1.0 + 1.0 / max(V.y, 0.25));
     // loss a metre: stream water carries fine sediment and dissolved organic matter even on a fair day (red lost
