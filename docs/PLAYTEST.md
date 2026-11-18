@@ -533,3 +533,10 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 **Known gaps**
 
 - Nothing uses it yet; the first user is the vehicle seat (V3).
+
+## A finished building looks finished (branch `finish`)
+
+- Once the last stage is done, the construction view lets go of the building: no nail heads, no studs or sheathing showing through. Build mode draws it (siding on the walls, the roof) as it does any finished building.
+- The dollhouse cut shows solid wall sections: a cut piece is drawn with a dark section where it was opened, not as a hollow box.
+- A gable's sheathing, wrap and siding belong to its roof and hide with it when you are inside (siding on a gable end is real; it just floated there with the roof gone).
+- By the sawhorses, two neat stacks: the pieces cut and waiting to go in on the near side, the offcuts on the far side, each sorted longest first, ends flush, four to a layer, at their real lengths and sizes.
