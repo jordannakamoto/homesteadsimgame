@@ -1,4 +1,4 @@
-/* Foundation view (slice B2 of the ground-foundations design): a poured foundation built by hand.
+/* Foundation view (slices B2-B4 of the ground-foundations design): a poured foundation built by hand.
    - A building with a slab, stem wall or poured piers that is put up in construction mode becomes a foundation job
      (foundation.setPlan with its corners and dig regions, read from build mode's members): its site and foundation
      stages are this view's, not the construction view's, and build mode no longer levels its ground by magic.
@@ -11,6 +11,17 @@
      drag the scoop where it goes). A tape hangs from the string at the blade to read how far there is to go. Once
      most of the amber is gone, right-drag the flat of the shovel across the rest: it trims to the line and pushes
      the earth out past the edge. When it is all down the site stage is done.
+   - The base (B3, slabs): gravel (the truck tips heaps where you drag), the barrow, the rake (drag: the gravel is
+     pulled to the line under the strings) and the tamper (twice everywhere). The overlay shows amber where it wants
+     more gravel, blue where it stands proud, faint dots where it is not yet tamped twice. All through the Yard's own
+     commands (landscape.deliver via foundation.gravel, load, tip, push, rake, tamp).
+   - Forms (B3): hold a board near a string and the ghost snaps along the run; a click sets `gesture` boards. Stakes
+     glow outside the boards: the hammer drives one (two blows) and the next ones along, `gesture` in all. Unstaked
+     boards wobble; under concrete they bow and leak until staked.
+   - The pour (B4): the barrow mixes: drag up slashes bags in, the right button runs the hose, side to side hoes it,
+     drag down at the forms tips it (a meter shows the water/cement ratio against too dry .. soupy). The rake spreads
+     it. The screed board lies across the forms: drag it toward you and the surplus rolls ahead as a ridge, leaving a
+     flat, wet-bright top; dull patches are hollows. The wet field is one mesh (window.__fieldmesh.create).
    Owns no truth: the job, its layout and its dig are the foundation system's (src/sim/foundation.js); the ground is
    the ground system's. Registers window.__foundation = { owns, hint, job, redraw, tools, debugPour }.
    Cost: a sync of jobs twice a second (cheap reads); the overlay is recoloured only when the ground changes and the
@@ -54,7 +65,7 @@
     if (st.found === 'slab') {
       local = by('footing', 'edge').map((m) => [m.a[0], m.a[2]]);
       const slab = by('slab')[0], bed = by('footing', 'gravel-bed')[0];
-      if (local.length >= 3 && slab) digs.push({ poly: local.map(([x, z]) => XZ(x, z)), targetY: Math.min(bottom(slab), bed ? bottom(bed) : Infinity) });
+      if (local.length >= 3 && slab) digs.push({ poly: local.map(([x, z]) => XZ(x, z)), targetY: Math.min(bottom(slab), bed ? bottom(bed) : Infinity), baseY: +bottom(slab).toFixed(4) });
     } else if (st.found === 'stemwall') {
       const strips = by('footing', 'strip');
       local = strips.map((m) => [m.a[0], m.a[2]]);
@@ -215,6 +226,16 @@
       out[0] = 1; out[1] = 0.97; out[2] = 0.88; out[3] = 0.4; return true;
     }
     if (C.edge[c]) { out[0] = 0.97; out[1] = 0.96; out[2] = 0.92; out[3] = 0.9; return true; }   // the painted dig line
+    if (job.step === 'base') {
+      // the base: amber where it wants more gravel, blue where it stands proud, and a faint dot pattern where it is
+      // level but not yet tamped twice (the tamper's job)
+      const d0 = surf(x, z) - (job.digs[k].baseY ?? job.topY - 0.1);
+      if (d0 < -0.03) { const f = clamp((-d0 - 0.03) / 0.08, 0, 1); out[0] = 0.95 - 0.15 * f; out[1] = 0.55 - 0.2 * f; out[2] = 0.08; out[3] = 0.4 + 0.35 * f; return true; }
+      if (d0 > 0.02) { out[0] = 0.35; out[1] = 0.62; out[2] = 1; out[3] = 0.3; return true; }
+      const q = G.landscape.groundAt(G.sim.state, x, z);
+      if ((!q || q.tamped < 2) && ((Math.floor(x * 10) + Math.floor(z * 10)) & 1)) { out[0] = 1; out[1] = 1; out[2] = 0.92; out[3] = q && q.tamped ? 0.12 : 0.22; return true; }
+      return false;
+    }
     if (job.step !== 'excavate') return false;
     const d = surf(x, z) - job.digs[k].targetY;
     // dark amber: still to dig (darker the more there is); pale yellow: close, the flat of the shovel trims it
@@ -232,7 +253,7 @@
     for (const j of Object.values(FS().jobs)) {
       if (!j.layout || !j.layout.corners.length) continue;
       const C = j.layout.corners, cx = C.reduce((a, c) => a + c[0], 0) / C.length, cz = C.reduce((a, c) => a + c[1], 0) / C.length;
-      const d = Math.hypot(cx - P.x, cz - P.z) - (['layout', 'excavate'].includes(j.step) ? 0 : 20);
+      const d = Math.hypot(cx - P.x, cz - P.z) - (['layout', 'excavate', 'base', 'forms', 'pour'].includes(j.step) ? 0 : 20);
       if (d < bd) { bd = d; best = j; }
     }
     return best;
@@ -326,6 +347,7 @@
     }
     if (d.t < 0.42) return;
     site.drive = null;
+    if (d.form) { if (d.mesh.parent) d.mesh.parent.remove(d.mesh); return stakeDone(d); }
     const job = site.job;
     if (!job || job.id !== d.job) return;
     const r = cmd('stake', { jobId: job.id, corner: d.k });
@@ -390,10 +412,458 @@
     P.lead = d > 1.9 ? { x: ((gx - P.x) / d) * Math.min(1, (d - 1.9) / 0.8), z: ((gz - P.z) / d) * Math.min(1, (d - 1.9) / 0.8) } : null;
   }
 
+
+  /* ================= B3: the gravel base, form boards and stakes ================= */
+  const ITEMS = (G.stock && G.stock.ITEMS) || {};
+  const money = (v) => '$' + (Math.round(v * 100) / 100).toFixed(v % 1 ? 2 : 0);
+  const gestureN = () => { const o = CS() && CS().options; return Math.max(1, Math.min(4, (o && o.gesture) || 1)); };
+  const stockItems = () => (G.sim.state.sys.stock && G.sim.state.sys.stock.items) || {};
+  const buyBtn = (id, qty, label) => ITEMS[id] ? ' <button type="button" class="go" data-buy="' + id + '" data-qty="' + qty + '">' + (label || 'Buy') + ' ' + money(ITEMS[id].priceUsd * qty) + '</button>' : '';
+  hintEl.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('[data-buy]');
+    if (!b) return;
+    const r = G.sim.commandNow('stock.buy', { id: b.dataset.buy, qty: +b.dataset.qty || 1 });
+    say(r.ok ? 'Bought ' + (ITEMS[b.dataset.buy] ? ITEMS[b.dataset.buy].name.toLowerCase() : b.dataset.buy) + '.' : r.reason === 'not enough money' ? 'Not enough money.' : r.reason, 3);
+    G.markStockDirty && G.markStockDirty();
+    $('view') && $('view').focus();
+  });
+  const FRM = { boardM: 2.44, boardH: 0.14, boardT: 0.038 };      // as content/concrete.js FORMS (the sim decides)
+  const GRAVEL = 0x9c958a, CONC = 0x76736d;
+  const mat = (c, o) => new T.MeshLambertMaterial({ color: c, ...(o || {}) });
+  const formWood = mat(0xd2b07a), stakeWood = mat(0xb08a52), ghostBoard = new T.MeshBasicMaterial({ color: 0xfff2c4, transparent: true, opacity: 0.45, depthWrite: false });
+  const dotMat = new T.MeshBasicMaterial({ color: 0xffd23a, transparent: true, opacity: 0.85, depthWrite: false });
+  const dotGeo = new T.RingGeometry(0.07, 0.11, 18); dotGeo.rotateX(-Math.PI / 2);
+  const runPt = (r, t, off = 0) => [r.a[0] + ((r.b[0] - r.a[0]) * t) / r.len + r.out[0] * off, r.a[1] + ((r.b[1] - r.a[1]) * t) / r.len + r.out[1] * off];
+  const runYaw = (r) => -Math.atan2(r.b[1] - r.a[1], r.b[0] - r.a[0]);
+  const fv = { sig: '', group: null, runs: [], dots: [], ghost: null, ghostRun: -1, pop: [], bags: null, bagSig: '' };
+  // the gaps between what holds a run (its corners and driven stakes), and the bow of the worst one at t
+  function bowAt(r, t) {
+    if (!(r.bow > 0.0005)) return 0;
+    const sup = [0, ...r.stakes.filter((s, q) => r.driven[q]), r.len].sort((a, b) => a - b);
+    let g0 = 0, g1 = r.len, best = -1;
+    for (let q = 0; q + 1 < sup.length; q++) if (sup[q + 1] - sup[q] > best) { best = sup[q + 1] - sup[q]; g0 = sup[q]; g1 = sup[q + 1]; }
+    return t > g0 && t < g1 ? r.bow * Math.sin((Math.PI * (t - g0)) / (g1 - g0)) : 0;
+  }
+  function buildForms(job) {
+    if (fv.group) { G.scene.remove(fv.group); fv.group = null; }
+    fv.runs = []; fv.dots = [];
+    if (!job || !job.forms) return;
+    const g = (fv.group = new T.Group()), top = job.topY, F = FRM;
+    G.scene.add(g);
+    job.forms.runs.forEach((r, k) => {
+      const rg = new T.Group(), segs = [];
+      g.add(rg);
+      const setL = Math.min(r.len + F.boardT * 2, r.set * F.boardM);
+      // the boards, in short pieces so a bow shows as a curve
+      for (let t0 = -F.boardT; t0 < setL - F.boardT - 1e-3; t0 += 0.3) {
+        const t1 = Math.min(setL - F.boardT, t0 + 0.3), tm = (t0 + t1) / 2, m = new T.Mesh(box, formWood);
+        m.scale.set(t1 - t0 + 0.004, F.boardH, F.boardT); m.rotation.y = runYaw(r); m.castShadow = true;
+        m.userData.t = tm; segs.push(m); rg.add(m);
+      }
+      // stakes driven outside the boards; the ones still to drive glow where they go
+      r.stakes.forEach((s, q) => {
+        if (s > setL) return;
+        const [x, z] = runPt(r, s, F.boardT + 0.022);
+        if (r.driven[q]) { const m = stakeMesh(x, z, top - 0.015, stakeWood, 0.038); rg.add(m); }
+        else { const d = new T.Mesh(dotGeo, dotMat); d.position.set(x, surf(x, z) + 0.03, z); d.renderOrder = 3; d.userData = { run: k, stake: q }; g.add(d); fv.dots.push(d); }
+      });
+      fv.runs.push({ r, segs, group: rg, loose: r.set >= r.boards && r.driven.some((d) => !d) });
+    });
+    placeBoards(job, 0);
+  }
+  function placeBoards(job, time) {
+    const top = job.topY, F = FRM;
+    for (const fr of fv.runs) {
+      const wob = fr.loose && job.step === 'forms' ? 0.004 * Math.sin(time * 9 + fr.r.len) : 0;
+      for (const m of fr.segs) {
+        const t = m.userData.t, [x, z] = runPt(fr.r, t, F.boardT / 2 + bowAt(fr.r, t) + wob);
+        m.position.set(x, top - F.boardH / 2, z);
+      }
+    }
+  }
+  const formsSig = (j) => j && j.forms ? j.step + ':' + j.topY + ':' + j.forms.runs.map((r) => r.set + '/' + r.driven.join('') + '/' + Math.round(r.bow * 1000)).join(';') : '';
+  // the ghost of the next boards, snapped along the run nearest the hand
+  function ghostTick(a, job) {
+    const show = on && held() === 'board' && job && job.step === 'forms' && job.forms && a.valid;
+    let k = -1;
+    if (show) { let bd = 1.2; job.forms.runs.forEach((r, q) => { if (r.set >= r.boards) return; const d = segDistV(r, a.gx ?? a.x, a.gz ?? a.z); if (d < bd) { bd = d; k = q; } }); }
+    if (k < 0) { if (fv.ghost) fv.ghost.visible = false; fv.ghostRun = -1; return; }
+    const r = job.forms.runs[k], n = Math.min(gestureN(), r.boards - r.set), t0 = r.set * FRM.boardM - FRM.boardT, t1 = Math.min(r.len + FRM.boardT, (r.set + n) * FRM.boardM - FRM.boardT);
+    if (!fv.ghost) { fv.ghost = new T.Mesh(box, ghostBoard); fv.ghost.renderOrder = 4; G.scene.add(fv.ghost); }
+    const [x, z] = runPt(r, (t0 + t1) / 2, FRM.boardT / 2);
+    fv.ghost.scale.set(t1 - t0, FRM.boardH, FRM.boardT); fv.ghost.rotation.y = runYaw(r); fv.ghost.position.set(x, job.topY - FRM.boardH / 2 + 0.02 * Math.sin(performance.now() / 160), z);
+    fv.ghost.visible = true; fv.ghostRun = k;
+  }
+  function segDistV(r, x, z) { const dx = r.b[0] - r.a[0], dz = r.b[1] - r.a[1], L2 = dx * dx + dz * dz, k = L2 ? clamp(((x - r.a[0]) * dx + (z - r.a[1]) * dz) / L2, 0, 1) : 0; return Math.hypot(x - r.a[0] - dx * k, z - r.a[1] - dz * k); }
+  function setBoards(job) {
+    if (fv.ghostRun < 0) return say('Hold a board near a string line: it snaps along the run. Click to set it.');
+    const r = cmd('setForm', { jobId: job.id, run: fv.ghostRun, n: gestureN() });
+    if (!r.ok) return say(r.reason + (/form boards/.test(r.reason) ? buyBtn('form_board', job.forms.runs.reduce((a, q) => a + q.boards - q.set, 0), 'Buy them') : ''), 6);
+    const rr = FR.job(G.sim.state, job.id).forms.runs[r.run], [x, z] = runPt(rr, Math.min(rr.len, rr.set * FRM.boardM) / 2);
+    G.juice.hitStop = 0.05; G.cam.shake = Math.min((G.cam.shake || 0) + 0.03, 0.2);
+    G.burst(x, job.topY - 0.05, z, 10, 0xd2b07a, 1.4, 1.6, 0.05, 0.5);
+    say(r.done ? (r.stakesLeft ? '<b>Formed.</b> Now stake them: take up the <b>hammer</b> and drive the glowing stakes, or the boards bow out under the concrete.' : '<b>Formed and staked.</b>') : 'Board set on the string. ' + (r.runDone ? 'That side is done.' : ''), 5);
+  }
+  // the hammer on a form stake: two blows, then the stakes beside it (up to the gesture setting)
+  function stakeAt(a, job) {
+    let best = null, bd = 0.45;
+    for (const d of fv.dots) { const x = d.position.x, z = d.position.z, dh = Math.min(Math.hypot(x - a.x, z - a.z), a.gx != null ? Math.hypot(x - a.gx, z - a.gz) : Infinity); if (dh < bd && Math.hypot(x - G.player.x, z - G.player.z) < 2.4) { bd = dh; best = d; } }
+    return best;
+  }
+  function startStake(job, d) {
+    const top = job.topY - 0.015, x = d.position.x, z = d.position.z, m = stakeMesh(x, z, top + 0.2, stakeWood, 0.038);
+    fv.group && fv.group.add(m);
+    d.visible = false;
+    site.drive = { job: job.id, form: d.userData, x, z, top, t: 0, blows: 0, mesh: m };
+  }
+  function stakeDone(dr) {
+    const job = site.job;
+    if (!job || job.id !== dr.job) return;
+    const r = cmd('stakeForm', { jobId: job.id, run: dr.form.run, stake: dr.form.stake, n: gestureN() });
+    fv.sig = '';
+    if (!r.ok) return say(r.reason + (/form stakes/.test(r.reason) ? buyBtn('form_stake', 10, 'Buy 10') : ''), 6);
+    const rr = FR.job(G.sim.state, job.id).forms.runs[r.run];
+    r.driven.slice(1).forEach((q, n) => { const [x, z] = runPt(rr, rr.stakes[q], FRM.boardT + 0.022); setTimeout(() => { G.burst(x, surf(x, z) + 0.05, z, 4, 0x6b4f35, 0.9, 1.2, 0.04, 0.35); G.cam.shake = Math.min((G.cam.shake || 0) + 0.015, 0.2); }, 90 * (n + 1)); });
+    if (job.step === 'pour' && !r.leaking) say('Staked: the board is held.', 3);
+    else if (r.stakesLeft) say(r.driven.length + ' staked and nailed to the board. ' + r.stakesLeft + ' to go.', 3);
+    else say('<b>Every stake in.</b> The forms are ready for the pour: mix concrete in the <b>barrow</b>.', 6);
+  }
+
+  /* ---------- hand items (simple procedural) ---------- */
+  const part = (geo, m, x, y, z, rx = 0, ry = 0, rz = 0) => { const o = new T.Mesh(geo, m); o.position.set(x, y, z); o.rotation.set(rx, ry, rz); o.castShadow = true; return o; };
+  const bx = (w, h, d) => new T.BoxGeometry(w, h, d);
+  const steel = mat(0x6d767c), handleMat = mat(0xc9975a), dark = mat(0x2a2a2a), trayMat = mat(0x2f6e8e);
+  const heapMat = mat(0x9c958a), heapGeo = new T.SphereGeometry(0.2, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+  const barrow = (() => {
+    const g = new T.Group();
+    g.add(part(bx(0.56, 0.05, 0.7), trayMat, 0, 0.42, 0), part(bx(0.56, 0.2, 0.04), trayMat, 0, 0.52, 0.34, 0.25), part(bx(0.56, 0.2, 0.04), trayMat, 0, 0.52, -0.34, -0.25),
+      part(bx(0.04, 0.2, 0.7), trayMat, 0.28, 0.52, 0), part(bx(0.04, 0.2, 0.7), trayMat, -0.28, 0.52, 0), part(new T.CylinderGeometry(0.16, 0.16, 0.07, 14), dark, 0, 0.16, 0.48, 0, 0, Math.PI / 2),
+      part(bx(0.035, 0.035, 1.3), handleMat, 0.22, 0.42, -0.25, 0.12), part(bx(0.035, 0.035, 1.3), handleMat, -0.22, 0.42, -0.25, 0.12));
+    const heap = new T.Mesh(heapGeo, heapMat); heap.position.set(0, 0.45, 0); heap.scale.set(1.2, 0.01, 1.5); g.add(heap);
+    g.scale.setScalar(0.85);
+    return { obj: g, heap, use: 'hand', still: [0, 0.05, 0.65, 0, 0, 0], reach: [0, 0.05, 0.75, 0, 0, 0], stillArm: -0.4 };
+  })();
+  const rake = { obj: (() => { const g = new T.Group(); g.add(part(bx(0.024, 1.6, 0.024), handleMat, 0, 0.83, 0), part(bx(0.46, 0.03, 0.04), steel, 0, 0.03, 0.02)); for (let i = 0; i < 12; i++) g.add(part(bx(0.012, 0.08, 0.012), steel, -0.21 + i * 0.038, 0, 0.05)); return g; })(), use: 'tip', still: [0.38, 0.02, 0.24, 0, 0, 0], stillArm: -0.5, walk: [0.3, 1.74, -0.78, 2.15, 0, 0], walkArm: -1.0 };
+  const tamper = { obj: (() => { const g = new T.Group(); g.add(part(bx(0.03, 1.2, 0.03), dark, 0, 0.62, 0), part(bx(0.2, 0.025, 0.2), steel, 0, 0.012, 0), part(bx(0.16, 0.03, 0.03), dark, 0, 1.22, 0)); return g; })(), use: 'tip', still: [0.38, 0.02, 0.24, 0, 0, 0], stillArm: -0.5, walk: [0.3, 1.74, -0.78, 2.15, 0, 0], walkArm: -1.0 };
+  const boardItem = { obj: part(bx(1.2, 0.14, 0.038), formWood, 0, 0, 0), use: 'hand', still: [0.3, 0.9, 0.15, 0, 1.5, 0], stillArm: -0.6, walk: [0.3, 1.5, -0.1, 0, 1.5, 1.4], walkArm: -1.2 };
+  const screedItem = { obj: part(bx(1.8, 0.089, 0.038), formWood, 0, 0, 0), use: 'hand', still: [0.3, 0.9, 0.15, 0, 1.5, 0], stillArm: -0.6, walk: [0.3, 1.5, -0.1, 0, 1.5, 1.4], walkArm: -1.2 };
+  const truckFlag = { obj: (() => { const g = new T.Group(); g.add(part(bx(0.02, 0.9, 0.02), handleMat, 0, 0.45, 0), part(bx(0.22, 0.14, 0.01), mat(0xff7a1a), 0.11, 0.82, 0)); return g; })(), use: 'hand', still: [0.32, 0.78, 0.2, 0.3, 0, 0], stillArm: -0.5 };
+  ICONS.gravel = I('<path d="M4 30h28" stroke="#a3784e" stroke-width="2"/><path d="M7 29c3-9 8-13 11-13s8 4 11 13z" fill="#9c958a" stroke="#d8d2c6"/><circle cx="14" cy="24" r="1.4" fill="#6f6a62"/><circle cx="20" cy="21" r="1.4" fill="#6f6a62"/><circle cx="23" cy="26" r="1.4" fill="#6f6a62"/>');
+  ICONS.barrow = I('<path d="M6 14h20l-4 10H11z" fill="#2f6e8e" stroke="#cfe4ee"/><circle cx="25" cy="29" r="4" fill="#222" stroke="#ddd"/><path d="M8 24l-3 8M21 24l4 2M26 14l9-4" stroke="#d8b585" stroke-width="2"/>');
+  ICONS.rake = I('<path d="M29 5L15 27" stroke="#d8b585" stroke-width="2.6"/><path d="M7 25l14 9" stroke="#b9c2c9" stroke-width="2.6"/><path d="M8 26l-2 4M11 28l-2 4M14 30l-2 4M17 32l-2 4M20 34l-2 3" stroke="#b9c2c9" stroke-width="1.8"/>');
+  ICONS.tamper = I('<path d="M20 5v24" stroke="#bbb" stroke-width="2.6"/><path d="M15 5h10" stroke="#888" stroke-width="3"/><path d="M11 29h18v4H11z" fill="#7d8287" stroke="#ddd"/>');
+  ICONS.board = I('<path d="M4 22l26-10 2 5-26 10z" fill="#d2b07a" stroke="#f1dcb2"/><path d="M9 26v7M27 19v7" stroke="#b08a52" stroke-width="2.4"/>');
+  ICONS.hammer = I('<path d="M12 31l12-19" stroke="#c9975a" stroke-width="3"/><path d="M18 9l9 6 3-4-9-6z" fill="#8f979d" stroke="#cfd6dc"/><path d="M6 33h10" stroke="#b08a52" stroke-width="2"/><path d="M9 26v7" stroke="#b08a52" stroke-width="3"/>');
+  ICONS.screed = I('<path d="M3 20h30" stroke="#d2b07a" stroke-width="4"/><path d="M5 26c6-2 11-2 16 0" stroke="#76736d" stroke-width="3"/><path d="M22 27c3-3 6-4 10-3" stroke="#9a978f" stroke-width="2.4"/>');
+
+  /* ================= B3: the base gestures (the Yard's own commands) ================= */
+  const lcmd = (n, p) => { try { return G.sim.commandNow('landscape.' + n, p) || { ok: false }; } catch (e) { return { ok: false, reason: e.message }; } };
+  const tools = () => (G.sim.state.sys.stock && G.sim.state.sys.stock.tools) || [];
+  const needTool = (id, name) => tools().includes(id) ? null : 'You need ' + name + '.' + buyBtn(id, 1);
+  const baseLine = (job, x, z) => { const d = digAt(x, z) || (job.digs || [])[0]; return d ? (d.baseY ?? job.topY - 0.1) : job.topY - 0.1; };
+  const b3 = { lx: 0, lz: 0, acc: 0, tipped: false, n: 0, m3: 0 };
+  function heapTick() {
+    const st = G.sim.state.sys, job = site.job, pour = job && job.step === 'pour';
+    const m3 = pour ? (FR.carry(G.sim.state).vol || 0) : (st.landscape && st.landscape.barrow ? st.landscape.barrow.m3 : 0), cap = pour ? 0.051 : 0.1;
+    const k = clamp(m3 / cap, 0, 1);
+    barrow.heap.visible = k > 0.01;
+    barrow.heap.scale.set(1.2, 0.05 + 0.75 * k, 1.5);
+    if (pour) { const c = FR.carry(G.sim.state); heapMat.color.setHex(!c.band ? 0xb9b5ad : c.mixed < 0.5 ? 0x9a968e : c.band === 'dry' ? 0x8f8b83 : c.band === 'soupy' || c.band === 'wet' ? 0x5f5d59 : 0x6c6a65); }
+    else heapMat.color.setHex(st.landscape && st.landscape.barrow && st.landscape.barrow.s === 'soil' ? 0x5a4230 : GRAVEL);
+  }
+  function gravelPress(a, job) {
+    if (job.step !== 'base') return say(job.step === 'excavate' ? 'Dig to the line first.' : 'The base is in.');
+    b3.lx = a.x; b3.lz = a.z; b3.n = 0; b3.m3 = 0;
+    tipGravel(a, job);
+  }
+  function tipGravel(a, job) {
+    const r = cmd('gravel', { jobId: job.id, x: a.x, z: a.z });
+    if (!r.ok) { say(r.reason + (/No gravel/.test(r.reason) ? buyBtn('gravel', 0.5, 'Buy 0.5 m³') : ''), 6); b3.n = -99; return; }
+    b3.n++; b3.m3 += r.m3;
+    G.juice.hitStop = 0.06; G.cam.shake = Math.min((G.cam.shake || 0) + 0.08, 0.3);
+    G.burst(a.x, surf(a.x, a.z) + 0.6, a.z, 30, GRAVEL, 2.2, 1.2, 0.07, 0.8);
+    say('The truck tips as you guide it: <b>' + Math.round(r.delivered * 1000) + ' L</b> of ' + Math.round(r.needM3 * 1000) + ' L. Drag along the pad to spread the load.', 4);
+  }
+  function gravelFrame(a, job) {
+    if (b3.n < 0) return;
+    lead(a);
+    if (Math.hypot(a.x - b3.lx, a.z - b3.lz) < 0.55) return;
+    b3.lx = a.x; b3.lz = a.z;
+    tipGravel(a, job);
+  }
+  // the barrow (the Yard's): click to shovel a scoop in, drag down to tip it out
+  function barrowRelease(a) {
+    if (b3.tipped) return;
+    const why = needTool('wheelbarrow', 'a wheelbarrow');
+    if (why) return say(why, 5);
+    const r = lcmd('load', { x: a.x, z: a.z });
+    if (!r.ok) return say(r.reason);
+    G.burst(a.x, surf(a.x, a.z) + 0.12, a.z, 10, r.s === 'soil' ? 0x5a4230 : GRAVEL, 1.5, 2.2, 0.07, 0.6);
+    say(r.full ? 'The barrow is full. Wheel it to a low spot and <b>drag down</b> to tip it.' : 'In the barrow: ' + Math.round(r.load * 1000) + ' L.');
+  }
+  function barrowTipBase(a) {
+    if (b3.tipped || a.tip < 0.45) return;
+    b3.tipped = true;
+    const r = lcmd('tip', { x: a.x, z: a.z });
+    if (!r.ok) return say(r.reason);
+    G.burst(a.x, surf(a.x, a.z) + 0.3, a.z, 24, r.s === 'soil' ? 0x5a4230 : GRAVEL, 1.8, 1.4, 0.07, 0.7);
+    say('Tipped ' + Math.round(r.m3 * 1000) + ' L. Rake it to the line.');
+  }
+  // the rake on the base: the back of it pulls gravel to the line under the strings (a push riding at the base
+  // level), the tines even it out
+  function rakeBaseFrame(a, job) {
+    lead(a);
+    const L = Math.hypot(a.x - b3.lx, a.z - b3.lz);
+    if (L < 0.1) return;
+    const why = needTool('rake', 'a rake');
+    if (why) { if (!b3.warned) say(why, 5); b3.warned = 1; return; }
+    const mx = (a.x + b3.lx) / 2, mz = (a.z + b3.lz) / 2, level = baseLine(job, mx, mz) - G.heightAt(mx, mz);
+    const steps = Math.ceil(L / 0.1);
+    for (let k = 0; k < steps; k++) {
+      const x0 = b3.lx + ((a.x - b3.lx) * k) / steps, z0 = b3.lz + ((a.z - b3.lz) * k) / steps, x1 = b3.lx + ((a.x - b3.lx) * (k + 1)) / steps, z1 = b3.lz + ((a.z - b3.lz) * (k + 1)) / steps;
+      lcmd('push', { x0, z0, x1, z1, level });
+    }
+    const r = lcmd('rake', { x: a.x, z: a.z, r: 0.4, k: 0.6 });
+    if (!r.ok && r.reason) { if (!b3.warned) say(r.reason); b3.warned = 1; }
+    b3.lx = a.x; b3.lz = a.z;
+    if (++b3.n % 2 === 0) G.burst(a.x, surf(a.x, a.z) + 0.04, a.z, 3, GRAVEL, 0.9, 0.8, 0.035, 0.35);
+  }
+  function thump(a) {
+    const r = lcmd('tamp', { x: a.x, z: a.z });
+    G.juice.hitStop = 0.05; G.cam.shake = Math.min((G.cam.shake || 0) + 0.03, 0.2);
+    // a dust ring off the plate
+    for (let k = 0; k < 6; k++) { const an = (k / 6) * Math.PI * 2; G.burst(a.x + Math.cos(an) * 0.16, surf(a.x, a.z) + 0.02, a.z + Math.sin(an) * 0.16, 1, 0xb8ae9c, 0.8, 0.3, 0.04, 0.4); }
+    if (!r.ok) { if (b3.why !== r.reason) say(r.reason); b3.why = r.reason; }
+  }
+
+  /* ================= B4: mixing in the barrow, tipping, raking, the screed ================= */
+  const MIXB = [['dry', 0.4], ['stiff', 0.48], ['good', 0.64], ['wet', 0.78], ['soupy', 1.0]];  // as content MIX bands
+  const BAND_COL = { dry: '#c9b48a', stiff: '#b9c27a', good: '#6fcf6f', wet: '#7ab6e0', soupy: '#5a86d8' };
+  function mixMeter() {
+    const c = FR.carry(G.sim.state);
+    if (!c.vol) return '';
+    const lo = 0.25, hi = 1.0, pct = (v) => Math.round((clamp(v, lo, hi) - lo) / (hi - lo) * 100);
+    let bands = '', prev = lo;
+    for (const [id, up] of MIXB) { bands += '<i style="left:' + pct(prev) + '%;width:' + (pct(up) - pct(prev)) + '%;background:' + BAND_COL[id] + '"></i>'; prev = up; }
+    const needle = c.wc != null ? '<b style="left:' + pct(c.wc) + '%"></b>' : '';
+    return '<span class="fmix"><span class="fbands">' + bands + needle + '</span><span class="flab">' + c.bags.toFixed(c.bags % 1 ? 1 : 0) + ' bags · ' + c.waterL.toFixed(1) + ' L water · mixed ' + Math.round(c.mixed * 100) + '%</span></span>';
+  }
+  css.textContent += '#fbar .fmix{display:block;margin:4px auto 0;width:300px}#fbar .fbands{position:relative;display:block;height:9px;border-radius:5px;overflow:hidden;background:#333}#fbar .fbands i{position:absolute;top:0;bottom:0;opacity:.75}' +
+    '#fbar .fbands b{position:absolute;top:-2px;width:3px;height:13px;margin-left:-1px;background:#fff;box-shadow:0 0 4px #000}#fbar .flab{display:block;font-size:12px;color:var(--ink-dim)}';
+  const b4 = { hose: false, waterAcc: 0, slashed: false, tipped: false, hoeX: null, hoeZ: null, hoeAcc: 0, rx: 0, rz: 0, scr: null, last: null };
+  function bagsAvail() {
+    const cs = CS(), st = cs && cs.stacks ? cs.stacks.filter((k) => k.itemId === 'concrete_mix').reduce((a, k) => a + k.qty, 0) : 0;
+    return Math.floor(((st || 0) + (stockItems().concrete_mix || 0)) / 36 + 1e-6);
+  }
+  function mixPress(a, job) {
+    b4.slashed = false; b4.tipped = false; b4.hoeX = a.x; b4.hoeZ = a.z; b4.hoeAcc = 0; b4.hose = !!a.alt;
+    if (!tools().includes('wheelbarrow')) { say(needTool('wheelbarrow', 'a wheelbarrow to mix in'), 6); act.kind = ''; return; }
+    if (b4.hose) say('Water running in…', 1.5);
+  }
+  function mixFrame(a, dt, job) {
+    const c = FR.carry(G.sim.state);
+    if (b4.hose) {
+      b4.waterAcc += dt;
+      if (b4.waterAcc >= 0.1) {
+        const r = cmd('mix', { jobId: job.id, waterL: 0.5 * b4.waterAcc }); b4.waterAcc = 0;
+        if (!r.ok) { say(r.reason); b4.hose = false; return; }
+        G.burst(a.x, surf(a.x, a.z) + 0.55, a.z, 2, 0x9fd0ff, 0.5, 0.6, 0.025, 0.25);
+        say(mixSays(r.mix), 1.2);
+      }
+      return;
+    }
+    // drag up over the lip: bags slashed open into it
+    if (!b4.slashed && a.lift > 0.45) {
+      b4.slashed = true;
+      const r = cmd('mix', { jobId: job.id, bags: gestureN() });
+      if (!r.ok) return say(r.reason + (/No concrete mix/.test(r.reason) ? buyBtn('concrete_mix', 36 * 3, 'Buy 3 bags') : ''), 6);
+      G.juice.hitStop = 0.04;
+      G.burst(a.x, surf(a.x, a.z) + 0.75, a.z, 18, 0xcfcac0, 1.6, 1.2, 0.06, 0.9);
+      say('Slashed open ' + (r.bags % 1 ? r.bags.toFixed(1) : r.bags) + ' bag' + (r.bags === 1 ? '' : 's') + ' (' + Math.round(r.mix.bags * 36) + ' kg). Now <b>hold the right button</b> to run the hose in, about 3 L a bag.', 5);
+      return;
+    }
+    // drag down at the forms: tip it in
+    if (!b4.tipped && a.tip > 0.45 && c.vol > 0) {
+      b4.tipped = true;
+      return tipConcrete(a, job);
+    }
+    // side to side in the tub: the hoe works it through
+    const d = Math.hypot(a.x - b4.hoeX, a.z - b4.hoeZ);
+    if (d > 0.05 && a.lift < 0.3 && a.tip < 0.3 && c.vol > 0) {
+      b4.hoeAcc += d; b4.hoeX = a.x; b4.hoeZ = a.z;
+      if (b4.hoeAcc > 0.15) {
+        const r = cmd('mix', { jobId: job.id, work: b4.hoeAcc * 1.6 }); b4.hoeAcc = 0;
+        if (r.ok) { if (r.dry) say('Stirring dry powder does little: water in first (right button).', 3); else { say(mixSays(r.mix), 1.5); if (Math.random() < 0.5) G.burst(a.x, surf(a.x, a.z) + 0.5, a.z, 2, 0x6c6a65, 0.6, 0.6, 0.03, 0.3); } }
+      }
+    }
+  }
+  function mixSays(m) {
+    if (!m || !m.vol) return 'The barrow is empty.';
+    if (m.band === null) return 'Grey powder. Run water in (right button).';
+    const word = { dry: 'Crumbly, too dry', stiff: 'Stiff', good: 'Right', wet: 'Wet', soupy: 'Soupy' }[m.band];
+    return '<b>' + word + '.</b> ' + (m.mixed < 0.5 ? 'Hoe it through: drag back and forth in the barrow.' : m.mixed < 1 ? 'Keep hoeing (' + Math.round(m.mixed * 100) + '%).' : m.says + '.') + mixMeter();
+  }
+  function tipConcrete(a, job) {
+    const r = cmd('tip', { jobId: job.id, x: a.x, z: a.z });
+    if (!r.ok) return say(r.reason);
+    const [x, z] = r.at;
+    G.juice.hitStop = 0.07; G.cam.shake = Math.min((G.cam.shake || 0) + 0.06, 0.25);
+    G.burst(x, surf(x, z) + 0.25, z, 16, CONC, 1.4, 0.9, 0.07, 0.6);
+    pourDirty(x, z, 2.2);
+    const pct = Math.round((r.placed / Math.max(1e-6, r.needM3)) * 100);
+    const slump = { dry: 'It sits in a crumbly heap.', stiff: 'It holds its heap: rake it out.', good: 'A heavy heap that slumps and spreads.', wet: 'It slumps flat and runs.', soupy: 'It runs out flat and bleeds water.' }[r.band];
+    say(slump + ' <b>' + pct + '%</b> of the slab in. ' + (r.leaking.length ? '<b>A form is bowing out and leaking: stake it!</b> (hammer)' : pct >= 100 ? 'Enough for the screed: rake it level, then take up the <b>screed</b>.' : 'Mix the next batch.'), 6);
+  }
+  function rakeConcreteFrame(a, job) {
+    lead(a);
+    if (Math.hypot(a.x - b4.rx, a.z - b4.rz) < 0.1) return;
+    b4.rx = a.x; b4.rz = a.z;
+    const r = cmd('rake', { jobId: job.id, x: a.x, z: a.z });
+    if (!r.ok) return;
+    pourDirty(a.x, a.z, 1.4);
+    if (r.leaking.length && !b4.leakSaid) { b4.leakSaid = 1; say('<b>A form is bowing out and leaking:</b> stake it with the hammer.', 5); }
+    if (r.m3 > 0.0005 && Math.random() < 0.4) G.burst(a.x, surf(a.x, a.z) + 0.12, a.z, 2, CONC, 0.6, 0.5, 0.03, 0.3);
+  }
+  // the screed: the board lies across the forms at the hand; drag it toward you with a little saw and the surplus
+  // rolls ahead of it as a ridge
+  const screedMesh = part(bx(1, 0.089, 0.038), formWood, 0, 0, 0); screedMesh.visible = false; G.scene.add(screedMesh);
+  function longAxis(job) {
+    const C = job.layout.corners;
+    let best = -1, u = [1, 0];
+    for (let k = 0; k < C.length; k++) { const a = C[k], b = C[(k + 1) % C.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L > best) { best = L; u = [(b[0] - a[0]) / L, (b[1] - a[1]) / L]; } }
+    return u;
+  }
+  function placeScreed(job, x, z, board, saw) {
+    const u = board ? board.u : longAxis(job), n = [-u[1], u[0]], C = job.layout.corners;
+    let lo = Infinity, hi = -Infinity;
+    for (const c of C) { const v = c[0] * n[0] + c[1] * n[1]; lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    const mid = board ? board.mid : (lo + hi) / 2, w = board ? board.w : hi - lo + 0.24, al = x * u[0] + z * u[1];
+    const px = al * u[0] + (mid + saw) * n[0], pz = al * u[1] + (mid + saw) * n[1];
+    screedMesh.scale.set(w, 1, 1); screedMesh.rotation.set(0, -Math.atan2(n[1], n[0]), 0.12);
+    screedMesh.position.set(px, job.topY + 0.045, pz); screedMesh.visible = true;
+  }
+  function screedPress(a, job) {
+    b4.scr = { x: a.x, z: a.z, t: 0, board: null, n: 0 };
+    placeScreed(job, a.x, a.z, null, 0);
+    say('Drag the board toward you along the forms, sawing a little: it rides the forms at the top of the slab.', 4);
+  }
+  function screedFrame(a, dt, job) {
+    const s = b4.scr;
+    if (!s) return;
+    lead(a);
+    s.t += dt;
+    const saw = 0.035 * Math.sin(s.t * 14);
+    const L = Math.hypot(a.x - s.x, a.z - s.z);
+    if (L >= 0.08) {
+      const r = cmd('screed', { jobId: job.id, x0: s.x, z0: s.z, x1: a.x, z1: a.z });
+      if (r.ok) {
+        s.board = r.board || s.board; s.n++;
+        pourDirty(a.x, a.z, 3);
+        // the ridge rolling ahead: grey crumbs off the front, more the bigger it is
+        if (r.m3 > 0.001) { const u = s.board ? s.board.u : [0, 0], sg = Math.sign((a.x - s.x) * u[0] + (a.z - s.z) * u[1]) || 1; G.burst(a.x + u[0] * 0.2 * sg, job.topY + 0.03, a.z + u[1] * 0.2 * sg, 2 + Math.min(6, Math.round(r.m3 * 300)), CONC, 0.9, 0.5, 0.04, 0.35); }
+        G.cam.shake = Math.min((G.cam.shake || 0) + 0.004, 0.06);
+        if (r.torn) say(r.torn + '.', 3);
+        else if (r.hollow > 0.04) say('Dull hollows behind the board: tip a little more ahead of it and pass again.', 3);
+        if (r.done) screededOut(job);
+      } else if (r.reason) say(r.reason);
+      s.x = a.x; s.z = a.z;
+    }
+    if (FR.job(G.sim.state, job.id).step === 'pour') placeScreed(job, a.x, a.z, s.board, saw); else screedMesh.visible = false;
+  }
+  function screededOut(job) {
+    G.juice.hitStop = 0.12; G.cam.shake = Math.min((G.cam.shake || 0) + 0.12, 0.35);
+    const C = job.layout.corners;
+    for (const c of C) G.burst(c[0], job.topY + 0.2, c[1], 10, 0xfff2c4, 1.6, 2.4, 0.06, 0.9);
+    const cx = C.reduce((a, c) => a + c[0], 0) / C.length, cz = C.reduce((a, c) => a + c[1], 0) / C.length;
+    G.burst(cx, job.topY + 0.1, cz, 30, 0xdfe6ea, 2.6, 1.4, 0.05, 1.1);
+    screedMesh.visible = false;
+    const v = FR.jobView(G.sim.state, job.id);
+    say('<b>Screeded.</b> Dead flat and wet-bright, right to the forms. The slab is poured: ' + (v.pour ? Math.round(v.pour.m3 * 1000) + ' L' : '') + '. It is curing now; framing waits until it is half strength.', 9);
+  }
+
+  /* ---------- the pour drawn: the wet field (fieldmesh) ---------- */
+  const pourMesh = { fm: null, jobId: null, grid: null, colour: null };
+  function pourDirty(x, z, r) { if (pourMesh.fm) pourMesh.fm.request([Math.floor((x - r) / 0.1), Math.floor((z - r) / 0.1), Math.ceil((x + r) / 0.1), Math.ceil((z + r) / 0.1)]); }
+  function pourColour(job) {
+    const top = job.topY, band = (FR.jobView(G.sim.state, job.id).pour || {}).band || 'good';
+    return (tile, n, i, j, out) => {
+      const g = pourMesh.grid, name = g.codes[tile.s[n]], h = tile.h[n] / 1000, x = i * 0.1, z = j * 0.1;
+      const lv = FR.screedLevelAt(G.sim.state, job.id, x, z), inside = lv > 0, nz = ((i * 73856093) ^ (j * 19349663)) % 7 / 300;
+      // wet concrete is a dark, cool grey; the finish channel is how glossy (the bleed-water sheen of a screeded top)
+      let v = 0.34 + nz, f = 0.22;
+      if (name === 'screeded') { v = 0.31; f = 0.7; }
+      else if (inside && h < lv - 0.006) { v = 0.4 + nz; f = 0.05; }                 // a hollow: dull
+      else if (inside && h > lv + 0.01) { v = 0.36 + nz; f = 0.15; }                 // standing proud: lumpy
+      if (band === 'soupy' || band === 'wet') { v -= 0.03; f = Math.max(f, 0.6); }
+      if (band === 'dry') { v += 0.06; f = Math.min(f, 0.05); }
+      if (!inside) { v += 0.03; f = 0.15; }
+      out[0] = v; out[1] = v * 0.985; out[2] = v * 0.95; out[3] = f;
+      return true;
+    };
+  }
+  function pourSync(job) {
+    const g = job && job.step === 'pour' && job.pour ? job.pour.grid : null;
+    if (!g) {
+      if (pourMesh.fm) {
+        // poured: build mode draws the slab member in its place
+        const was = FR.job(G.sim.state, pourMesh.jobId), st = was && was.owner && B.structs().find((q) => q.id === was.owner.structId);
+        if (st && CS().progress[st.id]) showBuilt(st, CS().progress[st.id]);
+        pourMesh.fm.dispose(); pourMesh.fm = null; pourMesh.grid = null; pourMesh.jobId = null;
+      }
+      return;
+    }
+    if (pourMesh.fm && pourMesh.jobId === job.id && pourMesh.grid === g) { pourMesh.colour = pourColour(job); return; }
+    if (pourMesh.fm) pourMesh.fm.dispose();
+    const C = job.layout.corners;
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const [x, z] of C) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+    const pad = 0.8, col = pourColour(job);
+    pourMesh.grid = g; pourMesh.jobId = job.id; pourMesh.colour = col;
+    pourMesh.fm = FM.create({ grid: g, i0: Math.floor((x0 - pad) / 0.1), j0: Math.floor((z0 - pad) / 0.1), i1: Math.ceil((x1 + pad) / 0.1), j1: Math.ceil((z1 + pad) / 0.1), baseY: surf, colour: (t, n, i, j, o) => pourMesh.colour(t, n, i, j, o), minMs: 70 });
+    pourMesh.fm.refresh();
+  }
+  // the bags of mix, stacked by the forms where the mixing is done
+  function bagPile(job) {
+    const want = job && job.step === 'pour' ? Math.min(12, bagsAvail()) : 0, sig = job ? job.id + ':' + want : '';
+    if (sig === fv.bagSig) return;
+    fv.bagSig = sig;
+    if (fv.bags) { G.scene.remove(fv.bags); fv.bags = null; }
+    if (!want) return;
+    const r = job.forms && job.forms.runs[0];
+    if (!r) return;
+    const [x, z] = runPt(r, r.len / 2, 1.1), g = (fv.bags = new T.Group()), bagMat = mat(0xd9cdb2);
+    for (let k = 0; k < want; k++) { const m = part(bx(0.45, 0.13, 0.32), bagMat, (k % 3 - 1) * 0.47, surf(x, z) + 0.065 + Math.floor(k / 6) * 0.13, (Math.floor(k / 3) % 2) * 0.34, 0, (k % 2) * 0.08, 0); g.add(m); }
+    g.position.set(x, 0, z); g.rotation.y = runYaw(r);
+    G.scene.add(g);
+  }
+  function b34Tick(dt, t) {
+    const job = site.job;
+    if (on) { heapTick(); ghostTick(H.aim, job); } else if (fv.ghost) fv.ghost.visible = false;
+    const sig = formsSig(job);
+    if (sig !== fv.sig && !site.drive) { fv.sig = sig; buildForms(job); }
+    if (fv.runs.length) placeBoards(job, t / 1000);
+    if (fv.dots.length) { const s = 1 + 0.15 * Math.sin(t / 170), hammer = on && held() === 'hammer'; for (const d of fv.dots) { d.scale.set(s, 1, s); d.material.opacity = hammer ? 0.95 : 0.5; } }
+    if (pourMesh.fm) pourMesh.fm.update();
+    // a leaking board: grey seeps out at its foot
+    if (job && job.step === 'pour' && job.forms) for (const r of job.forms.runs) if (r.leak && Math.random() < dt * 3) { const [x, z] = runPt(r, (r.leak[0] + r.leak[1]) / 2, 0.08); G.burst(x, surf(x, z) + 0.03, z, 2, CONC, 0.5, 0.3, 0.03, 0.4); }
+  }
+  function b34Slow(job) { pourSync(job); bagPile(job); }
+
   /* ================= press, drag, let go ================= */
   const held = () => H.held;
   function press(a) {
     const job = site.job, id = held();
+    if (job && ['gravel', 'barrow', 'rake', 'tamper', 'board', 'hammer', 'screed'].includes(id)) {
+      act.kind = id; b3.lx = a.x; b3.lz = a.z; b3.n = 0; b3.tipped = false; b3.warned = 0; b3.why = ''; b3.acc = 0; b4.rx = a.x; b4.rz = a.z; b4.leakSaid = 0;
+      const pour = job.step === 'pour';
+      if (id === 'gravel') return gravelPress(a, job);
+      if (id === 'barrow') return pour ? mixPress(a, job) : undefined;
+      if (id === 'rake') { if (pour) { const r = cmd('rake', { jobId: job.id, x: a.x, z: a.z }); if (r.ok) pourDirty(a.x, a.z, 1.4); return; } return; }
+      if (id === 'tamper') { const why = needTool('tamper', 'a hand tamper'); if (why) { act.kind = ''; return say(why, 5); } return thump(a); }
+      if (id === 'board') return setBoards(job);
+      if (id === 'hammer') { if (site.drive) return; const d = stakeAt(a, job); if (d) startStake(job, d); else say(fv.dots.length ? 'Aim at a glowing stake mark outside a board.' : 'Every stake is in.'); return; }
+      if (id === 'screed') return pour ? screedPress(a, job) : say('The screed comes out once concrete is in the forms.');
+    }
     if (id === 'kit') {
       act.kind = 'kit';
       if (!job) return say('Nothing to lay out here. Put up a building with a slab, stem wall or pier foundation (<kbd>L</kbd>).');
@@ -419,6 +889,13 @@
   }
   function frame(a, dt) {
     if (!a.down) return;
+    const job = site.job, k0 = act.kind;
+    if (job && k0 === 'gravel') return gravelFrame(a, job);
+    if (job && k0 === 'barrow') return job.step === 'pour' ? mixFrame(a, dt, job) : barrowTipBase(a);
+    if (job && k0 === 'rake') return job.step === 'pour' ? rakeConcreteFrame(a, job) : rakeBaseFrame(a, job);
+    if (job && k0 === 'tamper') { lead(a); b3.acc += dt; if (b3.acc >= 0.3) { b3.acc = 0; thump(a); } return; }
+    if (job && k0 === 'screed') return screedFrame(a, dt, job);
+    if (['board', 'hammer'].includes(k0)) return;
     if (act.kind === 'kit') {
       const job = site.job;
       if (!job || job.step !== 'layout') return;
@@ -431,6 +908,10 @@
     const k = act.kind;
     act.kind = '';
     G.player.lead = null;
+    if (k === 'barrow' && site.job && site.job.step !== 'pour') return barrowRelease(a);
+    if (k === 'barrow') { b4.hose = false; return; }
+    if (k === 'screed') { b4.scr = null; screedMesh.visible = false; return; }
+    if (k === 'gravel' && b3.n > 1) return say('Tipped ' + Math.round(b3.m3 * 1000) + ' L along your line. Rake it level to the strings, then tamp it twice.', 5);
     if (k === 'trim') { const t = act.trim; act.trim = null; if (t && t.m3 > 0.0005) say('Trimmed ' + Math.round(t.m3 * 1000) + ' L to the line, pushed out past the edge.', 3); return; }
     if (k === 'shovel' && LS()) LS().tools.shovel.release(a);
   }
@@ -438,6 +919,27 @@
   /* ================= taking up the site tools, and putting them away ================= */
   let on = false, lastHeld = 'kit';
   function slotList() {
+    const step = site.job ? site.job.step : 'layout', own = (id) => tools().includes(id);
+    if (step === 'base') return [
+      { id: 'gravel', name: 'Gravel', icon: ICONS.gravel, item: truckFlag, title: 'Gravel: press and drag along the pad; the truck tips as you guide it' },
+      { id: 'barrow', name: 'Barrow', icon: ICONS.barrow, item: barrow, dim: !own('wheelbarrow'), title: 'Wheelbarrow: click to shovel a scoop in, drag down to tip it' },
+      { id: 'rake', name: 'Rake', icon: ICONS.rake, item: rake, dim: !own('rake'), meter: site.job.base ? site.job.base.level : 0, title: 'Rake: drag to pull the gravel to the line under the strings' },
+      { id: 'tamper', name: 'Tamper', icon: ICONS.tamper, item: tamper, dim: !own('tamper'), meter: site.job.base ? site.job.base.compact : 0, title: 'Tamper: click to thump, hold and walk to tamp a strip. Twice everywhere is firm' },
+      ...(LS() ? [{ id: 'shovel', name: 'Shovel', icon: ICONS.shovel, item: LS().items.shovel, dim: !ownsTool('shovel') && !ownsTool('spade'), title: 'Shovel: move gravel by hand' }] : []),
+    ];
+    if (step === 'forms' || step === 'rebar' || step === 'roughin') return [
+      { id: 'board', name: 'Boards', icon: ICONS.board, item: boardItem, badge: String(Math.floor(stockItems().form_board || 0)), title: 'Form boards: hold one near a string, it snaps along the run; click sets ' + gestureN() },
+      { id: 'hammer', name: 'Stakes', icon: ICONS.hammer, item: kit, badge: String(Math.floor(stockItems().form_stake || 0)), title: 'Hammer and stakes: click a glowing mark outside a board to drive a stake and nail it' },
+    ];
+    if (step === 'pour') {
+      const c = FR.carry(G.sim.state);
+      return [
+        { id: 'barrow', name: 'Barrow', icon: ICONS.barrow, item: barrow, dim: !own('wheelbarrow'), badge: c.vol ? Math.round(c.vol * 1000) + ' L' : null, meter: c.vol ? c.mixed : null, title: 'Barrow: drag up to slash bags in, hold the right button to run water, drag side to side to hoe, drag down at the forms to tip' },
+        { id: 'rake', name: 'Rake', icon: ICONS.rake, item: rake, title: 'Rake: drag through the wet concrete to spread it into the corners' },
+        { id: 'screed', name: 'Screed', icon: ICONS.screed, item: screedItem, meter: site.job.pour ? site.job.pour.screed : 0, title: 'Screed: drag the board toward you along the forms' },
+        { id: 'hammer', name: 'Stakes', icon: ICONS.hammer, item: kit, title: 'Hammer and stakes: stake a form that bows out' },
+      ];
+    }
     const out = [{ id: 'kit', name: 'Layout', icon: ICONS.kit, item: kit, title: 'Layout kit: press a glowing corner to drive a stake, keep holding and pull to the next corner' }];
     if (LS()) {
       const v = site.job ? FR.jobView(G.sim.state, site.job.id) : null;
@@ -448,7 +950,7 @@
   function enter() {
     on = true; document.body.classList.add('gardening'); bar.hidden = false;
     const j = site.job;
-    H.open({ bar: toolsEl, reach: 1.6, camDist: 8.5, camPitch: 0.95, camFree: true, pace: 0.55, tipPx: 90, liftPx: 70, slots: slotList(), held: j && j.step === 'excavate' ? 'shovel' : lastHeld, onHold, press, frame, release, alt: (cur) => !!cur && cur.id === 'shovel' });
+    H.open({ bar: toolsEl, reach: 1.6, camDist: 8.5, camPitch: 0.95, camFree: true, pace: 0.55, tipPx: 90, liftPx: 70, slots: slotList(), held: j ? ({ excavate: 'shovel', base: 'gravel', forms: 'board', pour: 'barrow' }[j.step] || lastHeld) : lastHeld, onHold, press, frame, release, alt: (cur) => !!cur && (cur.id === 'shovel' || (cur.id === 'barrow' && !!site.job && site.job.step === 'pour')) });
     onHold(held());
   }
   function leave() {
@@ -456,7 +958,8 @@
     if (LS()) LS().bindSay(null);
     on = false; bar.hidden = true; tape.visible = false; G.player.lead = null;
     if (!['garden', 'yard'].includes(G.player.tool)) document.body.classList.remove('gardening');
-    if (H.isOpen && H.held && ['kit', 'shovel'].includes(H.held) && H.slots.some((s) => s.id === 'kit')) H.close();
+    if (H.isOpen && H.held && H.slots.some((s) => ['kit', 'gravel', 'board', 'screed'].includes(s.id))) H.close();
+    screedMesh.visible = false; if (fv.ghost) fv.ghost.visible = false;
   }
   function onHold() { sayT = 0; updateHint(true); }
   function updateHint(force) {
@@ -471,11 +974,31 @@
       const v = FR.jobView(G.sim.state, job.id), pct = Math.round(v.dig * 100);
       h = id === 'shovel' ? (v.rough >= v.trimFrom ? '<b>' + pct + '%</b> on the line. <b>Right-drag</b> the flat of the shovel across the yellow: it trims to the line and pushes the earth out past the edge.' : '<b>' + Math.round(v.rough * 100) + '%</b> dug. <b>Press</b> in the dark amber to dig a scoop, <b>drag</b> it out past the white line. Yellow is close enough to trim later.') : 'Dig to the strings: take up the <b>shovel</b> (2).';
       if (id === 'shovel' && tape.visible && tape.userData.cm != null) h += ' <b>Here: ' + (tape.userData.cm > 0 ? tape.userData.cm + ' cm to go' : tape.userData.cm < -4 ? Math.abs(tape.userData.cm) + ' cm too deep' : 'on the line') + '</b>';
+    } else if (job.step === 'base') {
+      const v = FR.jobView(G.sim.state, job.id), b = v.base, pc = (x) => Math.round(x * 100) + '%';
+      const line = 'Base: gravel <b>' + pc(b.gravel) + '</b> · level <b>' + pc(b.level) + '</b> · tamped <b>' + pc(b.compact) + '</b>. ';
+      h = line + (id === 'gravel' ? '<b>Press and drag</b> along the pad: the truck tips gravel as you guide it.'
+        : id === 'rake' ? (needTool('rake', 'a rake') || '<b>Drag</b> to pull the gravel to the line: amber wants more, blue stands proud.')
+        : id === 'tamper' ? (needTool('tamper', 'a hand tamper') || '<b>Click</b> to thump, <b>hold and walk</b> to tamp a strip. Twice everywhere: the dots go when it is firm.')
+        : id === 'barrow' ? (needTool('wheelbarrow', 'a wheelbarrow') || '<b>Click</b> on a heap to shovel a scoop in, <b>drag down</b> to tip it where it is low.')
+        : 'Move gravel by hand: press to scoop, drag to throw.');
+    } else if (job.step === 'forms' || job.step === 'rebar' || job.step === 'roughin') {
+      const v = FR.jobView(G.sim.state, job.id), f = v.forms || { boards: 0, set: 0, stakes: 0, driven: 0 }, need = f.boards - f.set, have = Math.floor(stockItems().form_board || 0), hs = Math.floor(stockItems().form_stake || 0);
+      h = 'Forms: <b>' + f.set + ' of ' + f.boards + '</b> boards · <b>' + f.driven + ' of ' + f.stakes + '</b> stakes. ';
+      if (id === 'board') h += need > 0 ? (have >= need ? 'Hold a board near a string: it snaps along the run. <b>Click</b> to set ' + gestureN() + '.' : 'You have ' + have + ' form boards and need ' + need + '.' + buyBtn('form_board', need - have)) : 'Boards all set. Take up the <b>stakes</b>.';
+      else h += f.stakes - f.driven > 0 ? (hs >= f.stakes - f.driven ? '<b>Click</b> a glowing mark outside a board: a stake goes in and is nailed to it (' + gestureN() + ' at a time).' : 'You have ' + hs + ' stakes and need ' + (f.stakes - f.driven) + '.' + buyBtn('form_stake', f.stakes - f.driven - hs)) : 'Every stake is in.';
+    } else if (job.step === 'pour') {
+      const v = FR.jobView(G.sim.state, job.id), p = v.pour, pct = p ? Math.round((p.m3 / Math.max(1e-6, p.needM3)) * 100) : 0, bags = bagsAvail();
+      h = (v.forms && v.forms.leaking ? '<b>A form is bowing and leaking: stake it (4)!</b> ' : '') + 'Pour: <b>' + pct + '%</b> in' + (p && p.screed ? ' · screeded <b>' + Math.round(p.screed * 100) + '%</b>' : '') + ' · ' + bags + ' bags on site. ';
+      if (id === 'barrow') h += (needTool('wheelbarrow', 'a wheelbarrow') || '<b>Drag up</b>: slash ' + gestureN() + ' bag' + (gestureN() > 1 ? 's' : '') + ' in. <b>Hold right</b>: hose water in. <b>Drag side to side</b>: hoe. <b>Drag down</b> at the forms: tip.') + (bags ? '' : buyBtn('concrete_mix', 36 * 6, 'Buy 6 bags')) + mixMeter();
+      else if (id === 'rake') h += '<b>Drag</b> through it to push it into the corners and even it out.';
+      else if (id === 'screed') h += pct < 95 ? 'Get a little more than enough in first, then screed.' : 'Stand at one end and <b>drag the board toward you</b>, sawing a little. The surplus rolls ahead of it.';
+      else h += 'Stake a bowing form: click its glowing marks.';
     } else h = STEP_LINE[job.step] || 'The foundation is past digging.';
     if (h !== hintEl.innerHTML) hintEl.innerHTML = h;
   }
   const STEP_LINE = {
-    base: 'Dug to the line. The gravel base, forms and the pour come next (not in the game yet: <b>__foundation.debugPour()</b> in the console pours it for testing).',
+    base: 'Dug to the line. The gravel base goes in next (slab foundations; stem walls and piers are poured with <b>__foundation.debugPour()</b> for now).',
     cure: 'Poured: the concrete is curing.', strip: 'Poured: the concrete is curing.', done: 'The foundation is finished.',
   };
   addEventListener('keydown', (e) => {
@@ -502,7 +1025,7 @@
     const dt = Math.min(0.1, (t - last) / 1000); last = t;
     const want = G.player.tool === 'site';
     if (want !== on) { if (want) enter(); else leave(); }
-    driveTick(dt); popTick(dt);
+    driveTick(dt); popTick(dt); b34Tick(dt, t);
     if (site.strings.visible) {
       if (on && held() === 'kit' && site.job && site.job.step === 'layout' && site.order.length) site.strings.hand(handPt()); else if (site.job && site.job.step === 'layout') site.strings.hand(null);
       site.strings.update(dt);
@@ -523,31 +1046,41 @@
       if (os !== site.ovSig) { site.ovSig = os; buildOverlay(fresh); }
       if (site.ov) {
         const P = G.player, C = fresh.layout.corners, near = Math.hypot(C[0][0] - P.x, C[0][1] - P.z) < 40;
-        site.ov.visible = near && ['layout', 'excavate'].includes(fresh.step);
+        site.ov.visible = near && ['layout', 'excavate', 'base'].includes(fresh.step);
         const gs = (LS() ? LS().rev : 0) + ':' + G.ground.rev + ':' + fresh.step;
         if (gs !== site.groundSig) {
           site.groundSig = gs; site.ov.request();
-          if (fresh.step === 'excavate') site.checkDue = true;
+          if (fresh.step === 'excavate' || fresh.step === 'base' || fresh.step === 'forms') site.checkDue = true;
         }
         site.ov.update();
       }
-      if (site.checkDue && fresh && fresh.step === 'excavate' && !(LS() && LS().flying)) {
+      if (site.checkDue && fresh && ['excavate', 'base'].includes(fresh.step) && !(LS() && LS().flying)) {
         site.checkT += 0.2;
         if (site.checkT > 0.4) {
           site.checkT = 0; site.checkDue = false;
-          const r = cmd('check', { jobId: fresh.id });
-          if (r.ok && r.advanced) dugOut(fresh);
+          const step0 = fresh.step, r = cmd('check', { jobId: fresh.id });
+          if (r.ok && r.advanced) { if (step0 === 'excavate') dugOut(fresh); else baseIn(fresh); }
         }
       }
+      b34Slow(fresh);
       if (on) { H.setSlots(slotList()); updateHint(); }
     }
     requestAnimationFrame(tick);
+  }
+  function baseIn(job) {
+    G.juice.hitStop = 0.08;
+    for (const c of job.layout.corners) G.burst(c[0], surf(c[0], c[1]) + 0.2, c[1], 8, 0xfff2c4, 1.4, 2.2, 0.06, 0.8);
+    say('<b>The base is firm and level.</b> Now the forms: hold a <b>form board</b> near a string and it snaps along the run.', 7);
+    const st = B.structs().find((s) => s.id === (job.owner && job.owner.structId)), pr = st && CS().progress[st.id];
+    if (st && pr) showBuilt(st, pr);
+    if (on) { H.setSlots(slotList()); H.hold && H.hold('board'); }
   }
   function dugOut(job) {
     G.juice.hitStop = 0.08;
     const C = job.layout.corners;
     for (const c of C) G.burst(c[0], surf(c[0], c[1]) + 0.2, c[1], 8, 0xfff2c4, 1.4, 2.2, 0.06, 0.8);
-    say('<b>Dug to the line.</b> Flat and down to firm ground: the site is ready for its gravel base.', 7);
+    say('<b>Dug to the line.</b> Flat and down to firm ground. Now the gravel base: take up <b>gravel</b> and drag along the pad.', 7);
+    if (on) { setTimeout(() => { H.setSlots(slotList()); H.hold && H.hold('gravel'); }, 50); }
     const st = B.structs().find((s) => s.id === (job.owner && job.owner.structId)), pr = st && CS().progress[st.id];
     if (st && pr) showBuilt(st, pr);
   }
@@ -563,14 +1096,16 @@
       if (!j) return null;
       if (j.step === 'layout') return 'Lay out the foundation: press <kbd>7</kbd> for the layout kit. Press a glowing corner and pull the string round the others.';
       if (j.step === 'excavate') return 'Dig to the strings: press <kbd>7</kbd> and dig where the ground is amber (' + Math.round(FR.jobView(G.sim.state, j.id).dig * 100) + '% down to the line).';
-      if (j.step === 'base') return 'Dug to the line. The base, forms and pour are not in the game yet: <code>__foundation.debugPour()</code> pours it for testing.';
+      if (j.step === 'base') return j.type === 'slab' ? 'The gravel base: press <kbd>7</kbd>, tip gravel on the pad, rake it to the line and tamp it twice.' : 'Dug to the line. Stem walls and piers are not poured by hand yet: <code>__foundation.debugPour()</code> pours it for testing.';
+      if (['forms', 'rebar', 'roughin'].includes(j.step)) return 'Set the forms: press <kbd>7</kbd>, snap form boards along the strings and stake them.';
+      if (j.step === 'pour') return 'Pour the slab: press <kbd>7</kbd>, mix bags in the barrow, tip, rake and screed it off the forms.';
       return null;
     },
     job: (structId) => (structId === undefined ? site.job : jobFor(structId)),
     redraw: () => { site.sig = ''; site.ovSig = ''; },
     tools: { kit },
     // for tests: what is drawn
-    drawn: () => ({ overlay: !!(site.ov && site.ov.visible), tinted: site.ov ? (() => { const c = site.ov.mesh.geometry.attributes.color.array; let n = 0; for (let i = 3; i < c.length; i += 16) if (c[i] > 0) n++; return n; })() : 0, strands: site.strings.visible ? site.strings.mesh.count : 0, boards: site.boards.filter(Boolean).length, stakes: site.stakes.filter(Boolean).length, ghosts: site.ghosts.filter(Boolean).length }),
+    drawn: () => ({ overlay: !!(site.ov && site.ov.visible), tinted: site.ov ? (() => { const c = site.ov.mesh.geometry.attributes.color.array; let n = 0; for (let i = 3; i < c.length; i += 16) if (c[i] > 0) n++; return n; })() : 0, strands: site.strings.visible ? site.strings.mesh.count : 0, boards: site.boards.filter(Boolean).length, stakes: site.stakes.filter(Boolean).length, ghosts: site.ghosts.filter(Boolean).length, boardsDrawn: fv.runs.reduce((a, r) => a + r.segs.length, 0), stakeMarks: fv.dots.length, pour: !!(pourMesh.fm && pourMesh.fm.visible), bags: fv.bags ? fv.bags.children.length : 0 }),
     // testing: the nearest job (or a building's) is poured now and starts to cure
     debugPour(structId) {
       const j = structId === undefined ? site.job || nearJob() : jobFor(structId);

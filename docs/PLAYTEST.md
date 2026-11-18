@@ -647,3 +647,30 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 - On a slope the low side ends up below the line (blue); filling it is the gravel base's job (B3).
 - Hammer-blow pose and batter-board look are first passes; untuned against a real playtest. Guided level has no one-click layout yet.
 - Console: `__foundation.drawn()`, `__game.foundation.jobView(__game.sim.state, '1')`. Smoke test: `node test/foundation.smoke.mjs`.
+
+## Foundations B3 + B4 — gravel base, forms, barrow concrete and the screed (branch `ground-b3b4`)
+
+**What is new**
+
+- After the dig, a **slab** carries on by hand in the Site tool (key 7); the bar changes with the step.
+  - **Base**: **Gravel**: press and drag along the pad and the truck tips heaps where you guide it (the building's ordered gravel, or gravel bought in the Yard store). **Barrow** (click a heap to shovel in, drag down to tip), **Rake** (drag: the back of it pulls gravel to the line under the strings, the tines even it), **Tamper** (click to thump, hold and walk for a strip). The overlay: amber wants more gravel, blue stands proud, faint dots are not yet tamped twice. The bar reads gravel / level / tamped %. Done when level and twice tamped: the gravel bed member is finished.
+  - **Forms**: hold a **board** near a string: a ghost snaps along the run; click sets as many as the gesture setting (Supplier/construction 1x-4x). Then the **Stakes** (hammer): glowing marks outside the boards; click one, two blows, and it and its neighbours go in. Missing boards or stakes: a Buy button in the hint. Unstaked boards wobble.
+  - **Pour**: **Barrow**: drag **up** to slash bags in (gesture count, three fill it), hold the **right button** to run the hose, drag **side to side** to hoe it through, drag **down** at the forms to tip. A meter under the hint shows water/cement against dry / stiff / right / wet / soupy. Too dry sits in a crumbly heap and tears under the screed; too wet slumps flat and cures weaker (Abrams). **Rake** spreads it into the corners. **Screed**: press at one end and drag the board toward you; it rides the forms at the slab's top, the surplus rolls ahead as a ridge, the top behind it turns flat and wet-bright; dull patches are hollows (tip a little more ahead, pass again). Fully screeded: a burst, "Screeded", the slab starts to cure and framing waits for half strength.
+  - An **unstaked form bows** under the concrete (a real beam deflection between whatever holds it) and **leaks** grey out at its foot; stake it during the pour and it stops (what ran out stays out).
+- Building plans sent again by build mode no longer drop the green-concrete hold.
+
+**Try this**
+
+1. As B2 (a shed with a slab on flat ground; 7; stake; dig). Buy a rake, tamper and wheelbarrow in the Yard store if you have none (the hint offers Buy buttons), and order the building's materials (gravel, concrete mix).
+2. Gravel: one drag over the pad. Rake it until the amber and blue are gone, tamp it over twice.
+3. Boards on the four strings, then the stakes (try setting gesture to 3x). Leave one long side unstaked to see it bow and leak.
+4. Mix: up, right-hold for ~6 s for three bags, hoe until 100%, tip. About 14 batches for the 3 x 2.4 m shed slab at 1x. Then screed. Console shortcuts: `__game.sim.commandNow('foundation.mix', { jobId: '1', bags: 3 })`, `{ waterL: 9 }`, `{ work: 5 }`, then `foundation.tip { jobId: '1', x, z }`.
+
+**Weak / not in yet**
+
+- Slabs only: stem walls and piers still use `__foundation.debugPour()` (B8). Finishing (float, joints, broom), cure colour, covers and stripping the forms are B5; the wet mesh disappears when the screed finishes and the slab member is drawn.
+- Leaked concrete cannot be shovelled back yet; it is lost. The ridge pushed past the far form ends up on it (shovel-off is not modelled).
+- The barrow is the only mixer; 14 barrow batches for a shed slab is real but long (the mixer is B7, ready-mix B9).
+- Gravel coverage is read as "filled to half the base depth over the dig line" once the job's own gravel has been tipped in (core earthwork loses track of a raked layer's thickness, so the label alone is not reliable).
+- Water feedback is the meter, the colour of the heap in the barrow and the hint; no sloshing or crumb visuals in the tub yet. The screed's "saw" is a small wobble of the board.
+- Console: `__foundation.drawn()`, `__game.foundation.jobView(__game.sim.state, '1')`, `__game.foundation.carry(__game.sim.state)`. Tests: `node --test test/foundation-pour.test.mjs`, `node test/foundation.smoke.mjs`.

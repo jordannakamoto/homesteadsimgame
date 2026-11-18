@@ -7,11 +7,21 @@
 // cure step and the gates. B2 adds the layout and the dig: setPlan takes the corners and the dig regions from the
 // page, foundation.stake closes the string lines, foundation.check reads the dig from the ground (and finishes the
 // building's site stage when it is down to the line), foundation.trim is the flat of the shovel along a stroke.
-// The other hands-on steps (base, forms, rebar, pour, finish, strip) come in B3-B8.
+// B3: the gravel base is read from the ground (foundation.check: gravel, level under the slab, tamped twice through
+// the landscape's tamp flags; foundation.gravel tips the building's gravel as a landscape heap), then forms: runs of
+// boards on the strings (foundation.setForm) held by stakes (foundation.stakeForm). B4: the barrow mix is a generic
+// batch (core/batch.js; foundation.mix, foundation.take) whose water/cement ratio sets its slump, whether it screeds
+// and its strength; the wet slab is an earthwork-format grid in job.pour (h = mm of concrete over the base, the
+// forms are WALL bits) worked by foundation.tip (fill and flow), foundation.rake (relax) and foundation.screed (push
+// riding on the forms, the ridge rolling ahead). Each board bows as a beam between what holds it; past
+// FORMS.leakBowM it gapes and the concrete runs out. Screeded flat, the slab starts to cure (finishing is B5).
+// The other hands-on steps (rebar, finish, strip, piers and walls) come in B5-B8.
 //
-// state sys.foundation = { v: 1, nextId, jobs: { [id]: job }, carry: null, machines: {} }
+// state sys.foundation = { v: 1, nextId, jobs: { [id]: job }, carry: batch | null (the barrow's mix), machines: {} }
 // job = { id, owner: { structId } | null, type, x, z, yaw, topY, step, layout, digs: [{ poly, targetY, frac, rough }], roughIn, elements: [element], pour,
-//         held: reason | null, baseIds: [construction member ids of the gravel base] }
+//         held: reason | null, baseIds: [construction member ids of the gravel base], base: { level, gravel, compact },
+//         gravelM3, forms: { runs: [{ a, b, len, out, boards, set, stakes, driven, bow, leak }] },
+//         pour: { grid, m3, wcM3, weakM3, leakM3, cold, firstT, lastT, screed, needM3 } }
 // element = { id, kind, memberIds, w, botY, topY, volM3, dig, base, forms, rebar, bolts, pour, finish, cure }
 // events: 'foundation.gate' { jobId, gate } when a gate opens; 'foundation.cured' { jobId } when it is followed no more.
 import * as CU from './core/cure.js';
@@ -187,12 +197,13 @@ export function baseRead(state, job, fine) {
       const q = fine ? EW.point(fine, i, j) : null;
       // filled at least half the base above the dig line with gravel. Raking and pushing a layer lose track of its
       // thickness here and there (core earthwork keeps l only roughly once relaxed), so a filled point counts when it
-      // reads as gravel or gravel lies on most of the base (gravelSurf, below)
+      // reads as gravel, or gravel lies on most of the base or at least that share of it was tipped in (gravelSurf, below)
       if (q && q.s !== EW.UNTOUCHED && dy + by - d.targetY >= thick * B.minLayer) { filled++; if (B.surfaces.includes(q.s)) gravel++; }
       if (q && (q.s !== EW.UNTOUCHED)) compact += q.f & B.tamp2 ? 1 : q.f & B.tamp1 ? 0.5 : 0;
     }
   }
-  return n ? { n, level: r6(level / n), gravel: r6(gravel / n >= B.gravelSurf ? filled / n : gravel / n), compact: r6(compact / n), needM3: r6(needM3) } : { n: 0, level: 1, gravel: 1, compact: 1, needM3: 0 };
+  const tipped = (job.gravelM3 || 0) >= needM3 * B.gravelSurf;   // or the job's own gravel was tipped into it
+  return n ? { n, level: r6(level / n), gravel: r6(gravel / n >= B.gravelSurf || tipped ? filled / n : gravel / n), compact: r6(compact / n), needM3: r6(needM3) } : { n: 0, level: 1, gravel: 1, compact: 1, needM3: 0 };
 }
 const baseDone = (b) => b.level >= CC.BASE.levelDone && b.gravel >= CC.BASE.gravelDone && b.compact >= CC.BASE.compactDone;
 
