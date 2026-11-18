@@ -142,17 +142,20 @@
     aim.touch = e.pointerType === 'touch';
     if (aim.touch) { fingers.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (fingers.size > 1) { endPress(); return; } }
     setPtr(e);
-    if (e.button === 2) {
+    // the middle button always turns the view; the right button does too, unless the item in hand has a second use
+    // for it (the shovel: the flat of the blade), when it is a press of its own (aim.alt)
+    const alt = e.button === 2 && !aim.down && !!(cfg.alt && cfg.alt(cur));
+    if (e.button === 1 || (e.button === 2 && !alt)) {
       if (aim.down) aim.second = true;                       // second button while working: tip all the way
       else { ptr.turning = true; ptr.rx = ptr.rx0 = e.clientX; ptr.ry = ptr.ry0 = e.clientY; }
       return;
     }
-    if (e.button !== 0) return;
+    if (e.button !== 0 && !alt) return;
     try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     aim.down = false; locate();
     if (!aim.valid) return;
     const P = G.player;
-    aim.down = true; aim.held = 0; aim.shift = e.shiftKey; ptr.px = e.clientX; ptr.py = e.clientY; ptr.pressNdcY = ptr.ndcY;
+    aim.down = true; aim.alt = alt; aim.held = 0; aim.shift = e.shiftKey; ptr.px = e.clientX; ptr.py = e.clientY; ptr.pressNdcY = ptr.ndcY;
     aim.dx = aim.dy = aim.travel = aim.pull = aim.lift = aim.side = 0; aim.tip = 0;
     aim.ox = ptr.lx = aim.x; aim.oz = ptr.lz = aim.z;
     const d = Math.hypot(P.x - aim.x, P.z - aim.z) || 1; ptr.ux = (P.x - aim.x) / d; ptr.uz = (P.z - aim.z) / d;
@@ -165,13 +168,15 @@
       const f = fingers.get(e.pointerId); if (!f) return;
       turn(e.clientX - f.x, e.clientY - f.y); f.x = e.clientX; f.y = e.clientY; return;
     }
-    if (ptr.turning && (e.buttons & 2)) { turn(e.clientX - ptr.rx, e.clientY - ptr.ry); ptr.rx = e.clientX; ptr.ry = e.clientY; return; }
+    if (ptr.turning && (e.buttons & 6)) { turn(e.clientX - ptr.rx, e.clientY - ptr.ry); ptr.rx = e.clientX; ptr.ry = e.clientY; return; }
     setPtr(e);
     if (aim.down) { aim.dx = e.clientX - ptr.px; aim.dy = e.clientY - ptr.py; aim.side = Math.max(aim.side, Math.abs(aim.dx)); aim.shift = e.shiftKey; }
   }, true);
   const up = (e) => {
     if (!cfg) return;
     if (e.pointerType === 'touch') fingers.delete(e.pointerId);
+    if (e.button === 2 && aim.down && aim.alt) { e.stopImmediatePropagation(); endPress(); return; }
+    if (e.button === 1) { ptr.turning = false; return; }
     if (e.button === 2) {
       // a right-click that did not drag the view is a tap: the stance may use it (the yard sets where earth goes)
       const tap = ptr.turning && Math.hypot(e.clientX - (ptr.rx0 ?? e.clientX), e.clientY - (ptr.ry0 ?? e.clientY)) < 6;
@@ -179,7 +184,7 @@
       if (tap && cfg.second && e.target === canvas) { setPtr(e); locate(); if (aim.valid) cfg.second(aim, cur); }
       return;
     }
-    if (!aim.down) return;
+    if (!aim.down || aim.alt) return;
     e.stopImmediatePropagation();
     endPress();
   };

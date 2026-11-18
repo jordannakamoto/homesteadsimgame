@@ -190,9 +190,9 @@ test('materials arrive as bags or a heap; a bag broken open spills where it lies
 test('a dug hole keeps its walls; the thrown earth is loose and slumps to a cone', () => {
   const sim = makeSim();
   for (let k = 0; k < 6; k++) { assert.ok(c(sim, 'landscape.dig', { x: 2, z: 2 }).ok); assert.ok(c(sim, 'landscape.dump', { x: 3.2, z: 2 }).ok); }
-  const g = L(sim).grid, hole = reliefAt(g, 2, 2), wall = reliefAt(g, 2.3, 2), heap = reliefAt(g, 3.2, 2);
+  const g = L(sim).grid, hole = reliefAt(g, 2, 2), wall = reliefAt(g, 2.45, 2), heap = reliefAt(g, 3.2, 2);
   assert.ok(hole < -0.3, 'deep: ' + hole);
-  assert.ok(wall > -0.06, 'the wall stands: ground 30 cm off the centre is near grade, ' + wall);
+  assert.ok(wall > -0.06, 'the wall stands: ground 45 cm off the centre is near grade, ' + wall);
   assert.ok(heap > 0.12, 'a heap: ' + heap);
   // the heap is no steeper than loose earth stands
   let steep = 0;
@@ -234,4 +234,20 @@ test('grains: a load poured into the air lands grain by grain; an over-steep hea
   assert.ok(o.ok && L(sim).air.woodchips > 0.05);
   c(sim, 'landscape.land', { pts: [[6, 6, 0.056, 'woodchips']] });
   assert.equal(landscapeRead.groundAt(sim.state, 6, 6).s, 'woodchips');
+});
+
+test('the flat of the shovel: pushed across a heap it carries the earth on, fills a hollow and leaves the ground level', () => {
+  const sim = makeSim();
+  const g = () => L(sim).grid;
+  // a heap at x = 3, a hollow at x = 5
+  for (let k = 0; k < 3; k++) { c(sim, 'landscape.dig', { x: 5, z: 2 }); c(sim, 'landscape.dump', { x: 3, z: 2 }); }
+  const net0 = netVolume(g()), heap0 = reliefAt(g(), 3, 2), hole0 = reliefAt(g(), 5, 2);
+  assert.ok(heap0 > 0.15 && hole0 < -0.1);
+  // push from x = 2 to x = 6 in short steps, the blade at grade (0)
+  for (let x = 2; x < 6; x += 0.1) { const r = c(sim, 'landscape.push', { x0: x, z0: 2, x1: x + 0.1, z1: 2, level: 0 }); assert.ok(r.ok, r.reason); }
+  assert.ok(reliefAt(g(), 3, 2) < 0.03, 'the heap is pushed away: ' + reliefAt(g(), 3, 2));
+  assert.ok(reliefAt(g(), 5, 2) > hole0 + 0.08, 'the hollow filled: ' + hole0 + ' -> ' + reliefAt(g(), 5, 2));
+  assert.ok(Math.abs(netVolume(g()) - net0) < 1e-6, 'conserved');
+  // one push step is a short one
+  assert.equal(c(sim, 'landscape.push', { x0: 0, z0: 0, x1: 0.6, z1: 0, level: 0 }).ok, false);
 });

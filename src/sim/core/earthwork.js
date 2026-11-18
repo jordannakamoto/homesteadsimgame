@@ -216,6 +216,68 @@ export function settle(g, x, z, r = 0.8, slope = REPOSE, iters = 40, firmOnly = 
   }
   g.rev++;
 }
+// The flat of a blade pushed along the ground from (x0, z0) to (x1, z1), riding at relief `level` (metres): loose
+// earth and layers above that height in the swept strip (width w) come away in front of the blade; low spots it
+// passes are filled from what it pushes, up to the level; what is left is dropped as a ridge just ahead of the blade,
+// where the next push picks it up again. Firm ground and turf are not cut. Volume is conserved. Returns
+// { m3: what is now in front of the blade, s: its surface }.
+export function push(g, x0, z0, x1, z1, level, { w = 0.45, t = 0 } = {}) {
+  const st = g.step, A = area(g), L = Math.hypot(x1 - x0, z1 - z0);
+  if (L < 1e-4) return { m3: 0, s: '' };
+  const ux = (x1 - x0) / L, uz = (z1 - z0) / L, half = w / 2, lv = Math.round(level * 1000), AHEAD = 0.14;
+  const xs = [x0, x1, x1 + ux * AHEAD], zs = [z0, z1, z1 + uz * AHEAD];
+  const i0 = Math.floor((Math.min(...xs) - half) / st), i1 = Math.ceil((Math.max(...xs) + half) / st);
+  const j0 = Math.floor((Math.min(...zs) - half) / st), j1 = Math.ceil((Math.max(...zs) + half) / st);
+  const swept = [], ahead = [];
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+    const px = i * st - x0, pz = j * st - z0, along = px * ux + pz * uz, across = Math.abs(-px * uz + pz * ux);
+    if (across > half) continue;
+    if (along >= -st * 0.5 && along <= L) swept.push([i, j, along]);
+    else if (along > L && along <= L + AHEAD) ahead.push([i, j]);
+  }
+  // what the blade gathers, by surface (in mm over one point's area)
+  const load = new Map();
+  let total = 0;
+  for (const [i, j] of [...swept, ...ahead]) {
+    const r = tileOf(g, i, j, false);
+    if (!r) continue;
+    const [tl, n] = r, loose = (tl.f[n] & LOOSE_BIT) || tl.l[n] > 0;
+    if (!loose || tl.s[n] === 0 || tl.h[n] <= lv) continue;
+    // a layer (chips, gravel) comes off on its own, down to what is under it; loose earth down to the level
+    const name = tl.l[n] > 0 ? g.codes[tl.s[n]] : 'soil', take = tl.l[n] > 0 ? Math.min(tl.h[n] - lv, tl.l[n]) : tl.h[n] - lv;
+    tl.h[n] -= take;
+    if (tl.l[n] > 0) { tl.l[n] = Math.max(0, tl.l[n] - take); if (!tl.l[n]) tl.s[n] = code(g, 'soil'); }
+    load.set(name, (load.get(name) || 0) + take); total += take;
+  }
+  // the blade's surface: whatever it holds most of
+  let surf = 'soil', most = -1;
+  for (const [k, v] of load) if (v > most) { most = v; surf = k; }
+  const layer = surf !== 'soil', c = code(g, surf);
+  const put = (i, j, d) => {
+    const [tl, n] = tileOf(g, i, j, true);
+    tl.h[n] += d; tl.f[n] |= LOOSE_BIT;
+    if (layer) { if (tl.s[n] !== c) tl.l[n] = 0; tl.l[n] += d; tl.s[n] = c; } else if (tl.s[n] === 0 || tl.l[n] === 0) { tl.s[n] = code(g, 'soil'); }
+    tl.t[n] = t;
+  };
+  // low spots it passes over fill first, nearest the blade first (that is where the earth is)
+  swept.sort((a, b) => b[2] - a[2]);
+  for (const [i, j] of swept) {
+    if (total <= 0) break;
+    const r = tileOf(g, i, j, false), h = r ? r[0].h[r[1]] : 0;
+    if (h >= lv) continue;
+    const d = Math.min(lv - h, total);
+    put(i, j, d); total -= d;
+  }
+  // the rest rides ahead of the blade as a ridge
+  if (total > 0 && ahead.length) {
+    const each = Math.floor(total / ahead.length);
+    let left = total - each * ahead.length;
+    for (const [i, j] of ahead) { const d = each + (left > 0 ? 1 : 0); if (left > 0) left--; if (d > 0) put(i, j, d); }
+    total = 0;
+  } else if (total > 0) { const i = Math.round(x1 / st), j = Math.round(z1 / st); put(i, j, total); total = 0; }
+  g.rev++;
+  return { m3: (most > 0 ? [...load.values()].reduce((a, b) => a + b, 0) : 0) / 1000 * A, s: surf };
+}
 // Smooth loose ground in a round footprint toward its neighbours (a rake), keeping its volume. k: 0..1 a pass.
 export function relax(g, x, z, r = 0.35, k = 0.5) {
   const fp = footprint(g, x, z, r).filter((p) => isLooseCode(sAt(g, p[0], p[1])));

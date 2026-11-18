@@ -25,7 +25,7 @@ await G(() => { __game.lockQuality(); __game.setQuality('low'); __game.setSpeed(
 await page.keyboard.press('Digit6'); await wait(1500);
 check('key 6 takes up the yard tools', await G(() => __game.player.tool === 'yard' && __hands.isOpen));
 const scr = (x, z) => G((o) => { const p = __hands.toScreen(o.x, __game.surfaceAt(o.x, o.z) + 0.02, o.z, {}); return { x: p.x, y: p.y }; }, { x, z });
-const P = await G(() => { const g = __game, P = g.player; return { x: P.x, z: P.z, fx: -Math.sin(g.cam.yaw), fz: -Math.cos(g.cam.yaw), rx: Math.cos(g.cam.yaw), rz: -Math.sin(g.cam.yaw) }; });
+const P = await G(() => { const g = __game, P = g.player; return { x: P.x, z: P.z, fx: -Math.sin(g.cam.yaw), fz: -Math.cos(g.cam.yaw), rx: Math.cos(g.cam.yaw), rz: -Math.sin(g.cam.yaw), yaw: g.cam.yaw }; });
 const at = (r, f) => ({ x: P.x + P.rx * r + P.fx * f, z: P.z + P.rz * r + P.fz * f });
 const landed = async () => { for (let k = 0; k < 60 && (await G(() => __landscape.flying)); k++) await wait(250); };
 const hold = async (id) => { await G((i) => __landscape.hold(i), id); await wait(250); };
@@ -45,7 +45,17 @@ check('a scoop is dug, carried and dropped; earth is neither made nor lost', s.c
 for (let i = 0; i < 4; i++) await scoop(at(0.4, 1.2), at(-0.8, 1.2));
 const hole = await rel(at(0.4, 1.2)), heap = await rel(at(-0.8, 1.2));
 check('scoop after scoop: a round hole, and a heap where they were dropped', hole < -0.12 && heap > 0.1, Math.round(hole * 100) + ' cm, +' + Math.round(heap * 100) + ' cm');
-const net0 = (await L()).net;
+// the flat of the blade (right-drag): pushed through the heap from beside it, the heap is bulldozed along
+{
+  const h0 = await rel(at(-0.8, 1.2)), A0 = at(-0.8, 0.45), B0 = at(-0.8, 2.0), a = await scr(A0.x, A0.z), b = await scr(B0.x, B0.z);
+  await page.mouse.move(a.x, a.y); await wait(150); await page.mouse.down({ button: 'right' });
+  await page.mouse.move(b.x, b.y, { steps: 16 }); await wait(600); await page.mouse.up({ button: 'right' }); await wait(300); await landed();
+  const h1 = await rel(at(-0.8, 1.2)), l = await L(), air = await G(() => Object.values(__game.sim.state.sys.landscape.air || {}).reduce((x, y) => x + y, 0));
+  check('right-drag pushes the heap along with the flat of the blade; nothing lost', h1 < h0 - 0.05 && Math.abs(l.net + air) < 2e-4, Math.round(h0 * 100) + ' -> ' + Math.round(h1 * 100) + ' cm');
+  check('the right button did not turn the view while pushing', Math.abs((await G(() => __game.cam.yaw)) - P.yaw) < 1e-6);
+}
+const airNow = () => G(() => Object.values(__game.sim.state.sys.landscape.air || {}).reduce((a, b) => a + b, 0));
+const net0 = (await L()).net + (await airNow());
 await dig1(at(0.4, 1.2));
 { const l = await L(), air = await G(() => Object.values(__game.sim.state.sys.landscape.air || {}).reduce((a, b) => a + b, 0)); check('a plain click digs and drops it beside the hole (earth on the ground or still in the air: none lost)', l.carry === 0 && Math.abs(l.net + air - net0) < 2e-4, JSON.stringify({ c: l.carry, d: l.net - net0, air })); }
 check('the shaped ground is drawn and the terrain lets it through', await G(() => __landscape.tiles() > 0));
