@@ -251,3 +251,29 @@ test('the flat of the shovel: pushed across a heap it carries the earth on, fill
   // one push step is a short one
   assert.equal(c(sim, 'landscape.push', { x0: 0, z0: 0, x1: 0.6, z1: 0, level: 0 }).ok, false);
 });
+
+test('the blade pushed further in takes more; patted, loose earth goes smooth and firm; a fast push leaves no spires', () => {
+  const sim = makeSim();
+  const g = () => L(sim).grid;
+  const a = c(sim, 'landscape.dig', { x: 2, z: 2, m3: 0.01 });
+  assert.ok(a.ok && Math.abs(a.load - 0.01) < 1e-4);
+  const b = c(sim, 'landscape.dig', { x: 2, z: 2, m3: 0.05, add: true });
+  assert.ok(b.ok && Math.abs(b.load - b.cap) < 1e-4, 'filled to a full blade: ' + b.load);
+  assert.equal(c(sim, 'landscape.dig', { x: 2, z: 2, add: true }).ok, false, 'no more than a full blade');
+  c(sim, 'landscape.dump', { x: 4, z: 2 });
+  // lumpy loose ground, patted: smoother, firm, same volume
+  for (const [x, z] of [[6, 6], [6.15, 6.05], [5.9, 6.1]]) { c(sim, 'landscape.dig', { x: 8, z: 8 }); c(sim, 'landscape.land', {}); c(sim, 'landscape.pour', { x, z }); c(sim, 'landscape.land', { pts: [[x, z, L(sim).air.soil, 'soil']] }); }
+  const rough = () => { let r = 0; for (let i = -2; i <= 2; i++) r += Math.abs(reliefAt(g(), 6 + i * 0.1, 6) * 2 - reliefAt(g(), 6 + (i - 1) * 0.1, 6) - reliefAt(g(), 6 + (i + 1) * 0.1, 6)); return r; };
+  const r0 = rough(), v0 = netVolume(g());
+  for (let k = 0; k < 3; k++) assert.ok(c(sim, 'landscape.pat', { x: 6, z: 6 }).ok);
+  assert.ok(rough() < r0 * 0.6, 'smoother: ' + r0.toFixed(3) + ' -> ' + rough().toFixed(3));
+  assert.ok(Math.abs(netVolume(g()) - v0) < 1e-6, 'conserved');
+  assert.equal(landscapeRead.groundAt(sim.state, 6, 6).s, 'soil');
+  // pushing a big heap fast (long steps) leaves nothing steeper than loose earth stands
+  for (let k = 0; k < 6; k++) { c(sim, 'landscape.dig', { x: 12, z: 2 }); c(sim, 'landscape.dump', { x: 10, z: 2 }); }
+  for (let x = 9.2; x < 11.6; x += 0.45) c(sim, 'landscape.push', { x0: x, z0: 2, x1: x + 0.45, z1: 2.1, level: 0 });
+  c(sim, 'landscape.settle', { x: 11.65, z: 2.1, r: 0.9 });   // the blade lifted: its face no longer holds the ridge
+  let steep = 0;
+  for (let i = 88; i < 114; i++) for (let j = 15; j < 26; j++) { const h = reliefAt(g(), i / 10, j / 10), hx = reliefAt(g(), (i + 1) / 10, j / 10), hz = reliefAt(g(), i / 10, (j + 1) / 10); steep = Math.max(steep, Math.abs(hx - h) / 0.1, Math.abs(hz - h) / 0.1); }
+  { let w = ''; for (let i = 88; i < 114; i++) for (let j = 15; j < 26; j++) { const h = reliefAt(g(), i / 10, j / 10), hx = reliefAt(g(), (i + 1) / 10, j / 10), hz = reliefAt(g(), i / 10, (j + 1) / 10); if (Math.max(Math.abs(hx - h), Math.abs(hz - h)) / 0.1 > 1) w += ' ' + i + ',' + j + ':' + h.toFixed(2) + '/' + hx.toFixed(2) + '/' + hz.toFixed(2); } assert.ok(steep < 1.0, 'no spires: steepest ' + steep.toFixed(2) + w); }
+});
