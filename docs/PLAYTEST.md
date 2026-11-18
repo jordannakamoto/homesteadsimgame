@@ -663,3 +663,30 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - The rider is the existing blocky character with one-piece legs, so knees do not bend; the legs reach the footrests straight.
 - Fuel runs down but there is no way to refuel by hand yet (V9); `__game.sim.commandNow('vehicles.refuel', { id })` takes gasoline from stock.
 - Collisions with buildings and trees use three circles along the body; it can clip a corner slightly.
+
+## Vehicles V7 + V8 — tow the trailer, haul lumber with it (branch `vehicles-v7v8-trailer`)
+
+**What is new**
+
+- **A small utility trailer comes with the ATV** (for now, in new worlds and once in older saves; V9 moves it to the supplier). It is parked loose a few steps behind the ATV, lined up: an ATV dump trailer of the common steel kind, 1.8 x 1.1 m bed, 90 kg, rated 350 kg, on a 2-inch ball. Steel tub with a front board, side rails and the tailgate hung open for long loads, A-frame tongue with a coupler and jack post, two wheels under fenders.
+- **Hitch by backing onto it.** Reverse toward the tongue: within 3 m a faint line runs from the ball to the coupler (pale yellow, greener when you are lined up). Get the ball within 0.4 m with the trailer lined up within 35 degrees and it latches with a clunk ("Hitched"). Not lined up: it says so. **X unhitches** while seated (stop first).
+- **Towing feels the load.** The trailer's mass and its load add to what the engine pulls and what the ATV's brakes stop (small trailers have no brakes of their own), so a full trailer pulls away slower and stops longer (in the test, deceleration on dry grass drops by over a quarter with 350 kg on). A tenth of its gross weight sits on the ball, behind the rear axle: more weight on the driven wheels, less on the front, so the steering washes out sooner with a heavy load. It follows on the ball without sliding at its own axle, so it cuts corners and swings in a tight turn. Backing up is unstable the way it is in life: it folds, and at 75 degrees (the jackknife stop) the rig binds and stops ("Jackknifed: pull forward to straighten the trailer").
+- **Loading at a pile: hold.** With the trailer parked within about 4 m of a pile, aim at the pile and hold the left button (or E): after a moment the pieces stream onto the bed, about eight a second, each flying from the pile to its place, until you let go, the pile is gone or the bed reaches 350 kg. A quick tap still picks up an armful as before. Studs and joists lie along the bed and hang over the open tailgate; sheets lie flat; boxes and bags in rows. Mixed loads stack layer on layer.
+- **Build straight off the trailer.** What is on the bed stays a construction pile that rides with the trailer, so a trailer parked by the work is the pile the build draws from (guided building, work until done, cutting at the sawhorses take from the nearest pile), and by hand you can take an armful off the bed (walk up to it: "Pick up ... off the trailer").
+- **Tipping.** While seated with the trailer on, hold the left button: the bed tips up about its pivot (30 degrees a second, to 48). Past about 27 degrees (dry lumber on steel) the load slides off the tail and lands as an ordinary pile behind the trailer. Let go and the bed comes down.
+
+**Try this**
+
+1. New world or an old save: walk past the well. The trailer is behind the ATV. Get on, look along the ATV's nose, hold S: watch the guide line and back onto the tongue. Tow it around the house; back it into a spot between two trees (Shift is gentle throttle).
+2. Order lumber (Build panel), drive the trailer to the delivered pile, step off, hold at the stud pile. Drive to the far side of the building and build with "work until done": the studs come off the trailer.
+3. Tip the rest off behind the building; X to unhitch.
+4. Console: `__vehicles.bed('v2')` (tip angle, pieces, kg), `__vehicles.hitch()`, `__vehicles.unhitch()`, `__vehicles.tip(true)`.
+
+**What's weak**
+
+- The trailer is given with the ATV, not bought: V9 adds it to the supplier (the item `trailer_small`, $450, is already in the catalog).
+- No touch control yet for tipping or unhitching (V6: "Use" and a long press). On a phone, the trailer can be towed and loaded but not tipped or unhitched.
+- A loose trailer cannot be pulled around by hand yet; only the ATV moves it.
+- Its tongue rests at ball height on the jack whether hitched or not (no crank). Loads longer than the bed pass through the open tailgate's line rather than over it.
+- The pieces flying onto the bed are drawn by the trailer's own instanced load (a short arc), not by construction's member fly-in, which is tied to building members.
+- The trailer pushes no sideways force into the ATV through the ball (the tow model is kinematic: the trailer's mass slows and lengthens stops, its tongue load moves the ATV's grip, and it binds at the jackknife stop, but it cannot shove the ATV's tail out on a downhill turn).

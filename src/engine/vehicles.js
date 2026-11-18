@@ -3,7 +3,7 @@
 // game words; content (src/game/*.js) registers models and names the ground under a point.
 //
 //   window.__vehicles = {
-//     register({ models, surface, onStroke }),   content, once. models[look] = (T, helper, kind) -> model (below);
+//     register({ models, surface, onStroke, onDump }),   content, once. models[look] = (T, helper, kind) -> model (below);
 //                                                surface(x, z) -> a name in the vehicles system's api.surfaces
 //     units(), unit(id), driven() -> id | null, kinds(),
 //     mount(id, seat?), dismount(),              also done by walking into a mount zone / pressing E
@@ -11,10 +11,21 @@
 //     bedPoint(id, out), nearest(x, z, r) -> id | null, spawn(kind, x?, z?, yaw?) -> id (debug and tests),
 //     findSpot(x, z, { rMin, rMax, rad, away }) -> { x, z, yaw } | null   a clear, dry, flat place near a point
 //     unstick(id), stats(),
+//     towing: hitch(id?) (the driven unit to the nearest towed unit in reach), unhitch() (X while seated),
+//     cargo:  setCargo(id, groups, kg)  what lies on a unit's bed: groups = [{ n, w, h, l, color }] (pieces, metres,
+//             laid along the bed, layer on layer); kg is what it weighs (the drive model tows it),
+//             flyFrom(id, { x, y, z })  the next pieces added fly onto the bed from there,
+//             carrierNear(x, z, r) -> id | null   a unit with a bed within r of a point, bed(id) -> { angle, sliding }
+//     gen   bumped whenever the page's units are rebuilt (content re-sends cargo)
 //   }
 //   model = { body: Object3D, wheels: InstancedMesh | null (one instance per probe: front left, front right, rear left,
-//             rear right), bars: Object3D | null (turns with the steering about its own y), grips: [[x, y, z] left,
-//             right] | null, feet: [[x, y, z] left, right] | null }
+//             rear right; a one-axle towed unit: left, right), bars: Object3D | null (turns with the steering about its
+//             own y), grips: [[x, y, z] left, right] | null, feet: [[x, y, z] left, right] | null,
+//             bed: Object3D | null (a tipping bed, built in the unit's frame; it turns about kind.cargo.pivot) }
+//   Towing: a unit hitched in the sim is stepped with its tow unit (stepBody's trailer). Backing the tow point within
+//   kind.hitch.latchM of a loose unit's tongue, lined up within hitch.alignRad, latches it; a faint line from the ball
+//   to the tongue shows while reversing within 3 m. Holding the left button while seated tips a towed unit's bed
+//   (cargo.tips): past cargo.slideRad the load slides off and content's onDump(id, { x, z }) puts it on the ground.
 //   helper = { boxModel(parts) -> BufferGeometry (parts: [w, h, d, x, y, z, hex, rx?, ry?, rz?]), mergeGeo(T, list) }
 //
 // The sim (vehicles system) owns where each unit is parked, its fuel and who sits where. While a unit is driven this file
@@ -29,7 +40,9 @@
   const sysDef = () => G.sim.systems.find((s) => s.name === 'vehicles') || null;
   const S = () => G.sim.state.sys.vehicles || null;
   const kinds = () => { const d = sysDef(); return d ? d.api.kinds : {}; };
-  const content = { models: {}, surface: null, onStroke: null };
+  const content = { models: {}, surface: null, onStroke: null, onDump: null };
+  const CARGO_CAP = 96, FLY_S = 0.35, SLIDE_S = 0.7, GUIDE_M = 3;
+  let gen = 0;
   const live = new Map();                 // id -> L, the page's view of each unit
   let simRef = null, seat = null, stepping = null, buildV = -1, zone = null, sayT = 0, warnT = 0;
   const stat = { ms: 0, sub: 0, frames: 0 };
@@ -85,7 +98,7 @@
     if (!kind) return null;
     const L = { id: u.id, kind, root: new T.Group(), model: null, body: null, prev: {}, cur: {}, pose: {}, acc: 0, env: null,
       parked: { x: u.x, z: u.z, yaw: u.yaw }, water: 0, wl: [0, 0, 0, 0], spin: 0, wake: 0, tip: null, glow: 0, mats: [], surf: null, syncT: 0,
-      sent: { burned: 0, dist: 0, engine: 0 } };
+      sent: { burned: 0, dist: 0, engine: 0 }, towL: null, trSpec: null, loadKg: 0, bedG: null, bedA: 0, bedWant: false, cg: null };
     L.env = makeEnv(L);
     const fn = content.models[kind.look] || greyBox;
     const m = fn(T, helper, kind) || greyBox(T, helper, kind);
@@ -93,9 +106,18 @@
     L.root.matrixAutoUpdate = false;
     for (const o of [m.body, m.wheels, m.bars]) if (o) { L.root.add(o); o.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = false; if (c.material && c.material.emissive) { c.material = c.material.clone(); L.mats.push(c.material); } } }); }
     if (m.body) { m.body.matrixAutoUpdate = false; m.body.updateMatrix(); }
+    const cgo = kind.cargo;
+    if (m.bed && cgo) {                                       // the tipping bed turns about its pivot
+      const pv = cgo.pivot || [cgo.bed.at[1], cgo.bed.at[2] - cgo.bed.l / 2];
+      L.bedG = new T.Group(); L.bedG.position.set(0, pv[0], pv[1]);
+      m.bed.position.set(0, -pv[0], -pv[1]); L.bedG.add(m.bed); L.root.add(L.bedG);
+      m.bed.traverse((c) => { if (c.isMesh) c.castShadow = true; });
+    }
+    if (cgo) makeCargo(L);
     if (m.wheels) { m.wheels.frustumCulled = false; m.wheels.instanceMatrix.setUsage(T.DynamicDrawUsage); }
     G.scene.add(L.root);
     L.body = VC.createBody(kind, { x: u.x, z: u.z, yaw: u.yaw, fuelL: u.fuelL }, L.env);
+    gen++;
     L.surf = surfAt(u.x, u.z);
     VC.poseOf(L.body, L.prev); VC.poseOf(L.body, L.cur); VC.poseOf(L.body, L.pose);
     for (let i = 0; i < 4; i++) L.wl[i] = kind.wheelR;
@@ -107,6 +129,7 @@
     G.scene.remove(L.root);
     L.root.traverse((c) => { if (c.isMesh) { c.geometry.dispose(); if (c.material.dispose) c.material.dispose(); } });
     live.delete(L.id);
+    gen++;
   }
   // put a parked unit on the ground at the sim's pose (on load, when it was moved, when the ground under it changed)
   function park(L, u) {
@@ -159,6 +182,104 @@
     return out;
   }
 
+  // ---------------------------------------------------------------- the load on a bed: one instanced mesh per unit
+  // Pieces lie along the bed in rows across it, layer on layer; pieces longer than the bed rest on the front board and
+  // hang over the tail, as lumber does on a small trailer. New pieces can fly in from a point; tipping slides them off.
+  const hashf = (a, b) => { const v = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return v - Math.floor(v); };
+  function makeCargo(L) {
+    const c = L.kind.cargo, mesh = new T.InstancedMesh(new T.BoxGeometry(1, 1, 1), new T.MeshLambertMaterial({ color: 0xffffff }), CARGO_CAP);
+    mesh.count = 0; mesh.castShadow = true; mesh.frustumCulled = false; mesh.instanceMatrix.setUsage(T.DynamicDrawUsage);
+    const at = c.bed.at;
+    if (L.bedG) { const pv = L.bedG.position; mesh.position.set(at[0], at[1] - pv.y, at[2] - pv.z); L.bedG.add(mesh); }
+    else { mesh.position.set(at[0], at[1], at[2]); L.root.add(mesh); }
+    L.cg = { mesh, slots: [], fly: new Map(), from: null, fromT: 0, slide: -1, hidden: false, maxL: 0 };
+  }
+  function layoutCargo(L, groups) {
+    const c = L.kind.cargo.bed, out = [];
+    let y = 0, maxL = 0;
+    for (const g of groups) {
+      const n = Math.min(Math.max(0, g.n | 0), CARGO_CAP - out.length);
+      if (!n) continue;
+      const per = Math.max(1, Math.floor((c.w + 0.01) / (g.w + 0.012))), rows = g.l * 2 <= c.l ? Math.max(1, Math.floor((c.l + 0.01) / (g.l + 0.03))) : 1, perL = per * rows;
+      const z0 = g.l > c.l ? c.l / 2 - g.l / 2 : 0;
+      for (let k = 0; k < n; k++) {
+        const lay = Math.floor(k / perL), r = k % perL, i = r % per, row = Math.floor(r / per), q = out.length;
+        out.push({ x: (i - (per - 1) / 2) * (g.w + 0.012) + (hashf(q, 1) - 0.5) * 0.01, y: y + lay * (g.h + 0.004) + g.h / 2,
+          z: rows > 1 ? (row - (rows - 1) / 2) * (g.l + 0.03) : z0 + (hashf(q, 7) - 0.5) * 0.06,
+          sx: g.w, sy: g.h, sz: g.l * (0.96 + 0.04 * hashf(q, 3)), col: g.color, v: 0.9 + 0.2 * hashf(q, n) });
+      }
+      y += Math.ceil(n / perL) * (g.h + 0.004);
+      maxL = Math.max(maxL, g.l);
+    }
+    L.cg.maxL = maxL;
+    return out;
+  }
+  function applyCargo(L, groups) {
+    const cg = L.cg, old = cg.slots.length, slots = layoutCargo(L, groups);
+    cg.slots = slots; cg.hidden = false;
+    for (const k of [...cg.fly.keys()]) if (k >= slots.length) cg.fly.delete(k);
+    if (cg.fromT > 0 && slots.length > old) {           // the new pieces come flying from where they were taken
+      cg.mesh.updateWorldMatrix(true, false);
+      const inv = _m.copy(cg.mesh.matrixWorld).invert(), f = _v.set(cg.from.x, cg.from.y, cg.from.z).applyMatrix4(inv);
+      for (let k = old; k < slots.length; k++) cg.fly.set(k, { t: -(k - old) * 0.05, x: f.x, y: f.y, z: f.z });
+    }
+    drawCargo(L);
+  }
+  const _ce = new T.Euler(), _cq = new T.Quaternion(), _cp = new T.Vector3(), _cs = new T.Vector3(), _cc = new T.Color();
+  function drawCargo(L) {
+    const cg = L.cg, mesh = cg.mesh, slide = cg.slide >= 0 ? cg.slide : 0, bedL = L.kind.cargo.bed.l;
+    let n = 0;
+    if (!cg.hidden) for (let k = 0; k < cg.slots.length; k++) {
+      const q = cg.slots[k];
+      let x = q.x, y = q.y, z = q.z, rx = 0;
+      const fl = cg.fly.get(k);
+      if (fl) {
+        const f = clamp(fl.t / FLY_S, 0, 1), e = f * f * (3 - 2 * f);
+        x = fl.x + (q.x - fl.x) * e; z = fl.z + (q.z - fl.z) * e; y = fl.y + (q.y - fl.y) * e + Math.sin(Math.PI * f) * 0.7; rx = (1 - e) * 0.5;
+      }
+      if (slide > 0) {                                     // sliding off the tail: faster as it goes, tipping over the edge
+        const d = 2.6 * slide * slide, over = Math.max(0, -bedL / 2 - (q.z - d));
+        z -= d; y -= over * over * 2; rx = -Math.min(0.6, over * 0.8);
+      }
+      _ce.set(rx, 0, 0); _cq.setFromEuler(_ce); _cp.set(x, y, z); _cs.set(q.sx, q.sy, q.sz);
+      mesh.setMatrixAt(n, _m.compose(_cp, _cq, _cs));
+      mesh.setColorAt(n, _cc.setHex(q.col).multiplyScalar(q.v)); n++;
+    }
+    mesh.count = n;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }
+  // per frame, only for units whose bed moves or whose load is moving
+  function bedTick(L, dt) {
+    const c = L.kind.cargo, cg = L.cg;
+    if (!c || !cg) return;
+    if (cg.fromT > 0) cg.fromT -= dt;
+    let redraw = false;
+    if (L.bedG) {
+      const want = L.bedWant && c.tips ? c.tipMaxRad || 0.8 : 0, rate = (c.tipRadS || 0.5) * (want > L.bedA ? 1 : 1.6);
+      if (Math.abs(want - L.bedA) > 1e-4) {
+        L.bedA += clamp(want - L.bedA, -rate * dt, rate * dt);
+        L.bedG.rotation.x = -L.bedA;
+      }
+      if (cg.slide < 0 && !cg.hidden && cg.slots.length && L.bedA >= (c.slideRad || 0.47)) { cg.slide = 0; G.cam.shake = Math.min(0.4, G.cam.shake + 0.04); }
+    }
+    if (cg.fly.size) {
+      for (const [k, f] of cg.fly) { f.t += dt; if (f.t >= FLY_S) cg.fly.delete(k); }
+      redraw = true;
+    }
+    if (cg.slide >= 0) {
+      cg.slide += dt; redraw = true;
+      if (cg.slide >= SLIDE_S) {
+        cg.slide = -1;
+        const rear = c.bed.at[2] - c.bed.l / 2, at = VC.toWorld(L.body, 0, rear - 0.35 - Math.min(cg.maxL, 3.6) * 0.4, {});
+        const ok = content.onDump ? content.onDump(L.id, { x: at.x, z: at.z }) : false;
+        cg.hidden = !!ok;                                 // gone until content says what is left on the bed
+        if (ok) { G.cam.shake = Math.min(0.45, G.cam.shake + 0.08); landPuff({ body: { x: at.x, y: G.groundAt(at.x, at.z, L.body.y + 1), z: at.z } }); }
+      }
+    }
+    if (redraw) drawCargo(L);
+  }
+
   // ---------------------------------------------------------------- the rider
   const _rq = new T.Quaternion(), _re = new T.Euler(0, 0, 0, 'XYZ'), _rp = { x: 0, y: 0, z: 0 };
   function poseRider(L, hop) {
@@ -206,20 +327,92 @@
     const t0 = performance.now();
     L.acc += dt;
     let n = 0;
+    const Lt = L.towL, tr = Lt ? L.trSpec || (L.trSpec = { body: null, kind: null }) : null;
+    if (Lt) { tr.body = Lt.body; tr.kind = Lt.kind; Lt.body.cargoKg = Lt.loadKg; }
     L.surf = surfAt(L.body.x, L.body.z); L.water = waterAt(L.body.x, L.body.z);
     while (L.acc >= SUB && n < MAX_SUB) {
       VC.poseOf(L.body, L.prev);
-      VC.stepBody(L.body, L.kind, input, L.env, SUB);
+      if (Lt) VC.poseOf(Lt.body, Lt.prev);
+      VC.stepBody(L.body, L.kind, input, L.env, SUB, tr);
       L.land = Math.max(L.land || 0, L.body.land); L.bump = Math.max(L.bump || 0, L.body.bump);
+      L.jack = L.jack || L.body.jack;
       L.acc -= SUB; n++;
     }
     if (n === MAX_SUB) L.acc = Math.min(L.acc, SUB);
-    if (n) VC.poseOf(L.body, L.cur);
-    VC.lerpPose(L.prev, L.cur, clamp(L.acc / SUB, 0, 1), L.pose);
+    if (n) { VC.poseOf(L.body, L.cur); if (Lt) VC.poseOf(Lt.body, Lt.cur); }
+    const f = clamp(L.acc / SUB, 0, 1);
+    VC.lerpPose(L.prev, L.cur, f, L.pose);
     L.spin += (L.body.u * dt) / L.kind.wheelR;
     if (L.body.spin > 0.5) L.spin += (Math.sign(L.body.u || 1) * 9 * dt) * L.body.spin;    // spinning wheels turn faster than the ground
     draw(L, L.pose, dt, false);
+    if (Lt) { VC.lerpPose(Lt.prev, Lt.cur, f, Lt.pose); Lt.spin += (Lt.body.u * dt) / Lt.kind.wheelR; draw(Lt, Lt.pose, dt, false); }
     stat.ms += performance.now() - t0; stat.sub += n;
+  }
+
+  // ---------------------------------------------------------------- hitching
+  // a towed unit taken onto a driven one: its live body starts from the sim's pose (snapped onto the ball)
+  function wakeTowed(L, Lt) {
+    const u = S().units[Lt.id];
+    park(Lt, u);
+    Lt.body.artic = u.artic || 0; Lt.acc = 0; Lt.wake = 0; Lt.body.cargoKg = Lt.loadKg;
+  }
+  const guide = new T.Line(new T.BufferGeometry().setFromPoints([new T.Vector3(), new T.Vector3()]), new T.LineBasicMaterial({ color: 0xf0dca0, transparent: true, opacity: 0.4, depthWrite: false, fog: false }));
+  guide.visible = false; guide.frustumCulled = false; guide.renderOrder = 5;
+  G.scene.add(guide);
+  const _ball = {}, _gp = { x: 0, y: 0, z: 0 };
+  // the loose towed unit whose tongue is nearest the driven unit's tow point of the type it hitches on
+  function nearestTongue(L, r) {
+    const b = L.body, s = S();
+    let best = null;
+    for (const Lt of live.values()) {
+      const h = Lt.kind.hitch, su = s.units[Lt.id];
+      if (Lt === L || !h || Lt.tip || !su || su.towedBy || su.towing) continue;
+      const ball = VC.towPoint(b, L.kind, h.type, _ball);
+      if (!ball) continue;
+      const tx = Lt.body.x + Math.sin(Lt.body.yaw) * h.at[2], tz = Lt.body.z + Math.cos(Lt.body.yaw) * h.at[2], d = Math.hypot(ball.x - tx, ball.z - tz);
+      if (d < r && (!best || d < best.d)) best = { Lt, d, ang: Math.abs(VC.wrap(Lt.body.yaw - b.yaw)) };
+    }
+    return best;
+  }
+  function hitchGuide(L) {
+    const b = L.body, best = !L.towL && nearestTongue(L, GUIDE_M);
+    const backing = b.u < -0.05 || b.gear < 0;
+    if (!best || (!backing && best.d > 0.6)) { guide.visible = false; return; }
+    const h = best.Lt.kind.hitch, lined = best.ang < (h.alignRad || 0.61), pt = (L.kind.points || []).find((q) => q.type === h.type);
+    const pos = guide.geometry.attributes.position;
+    toWorld(L, pt.at[0], pt.at[1], pt.at[2], _gp); pos.setXYZ(0, _gp.x, _gp.y + 0.02, _gp.z);
+    toWorld(best.Lt, h.at[0], h.at[1], h.at[2], _gp); pos.setXYZ(1, _gp.x, _gp.y + 0.02, _gp.z);
+    pos.needsUpdate = true;
+    guide.material.color.setHex(lined ? 0xc8e6a0 : 0xf0dca0); guide.material.opacity = 0.2 + 0.35 * (1 - best.d / GUIDE_M);
+    guide.visible = true;
+    if (best.d <= (h.latchM || 0.4)) {
+      if (lined && Math.abs(b.u) < 1.5) latch(L, best.Lt);
+      else if (!lined && warnT <= 0) { say('Line the trailer up straighter to hitch it.', 1.4); warnT = 1.4; }
+    }
+  }
+  function latch(L, Lt) {
+    syncNow(L);                                            // the sim snaps the tongue onto the ball where the ball is now
+    const r = G.sim.commandNow('vehicles.hitch', { id: L.id, to: Lt.id });
+    if (!r.ok) { if (warnT <= 0) { say('Cannot hitch: ' + r.reason + '.', 1.5); warnT = 1.5; } return false; }
+    L.towL = Lt; wakeTowed(L, Lt);
+    L.body.u *= 0.2; guide.visible = false;
+    G.cam.shake = Math.min(0.4, G.cam.shake + 0.09);
+    say(Lt.kind.cargo && Lt.kind.cargo.tips ? 'Hitched. X unhitches; hold the left button to tip the bed.' : 'Hitched. X unhitches.', 3);
+    return true;
+  }
+  function unhitch() {
+    if (!seat || seat.phase !== 'ride') return { ok: false, reason: 'not seated' };
+    const L = seat.L, Lt = L.towL;
+    if (!Lt) { say('Nothing is hitched.', 1.2); return { ok: false, reason: 'not hitched' }; }
+    if (Math.abs(L.body.u) > 0.5) { say('Stop first to unhitch.', 1.2); return { ok: false, reason: 'moving' }; }
+    syncNow(L);
+    const r = G.sim.commandNow('vehicles.unhitch', { id: L.id });
+    if (!r.ok) return r;
+    L.towL = null; Lt.bedWant = false;
+    park(Lt, S().units[Lt.id]);
+    G.cam.shake = Math.min(0.3, G.cam.shake + 0.04);
+    say('Unhitched.', 1.5);
+    return { ok: true };
   }
 
   // ---------------------------------------------------------------- the seat (a possession on the control stack)
@@ -263,9 +456,13 @@
   }
   function syncNow(L) {
     const b = L.body;
-    const r = G.sim.commandNow('vehicles.sync', { id: L.id, x: b.x, z: b.z, yaw: b.yaw, burnedL: b.burnedL - L.sent.burned, distM: b.distM - L.sent.dist, engineS: b.engineS - L.sent.engine });
+    const r = G.sim.commandNow('vehicles.sync', { id: L.id, x: b.x, z: b.z, yaw: b.yaw, artic: L.towL ? L.towL.body.artic : undefined, burnedL: b.burnedL - L.sent.burned, distM: b.distM - L.sent.dist, engineS: b.engineS - L.sent.engine });
     L.sent.burned = b.burnedL; L.sent.dist = b.distM; L.sent.engine = b.engineS;
-    if (r && r.ok) { b.fuelL = r.fuelL; const u = S().units[L.id]; L.parked.x = u.x; L.parked.z = u.z; L.parked.yaw = u.yaw; }
+    if (r && r.ok) {
+      b.fuelL = r.fuelL; const u = S().units[L.id]; L.parked.x = u.x; L.parked.z = u.z; L.parked.yaw = u.yaw;
+      const tu = L.towL && S().units[L.towL.id];
+      if (tu) { L.towL.parked.x = tu.x; L.towL.parked.z = tu.z; L.towL.parked.yaw = tu.yaw; }
+    }
     L.syncT = 0;
     return r;
   }
@@ -308,6 +505,13 @@
     }
     drive = VC.headingControl(b, k, input.mx, input.mz, { gentle: input.shift });
     if (input.brake) { drive.brake = 1; drive.throttle = 0; }
+    {                                                      // what it tows: the sim says; the live body follows the ball
+      const u = S().units[L.id], Lt = u && u.towing ? live.get(u.towing) || null : null;
+      if (Lt !== L.towL) { L.towL = Lt; if (Lt) wakeTowed(L, Lt); }
+      if (Lt) { Lt.bedWant = !!(seat.useDown && Lt.kind.cargo && Lt.kind.cargo.tips); guide.visible = false; }
+      else if (k.points && k.points.length) hitchGuide(L);
+      if (seat.useDown && !Lt && warnT <= 0) { say('Nothing to tip: hitch a trailer first.', 1.2); warnT = 1.2; }
+    }
     if (seat.offReq) {
       if (Math.abs(b.u) < OFF_MPS) {
         seat.offReq = false;
@@ -323,6 +527,7 @@
     if (L.land > 0.8) { G.cam.shake = Math.min(0.55, G.cam.shake + 0.06 * L.land); landPuff(L); }
     if (L.bump > 2) G.cam.shake = Math.min(0.5, G.cam.shake + 0.04 * L.bump);
     L.land = L.bump = 0;
+    if (L.jack) { L.jack = false; if (warnT <= 0) { say('Jackknifed: pull forward to straighten the trailer.', 1.6); warnT = 1.6; } }
     // fuel, side slopes
     if (b.stalled === 'fuel' && sayT <= 0) say('Out of fuel.', 2.5);
     if (b.stalled === 'water' && sayT <= 0) say('Too deep: the engine drowned.', 2.5);
@@ -339,6 +544,8 @@
     syncNow(L);
     G.sim.commandNow('vehicles.leave', { id: L.id, seat: seat.seatId });
     L.body.cargoKg = 0; L.wake = 1.2;                      // a moment to settle on its springs, braked
+    if (L.towL) { L.towL.bedWant = false; park(L.towL, S().units[L.towL.id]); }
+    guide.visible = false;
     const h = seat.poss;
     seat = null;
     control.pop(h, 'off');
@@ -358,6 +565,8 @@
     P.x = o.x; P.z = o.z; P.y = G.groundAt(o.x, o.z, b.y + 1);
     releaseRider(b.yaw);
     L.body.cargoKg = 0; b.u = b.w = b.r = 0;
+    if (L.towL) { L.towL.bedWant = false; park(L.towL, S().units[L.towL.id]); }
+    guide.visible = false;
     L.tip = { t: 0, k: 0, dir };
     G.cam.shake = Math.min(0.6, G.cam.shake + 0.35);
     say('It rolled over. You jumped clear.', 3);
@@ -375,6 +584,7 @@
   // ---------------------------------------------------------------- the world: reconcile with the sim, mount zones
   function reset() {
     if (seat) { const h = seat.poss; seat = null; control.pop(h, 'reset'); releaseRider(P.face); }
+    guide.visible = false;
     for (const L of [...live.values()]) destroy(L);
     simRef = G.sim; buildV = -1; zone = null;
   }
@@ -384,12 +594,12 @@
     for (const id in s.units) {
       const u = s.units[id], L = live.get(id);
       if (!L) { create(u); continue; }
-      const driven = seat && seat.L === L;
+      const driven = seat && (seat.L === L || seat.L.towL === L);
       if (!driven && !L.wake && !L.tip && (Math.abs(u.x - L.parked.x) > 1e-3 || Math.abs(u.z - L.parked.z) > 1e-3 || Math.abs(VC.wrap(u.yaw - L.parked.yaw)) > 1e-3)) park(L, u);
     }
     for (const L of [...live.values()]) if (!s.units[L.id]) { if (seat && seat.L === L) reset(); else destroy(L); }
     const bv = window.__build ? window.__build.version : 0;
-    if (bv !== buildV) { buildV = bv; for (const L of live.values()) if (!(seat && seat.L === L) && !L.wake && !L.tip) park(L, s.units[L.id]); }
+    if (bv !== buildV) { buildV = bv; for (const L of live.values()) if (!(seat && (seat.L === L || seat.L.towL === L)) && !L.wake && !L.tip) park(L, s.units[L.id]); }
     if (!seat) {                                           // after a load: the save had the player on a seat
       const so = seatOf(), L = so && live.get(so.id);
       if (L) enterSeat(L, so.seat, null);
@@ -423,7 +633,8 @@
   // units that were just left settle on their springs, braked, then sleep; a rolled one goes over and comes back
   function settleUnits(dt) {
     for (const L of live.values()) {
-      if (seat && seat.L === L) continue;
+      if (L.cg) bedTick(L, dt);
+      if (seat && (seat.L === L || seat.L.towL === L)) continue;
       if (L.tip) {
         const t = (L.tip.t += dt);
         L.tip.k = t < 0.6 ? Math.sin((t / 0.6) * Math.PI / 2) : t < 2.4 ? 1 : Math.max(0, 1 - (t - 2.4) / 0.8);
@@ -453,7 +664,7 @@
   // ---------------------------------------------------------------- collisions: the player and other units against a unit's box
   control.colliders.push((o, rad) => {
     for (const L of live.values()) {
-      if (L === stepping || (seat && seat.L === L && o === P)) continue;
+      if (L === stepping || (stepping && stepping.towL === L) || (seat && seat.L === L && o === P)) continue;
       const b = L.body, dx = o.x - b.x, dz = o.z - b.z, reach = L.kind.dims.l / 2 + rad + 0.2;
       if (dx * dx + dz * dz > reach * reach) continue;
       if (o.y != null && Math.abs(o.y - b.y) > 1.6) continue;
@@ -475,12 +686,16 @@
     if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return;
     e.stopImmediatePropagation(); e.preventDefault();
     if (e.code === 'KeyE' && !e.repeat) seat.offReq = true;
+    if (e.code === 'KeyX' && !e.repeat) unhitch();
   }, true);
   window.addEventListener('pointerdown', (e) => {
     if (!seat || e.target !== canvas || e.pointerType !== 'mouse') return;
     e.stopImmediatePropagation();
+    if (e.button === 0 && document.pointerLockElement === canvas) seat.useDown = true;     // held: the implement (tips a bed)
     if (document.pointerLockElement !== canvas) { try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (err) { /* refused: the engine's lock prompt stays */ } }
   }, true);
+  const useUp = () => { if (seat) seat.useDown = false; };
+  window.addEventListener('pointerup', useUp, true); window.addEventListener('blur', useUp);
   // commit the pose before the engine saves on the way out (capture listeners at the target run first)
   const flush = () => { if (seat && seat.phase === 'ride') syncNow(seat.L); };
   window.addEventListener('pagehide', flush, true);
@@ -508,8 +723,9 @@
 
   // ---------------------------------------------------------------- the interface
   window.__vehicles = {
-    register({ models, surface, onStroke } = {}) {
+    register({ models, surface, onStroke, onDump } = {}) {
       if (models) Object.assign(content.models, models);
+      if (onDump) content.onDump = onDump;
       if (surface) content.surface = surface;
       if (onStroke) content.onStroke = onStroke;
       for (const L of [...live.values()]) if (!(seat && seat.L === L)) destroy(L);    // redrawn with the new models
@@ -539,6 +755,32 @@
       return r.ok ? r.id : r;
     },
     findSpot,
+    get gen() { return gen; },
+    hitch(id) {                                            // the driven unit onto the nearest loose towed unit in reach (tests, console)
+      if (!seat) return { ok: false, reason: 'not seated' };
+      const L = seat.L, best = nearestTongue(L, 0.6), Lt = id ? live.get(id) : best && best.Lt;
+      return Lt && latch(L, Lt) ? { ok: true } : { ok: false, reason: 'nothing in reach' };
+    },
+    unhitch,
+    setCargo(id, groups, kg = 0) {
+      const L = live.get(id);
+      if (!L || !L.cg) return false;
+      L.loadKg = kg > 0 ? kg : 0; L.body.cargoKg = L.loadKg;
+      applyCargo(L, groups || []);
+      return true;
+    },
+    flyFrom(id, p) { const L = live.get(id); if (!L || !L.cg) return false; L.cg.from = { x: p.x, y: p.y, z: p.z }; L.cg.fromT = 0.6; return true; },
+    carrierNear(x, z, r = 4) {
+      let best = null, bd = Infinity;
+      for (const L of live.values()) {
+        if (!L.cg || L.tip || L.bedA > 0.05) continue;
+        const d = Math.hypot(L.body.x - x, L.body.z - z) - L.kind.cargo.bed.l / 2;
+        if (d < r && d < bd) { bd = d; best = L.id; }
+      }
+      return best;
+    },
+    bed(id) { const L = live.get(id); return L && L.cg ? { angle: L.bedA, sliding: L.cg.slide >= 0, pieces: L.cg.hidden ? 0 : L.cg.slots.length, kg: L.loadKg } : null; },
+    tip(on = true) { if (seat && seat.L.towL) { seat.useDown = !!on; return true; } return false; },     // tests: as holding the left button
     unstick(id) {                                          // push a parked unit out of whatever it is stuck in (page only until it is driven)
       const L = live.get(id);
       if (!L || (seat && seat.L === L)) return false;

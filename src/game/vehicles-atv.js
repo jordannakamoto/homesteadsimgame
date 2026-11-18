@@ -2,6 +2,10 @@
 // utility quad: 2.15 m long, 1.20 m wide, seat at 0.89 m, 24 in tyres, racks front and rear), what the ground under a
 // wheel is called (for grip: dry or wet grass, packed or loose dirt, mud, gravel, mulch, sand, snow, water, floors),
 // and the starter ATV parked by the old well, once per world. Registers with window.__vehicles (src/engine/vehicles.js).
+// The small utility trailer: its model (a steel dump bed on an A-frame, two wheels), the lumber on its bed (construction
+// stacks flagged `carrier`, drawn through __vehicles.setCargo and kept under the trailer with construction.carrierMove),
+// tipping the load off (construction.carrierUnload), and for now one trailer given with the ATV (V9 moves it to the
+// supplier).
 (() => {
   const G = window.__game, V = window.__vehicles;
   if (!G || !V) return;
@@ -95,6 +99,93 @@
     };
   }
 
+  // ---- the small trailer: [w, h, d, x, y, z] in its frame (origin on the ground under the middle of the axle, z forward)
+  const TC = { bed: 0x3d4a3f, rail: 0x2f3833, frame: 0x26282a, metal: 0x80858a, black: 0x1c1d1e, amber: 0xc98a2a, red: 0x8a2a22, plank: 0x7a6a52 };
+  function trailerBody() {
+    return [
+      [1.2, 0.06, 0.06, 0, 0.25, 0, TC.frame],                                   // the axle
+      ...mirror([
+        [0.06, 0.07, 1.5, 0.42, 0.4, 0.12, TC.frame],                           // rails under the bed
+        [0.05, 0.06, 1.12, 0.17, 0.4, 1.14, TC.frame, 0, -0.25],               // the A-frame, meeting at the coupler
+        [0.17, 0.035, 0.5, 0.68, 0.54, 0, TC.rail],                             // fenders over the wheels, outside the bed
+        [0.17, 0.12, 0.035, 0.68, 0.49, 0.25, TC.rail, 0.5],
+        [0.17, 0.12, 0.035, 0.68, 0.49, -0.25, TC.rail, -0.5],
+        [0.06, 0.15, 0.06, 0.42, 0.33, 0, TC.frame],                           // spring hangers
+      ]),
+      [0.9, 0.06, 0.06, 0, 0.4, 0.62, TC.frame],                                // cross members
+      [0.9, 0.06, 0.06, 0, 0.4, -0.55, TC.frame],
+      [0.08, 0.08, 0.2, 0, 0.42, 1.6, TC.metal],                                // the coupler and its latch
+      [0.04, 0.05, 0.06, 0, 0.48, 1.58, TC.black],
+      [0.05, 0.42, 0.05, 0.08, 0.21, 1.32, TC.frame],                          // the jack post and its foot
+      [0.12, 0.02, 0.12, 0.08, 0.01, 1.32, TC.frame],
+      [0.08, 0.05, 0.05, 0.08, 0.45, 1.32, TC.black],
+      [0.06, 0.1, 0.06, 0, 0.47, 0.9, TC.frame],                                // the bed's front rest and its pin
+      [0.1, 0.05, 0.03, 0, 0.53, 0.94, TC.amber],
+    ];
+  }
+  function trailerBed() {
+    return [
+      [1.1, 0.04, 1.8, 0, 0.48, 0, TC.bed],                                     // the floor; the load lies on y 0.5
+      ...mirror([
+        [0.04, 0.3, 1.8, 0.57, 0.65, 0, TC.bed],                                // sides with a top rail
+        [0.06, 0.04, 1.82, 0.57, 0.81, 0, TC.rail],
+        [0.03, 0.04, 0.03, 0.57, 0.62, -0.91, TC.red],                          // tail reflectors
+        [0.05, 0.22, 0.05, 0.57, 0.6, 0.6, TC.rail], [0.05, 0.22, 0.05, 0.57, 0.6, -0.3, TC.rail],
+      ]),
+      [1.18, 0.34, 0.04, 0, 0.66, 0.92, TC.bed],                               // the front board
+      [1.18, 0.04, 0.06, 0, 0.83, 0.92, TC.rail],
+      [1.1, 0.3, 0.035, 0, 0.36, -0.93, TC.bed],                               // the tailgate, hung down open for long loads
+      [1.0, 0.06, 0.06, 0, 0.44, -0.3, TC.frame],                               // the pivot tube
+      [0.6, 0.05, 0.04, 0, 0.53, 0.86, TC.metal],                               // the release lever
+    ];
+  }
+  function trailer(T, h, kind) {
+    const mat = () => new T.MeshLambertMaterial({ vertexColors: true });
+    const body = new T.Mesh(h.boxModel(trailerBody()), mat());
+    const bed = new T.Mesh(h.boxModel(trailerBed()), mat());
+    const wheels = new T.InstancedMesh(wheelGeo(T, kind.wheelR, 0.18), mat(), 2);
+    return { body, bed, wheels };
+  }
+
+  // ---- the load on a trailer: construction stacks flagged `carrier`, drawn on the bed and kept under the trailer
+  const consys = () => G.sim.systems.find((q) => q.name === 'construction');
+  let cargoSig = '', cargoGen = -1;
+  function cargoTick() {
+    const s = G.sim.state.sys.construction, CV = window.__construct, sys = consys();
+    if (!s || !CV || !CV.describe || !sys) return;
+    const cat = sys.api.catalog, units = V.units(), kinds = V.kinds();
+    let sig = '';
+    for (const k of s.stacks) if (k.carrier != null) sig += k.carrier + ':' + k.itemId + ':' + k.qty + ',';
+    // the load follows its trailer (the sim's pose of it changes on sync, hitching and parking); a load whose
+    // trailer is gone is left on the ground where it stood
+    for (const k of s.stacks) {
+      if (k.carrier == null) continue;
+      const u = units[k.carrier];
+      if (!u) { G.sim.commandNow('construction.carrierUnload', { carrier: k.carrier, x: k.x, z: k.z }); return; }
+      if (Math.abs(u.x - k.x) > 0.02 || Math.abs(u.z - k.z) > 0.02) G.sim.commandNow('construction.carrierMove', { carrier: k.carrier, x: u.x, z: u.z });
+    }
+    if (sig === cargoSig && V.gen === cargoGen) return;
+    cargoSig = sig; cargoGen = V.gen;
+    for (const id in units) {
+      if (!kinds[units[id].kind] || !kinds[units[id].kind].cargo) continue;
+      let kg = 0;
+      const groups = [];
+      for (const k of s.stacks) {
+        if (k.carrier !== id) continue;
+        const d = CV.describe(k.itemId, k.qty), it = cat[k.itemId];
+        kg += k.qty * (it ? it.massKgPerUnit : 0);
+        groups.push({ n: d.form === 'ladder' ? 1 : d.n, w: d.w, h: d.h * (d.scaleH || 1), l: d.l, color: d.color });
+      }
+      V.setCargo(id, groups, kg);
+    }
+    cargoGen = V.gen;
+  }
+  // tipped: the load slides off the tail and lies on the ground there as an ordinary pile
+  function onDump(id, at) {
+    const r = G.sim.commandNow('construction.carrierUnload', { carrier: id, x: at.x, z: at.z });
+    return !!(r && r.ok);
+  }
+
   // ---- what the ground is under a wheel, by the names in the vehicles system's surfaces table
   const LAYER = { gravel: 'gravel', crushed: 'gravel', dg: 'gravel', slate: 'gravel', marble: 'gravel', lava: 'gravel', riverrock: 'gravel', woodchips: 'mulch', bark: 'mulch', sand: 'sand' };
   function surface(x, z) {
@@ -111,7 +202,8 @@
     return wet ? 'grass_wet' : 'grass';
   }
 
-  V.register({ models: { atv }, surface });
+  V.register({ models: { atv, trailer_small: trailer }, surface, onDump });
+  G.stepHooks.push(cargoTick);
 
   // ---- the starter ATV: once per world, parked a few steps past the old well (or by you in a world without one)
   let given = null, wait = 0;
@@ -125,5 +217,22 @@
       || V.findSpot(P.x, P.z, { rMin: 4, rMax: 14, rad: 1.3 });
     if (!spot) { given = null; wait = 2; return; }     // nowhere clear yet: try again in a moment
     sim.commandNow('vehicles.add', { kind: 'atv', x: spot.x, z: spot.z, yaw: spot.yaw, starter: true });
+  });
+  // ---- for now the small trailer comes with the ATV (new worlds and old saves, once): loose, a little behind its
+  // ball and lined up, so backing onto it is the first thing to try. V9 moves it to the supplier.
+  let gifted = null, giftWait = 0;
+  G.stepHooks.push((dt) => {
+    const sim = G.sim, s = sim.state.sys.vehicles;
+    if (!s || !s.starter || (s.once && s.once.trailer) || gifted === sim || (giftWait -= dt) > 0) return;
+    const atvId = Object.keys(s.units).find((id) => s.units[id].kind === 'atv' && !s.units[id].towing);
+    if (!atvId || V.driven() === atvId) { giftWait = 2; return; }
+    gifted = sim;
+    const a = s.units[atvId], K = V.kinds(), tk = K.trailer_small, ball = K.atv.points.find((q) => q.type === 'ball').at[2];
+    const back = -ball + 1.4 + tk.hitch.at[2], fx = Math.sin(a.yaw), fz = Math.cos(a.yaw);
+    const want = { x: a.x - fx * back, z: a.z - fz * back };
+    const spot = V.findSpot(want.x, want.z, { rMin: 0, rMax: 3, rad: 0.75, n: 16 }) || V.findSpot(a.x, a.z, { rMin: 4, rMax: 9, rad: 0.8 });
+    if (!spot) { gifted = null; giftWait = 3; return; }
+    const r = sim.commandNow('vehicles.add', { kind: 'trailer_small', x: spot.x, z: spot.z, yaw: Math.hypot(spot.x - want.x, spot.z - want.z) < 0.5 ? a.yaw : spot.yaw, once: 'trailer' });
+    if (r.ok && !localStorage.getItem('veh:toldTrailer')) { localStorage.setItem('veh:toldTrailer', '1'); V.say('A small trailer came with the ATV. Back the ATV onto its tongue to hitch it.', 5); }
   });
 })();
