@@ -4720,6 +4720,8 @@ window.__game = {
     do: (name, payload) => { const r = runStockCommand(sim, name, payload); hudDirty = true; return r; },
   },
   saveGame, saveData: () => saveData(), setSpeed,
+  // test hook: advance n fixed-length frames (update + one draw) synchronously, no wall-clock wait; smokes use it instead of sleeps
+  stepFrames: (n = 1, dt = 1 / 60) => { for (let i = 0; i < n; i++) step(dt); render(); return n; },
   // what a save costs: bytes as stored (earthwork grids packed) and as plain JSON
   saveSize: () => { const d = saveData(true); return { bytes: stringifySave(d).length, plainBytes: JSON.stringify(d).length }; }, get speed() { return simCtl.speed; },
   enemies, spawnEnemy, arrows, fireArrow, MOVES, startMove, juice, updateHud, waveHeight, depthState, lockQuality: () => { autoDropped = true; }, world, player, cam, keys, mouse, cursor, step, render, heightAt, fellTree, applyBrush, setQuality, renderer, THREE,
