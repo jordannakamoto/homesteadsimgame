@@ -48,9 +48,14 @@ export const SKY_NOISE_GLSL = /* glsl */ `
   uniform float uFrame;
   const float C_BASE = 1.4, C_TOP = 4.6;   // heaps up to about 3 km tall: fair-weather cumulus to towering congestus
   float remap(float v, float a, float b, float c, float d) { return c + (v - a) / (b - a) * (d - c); }
+  // where clouds may be (the weather map, as Red Dead's cloud map): fields tens of kilometres across with open sky
+  // between, groups within them. A clear day has a few separate groups; partly cloudy, big fields; cloudy and
+  // overcast, the fields run together into a deck
   float cloudCov(vec2 p, float cover) {
-    float wm = textureLod(uCloudNoise, p * 0.018 + vec2(0.31, 0.77), 2.0).r;
-    return clamp(0.1 + cover * 1.1 * (0.3 + 1.0 * wm) - 0.06 + 0.35 * smoothstep(0.7, 1.0, cover), 0.0, 1.0);
+    float field = textureLod(uCloudNoise, p * 0.011 + vec2(0.31, 0.77), 2.0).r * 0.7 + textureLod(uCloudNoise, p * 0.04 + vec2(0.71, 0.13), 1.0).r * 0.3;
+    float thr = mix(0.72, 0.22, pow(smoothstep(0.05, 0.95, cover), 1.6));
+    float cl = smoothstep(thr, thr + 0.12, field);
+    return clamp(cl * mix(0.5, 1.0, cover) + smoothstep(0.78, 1.0, cover) * 0.5, 0.0, 1.0);
   }
   // density at p (km, on the ground plan) and h (0 at the base .. 1 at the top), coverage cov; fine: erode the edges
   float fine_k = 1.0;                     // how much of the fine erosion to use (less far off, where it would alias)
@@ -75,6 +80,9 @@ export const SKY_NOISE_GLSL = /* glsl */ `
     vec4 e = textureLod(uNoise3, q * 0.7 + vec3(0.0, -t * 0.002, 0.0), 0.0);
     float df = e.g * 0.625 + e.b * 0.25 + e.a * 0.125;
     float det = mix(1.0 - df, df, clamp(h * 4.0, 0.0, 1.0));
+    // and a finer octave still, for crisp edges
+    float e2 = textureLod(uNoise3, q * 2.3 + vec3(0.3, t * 0.003, 0.7), 0.0).g;
+    det = mix(det, mix(1.0 - e2, e2, clamp(h * 4.0, 0.0, 1.0)), 0.3);
     d = remap(d, det * 0.55 * fine_k, 1.0, 0.0, 1.0);
     return clamp(d, 0.0, 1.0) * cov;
   }
@@ -199,11 +207,13 @@ const SKY_COMMON = /* glsl */ `
             // powder: the thin, outer parts facing the light scatter less of it back, so the billows stand out
             float powder = 1.0 - exp(-den * 16.0);
             float sunL = (exp(-od) * pf + 0.5 * exp(-od * 0.3) * pb + 0.25 * exp(-od * 0.1) * pc) * mix(0.5, 1.0, powder);
-            vec3 amb = mix(ambLo, ambHi, smoothstep(0.0, 1.0, h)) * mix(0.3, 1.0, h) * (0.6 + 0.4 * powder);
+            // (with the sun low the sky's light is most of what a cloud's body gets: more of it, so dusk clouds go lavender
+            // and slate, not mud)
+            vec3 amb = mix(ambLo, ambHi, smoothstep(0.0, 1.0, h)) * mix(0.55, 1.0, h) * (0.7 + 0.3 * powder) * (1.0 + 0.9 * (1.0 - smoothstep(0.0, 0.35, uTrueSun.y)));
             // (scaled so a cloud's sunlit face sits just under white: brighter, every lit face tone-maps to the same flat
             // white and the cloud loses its shading)
             vec3 S = uSunHi * sunL * 0.17 + amb;
-            float st = exp(-den * 90.0 * dt);   // dense: a cloud's edge is sharp, not a cotton-wool fuzz
+            float st = exp(-den * 55.0 * dt);   // dense enough for a definite edge, thin enough that light comes through
             L += T * S * (1.0 - st);
             tw += t * T * (1.0 - st); tws += T * (1.0 - st);
             T *= st;
@@ -489,24 +499,27 @@ ${SKY_COMMON}      void main() {
         if (d.y <= 0.0) return vec4(0.0);
         float mu = dot(d, uTrueSun), cover = clamp(uCloud, 0.0, 1.0);
         vec3 zen = airAt(vec3(0.0, 1.0, 0.0));
-        vec3 ambHi = zen * 1.1 + mix(uSky, uZenith, 0.5) * uNight * (0.25 + 0.5 * uMoon.w);
+        // the sky's own light on the cloud: from overhead and all round (it is what colours a cloud's shaded body: blue
+        // grey by day, lavender and rose at dawn and dusk)
+        vec3 ambHi = zen * 0.75 + airAt(normalize(vec3(d.x, 0.3, d.z))) * 0.9 + mix(uSky, uZenith, 0.5) * uNight * (0.25 + 0.5 * uMoon.w);
         // under the clouds: the sky low down, and light thrown up off the land (warm and green near, cooler far off,
         // as landscape painters give cloud bases)
         float near = exp(-layerT(d.y, C_BASE) / 6.0);
-        vec3 ambLo = airAt(normalize(vec3(d.x, 0.06, d.z))) * 0.32 + uSunCol * vec3(0.36, 0.38, 0.22) * 0.06 * near + uAmb * 0.05;
+        vec3 ambLo = airAt(normalize(vec3(d.x, 0.06, d.z))) * 0.6 + uSunCol * vec3(0.36, 0.38, 0.22) * 0.06 * near + uAmb * 0.05;
         float tMid;
         vec4 cl = marchClouds(d, cover, uWindOff, mu, ambHi, ambLo, tMid);
         if (cl.a < 0.001) return vec4(0.0);
         vec3 cc = cl.rgb / cl.a;
         cc = mix(cc, mix(uSky, uZenith, 0.25) * 0.9, uGrey * 0.6);
-        cc = mix(cc, skyAbove(d), 1.0 - exp(-tMid / 45.0));    // far clouds fade into the haze
+        cc = mix(cc, skyAbove(d), 1.0 - exp(-tMid / 22.0));    // far clouds fade into the haze
         return vec4(min(cc * 0.5, vec3(1.0)), cl.a * smoothstep(0.0, 0.07, d.y));
       }`,
   });
   const cloudQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), cloudMat); cloudQuad.frustumCulled = false;
   const cloudScene = new THREE.Scene(); cloudScene.add(cloudQuad);
   const cloudCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  let cloudsDrawn = false, cloudScale = 0.5, histOk = false;
+  let cloudsDrawn = false, cloudScale = 0.5, histOk = false, lastCover = -1;
+  const lastSun = new THREE.Vector3(), lastFwd = new THREE.Vector3(), lastPos = new THREE.Vector3();
   const prevVP = new THREE.Matrix4();
   const _c = new THREE.Vector3();
   // before the frame: w, h the size the scene is drawn at
@@ -521,6 +534,11 @@ ${SKY_COMMON}      void main() {
     const cw = Math.max(16, Math.round(w * cloudScale)), ch = Math.max(16, Math.round(h * cloudScale));
     const last = cloudRTs[cloudCur], next = cloudRTs[1 - cloudCur];
     let hist = histOk;
+    // a jump (the time, the weather or the view changing at once) starts the blend afresh rather than smearing
+    cam.getWorldDirection(_c);
+    const u = uniforms;
+    if (u.uTrueSun.value.distanceTo(lastSun) > 0.01 || Math.abs(u.uCloud.value - lastCover) > 0.03 || _c.dot(lastFwd) < 0.97 || cam.position.distanceTo(lastPos) > 20) hist = false;
+    lastSun.copy(u.uTrueSun.value); lastCover = u.uCloud.value; lastFwd.copy(_c); lastPos.copy(cam.position);
     for (const rt of cloudRTs) if (rt.width !== cw || rt.height !== ch) { rt.setSize(cw, ch); hist = false; }
     uniforms.uInvVP.value.multiplyMatrices(cam.matrixWorld, cam.projectionMatrixInverse);
     uniforms.uCamPos.value.copy(cam.position);
