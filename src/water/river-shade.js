@@ -21,6 +21,7 @@ export const RIVER_SHADE = /* glsl */ `
   uniform vec4 uWin;                       // the live simulation's window (x0, z0, x1, z1); x1 < x0 when there is none
   uniform samplerCube uEnv, uEnv2; uniform vec4 uEnvPos; uniform float uEnvMix;
   uniform sampler2D uRefl; uniform mat4 uReflMat; uniform vec4 uReflOn;   // the mirror (reflect-plane.js)
+  uniform float uCloud;                                  // how overcast it is (0-1)
   uniform sampler2D uRipTex; uniform vec4 uRipWin;      // the fine waves round the player (ripple-sim.js): x0, z0, size, on
   uniform vec4 uWake; uniform vec2 uWakeK;   // someone wading: where, the current past their legs (x, z); how deep, on          // the reflection probe (reflect-probe.js): where, and w on/off
   uniform vec4 uRip[24]; uniform vec2 uRipV[24], uRipD[24];   // ripples; the current that carries each; the way its maker was moving      // ripples, and the current that carries each one away                   // ripples: x, z, start time, strength
@@ -31,7 +32,7 @@ export const RIVER_SHADE = /* glsl */ `
   float liveShare(vec2 p) {
     if (uWin.z < uWin.x) return 0.0;
     float e = min(min(p.x - uWin.x, uWin.z - p.x), min(p.y - uWin.y, uWin.w - p.y));
-    return clamp((e - 1.0) / 4.0, 0.0, 1.0);
+    return clamp((e - 2.0) / 10.0, 0.0, 1.0);          // over 10 m, so the hand-over is gradual
   }
   vec2 waterCell(vec2 p) { return floor(p * uTPM); }
   vec2 waterTexel(vec2 p) { return uSnap > 0.5 ? (floor(p * uTPM) + 0.5) / uTPM : p; }
@@ -182,11 +183,14 @@ export const RIVER_SHADE = /* glsl */ `
     // what is reflected is smeared up and down (the long wavering reflections of a lake at eye level)
     float graze = 1.0 - ndv;
     fres *= mix(1.0, 0.55, smoothstep(0.1, 0.9, rough) * smoothstep(0.6, 0.95, graze));
-    fres = min(fres, mix(0.85, 0.65, rough));
+    fres = min(fres, mix(0.7, 0.5, rough));
+    // under an overcast sky the whole sky is one bright, even source: what the water reflects of it is real but
+    // soft, and the light coming up out of the water (lit from everywhere) holds its own against it
+    fres *= mix(1.0, 0.72, uCloud);
     // the shallow fringe by the banks: stirred-up silt, bits of leaf and scum, a film on the water; dull rather than
     // glossy, and cloudier
-    float fringe = 1.0 - smoothstep(0.03, 0.2, d);
-    fres *= mix(1.0, 0.4, fringe) * (1.0 - 0.45 * film);
+    float fringe = 1.0 - smoothstep(0.03, 0.3, d);
+    fres *= mix(1.0, 0.22, fringe) * (1.0 - 0.45 * film);
     float skyVis = mix(1.0, texture2D(uSkyMap, (q + 0.5) / 512.0).r, uSkyK);
     vec3 R = reflect(-V, N); R.y = abs(R.y);
     // What the water reflects is mostly its surroundings, not an empty sky (an even sky on a wavy surface is what
@@ -210,15 +214,18 @@ export const RIVER_SHADE = /* glsl */ `
     // wavering with the ripples
     if (uReflOn.x > 0.5) {
       // only water at the mirror's own level: a pool on a step above or below would show it misplaced
-      float kp = (1.0 - smoothstep(0.04, 0.12, abs(world.y - uReflOn.y))) * (1.0 - smoothstep(22.0, 34.0, distance(q, uReflOn.zw)));
+      float kp = (1.0 - smoothstep(0.08, 0.25, abs(world.y - uReflOn.y))) * (1.0 - smoothstep(22.0, 34.0, distance(q, uReflOn.zw)));
       if (kp > 0.0) {
         vec4 pr = uReflMat * vec4(world.x, uReflOn.y, world.z, 1.0);
         vec2 ruv = pr.xy / pr.w + g * (0.05 + 0.08 * rough);
         float smear = (0.003 + 0.012 * rough) * (1.0 + 3.0 * smoothstep(0.6, 0.98, graze));
         kp *= smoothstep(0.0, 0.03, min(min(ruv.x, 1.0 - ruv.x), min(ruv.y, 1.0 - ruv.y)));
-        vec3 mir = texture2D(uRefl, clamp(ruv, 0.001, 0.999)).rgb * 0.36;
-        mir += texture2D(uRefl, clamp(ruv + vec2(0.0, smear), 0.001, 0.999)).rgb * 0.22 + texture2D(uRefl, clamp(ruv - vec2(0.0, smear), 0.001, 0.999)).rgb * 0.22;
-        mir += texture2D(uRefl, clamp(ruv + vec2(0.0, smear * 2.2), 0.001, 0.999)).rgb * 0.1 + texture2D(uRefl, clamp(ruv - vec2(0.0, smear * 2.2), 0.001, 0.999)).rgb * 0.1;
+        // (alpha: whether the mirror drew anything there; where it did not, the sky and far surroundings above stand)
+        vec4 m4 = texture2D(uRefl, clamp(ruv, 0.001, 0.999)) * 0.36;
+        m4 += texture2D(uRefl, clamp(ruv + vec2(0.0, smear), 0.001, 0.999)) * 0.22 + texture2D(uRefl, clamp(ruv - vec2(0.0, smear), 0.001, 0.999)) * 0.22;
+        m4 += texture2D(uRefl, clamp(ruv + vec2(0.0, smear * 2.2), 0.001, 0.999)) * 0.1 + texture2D(uRefl, clamp(ruv - vec2(0.0, smear * 2.2), 0.001, 0.999)) * 0.1;
+        vec3 mir = m4.a > 0.01 ? m4.rgb / m4.a : sky;
+        kp *= clamp(m4.a, 0.0, 1.0);
         // a reflection is a little darker and greyer than what it shows (some light goes into the water, the surface
         // is never quite clean), more so in the silty shallows by the banks
         mir = mix(mir, vec3(dot(mir, vec3(0.3, 0.5, 0.2))), 0.2 + 0.3 * fringe) * mix(0.82, 0.6, fringe);
