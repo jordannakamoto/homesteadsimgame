@@ -189,8 +189,8 @@ export const RIVER_SHADE = /* glsl */ `
     fres *= mix(1.0, 0.72, uCloud);
     // the shallow fringe by the banks: stirred-up silt, bits of leaf and scum, a film on the water; dull rather than
     // glossy, and cloudier
-    float fringe = 1.0 - smoothstep(0.03, 0.2, d);
-    fres *= mix(1.0, 0.4, fringe) * (1.0 - 0.45 * film);
+    float fringe = 1.0 - smoothstep(0.03, 0.3, d);
+    fres *= mix(1.0, 0.22, fringe) * (1.0 - 0.45 * film);
     float skyVis = mix(1.0, texture2D(uSkyMap, (q + 0.5) / 512.0).r, uSkyK);
     vec3 R = reflect(-V, N); R.y = abs(R.y);
     // What the water reflects is mostly its surroundings, not an empty sky (an even sky on a wavy surface is what
