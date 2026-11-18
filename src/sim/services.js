@@ -22,7 +22,7 @@
 
 import { compileLinks } from './core/links.js';
 import { toNeutral, worldOf, runState, progress, pathLength } from './core/routes.js';
-import { SERVICE_CLASSES, SERVICE_SPECS, DEFAULT_SPEC, DEVICES, SERVICE_TEXT } from './content/services.js';
+import { SERVICE_CLASSES, SERVICE_SPECS, DEFAULT_SPEC, DEVICES, NODE_KINDS, SERVICE_TEXT } from './content/services.js';
 import { FIXTURES_ELECTRICAL } from './fixtures-electrical.js';
 import { FIXTURES_WATER } from './fixtures-water.js';
 
@@ -166,7 +166,8 @@ export function servicesSystem({ classes = SERVICE_CLASSES, routesName = 'routes
       'services.sync': (ctx) => { compile(ctx); return { ok: true, version: ctx.s.version }; },
       'services.note': (ctx, p = {}) => { const s = ensure(ctx), first = !s.notes[p.key]; s.notes[p.key] = true; return { ok: true, first }; },
     },
-    api: { classes, compileServices: (R) => compileServices(R, classes) },
+    // for page add-ons (global scripts cannot import): the content tables and the pure read-outs
+    api: { classes, specs: SERVICE_SPECS, devices: DEVICES, nodeKinds: NODE_KINDS, compileServices: (R) => compileServices(R, classes), overlayData, runInfo },
   };
 }
 export const services = servicesSystem();
