@@ -557,6 +557,28 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 **What's weak**
 
 - Packing a very large dug area (300 patches) takes about 30 ms once per autosave.
+
+## Services S2 + S3 — cable and pipe in buildings feed the real power and water; X shows them
+
+**What is new**
+
+- Runs in a building (the `routes` store from S1) now count: a finished cable from a panel slot to a box with a light lights it, through a breaker that appears in the slot at trim-out; a finished PEX run from a tank to a stub with a tap runs water indoors; an uncapped stub or an uncrimped end sprays. Electrical and water stay the judges (system `services`, `src/sim/services.js`).
+- Corded tools also find power at an outlet on one of these circuits.
+- The runs are drawn where they ride in the frame (`src/engine/routes.js`): full colour as far as they are pulled, pale beyond (a plan line), yellow dots where a hole is still to drill.
+- X (outside build mode) cycles Off, Power, Water (`src/overlays.js`): the runs show through the walls, cable green to red by load and grey when dead; water blue, red, brown, orange where it leaks.
+
+**Try this**
+
+1. Place a cabin (or any building) and finish its walls, stand near it, then in the console: `__servicesView.sample()`. A 14/2 cable runs from a wall box through two studs to a switch-height box, and a planned PEX run sits lower down with its holes still to drill.
+2. Press X: Power, then Water, then off. The sample cable is grey in Power (nothing feeds it); the PEX is dim in Water.
+3. `__servicesView.clearSample()` takes it out. `__servicesView.info('sample:cable')` says where the run is up to in plain words.
+4. A whole circuit from the console (a panel on a generator first, with Equip): add a `slot` node with `ref: { piece: <panel id>, port: 'b1' }`, a box, a `routes.addRun` with `cls: 'cable'`, `routes.work` it through, `routes.setNode` the box `{ key: 'device', value: 'light_ceiling' }` and both nodes `{ state: 'trimmed' }`. The light draws 9 W (`__game.sim.state.sys.electrical.loads`).
+
+**What's weak**
+
+- No planning or gestures yet (S5 to S7): runs come only from the console. The sample sets the building's frame once; frames do not follow a moved building until the plan UI syncs them.
+- Overlay colours are per run, not per segment, and there are no moving dashes yet (S12). Drains and vents compile but nothing drains through them indoors yet (S11).
+- A switch box is just a box: switching what it controls comes with trim-out (S9b).
 ## A finished building looks finished (branch `finish`)
 
 - Once the last stage is done, the construction view lets go of the building: no nail heads, no studs or sheathing showing through. Build mode draws it (siding on the walls, the roof) as it does any finished building.
