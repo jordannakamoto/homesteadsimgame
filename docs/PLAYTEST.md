@@ -459,3 +459,10 @@ The ground is a physical thing now: a smooth surface you shape 10 cm at a time, 
 - **Blows you can see.** A set piece stands nearly twice as proud as before, so each blow visibly drives it down, and the last one seats it with a bright spark.
 
 Try: lay the subfloor by hand from the default camera; nail a wall frame lying on the deck.
+
+## Cut to length at the yard; you cut the fitted pieces (branch `cuts`)
+
+- Most lumber comes cut to length on the order: precut studs, plates, joists, beams and headers. Carry them in and they fly from your arms into place: no trip to the saw and back.
+- The cuts a carpenter really makes on site are yours to make, as a job of their own: posts cut to height, cripples, gable studs, rafters, blocking, and any stub under 60 cm. Point at the sawhorses and press E once per piece: the stick is sawn there and the piece goes into your arms (six at most; with full arms it waits on the horses). Then carry them in and each goes where it was cut for.
+- The Build panel lists precut pieces as "36 × cut to 2.61 m"; what you cut yourself is still bought as stock sticks ("8 × 12 ft").
+- "Work until done" and guided building still cut for you.

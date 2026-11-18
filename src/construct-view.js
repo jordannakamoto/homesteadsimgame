@@ -111,7 +111,10 @@
     return list.length ? list[list.length - 1] : null;
   }
   const lineOf = (pr, memberId) => { const m = pr.members[memberId]; return m && m.line ? pr.lines[m.line] : null; };
-  const usable = (pr, pl, c) => pl.inst.filter((id) => { const ln = lineOf(pr, id); return !ln || pr.members[id].need - pr.members[id].got < 1e-6 || (c && c.itemId === ln.itemId) || !api.needsStock(S(), pr, id); });
+  // the item this member takes from the arms: its line's, the cut piece once it is cut at the sawhorses, or null until then
+  const wantOf = (pr, id) => api.wantItem(pr, id);
+  const holds = (c, pr, id) => !!c && c.itemId === wantOf(pr, id);
+  const usable = (pr, pl, c) => pl.inst.filter((id) => { const ln = lineOf(pr, id); return !ln || pr.members[id].need - pr.members[id].got < 1e-6 || holds(c, pr, id) || (!pr.members[id].site && !api.needsStock(S(), pr, id)); });
 
   // ------------------------------------------------------------------ keeping build mode and the simulation in step
   function attach() {
@@ -731,14 +734,16 @@
   // what the hands can do from here: every open piece within reach, and the one the pointer is on
   function aimHands(pr) {
     const pl = plan(pr.id), g = geom(pr.id), P = G.player, c = S().carried, st = V.structs.get(pr.id);
-    let best = null, bs = 1e9, want = null, ws = 1e9, high = false;
+    let best = null, bs = 1e9, want = null, ws = 1e9, high = false, tocut = null;
+    const set0 = (pm, ln) => !ln || pm.need - pm.got < 1e-6;
     const q = [], low0 = new Map();     // siding goes on from the bottom course up: the lowest course not yet set, per wall
     for (const mid of pl.inst) { const pm = pr.members[mid], m = g.byId.get(mid); if (m && courseOf(pm, m) && pm.need - pm.got > 1e-6) low0.set(pm.parent + pm.kind, Math.min(low0.has(pm.parent + pm.kind) ? low0.get(pm.parent + pm.kind) : 1e9, m.row)); }
     for (const mid of pl.inst) {
       if (V.sawing.has(mid)) continue;
       const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid);
       if (m && courseOf(pm, m) && pm.need - pm.got > 1e-6 && m.row > low0.get(pm.parent + pm.kind)) continue;
-      const set = !ln || pm.need - pm.got < 1e-6, act = pm.kind === 'site' ? 'dig' : set ? 'nail' : (c && c.itemId === ln.itemId) || !api.needsStock(S(), pr, mid) || stackWithin(ln.itemId, takeM()) ? 'set' : 'want';
+      const wi = !set0(pm, ln) && wantOf(pr, mid), set = set0(pm, ln), act = pm.kind === 'site' ? 'dig' : set ? 'nail' : pm.site && !pm.prep ? 'tocut' : holds(c, pr, mid) || (!pm.site && !api.needsStock(S(), pr, mid)) || (wi && stackWithin(wi, takeM())) ? 'set' : 'want';
+      if (act === 'tocut') { if (!tocut) tocut = mid; continue; }
       let score;
       if (!m) { if (Math.hypot(P.x - st.x, P.z - st.z) > g.reach + 0.5) continue; score = 0; }
       else {
@@ -761,6 +766,7 @@
     if (sk && sk.id === pr.id) { const pm = pr.members[sk.mid]; if (pm && !pm.built && pm.need > 0 && pm.got >= pm.need - 1e-6 && q.includes(sk.mid)) best = { mid: sk.mid, act: 'nail' }; else V.stick = null; }
     if (best) return { kind: 'hands', id: pr.id, act: best.act, mid: best.mid, q };
     if (want) return { kind: 'hint', text: 'Needs ' + low(plain(lineOf(pr, want).label)), id: pr.id };
+    if (tocut) return { kind: 'hint', text: cutLabel(pr, tocut) + ': cut at the sawhorses first', id: pr.id };
     if (high && RW && !RW.on() && ['dry-in', 'roofing'].includes(pr.stage)) { V.needLadder = 0.5; return { kind: 'hint', text: S().ladder ? 'Roofing is done from on the roof: climb the ladder and keep going onto the deck' : 'Roofing is done from on the roof: lean the ladder at the eave, climb it and step onto the deck', id: pr.id }; }
     if (high) { V.needLadder = 0.5; return { kind: 'hint', text: S().scaffold && !S().scaffold.set ? 'Too high: carry the scaffold inside the frame and set it up as a tower under this' : S().scaffold && S().scaffold.set ? 'Too high: walk into the scaffold ladder, or lean the ladder here' : S().ladder || (S().carried && S().carried.itemId === LAD.itemId) ? 'Too high: lean the ladder on a wall, then walk onto it' : S().stacks.some((k) => k.itemId === LAD.itemId) ? 'Too high: the ladder is in the yard by the stacks (glowing marker)' : 'Too high: bring the ladder', id: pr.id }; }
     return null;
@@ -872,9 +878,9 @@
   function setPiece(id, mid, pm, layer, m, at, swp, quiet) {
     const pr = S().progress[id], r = cmd('install', { structId: id, memberIds: [mid], hold: true });
     if (!r.ok) { if (!quiet) flash(reason(r, pm.kind)); return null; }
-    const sawn = r.cuts && r.cuts.find((q) => q.stick);
+    const sawn = r.cuts && r.cuts.find((q) => q.stick && q.sawn);
     if (sawn) { sawPiece(id, mid, layer, sawn, at, quiet); if (!quiet) flash(cutWords(sawn)); }
-    else if (r.cuts && r.cuts.length && !quiet) flash(r.cuts[0].how === 'offcut' ? 'Cut from an offcut' : 'Cut to fit; offcut kept');
+    else if (r.cuts && r.cuts.length && !r.cuts[0].stick && !quiet) flash(r.cuts[0].how === 'offcut' ? 'Cut from an offcut' : 'Cut to fit; offcut kept');
     if (r.set.length) { if (swp) V.stick = { id, mid }; if (sawn) { /* it swings in when the saw is through */ } else if (pm.kind === 'cladding') slideIn(id, layer, mid); else if (V.sheetMids && V.sheetMids.has(mid)) wrapRoll(id, layer, mid); else flyIn(id, layer, mid); sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
     else if (!quiet) { const q = r.partial[0]; sounds.play('rustle'); flash(plain(lineOf(pr, mid).label) + ': ' + Math.round((100 * q.got) / q.need) + '% there. Fetch more.'); }
     return r;
@@ -1193,9 +1199,36 @@
     return best;
   }
   const wantedStack = (d) => d.itemId === V.wantItem;
-  const wantsHere = (pr, pl, c) => pl.inst.some((id) => { const ln = lineOf(pr, id); return ln && ln.itemId === c.itemId && pr.members[id].need - pr.members[id].got > 1e-6; });
+  const wantsHere = (pr, pl, c) => pl.inst.some((id) => holds(c, pr, id) && pr.members[id].need - pr.members[id].got > 1e-6);
   const pickable = (d) => !C.SITE_SUPPLY.includes(d.itemId);
   // whatever is in the arms can always be put down: a hint with nothing to press gets that
+  // ---- cutting at the sawhorses: pointing at them with a piece to cut makes the next cut. Blocking, cripples and rafters
+  // are cut here, one press each; the piece goes into the arms (an armful) or onto the horses
+  const cutLabel = (pr, mid) => { const pm = pr.members[mid], k = pm.kind === 'stud' || pm.kind === 'jack' ? 'cripple' : pm.kind === 'block' ? 'blocking' : pm.kind; return k.charAt(0).toUpperCase() + k.slice(1); };
+  function cutCtx() {
+    const P = G.player, s = S(), h = s.horses, c = s.carried;
+    if (!CS || !h || V.horsesHeld || (s.barrow && s.barrow.held)) return null;
+    if (Math.hypot(h.x - P.x, h.z - P.z) > 2.6 || Math.hypot(h.x - reach.x, h.z - reach.z) > 1.3) return null;
+    let pr = null, mid = null;
+    for (const q of inProgress()) { const m = api.nextCut(q); if (m) { pr = q; mid = m; break; } }
+    if (!mid) return null;
+    const ln = lineOf(pr, mid), cid = C.cutItemOf(ln.itemId);
+    if (c && c.itemId !== cid && c.itemId !== ln.itemId) return { kind: 'hint', text: 'Put down what you carry to cut at the sawhorses', drop: true };
+    const left = Object.values(pr.members).filter((m) => m.site && !m.prep && !m.built && api.stageOpen(pr, m.stage)).length;
+    return { kind: 'cut', id: pr.id, mid, left, full: !!c && c.itemId === cid && c.qty >= C.SITE_CUT.armful };
+  }
+  function cutNext(ctx) {
+    if (V.cutBusy > 0) return;
+    const pr = S().progress[ctx.id], what = cutLabel(pr, ctx.mid), r = cmd('cut', { structId: ctx.id, memberId: ctx.mid });
+    if (!r.ok) { flash(reason(r)); return; }
+    const h = S().horses, P = G.player, tools = G.sim.state.sys.stock.tools, power = tools.includes('circular_saw') && !!(G.powerAvailable && G.powerAvailable());
+    const to = r.toArms ? { x: P.x, y: P.y + 1.3, z: P.z } : { x: h.x, y: G.heightAt(h.x, h.z) + 0.75, z: h.z };
+    V.cutBusy = 0.25; P.face = Math.atan2(h.x - P.x, h.z - P.z);
+    r.cut.pieces.forEach((pc, i) => CS.cut({ stockM: pc.stockM, lenM: pc.lenM, sawn: pc.sawn, keptM: pc.keptM, onHorses: true, x: h.x, z: h.z, yaw: h.yaw, to, power, slow: 1.5 }, i === r.cut.pieces.length - 1 ? () => { V.rev++; } : null));
+    const p = r.cut.pieces[0];
+    flash(what + ' ' + mm(p.lenM) + (p.how === 'offcut' ? ' from an offcut' : ' from a ' + ftOf(p.stockM) + ' stick') + (r.toArms ? '' : '; it waits on the horses'));
+    V.rev++;
+  }
   function context() { const x = contextRaw(); if (x && x.kind === 'hint' && !x.drop && S().carried && !(RW && RW.on())) return { ...x, drop: true }; return x; }
   function contextRaw() {
     const P = G.player, s = S(), c = s.carried;
@@ -1209,6 +1242,7 @@
     const strong = ladderCtx(true);
     if (strong) return strong;
     if (V.horsesHeld) return { kind: 'hset' };
+    { const cx = cutCtx(); if (cx) return cx; }
     if (CS && s.horses && !c && !(s.barrow && s.barrow.held) && Math.hypot(s.horses.x - P.x, s.horses.z - P.z) < 2.4 && Math.hypot(s.horses.x - reach.x, s.horses.z - reach.z) < 1.1) return { kind: 'hgrab' };
     {
       const b = s.barrow;
@@ -1283,6 +1317,7 @@
     else if (ctx.kind === 'sset') { const r = cmd('setScaffold', ctx.spot); V.scafHeld = false; if (r.ok) { sounds.play('thud'); G.cam.shake = Math.min(G.cam.shake + 0.05, 0.3); note('Scaffold up', ctx.spot.free ? 'Walk into the ladder at its end to climb. From the tower the ridge and the rafters overhead are in reach; take it down and set it up again to move it.' : 'Walk into the ladder at its end to climb. Up there the top of the wall and the roof edge are in reach.'); } else flash(r.reason); }
     else if (ctx.kind === 'sdrop') { const P = G.player; V.scafHeld = false; cmd('moveScaffold', { x: P.x + Math.sin(P.face) * 1.1, z: P.z + Math.cos(P.face) * 1.1 }); sounds.play('thunk'); }
     else if (ctx.kind === 'sstrike') { const P = G.player; const r = cmd('strikeScaffold', { x: P.x + Math.sin(P.face) * 1.1, z: P.z + Math.cos(P.face) * 1.1 }); if (r.ok) { sounds.play('thud'); flash('Scaffold down. Pick the bundle up to set it up along another wall'); } }
+    else if (ctx.kind === 'cut') cutNext(ctx);
     else if (ctx.kind === 'hgrab') { V.horsesHeld = true; V.rev++; sounds.play('lift'); flash('Carry the sawhorses to the work; press again to set them down'); }
     else if (ctx.kind === 'hset') { const h = CS.horses; V.horsesHeld = false; if (h) cmd('moveHorses', { x: h.x, z: h.z, yaw: h.yaw }); sounds.play('thunk'); }
     else if (ctx.kind === 'pick') pickUp(ctx.stack);
@@ -1327,7 +1362,7 @@
     },
     onDone(j) {
       V.working = null;
-      const r = cmd('install', { structId: j.id, memberIds: [j.memberId], from: j.from });
+      const r = cmd('install', { structId: j.id, memberIds: [j.memberId], from: j.from, auto: !!V.auto });
       if (!r.ok) { redraw(j.id); stopAuto(); flash(reason(r)); return; }
       const sawn = CS && r.cuts && r.cuts.find((q) => q.stick && q.sawn);
       if (sawn) { const P = G.player, onH = CS.near(P.x, P.z, 4.5); for (const pc of sawn.pieces) CS.cut({ stockM: pc.stockM, lenM: pc.lenM, sawn: pc.sawn, keptM: pc.keptM, onHorses: onH, x: P.x + Math.sin(P.face) * 0.75, z: P.z + Math.cos(P.face) * 0.75, y: P.y, yaw: P.face + Math.PI / 2, slow: 0.5 }, null); }
@@ -1343,7 +1378,7 @@
     onCancel(j) { V.working = null; redraw(j.id); },
   });
   const vTmp = new T.Vector3();
-  const reason = (r, kind, mid) => r.reason === 'support missing' ? ((C.SUPPORT_SAYS[r.missing] || 'Set the supports') + ' first') : (kind === 'door' || kind === 'window') && (r.reason === 'stage not open' || r.reason === 'frame not finished') ? (r.reason === 'frame not finished' ? 'Frame the opening first' : 'Wrap the wall before the ' + kind + ' goes in') : ({ 'no material': 'You need ' + (r.itemId ? stackName(r.itemId) : 'material') + ' for that', 'wrong material': 'That needs ' + (r.itemId ? stackName(r.itemId) : 'something else'), 'no fasteners': 'Out of ' + (r.itemId ? low(CAT[r.itemId].name) : 'fasteners') + ': buy more in the Supplier (U)', 'stage not open': 'Not yet: an earlier stage comes first' })[r.reason] || 'That cannot go in yet';
+  const reason = (r, kind, mid) => r.reason === 'support missing' ? ((C.SUPPORT_SAYS[r.missing] || 'Set the supports') + ' first') : (kind === 'door' || kind === 'window') && (r.reason === 'stage not open' || r.reason === 'frame not finished') ? (r.reason === 'frame not finished' ? 'Frame the opening first' : 'Wrap the wall before the ' + kind + ' goes in') : ({ 'no material': 'You need ' + (r.itemId ? stackName(r.itemId) : 'material') + ' for that', 'wrong material': 'That needs ' + (r.itemId ? stackName(r.itemId) : 'something else'), 'no fasteners': 'Out of ' + (r.itemId ? low(CAT[r.itemId].name) : 'fasteners') + ': buy more in the Supplier (U)', 'stage not open': 'Not yet: an earlier stage comes first', 'cut first': 'Cut it at the sawhorses first', 'no sawhorses': 'The sawhorses come with the lumber', 'nothing to cut': 'Nothing left to cut' })[r.reason] || 'That cannot go in yet';
   function beginMember(id, memberId, from) {
     const pr = S().progress[id], g = geom(id), m = g.byId.get(memberId) || { id: memberId, kind: 'site', a: [g.cx, 0, g.cz], b: [g.cx, 0, g.cz], n: [0, 1, 0], section: { b: 0, d: 0 }, draw: 0 }, pm = pr.members[memberId], ln = lineOf(pr, memberId);
     const need = pm.need - pm.got, c = S().carried;
@@ -1400,7 +1435,7 @@
   function tickWork(dt) {
     const ctx = V.ctx, held = !!G.keys.KeyE || V.mDown, s = S();
     V.cool -= dt * (C.workSpeed(G.sim.state.sys.stock.tools, G.powerAvailable && G.powerAvailable()));
-    V.handT += dt; tickBlow(dt); tickFlights(dt);
+    V.handT += dt; tickBlow(dt); tickFlights(dt); if (V.cutBusy > 0) V.cutBusy -= dt;
     if (V.jolt) { const j = V.jolt; j.t += dt; liftTo(j.id, j.layer, j.mid, Math.max(-0.025, (j.built ? 0 : proud(j.mid)) - 0.045 * Math.exp(-j.t * 16) * Math.cos(j.t * 46))); if (j.t > 0.28) { asm.lift(j.id, j.layer, j.mid, j.built ? 0 : proud(j.mid)); V.jolt = null; } }
     tickSlides(dt); tickRolls(dt);
     if (V.swingIn) { V.swingIn.t += dt; const w = V.swingIn; asm.lift(w.id, w.layer, w.mid, proud(w.mid)); if (w.t > 0.2) V.swingIn = null; }
@@ -1415,7 +1450,7 @@
         if (!q.length) { const was = A.stage; stopAuto(); if (!api.stageComplete(pr, was)) flash('Stopped: ' + C.STAGE[was].name + ' is waiting on something else'); return; }
         const ln = lineOf(pr, q[0]), pm = pr.members[q[0]], c = s.carried;
         if (A.guided || !ln || pm.need - pm.got < 1e-6) beginMember(A.id, q[0], A.guided ? 'stacks' : 'carried');
-        else if ((c && c.itemId === ln.itemId && (ln.stick ? c.qty + 1e-6 >= api.stockNeed(s, pr, q[0]) : true)) || !api.needsStock(s, pr, q[0])) beginMember(A.id, q[0], 'carried');
+        else if ((holds(c, pr, q[0]) && (ln.stick ? c.qty + 1e-6 >= api.stockNeed(s, pr, q[0]) : true)) || (!pr.members[q[0]].site && !api.needsStock(s, pr, q[0]))) beginMember(A.id, q[0], 'carried');
         else {                                        // fetch the next armful: a short pause for the walk
           A.wait += dt;
           if (A.wait > 0.8) {
@@ -1505,6 +1540,7 @@
     else if (ctx.kind === 'bgrab') { const k = ctx.load && s.stacks.find((q) => q.id === ctx.load); if (k) setPrompt('', 'Click: take ' + low(stackName(k.itemId)) + ', ' + describe(k.itemId, k.qty).n + ' left · Hold: take the handles', 'E also takes the handles', V.bHold ? Math.min(1, V.bHold.t / 0.4) : null); else setPrompt('E', 'Take the wheelbarrow handles', 'empty', null); }
     else if (ctx.kind === 'bload') setPrompt('E', 'Load the wheelbarrow with ' + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'bdown') setPrompt('E', 'Set the wheelbarrow down', '', null);
+    else if (ctx.kind === 'cut') setPrompt(ctx.full ? '' : 'E', ctx.full ? 'Your arms are full: carry these to the frame' : 'Cut ' + low(cutLabel(S().progress[ctx.id], ctx.mid)) + ' (' + mm(S().progress[ctx.id].members[ctx.mid].len) + ')', ctx.left + ' to cut', null);
     else if (ctx.kind === 'hgrab') setPrompt('E', 'Pick up the sawhorses', 'the cut station', null);
     else if (ctx.kind === 'sgrab') setPrompt('E', 'Take the scaffold bundle', '', null);
     else if (ctx.kind === 'sset') setPrompt('E', ctx.spot.free ? 'Set up a scaffold tower here, under the roof frame' : 'Set up the scaffold along this wall', '', null);
@@ -1551,6 +1587,15 @@
     if (looseOne) return { ...out, line: 'A piece is set but loose. ' + (pr.members[looseOne].kind === 'pier' ? 'Point at it and click to stamp it level.' : 'Strike it once to drive all its nails, or hold and drag across the pieces.'), target: at };
     if (['top-plates', 'roof-frame', 'roof-deck', 'dry-in', 'roofing', 'gutters'].includes(v.id) && !s.ladder && !V.climb && !s.options.auto && pr.level !== 'guided' && ((s.carried && s.carried.itemId === LAD.itemId) || s.stacks.some((k) => k.itemId === LAD.itemId))) return { ...out, line: 'This is out of reach from the ground. Carry the ladder to a wall and click to lean it. Walk onto the ladder to climb.', target: at };
     const c = s.carried;
+    {   // only pieces cut on site are left in this stage: to the sawhorses, or in with the ones already cut
+      const here = pl.inst.filter((id) => pr.members[id].stage === v.id && pr.members[id].need - pr.members[id].got > 1e-6);
+      if (here.length && here.every((id) => pr.members[id].site) && s.horses && !s.options.auto) {
+        if (c && C.isCutItem(c.itemId)) return { ...out, line: 'Carry the cut pieces in and point at a glowing place: each one goes where it was cut for.', target: at };
+        if (here.some((id) => !pr.members[id].prep)) return { ...out, line: 'Posts, cripples, gable studs and rafters are cut on site, to fit. Go to the sawhorses, point at them and press <kbd>E</kbd> for each cut; the pieces go into your arms.', target: { x: s.horses.x, z: s.horses.z, y: G.heightAt(s.horses.x, s.horses.z) + 1.4 } };
+        const pile = s.stacks.find((k) => C.isCutItem(k.itemId));
+        if (pile) return { ...out, line: 'The cut pieces wait on the sawhorses: pick them up and carry them in.', target: { x: pile.x, z: pile.z, y: G.heightAt(pile.x, pile.z) + 1.2 } };
+      }
+    }
     if (['dry-in', 'roofing'].includes(v.id) && RW && c && c.itemId === ln.itemId && pr.level !== 'guided' && !s.options.auto) {
       if (!RW.on()) return { ...out, line: 'Roofers work on the roof: climb the ladder and keep walking, onto the deck. On a steep roof, fix an anchor at the ridge and clip in first.', target: at };
       return { ...out, line: 'From the eave up, each layer lapping the one below. The glowing strip is the next one; the blue chalk line marks its top edge.' + (V.clip == null && RW.at() && RW.at().k > RWC.slideK ? ' Steep: clip in at the ridge first.' : ''), target: at };
@@ -1655,7 +1700,7 @@
       if (q.status === 'progress') h += `<span class="bar"><b style="width:${Math.round((100 * q.built) / q.total)}%"></b></span>`;
       if (show) {
         h += `<span class="why">Why${isNext ? ' it comes next' : ''}: ${esc(low(q.why))}</span>`;
-        if (q.lines.length) h += '<span class="mats">' + q.lines.map((l) => `<span>${esc(plain(l.label))}${l.count > 1 ? ' × ' + l.count : ''}</span><i title="${l.sticks ? esc(num(l.qty) + ' m of lumber in stock lengths') : ''}">${l.sticks && l.sticks.length ? l.sticks.map((c) => c.n + ' × ' + c.ft + ' ft').join(', ') : num(l.qty) + (UNIT[l.unit] || '')}</i><i>${money(l.costUsd)}</i><em>${esc(l.why)}</em>`).join('') + '</span>';
+        if (q.lines.length) h += '<span class="mats">' + q.lines.map((l) => `<span>${esc(plain(l.label))}${l.count > 1 ? ' × ' + l.count : ''}</span><i title="${l.sticks ? esc(num(l.qty) + ' m of lumber in stock lengths') : ''}">${l.sticks && l.sticks.length ? l.sticks.map((c) => c.pre ? c.n + ' × cut to ' + mm(c.lenM) : c.n + ' × ' + c.ft + ' ft').join(', ') : num(l.qty) + (UNIT[l.unit] || '')}</i><i>${money(l.costUsd)}</i><em>${esc(l.why)}</em>`).join('') + '</span>';
         let act = '';
         if (!q.complete && q.toOrderUsd > 0 && !isNext) act += `<button type="button" data-act="order:${q.id}">Order this stage, ${money(q.toOrderUsd)}</button>`;
         if ((q.built > 0 || q.complete) && !V.auto) act += `<button type="button" data-act="apart:${q.id}" title="The material goes back on the stacks">Take this stage apart</button>`;
@@ -1932,7 +1977,7 @@
   function nextPiece() {
     const pr = current(); if (!pr) return null;
     const pl = plan(pr.id), g = geom(pr.id), c = S().carried;
-    for (const mid of pl.inst) { const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid), set = !ln || pm.need - pm.got < 1e-6; if (!set && !(c && c.itemId === ln.itemId)) continue; if (!m) return { mid, x: V.structs.get(pr.id).x, z: V.structs.get(pr.id).z, site: true }; const hw = C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null; worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); wM.lerpVectors(wA, wB, 0.5); const w = { x: wM.x, y: wM.y, z: wM.z }; wM.project(G.camera); return { mid, ...w, sx: (wM.x * 0.5 + 0.5) * reach.w, sy: (-wM.y * 0.5 + 0.5) * reach.h, set }; }
+    for (const mid of pl.inst) { const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid), set = !ln || pm.need - pm.got < 1e-6; if (!set && !holds(c, pr, mid)) continue; if (!m) return { mid, x: V.structs.get(pr.id).x, z: V.structs.get(pr.id).z, site: true }; const hw = C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null; worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); wM.lerpVectors(wA, wB, 0.5); const w = { x: wM.x, y: wM.y, z: wM.z }; wM.project(G.camera); return { mid, ...w, sx: (wM.x * 0.5 + 0.5) * reach.w, sy: (-wM.y * 0.5 + 0.5) * reach.h, set }; }
     return null;
   }
   window.__construct = { asm, roof: RW, syncRoof, tryHop, ladderTop, ladderSpot, chalkLines: (id) => chalkLines(S().progress[id], geom(id)), scaffoldSpot, scaffold: SC, station: CS, press: (c) => press(c || V.ctx), beaconAt, finishPlace, nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };
