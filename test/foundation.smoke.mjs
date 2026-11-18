@@ -165,7 +165,7 @@ await G(() => { for (const t of ['concrete_finishing_kit', 'curing_blanket', 'po
 await wait(900);
 const fs0 = await G(() => ({ slots: __hands.slots.map((s) => s.id).join(), held: __hands.held, d: __foundation.drawn(), hint: document.querySelector('#fbar .ghint').innerText }));
 check('the finish step offers the finishing kit and bolts; the wet field and bolt marks stay', fs0.slots === 'bfloat,trowel,broom,edger,groover,bolt' && fs0.d.pour && fs0.d.boltMarks >= 4 && /Bleed water/.test(fs0.hint), JSON.stringify(fs0));
-check('the gate chip shows the slab at 0% with the sheen to wait out', /Slab 0%/.test(fs0.d.chip) && /Bleed water/.test(fs0.d.chip), fs0.d.chip);
+check('the gate chip shows a green slab (under the 10% walk gate) with the sheen to wait out', /Slab [0-9]%/.test(fs0.d.chip) && /Bleed water/.test(fs0.d.chip), fs0.d.chip);   // world time runs during the waits above: a slow machine sees a few percent
 const fl = await G((sid) => {
   const j = __foundation.job(sid), sim = __game.sim, C = j.layout.corners;
   const x0 = Math.min(...C.map((c) => c[0])), x1 = Math.max(...C.map((c) => c[0])), z0 = Math.min(...C.map((c) => c[1])), z1 = Math.max(...C.map((c) => c[1]));
