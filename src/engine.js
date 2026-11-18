@@ -13,7 +13,7 @@ import { createWaterFx } from './water/water-fx.js';
 import { createReflectProbe } from './water/reflect-probe.js';
 import { createReflectPlane } from './water/reflect-plane.js';
 import { createRippleSim } from './water/ripple-sim.js';
-import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork, powerNear } from './sim/index.js';
+import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, stringifySave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork, powerNear, vehicleCore } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -3158,11 +3158,12 @@ function syncSite() {
   sim.commandNow('structure.recheck');          // judge the building as it now stands, even while time is paused
   simCtl.siteV = version;
 }
-function saveData() {
+// live: hand the simulation state by reference (for saveGame, which only stringifies it: no 4 MB deep copy)
+function saveData(live = false) {
   syncSite();
   const edits = {};
   for (const [k, a] of world.edits) edits[k] = f32ToBase64(a);
-  return makeSave(sim.serialize(), {
+  return makeSave(live ? sim.state : sim.serialize(), {
     edits, removed: [...world.removed], wood: world.wood, stone: world.stone,
     player: { x: player.x, z: player.z }, cam: { yaw: cam.yaw, pitch: cam.pitch, dist: cam.dist },
     builds: window.__build && window.__build.serialize ? window.__build.serialize() : simCtl.builds,
@@ -3170,7 +3171,7 @@ function saveData() {
 }
 function saveGame() {
   try {
-    localStorage.setItem(SAVE_KEY + SEED, JSON.stringify(saveData()));
+    localStorage.setItem(SAVE_KEY + SEED, stringifySave(saveData(true)));
     localStorage.setItem(LAST_KEY, String(SEED));
     return true;
   } catch (e) { return false; }      // storage full or unavailable: the game carries on unsaved
@@ -4559,7 +4560,9 @@ window.__game = {
     get state() { return stockState(); },
     do: (name, payload) => { const r = runStockCommand(sim, name, payload); hudDirty = true; return r; },
   },
-  saveGame, saveData, setSpeed, get speed() { return simCtl.speed; },
+  saveGame, saveData: () => saveData(), setSpeed,
+  // what a save costs: bytes as stored (earthwork grids packed) and as plain JSON
+  saveSize: () => { const d = saveData(true); return { bytes: stringifySave(d).length, plainBytes: JSON.stringify(d).length }; }, get speed() { return simCtl.speed; },
   enemies, spawnEnemy, arrows, fireArrow, MOVES, startMove, juice, updateHud, waveHeight, depthState, lockQuality: () => { autoDropped = true; }, world, player, cam, keys, mouse, cursor, step, render, heightAt, fellTree, applyBrush, setQuality, renderer, THREE,
   taa, lookFlags: LOOK, get rivers() { return rivers; }, riverWater, riverLive, streamWaterAt, waterFx, get rippleSim() { return rippleSim; }, camera, scene, setTool, fade: addWind, fadeR: U.fadeR, burst, editGet: getDelta, editSet: setDelta, baseHeight, chunkSize: CS, treeKinds: TREE, refreshLock: lockUi, forestAt,
   light: SKY, noise: fbm, palette: PAL, quality: () => quality.level, composer: () => composer,
@@ -4584,7 +4587,7 @@ window.__game = {
     },
   },
   treeGeo, pineLite: pineLiteGeo, markStockDirty: () => { hudDirty = true; },
-  garden: gardenRead, landscape: landscapeRead, earthwork,
+  garden: gardenRead, landscape: landscapeRead, earthwork, vehicleCore,
   // the landscape view's hooks: the ground it shapes is walked on, and shows through the terrain where dug
   setRelief: (fn) => { reliefFn = fn; }, digMask: { win: DIG.uDigWin, enable: enableDigMask },
   handPose: null, sea: SEA,

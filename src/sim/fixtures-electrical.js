@@ -125,6 +125,9 @@ junction('panel_dc_12', '12-circuit DC fuse block', 12, { noun: 'DC fuse block',
   'Distribution for 12 V lights, fridge and sockets.');
 junction('busbar_dc', 'DC busbar (250 A)', 6, { noun: 'busbar', category: 'busbar', mainA: 250 }, 40, 0.6, dims(0.2, 0.05, 0.05),
   'Joins battery, controller and inverter cables.');
+// A box in a wall where cables meet (a switch box is one too, electrically). fitted: services put it in, Equip does not.
+junction('box_junction', 'Electrical box', 0, { noun: 'electrical box', category: 'junction_box', mainA: 30, fitted: true }, 2, 0.1, dims(0.05, 0.07, 0.1),
+  'Where cables in a wall meet or pass a device.');
 // Breakers: thermal-magnetic, rated for AC and low-voltage DC. Trip times follow the conventional
 // currents of IEC 60898 / UL 489: no trip below 1.13 x rating, trip within an hour at 1.45 x, about
 // two minutes at 2 x, seconds at 3 x, instantly (magnetic) at 5 x and above.
