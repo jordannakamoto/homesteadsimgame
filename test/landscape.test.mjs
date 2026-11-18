@@ -186,3 +186,20 @@ test('materials arrive as bags or a heap; a bag broken open spills where it lies
   sim.runDays(14);
   assert.ok(landscapeRead.groundAt(sim.state, 6, 6).weeds >= 1, 'chips on grass: the grass comes through');
 });
+
+test('a dug hole keeps its walls; the thrown earth is loose and slumps to a cone', () => {
+  const sim = makeSim();
+  for (let k = 0; k < 6; k++) { assert.ok(c(sim, 'landscape.dig', { x: 2, z: 2 }).ok); assert.ok(c(sim, 'landscape.dump', { x: 3.2, z: 2 }).ok); }
+  const g = L(sim).grid, hole = reliefAt(g, 2, 2), wall = reliefAt(g, 2.3, 2), heap = reliefAt(g, 3.2, 2);
+  assert.ok(hole < -0.3, 'deep: ' + hole);
+  assert.ok(wall > -0.06, 'the wall stands: ground 30 cm off the centre is near grade, ' + wall);
+  assert.ok(heap > 0.12, 'a heap: ' + heap);
+  // the heap is no steeper than loose earth stands
+  let steep = 0;
+  for (let i = 25; i < 40; i++) steep = Math.max(steep, Math.abs(reliefAt(g, (i + 1) / 10, 2) - reliefAt(g, i / 10, 2)) / 0.1);
+  assert.ok(steep < 0.9, 'heap slope ' + steep.toFixed(2));
+  // throw earth back in: it is loose and fills the hole
+  const before = reliefAt(g, 2, 2);
+  c(sim, 'landscape.dig', { x: 3.2, z: 2 }); c(sim, 'landscape.dump', { x: 2, z: 2 });
+  assert.ok(reliefAt(g, 2, 2) > before + 0.05);
+});

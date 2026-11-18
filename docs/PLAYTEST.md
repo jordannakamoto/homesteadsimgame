@@ -402,7 +402,7 @@ Water, electricity and room heat are merged and tested headlessly. They become p
 
 ## Digging and landscaping (Yard, key 6)
 
-The ground is a physical thing now: a smooth surface you shape 10 cm at a time, not a grid. Holes are round bowls, thrown earth lands in a heap and slides down until it holds at its natural slope, and the grass stays firm at the edge of a cut. Everything is put in the way it really is.
+The ground is a physical thing now: a smooth surface you shape 10 cm at a time, not a grid. Undisturbed earth is firm: a hole keeps its steep sides (only a wall steeper than about 60 degrees crumbles at the lip). What you throw is loose: it lands in a round heap and slides down until it holds at its natural slope, fills a hole you throw it into, and stays loose until you tamp it. Holes look damp, dark and deeper-darker; heaps look pale, dry and crumbly with clods on them. Everything is put in the way it really is.
 
 **The tools and how they move**
 

@@ -68,7 +68,7 @@
   const drawn = new Set();         // quad keys drawn (for the grass and the dig mask)
   const qKey = (i, j) => (i + 100000) * 200000 + (j + 100000);
   const COL = {
-    soil: new T.Color(0x5e4632), soilDry: new T.Color(0x86704f), firm: new T.Color(0x76604a), sod: new T.Color(0x56732f), sodDark: new T.Color(0x3f5a26),
+    soil: new T.Color(0x5e4632), soilDry: new T.Color(0x86704f), loose: new T.Color(0xa0835c), damp: new T.Color(0x4a3a2c), firm: new T.Color(0x76604a), sod: new T.Color(0x56732f), sodDark: new T.Color(0x3f5a26),
     sprout: new T.Color(0x6f9a3a), skirt: new T.Color(0x3d2c1f), liner: new T.Color(0x232526), fabric: new T.Color(0x2e2f2c), fabricLine: new T.Color(0x45463f),
     gravel: new T.Color(0xa49d90), gravelDark: new T.Color(0x6f6a62), bark: new T.Color(0x5a3626), barkLight: new T.Color(0x8a5a3a), sand: new T.Color(0xd8c79a),
     rock: new T.Color(0x8c8478), rockDark: new T.Color(0x5f5a52), subsoil: new T.Color(0x9a7348),
@@ -91,8 +91,14 @@
       if (f & (RD.FLAG.TAMP1 | RD.FLAG.TAMP2)) _c.lerp(COL.firm, f & RD.FLAG.TAMP2 ? 0.6 : 0.3);   // tamped earth: smoother and paler
       if (name === 'lawn_sown') { const age = clamp((lifeH - t.t[n]) / (RD.LAWN.coverDays * 24), 0, 1); if (hash(i * 3 + 1, j * 5) < 0.15 + 0.85 * age) _c.lerp(COL.sprout, 0.35 + 0.5 * age); }
     }
-    // down a hole: the paler subsoil under the dark topsoil, a little shaded
-    if (h < -0.04 && !(BASE[name] && t.l[n] > 2) && !(f & (RD.FLAG.LINER | RD.FLAG.FABRIC))) _c.lerp(COL.subsoil, clamp((-h - 0.04) * 5, 0, 0.75));
+    const bare = !(BASE[name] && t.l[n] > 2) && !(f & (RD.FLAG.LINER | RD.FLAG.FABRIC)) && name !== '';
+    // A hole reads as a hole and a heap as a heap: thrown earth is loose, dry and pale on top, crumbly; a hole is
+    // damp, cool and shadowed, the deeper the darker, with the redder subsoil showing in its walls.
+    if (bare && (f & EW.LOOSE_BIT) && h > -0.02) { _c.lerp(COL.loose, 0.55 + 0.2 * hash(i * 3, j + 4)); return _c.multiplyScalar(0.78 + clamp(h * 1.4, 0, 0.42)); }   // dark at the foot of a heap, pale at its top
+    if (h < -0.03 && bare) {
+      _c.lerp(COL.subsoil, clamp((-h - 0.03) * 4, 0, 0.55)).lerp(COL.damp, clamp(-h * 1.2, 0, 0.45));
+      return _c.multiplyScalar(1 - clamp(-h * 1.3, 0, 0.5));
+    }
     return _c.multiplyScalar(1 + clamp(h * 0.8, -0.25, 0));
   }
   const ptRef = (g, i, j) => { const tx = Math.floor(i / TS), tz = Math.floor(j / TS), t = g.tiles[tx + ',' + tz]; return t ? [t, (j - tz * TS) * TS + (i - tx * TS)] : null; };
@@ -107,7 +113,7 @@
     const vert = (i, j, down = 0) => {
       const x = i * STEP, z = j * STEP, yy = y(i, j);
       pos.push(x, yy - down, z);
-      const nx = y(i - 1, j) - y(i + 1, j), nz = y(i, j - 1) - y(i, j + 1), l = Math.hypot(nx, 2 * STEP, nz);
+      const nx = (y(i - 1, j) - y(i + 1, j)) * 1.7, nz = (y(i, j - 1) - y(i, j + 1)) * 1.7, l = Math.hypot(nx, 2 * STEP, nz);   // shading a little stronger than true, so shapes read from above
       if (down) nor.push(0, 1, 0); else nor.push(nx / l, (2 * STEP) / l, nz / l);
       const r = ptRef(g, i, j), c = down ? _c2.copy(COL.skirt) : r ? pointColour(g, r[0], r[1], i, j, lifeH) : _c.copy(COL.sod);
       col.push(c.r, c.g, c.b);
@@ -148,6 +154,7 @@
     marble: { n: 1.1, geo: new T.OctahedronGeometry(1, 0), size: [0.016, 0.028], flat: 0.7, cols: [0xf3f1ec, 0xe2ded6, 0xd6d2c9] },
     lava: { n: 0.8, geo: new T.IcosahedronGeometry(1, 0), size: [0.022, 0.04], flat: 0.75, cols: [0x7e3a2a, 0x5c2a20, 0x96503a, 0x45231c] },
     woodchips: { n: 1.1, geo: new T.BoxGeometry(2.4, 0.3, 0.8), size: [0.02, 0.04], flat: 1, cols: [0xc19a66, 0xa47a4c, 0x8a6238, 0xd8b588] },
+    clod: { n: 1.4, geo: new T.IcosahedronGeometry(1, 0), size: [0.014, 0.034], flat: 0.75, cols: [0x8a6c4a, 0x7a5e40, 0xa8895f, 0x5e4632, 0x93774f, 0x5f8a3a] },
     weed: { n: 1, geo: new T.ConeGeometry(0.6, 3, 3), size: [0.02, 0.035], flat: 1, cols: [0x4f7a2e, 0x5f8f36, 0x6b9a3c] },
   };
   for (const k in DETAIL) DETAIL[k].pos = DETAIL[k].geo.toNonIndexed().attributes.position.array;
@@ -172,6 +179,7 @@
       if (!r) continue;
       const [t, n] = r, D = DETAIL[g.codes[t.s[n]]];
       if (D && t.l[n] > 2) { const c = Math.floor(D.n) + (hash(i, j + 77) < D.n % 1 ? 1 : 0); if (c) scatter(D, i, j, c, 0); }
+      else if ((t.f[n] & EW.LOOSE_BIT) && g.codes[t.s[n]] === 'soil' && t.h[n] > -20) { const C = DETAIL.clod; scatter(C, i, j, 1 + (hash(i, j + 77) < 0.4 ? 1 : 0), 3); }   // clods on thrown earth
       const wd = (t.f[n] >> 4) & 7;
       if (wd) scatter(DETAIL.weed, i, j, Math.min(4, wd), 5);
     }
