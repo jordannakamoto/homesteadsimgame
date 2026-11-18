@@ -252,10 +252,11 @@ Slab foundations: runs hosted in the ground under a slab belong before the pour.
 
 ### 4.5 Seeing inside walls, and reopening
 
-- Runs are real geometry between the stud faces. Batts (`framing.js:397-405`) and the lining member (`<wall>.ln`, line 407) hide them by ordinary depth; no new rendering.
-- `services` marks a run `covered` when the lining of any of its `hosts` is built (read from `ctx.get('construction').progress`). Covered runs refuse `reroute` and `work` with "Open this wall first".
-- "Open this wall" in Hands calls `construction.dismantle` (832) on that wall's `.ln` member and the batts in the bays touched. Boards come back; gypsum is waste, as that command already decides.
-- A limit to state plainly: lining is one member per wall, so opening means the whole wall face. A cut-out patch is later work.
+- Runs are real geometry between the stud faces. Batts and the lining hide them by ordinary depth; no new rendering. Since the interior walls workstream (`interior-walls.md`) a wall face is hung sheet by sheet (`<wall>.ln<face>.<k>`, both faces of a partition), with taped seams (`<wall>.jt<face>.<k>`, stage `finish`).
+- Boxes are set proud of the studs by the wall's lining thickness (`frame-channels` `w.finish`), so their faces sit flush with the finished drywall or boards and stay visible once the wall is closed.
+- `services` marks a run `covered` when any lining piece of any of its `hosts` is built (read from `ctx.get('construction').progress`). Covered runs refuse `reroute` and `work` with "Open this wall first".
+- "Open this wall" in Hands calls `construction.dismantle` on that wall's lining pieces, its taped seams and the batts. Boards come back; gypsum is waste and spent compound comes back as nothing, as that command decides.
+- A limit to state plainly: opening takes the whole wall (both faces of a partition), not one sheet. A cut-out patch is later work.
 - "Close up anyway" calls `services.defer`: unfinished planned runs leave the tally and stay as faint plan lines.
 
 ## 5. Player experience (C)

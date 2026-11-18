@@ -21,7 +21,11 @@ const MOON_AGE_AT_START = 3.5 - calendar.START_DAY_OF_YEAR;   // days old at wor
 // sky frame and moon at world time t: { eq: Matrix3 (stars' frame to world), moon: Vector4 (world direction, lit
 // fraction), age (days) }
 const _P = new THREE.Vector3(), _Q = new THREE.Vector3(), _E = new THREE.Vector3(1, 0, 0), _a = new THREE.Vector3(), _b = new THREE.Vector3();
-export function skyFrame(t, latitudeDeg, out) {
+// The game's clock runs far faster than life (a day in twenty minutes), and stars turning at that pace look wrong:
+// so the stars (out.eq) show the true sky of the night at hand, as at its local midnight, and turn only at the real
+// sidereal rate (realSeconds: real time passed), which the eye reads as still. The sun and moon keep the game's
+// clock (out.eqNow is the true frame for them).
+export function skyFrame(t, latitudeDeg, out, realSeconds = 0) {
   const phi = latitudeDeg * RAD;
   // world: x east, y up, z south. The celestial pole stands over the north point at the latitude's height;
   // Q is where the celestial equator crosses the meridian in the south
@@ -29,18 +33,24 @@ export function skyFrame(t, latitudeDeg, out) {
   const days = calendar.absoluteDays(t);
   const lam = 2 * Math.PI * (days - 79.6) / 365.2422;                       // the sun's ecliptic longitude (0 at the March equinox)
   const raSun = Math.atan2(Math.cos(OBL) * Math.sin(lam), Math.cos(lam));
-  const lst = calendar.solarHourAngleRad(t) + raSun;
-  const c = Math.cos(lst), s = Math.sin(lst);
+  const lstOf = (tt) => calendar.solarHourAngleRad(tt) + raSun;
   // star at (cos dec cos ra, cos dec sin ra, sin dec): hour angle lst - ra, direction cosd cosH Q - cosd sinH E + sind P
-  _a.copy(_Q).multiplyScalar(c).addScaledVector(_E, -s);
-  _b.copy(_Q).multiplyScalar(s).addScaledVector(_E, c);
-  out.eq.set(_a.x, _b.x, _P.x, _a.y, _b.y, _P.y, _a.z, _b.z, _P.z);
+  const frame = (lst, m) => {
+    const c = Math.cos(lst), s = Math.sin(lst);
+    _a.copy(_Q).multiplyScalar(c).addScaledVector(_E, -s);
+    _b.copy(_Q).multiplyScalar(s).addScaledVector(_E, c);
+    m.set(_a.x, _b.x, _P.x, _a.y, _b.y, _P.y, _a.z, _b.z, _P.z);
+  };
+  frame(lstOf(t), out.eqNow);
+  // the night at hand: its local midnight (after noon, the coming one)
+  const frac = days - Math.floor(days), midnight = t - frac * 86400 + (frac >= 0.5 ? 86400 : 0);
+  frame(lstOf(midnight) + realSeconds * 7.2921e-5, out.eq);
   // the moon
   const age = (((days + MOON_AGE_AT_START) % SYNODIC) + SYNODIC) % SYNODIC;
   const lm = lam + 2 * Math.PI * age / SYNODIC, bm = 5.14 * RAD * Math.sin(2 * Math.PI * days / DRACONIC);
   const sd = Math.sin(bm) * Math.cos(OBL) + Math.cos(bm) * Math.sin(OBL) * Math.sin(lm);
   const dec = Math.asin(sd), ra = Math.atan2(Math.sin(lm) * Math.cos(OBL) - Math.tan(bm) * Math.sin(OBL), Math.cos(lm));
-  _a.set(Math.cos(dec) * Math.cos(ra), Math.cos(dec) * Math.sin(ra), Math.sin(dec)).applyMatrix3(out.eq).normalize();
+  _a.set(Math.cos(dec) * Math.cos(ra), Math.cos(dec) * Math.sin(ra), Math.sin(dec)).applyMatrix3(out.eqNow).normalize();
   out.moon.set(_a.x, _a.y, _a.z, (1 - Math.cos(2 * Math.PI * age / SYNODIC)) / 2);
   out.age = age;
   out.eqInv.copy(out.eq).transpose();
@@ -76,34 +86,42 @@ export function createNightSky({ scene, camera, sky }) {
     vertexShader: /* glsl */ `
       uniform mat3 uEqW; uniform float uLimit, uVis, uScale, uTime;
       attribute float mag; attribute vec3 scol;
-      varying vec3 vCol; varying vec3 vDir;
+      varying vec3 vCol; varying vec3 vDir; varying float vSize, vBright;
       void main() {
         vec3 d = normalize(uEqW * position);
         vDir = d;
         // the thicker air low down: dimmer (about a magnitude at 10 degrees), redder, and more twinkle
         float air = 1.0 / max(d.y + 0.025, 0.02);
         float m = mag + 0.12 * (air - 1.0);
-        float f = pow(10.0, -0.4 * (m - uLimit + 1.0));      // flux relative to the faintest seen
+        // brightness by the real scale (each magnitude 2.5 times the next): a few bright stars stand out, the many
+        // faint ones are barely there, rather than a field of equal specks
+        float flux = pow(10.0, -0.4 * (m - 1.0));
+        float f = 0.07 + 0.9 * min(flux, 1.6);
         // a gentle twinkle, mostly low down where the air is thick (strong and fast, it reads as flickering specks)
         float tw = 1.0 + (0.03 + 0.22 * smoothstep(0.35, 0.03, d.y)) * sin(uTime * (2.2 + fract(mag * 37.0) * 2.5) + mag * 91.0);
-        float b = clamp(f, 0.0, 3.0) * tw * uVis * smoothstep(uLimit + 0.3, uLimit - 0.6, m) * smoothstep(-0.01, 0.06, d.y);
+        float b = f * tw * uVis * smoothstep(uLimit + 0.3, uLimit - 0.6, m) * smoothstep(-0.01, 0.06, d.y);
         vCol = scol * mix(vec3(1.0), vec3(1.0, 0.75, 0.5), smoothstep(0.35, 0.03, d.y)) * b;
         vec4 p = projectionMatrix * viewMatrix * vec4(cameraPosition + d * 280.0, 1.0);
         gl_Position = p.xyww;
         gl_Position.z = gl_Position.w * 0.99999;
         // a few pixels for the brightest, one for the faint; the brightest also bloom
-        gl_PointSize = uScale * (2.0 + 8.0 * clamp(pow(10.0, -0.4 * (mag - 0.5)), 0.0, 1.0));
+        // the sprite: every star at least a soft point a pixel and a half across (smaller, it would come and go
+        // between pixels as the view moves, like dust), the bright ones with room for a glow
+        vBright = clamp(flux - 0.25, 0.0, 1.0);
+        vSize = uScale * (3.0 + 8.0 * vBright);
+        gl_PointSize = vSize;
       }`,
     fragmentShader: SKY_NOISE_GLSL + /* glsl */ `
       uniform float uCloud; uniform vec2 uWindOff; uniform vec4 uOpt;
-      varying vec3 vCol; varying vec3 vDir;
+      varying vec3 vCol; varying vec3 vDir; varying float vSize, vBright;
       void main() {
         vec2 q = gl_PointCoord - 0.5;
         float r = length(q) * 2.0;
         // a sharp point and, for the bright ones (their sprites are bigger), a soft glow round it, as the eye sees them
-        float a = smoothstep(0.32, 0.0, r) + exp(-r * r * 7.0) * 0.22;
+        float rp = r * 0.5 * vSize;                          // pixels from the centre
+        float a = exp(-rp * rp / (2.0 * 0.62 * 0.62)) + exp(-rp * rp / (2.0 * pow(0.2 * vSize, 2.0))) * 0.18 * vBright;
         float hidden = cloudCover(normalize(vDir), clamp(uCloud, 0.0, 1.0), uWindOff, uOpt.y);
-        gl_FragColor = vec4(vCol * a * (1.0 - hidden) * 2.8, 1.0);
+        gl_FragColor = vec4(vCol * a * (1.0 - hidden) * 1.6, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }`,
