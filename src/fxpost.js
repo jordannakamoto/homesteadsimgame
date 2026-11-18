@@ -137,6 +137,7 @@
       float z = linZ(d);
       // (the far blur only softens: blurred all the way, the distance read as a mist even on a clear day)
       float coc = max(smoothstep(uFocus * 1.5, uFocus * 4.0, z) * 0.55 * uDofFar, smoothstep(uFocus * 0.74, uFocus * 0.34, z) * uDofNear);
+      coc *= step(d, 0.99995);                          // not the sky: blurred, the stars and the moon's disc smear away
       vec3 col = mix(c.rgb, texture2D(tBlur, vUv).rgb, coc);
       if (d < 0.99995) {
         if (uAOOn > 0.5) {
