@@ -69,7 +69,7 @@ export function createNightSky({ scene, camera, sky }) {
   const su = sky.uniforms;
   const uniforms = {
     uEqW: { value: new THREE.Matrix3() }, uLimit: { value: 6 }, uVis: { value: 0 }, uScale: { value: 1 },
-    uTime: su.uTime, uCloud: su.uCloud, uWindOff: su.uWindOff, uOpt: su.uOpt, uCloudNoise: su.uCloudNoise,
+    uTime: su.uTime, uCloud: su.uCloud, uWindOff: su.uWindOff, uOpt: su.uOpt, uCloudNoise: su.uCloudNoise, uNoise3: su.uNoise3,
   };
   const mat = new THREE.ShaderMaterial({
     uniforms, transparent: true, depthWrite: false, depthTest: true, blending: THREE.AdditiveBlending, fog: false,
