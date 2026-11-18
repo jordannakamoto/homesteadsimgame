@@ -60,6 +60,9 @@ function wallOf(id, ms) {
   const w = { id, o: [ref[0] + u[0] * smin, ref[1] + u[1] * smin], u, n, L: smax - smin };
   const SB = studs[0].section.b, SD = studs[0].section.d;
   w.SB = SB; w.SD = SD;
+  // what will cover the studs on the inside (drywall, pine boards; docs/design/interior-walls.md): boxes are set proud of
+  // the studs by that much, so their faces end up flush with the finished wall, as an electrician sets them
+  { const ln = ms.find((m) => m.kind === 'lining'); w.finish = ln ? ln.thickness ?? ln.section.b : 0; }
   w.yt = t0.a[1] + 1.5 * SB;
   w.yb = bottoms.length ? bottoms[0].a[1] - SB / 2 : Math.min(...studs.map((m) => Math.min(m.a[1], m.b[1]))) - SB;
   // which side is outdoors: sheathing goes on the outside of an outside wall; inside walls have none
@@ -376,7 +379,9 @@ export function snap(ch, hit, opts = {}) {
     if (inBlock(w, s, y) || !w.bays.some((b) => s > b.s0 - 1e-6 && s < b.s1 + 1e-6)) s = st.s - dir * (w.SB / 2 + half);
     if (inBlock(w, s, y)) return { refused: 'That height is in a window or door opening.' };
     if (!w.bays.some((b) => s > b.s0 - 1e-6 && s < b.s1 + 1e-6)) return { refused: 'No room between the studs there.' };
-    return { at: P3(wallAt(w, s, y, side * (w.SD / 2 - depth / 2))), wall: w.id, s, y, side, host: { parent: w.id, member: st.id }, onto: 'stud' };
+    // the box's face at the finished wall: proud of the stud by the lining (and a hair more, so it is not lost in it)
+    const fin = w.finish ? w.finish + 0.001 : 0;
+    return { at: P3(wallAt(w, s, y, side * (w.SD / 2 + fin - depth / 2))), wall: w.id, s, y, side, host: { parent: w.id, member: st.id }, onto: 'stud' };
   }
   if (hit.kind === 'floor' && ch.floor) {
     const F = ch.floor, c = F.c(hit.point), bay = F.bays.find((b) => c > b.c0 && c < b.c1);
