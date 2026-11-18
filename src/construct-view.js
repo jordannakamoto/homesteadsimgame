@@ -22,6 +22,7 @@
   const low = (t) => t.charAt(0).toLowerCase() + t.slice(1);
 
   const look = B.memberLook();
+  const FCOL = (window.__flooring && window.__flooring.FLOOR_COLORS) || {};     // the floor's colours as hex, for the saw and the stacks
   const MARK = [0.09, 0.08, 0.09], CHALK = [0.8, 0.9, 1.0];       // pencil, and a snapped chalk line (pale blue)
   const asm = window.__assembly.create(G, { geo: look.geo, mat: look.mat, colorOf: (m) => (m.col === 'mark' ? MARK : m.col === 'chalk' ? CHALK : look.colors[m.col || 'timber'] || look.colors.timber) });
   const sounds = window.__assembly.createSounds();
@@ -43,7 +44,7 @@
   const freshOf = (id) => { let f = V.fresh.get(id); if (!f) V.fresh.set(id, (f = new Set())); return f; };
 
   // ------------------------------------------------------------------ what is being built, read once per change
-  const KR = { site: 0, pier: 1, footing: 1, post: 2, beam: 3, skid: 3, stemwall: 3, slab: 4, joist: 5, plate: 6, stud: 7, header: 8, rafter: 9, sheathing: 10, drip: 10.5, membrane: 11, rake: 11.5, roofing: 12, ridgecap: 12.6, cladding: 13, gutter: 13.4, downspout: 13.6, window: 14, door: 15, insulation: 16, lining: 17 };
+  const KR = { site: 0, pier: 1, footing: 1, post: 2, beam: 3, skid: 3, stemwall: 3, slab: 4, joist: 5, plate: 6, stud: 7, header: 8, rafter: 9, sheathing: 10, drip: 10.5, membrane: 11, rake: 11.5, roofing: 12, ridgecap: 12.6, cladding: 13, gutter: 13.4, downspout: 13.6, window: 14, door: 15, insulation: 16, lining: 17, underlay: 17.1, backer: 17.2, tackstrip: 17.3, pad: 17.4, plank: 17.5, tile: 17.5, paving: 17.5, carpet: 17.6, grout: 17.7, baseboard: 17.8, threshold: 17.9 };
   const TR = { rim: -0.5, end: 0, bottom: -0.2, top: -0.1, jack: 0.5, sill: 2.5, cripple: 2.7, gable: 2.6, underlayment: -1, 'ice-water': -1, starter: -0.3 };
   function geom(id) {
     const st = V.structs.get(id);
@@ -73,7 +74,7 @@
     // the order pieces go in: by stage, then by kind, then along the building
     for (const m of g.byId.values()) {
       const mx = (m.a[0] + m.b[0]) / 2, mz = (m.a[2] + m.b[2]) / 2, my = (m.a[1] + m.b[1]) / 2;
-      g.rank.set(m.id, C.STAGE_ORDER.indexOf(m.stage) * 1e6 + ((KR[m.kind] || 0) + (TR[m.type] || 0) + 2) * 1e4 + (m.kind === 'sheathing' || m.course || m.kind === 'cladding' && m.type !== 'vboards' && m.type !== 'batten' || m.kind === 'stud' && m.type === 'cripple' ? my * 300 : 0) + (mx - g.cx) + 0.37 * (mz - g.cz) + 50);
+      g.rank.set(m.id, C.STAGE_ORDER.indexOf(m.stage) * 1e6 + ((KR[m.kind] || 0) + (TR[m.type] || 0) + 2) * 1e4 + (m.kind === 'sheathing' || m.course || m.kind === 'cladding' && m.type !== 'vboards' && m.type !== 'batten' || m.kind === 'stud' && m.type === 'cripple' ? my * 300 : 0) + (m.stage === 'flooring' && m.row !== undefined ? m.row * 40 : 0) + (mx - g.cx) + 0.37 * (mz - g.cz) + 50);
     }
     // each framed wall: the line it swings up about (the inner edge of its bottom plate)
     for (const m of g.byId.values()) {
@@ -224,7 +225,19 @@
   // the next course on each roof plane: a blue chalk line snapped along where its top edge goes (underlayment and roofing alike)
   function chalkLines(pr, g) {
     const out = [], pl = plan(pr.id), rows = new Map();
-    if (!pl || !g.frames || !g.frames.size) return out;
+    if (!pl) return out;
+    { const low = new Map();
+      for (const mid of pl.inst) {
+        const pm = pr.members[mid], m = g.byId.get(mid);
+        if (!m || !m.cl || pm.stage !== 'flooring' || pm.need - pm.got < 1e-6) continue;
+        const k = pm.parent + pm.kind, r = low.get(k);
+        if (!r || m.row < r.row) low.set(k, { row: m.row, cl: m.cl });
+      }
+      for (const [k, r] of low) {
+        const [a, b] = r.cl, L = Math.hypot(b[0] - a[0], b[2] - a[2]) || 1;
+        out.push({ id: 'chalk:' + k, col: 'chalk', a, b, n: [(b[2] - a[2]) / L, 0, -(b[0] - a[0]) / L], section: { b: 0.0012, d: 0.012 } });
+      } }
+    if (!g.frames || !g.frames.size) return out;
     for (const mid of pl.inst) {
       const pm = pr.members[mid], m = g.byId.get(mid);
       if (!m || !m.course || !m.rs || !g.frames.has(pm.parent) || pm.need - pm.got < 1e-6) continue;
@@ -323,15 +336,20 @@
     if (itemId === 'ladder') return { form: 'ladder', w: 0.46, h: 0.06, l: 3.6, n: 9, color: 0xe3912f };
     if (f === 'lumber') { const l = itemId === 'lumber_2x4' ? 3.0 : 3.6; return { form: 'lumber', w: Math.max(d.depthM, d.widthM), h: Math.min(d.depthM, d.widthM), l, n: n(l), color: COLORS.lumber }; }
     if (f === 'boards') return { form: 'lumber', w: 0.14, h: 0.019, l: 3, n: n(3 * 4), color: COLORS.boards, scaleH: 4 };
-    if (f === 'sheet') return { form: 'sheet', w: 1.22, l: 2.44, h: Math.max(0.011, d.thicknessM || 0.011), n: n(1), color: /gypsum/.test(itemId) ? 0xd8d6cf : COLORS.osb };
+    if (f === 'sheet') return { form: 'sheet', w: d.widthM || 1.22, l: d.lengthM || 2.44, h: Math.max(0.011, d.thicknessM || 0.011), n: n(1), color: /gypsum/.test(itemId) ? 0xd8d6cf : itemId === 'backer_board' ? FCOL.flBacker : COLORS.osb };
     if (f === 'block') return { form: 'block', w: 0.3, l: 0.3, h: 0.2, n: n(1), color: COLORS.block };
-    if (f === 'roll') return { form: 'roll', w: 0.17, l: 1.0, h: 0.17, n: n(30), color: itemId === 'housewrap' ? COLORS.wrap : COLORS.felt };
+    if (f === 'roll' && /^carpet_(cut|berber)/.test(itemId)) return { form: 'roll', w: 0.3, l: 3.66, h: 0.3, n: n(18), color: FCOL[itemId === 'carpet_cut' ? 'flCarpetRed' : 'flBerber'] };
+    if (f === 'roll' && (itemId === 'carpet_pad' || itemId === 'underlay_foam')) return { form: 'roll', w: 0.28, l: itemId === 'carpet_pad' ? 1.83 : 1.0, h: 0.28, n: n(10), color: FCOL[itemId === 'carpet_pad' ? 'flPad' : 'flFoam'] };
+    if (f === 'roll') return { form: 'roll', w: 0.17, l: 1.0, h: 0.17, n: n(30), color: itemId === 'housewrap' ? COLORS.wrap : itemId === 'underlay_rosin' ? FCOL.flRosin : itemId === 'vapour_barrier' ? FCOL.flPoly : COLORS.felt };
     if (f === 'bundle') return { form: 'heap', w: 0.9, l: 0.33, h: 0.09, n: n(3), color: COLORS.shingle };
+    if (f === 'trim' && itemId === 'threshold_oak') return { form: 'lumber', w: 0.1, h: 0.015, l: 0.92, n: n(1), color: FCOL.flThresh };
+    if (f === 'trim' && (itemId === 'baseboard_primed' || itemId === 'tack_strip')) return { form: 'lumber', w: itemId === 'tack_strip' ? 0.025 : 0.089, h: itemId === 'tack_strip' ? 0.007 : 0.012, l: itemId === 'tack_strip' ? 1.22 : 3.6, n: n(itemId === 'tack_strip' ? 1.22 : 3.6), color: itemId === 'tack_strip' ? FCOL.flTack : FCOL.flBase };
     if (f === 'trim') return { form: 'lumber', w: 0.12, h: 0.05, l: 3.05, n: n(3.05), color: /gutter|downspout/.test(itemId) ? 0xe4e3de : 0xb9bec2 };
     if (f === 'bale') return { form: 'heap', w: 1.15, l: 0.4, h: 0.28, n: n(5), color: COLORS.batt };
     if (f === 'door') return { form: 'lean', w: 0.92, l: 2.03, h: 0.05, n: n(1), color: COLORS.door };
     if (f === 'pane') return { form: 'lean', w: 0.6, l: 0.9, h: 0.07, n: n(1), color: COLORS.pane };
-    if (f === 'bag') return { form: 'heap', w: 0.45, l: 0.3, h: 0.12, n: n(25), color: COLORS.bag };
+    if (f === 'bag') return { form: 'heap', w: 0.45, l: 0.3, h: 0.12, n: n(itemId === 'grout_sanded' || itemId === 'thinset_mortar' ? 11 : 25), color: itemId === 'grout_sanded' ? 0x9d9a92 : COLORS.bag };
+    if (f === 'carton') return /^tile_/.test(itemId) ? { form: 'heap', w: 0.34, l: 0.34, h: 0.1, n: n(1.1), color: 0x8f8a82 } : { form: 'heap', w: 0.21, l: 1.3, h: 0.1, n: n(2), color: 0xa8875c };
     return { form: 'heap', w: 0.3, l: 0.22, h: 0.15, n: n(2.5), color: COLORS.box };
   }
   // what a stack is to the player: the name the open work knows it by ("studs"), else what it is sold as
@@ -365,8 +383,11 @@
   // hold a piece clear of its seat: up for most things, out from the wall for siding
   function liftTo(id, layer, mid, h) {
     const m = geom(id) && geom(id).byId.get(mid);
-    if (m && m.kind === 'cladding' && m.out) asm.lift(id, layer, mid, h * 0.5, m.out); else asm.lift(id, layer, mid, h);
+    if (m && m.kind === 'cladding' && m.out) asm.lift(id, layer, mid, h * 0.5, m.out);
+    else if (m && m.stage === 'flooring' && m.out) asm.lift(id, layer, mid, h * (FLOOR_PROUD[m.kind] ?? 0.5), m.out);
+    else asm.lift(id, layer, mid, h);
   }
+  const FLOOR_PROUD = { plank: 0.7, tile: 0.35, grout: 0.1, backer: 0.3, baseboard: 0.45, threshold: 0.3, tackstrip: 0.3 };
   const proud = (mid) => { if (V.sheetMids && V.sheetMids.has(mid)) return 0; const sw = V.swingIn; if (sw && sw.mid === mid) return 0.045 + 0.55 * (1 - Math.min(1, sw.t / 0.2)) ** 2; const b = V.blows[mid]; return 0.045 * (1 - (b ? b.n / b.of : 0)); };
   const qTmp = new T.Quaternion(), aTmp = new T.Vector3(), wA = new T.Vector3(), wB = new T.Vector3(), wM = new T.Vector3();
   // a point of a member in the world, wherever its frame lies just now
@@ -388,6 +409,7 @@
     if (nm.has(mid)) return nm.get(mid);
     const m = g.byId.get(mid);
     let out = null;
+    if (m && m.pts && m.pts.length) { nm.set(mid, m.pts); return m.pts; }
     if (m && (m.kind === 'door' || m.kind === 'window')) {      // a unit in its opening: nails down both jambs (a door) or all round the flange (a window)
       const u = m.n, wx = -u[2], wz = u[0], mx = (m.a[0] + m.b[0]) / 2, mz = (m.a[2] + m.b[2]) / 2, sg = wx * (mx - g.cx) + wz * (mz - g.cz) >= 0 ? 1 : -1, off = sg * 0.06;
       const W = m.section.d, y0 = m.a[1], y1 = m.b[1], hx = W / 2 - 0.03, at = (v, y) => [mx + u[0] * v + wx * off, y, mz + u[2] * v + wz * off];
@@ -431,7 +453,7 @@
       if (!pts) continue;
       const cv = COVER[pm.stage];
       if (pm.built && cv && pr.tally[cv] && api.stageComplete(pr, cv)) continue;
-      if (pm.built && pm.kind === 'roofing') continue;      // a course's nails are under the course above
+      if (pm.built && (pm.kind === 'roofing' || pm.stage === 'flooring')) continue;      // a course's nails are under the course above; a floor's are hidden in its tongues and joints
       const b = V.blows[mid], flat = C.STAGE[pm.stage].flat && g.walls.has(pm.parent) && !pr.raised[pm.parent], layer = flat ? pm.parent : 'main', h = pm.built ? 0 : 0.045 * (1 - (b ? b.n / b.of : 0));
       let list = by.get(layer);
       if (!list) by.set(layer, (list = []));
@@ -769,7 +791,7 @@
     if (r.installed.length) {
       if (layer === 'main') freshOf(id).add(mid);
       if (kind === 'site' || kind === 'door' || kind === 'window' || freshOf(id).size >= 40) { flush(id); if (kind === 'site') V.terrainV = (V.terrainV || 0) + 1; }
-      moments(pr, { kind }, r);
+      moments(pr, { kind, memberId: mid }, r);
     }
     redraw(id);
   }
@@ -835,9 +857,35 @@
     const sawn = r.cuts && r.cuts.find((q) => q.stick);
     if (sawn) { sawPiece(id, mid, layer, sawn, at, quiet); if (!quiet) flash(cutWords(sawn)); }
     else if (r.cuts && r.cuts.length && !quiet) flash(r.cuts[0].how === 'offcut' ? 'Cut from an offcut' : 'Cut to fit; offcut kept');
-    if (r.set.length) { if (swp) V.stick = { id, mid }; if (sawn) { /* it swings in when the saw is through */ } else if (pm.kind === 'cladding') slideIn(id, layer, mid); else if (V.sheetMids && V.sheetMids.has(mid)) wrapRoll(id, layer, mid); else if (!quiet) V.swingIn = { mid, id, layer, t: 0 }; sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
+    if (r.set.length) { if (swp) V.stick = { id, mid }; if (sawn) { /* it swings in when the saw is through */ } else if (pm.stage === 'flooring' && m) { if (!floorCut(id, mid, layer, m, at, quiet)) floorIn(id, layer, mid, m, at, quiet); } else if (pm.kind === 'cladding') slideIn(id, layer, mid); else if (V.sheetMids && V.sheetMids.has(mid)) wrapRoll(id, layer, mid); else if (!quiet) V.swingIn = { mid, id, layer, t: 0 }; sounds.play(C.WORK.sound[pm.kind] === 'scrape' ? 'scrape' : 'thunk'); if (!quiet) { V.poseT = 0.25; V.poseKind = 'lift'; } G.cam.shake = Math.min(G.cam.shake + 0.025, 0.3); G.burst(at.x, at.y, at.z, 3, 0xe8d9b0, 0.5, 0.5, 0.05, 0.3); }
     else if (!quiet) { const q = r.partial[0]; sounds.play('rustle'); flash(plain(lineOf(pr, mid).label) + ': ' + Math.round((100 * q.got) / q.need) + '% there. Fetch more.'); }
     return r;
+  }
+  // ---- a floor's pieces go in the way installers put them: a board slides along its row (a click board comes in at an angle
+  // and drops), a tile is pressed down into its bed of thinset, what comes on a roll is unrolled, the trim slides along the wall
+  function floorIn(id, layer, mid, m, at, quiet) {
+    const k = m.kind;
+    if (V.sheetMids && V.sheetMids.has(mid)) wrapRoll(id, layer, mid);
+    else if (k === 'plank' || k === 'baseboard' || k === 'grout') slideIn(id, layer, mid);
+    else if (!quiet) V.swingIn = { mid, id, layer, t: 0 };
+    if (k === 'tile' || k === 'backer') G.burst(at.x, at.y, at.z, 4, 0x9c9a94, 0.45, 0.35, 0.04, 0.35);   // thinset squeezing out
+    else if (k === 'grout') { const g = geom(id); if (g) for (const t of [0.2, 0.5, 0.8]) { wA.set(m.a[0] + (m.b[0] - m.a[0]) * t, m.a[1], m.a[2] + (m.b[2] - m.a[2]) * t).applyMatrix4(g.matrix); G.burst(wA.x, wA.y + 0.02, wA.z, 2, 0xa8a49b, 0.4, 0.25, 0.035, 0.3); } }
+  }
+  // a board or a tile that is cut to fit goes through the saw first: kneeling at the work (a hand saw, or the circular saw on
+  // power), tiles on the wet saw. A board's cut-off is what starts the next row.
+  function floorCut(id, mid, layer, m, at, quiet) {
+    if (!CS || !m.cut || m.cut - m.cutTo < 0.004) return false;
+    const P = G.player, tile = m.kind === 'tile', tools = G.sim.state.sys.stock.tools, power = tile || (tools.includes('circular_saw') && !!(G.powerAvailable && G.powerAvailable())),
+      rest = m.cut - m.cutTo - 0.003, onH = !tile && CS.near(P.x, P.z, 4.5);
+    V.sawing.add(mid);
+    CS.cut({ stockM: m.cut, lenM: m.cutTo, sawn: true, keptM: rest >= 0.2 ? rest : 0, onHorses: onH, x: P.x + Math.sin(P.face) * 0.7, z: P.z + Math.cos(P.face) * 0.7, y: P.y, yaw: P.face + Math.PI / 2,
+      to: { x: at.x, y: at.y, z: at.z }, power, slow: quiet ? 0.45 : 0.8, w: m.section.d, h: Math.max(0.005, m.section.b), color: FCOL[m.col] === undefined ? 0xdcbc8c : FCOL[m.col], dust: tile ? 0xdedbd2 : 0xe8d9b0 },
+      () => { V.sawing.delete(mid); V.rev++; if (S().progress[id]) { redraw(id); floorIn(id, layer, mid, m, at, quiet); } });
+    if (!quiet) {
+      if (!V.named['fcut:' + m.kind]) { V.named['fcut:' + m.kind] = 1; note(tile ? 'Cut on the wet saw' : 'Cut to fit', tile ? 'The tiles at the walls are cut to fit. Laying out from the middle of the room keeps those cuts even on both sides.' : 'The last board in a row is cut to fit the gap left at the wall. What is cut off starts the next row, so the end joints never line up.'); }
+      else flash(tile ? 'Wet saw: ' + mm(m.cutTo) + ' piece for the wall' : 'Cut ' + mm(m.cutTo) + ' from a ' + mm(m.cut) + ' board' + (rest >= 0.2 ? '; the cut-off starts the next row' : ''));
+    }
+    return true;
   }
   // ---- the saw: every stick piece is sawn to length from stock or an offcut before it goes in. At the sawhorses (within
   // 4.5 m) the cut is quick; anywhere else it is done kneeling on the deck, slower. The piece stays out of sight until the
@@ -935,9 +983,11 @@
     }
     b.n++;
     V.poseT = 0.24; V.poseKind = 'hammer';
-    const snd = pm.kind === 'pier' ? 'thud' : C.WORK.sound[pm.kind] === 'dig' ? 'dig' : 'knock', last = b.n >= of;
+    const snd = pm.kind === 'pier' || pm.kind === 'carpet' ? 'thud' : pm.kind === 'grout' ? 'rustle' : pm.kind === 'tile' || pm.kind === 'paving' ? 'thunk' : C.WORK.sound[pm.kind] === 'dig' ? 'dig' : 'knock', last = b.n >= of;
     sounds.play(last && snd === 'knock' ? 'seat' : snd, 0.94 + 0.12 * Math.random());
     if (pm.kind === 'site') G.burst(reach.x, G.heightAt(reach.x, reach.z) + 0.15, reach.z, 5, 0x6b4f35, 1.4, 2.2, 0.11, 0.6);
+    else if (pm.kind === 'grout') G.burst(wM.x, wM.y, wM.z, last ? 4 : 3, 0xd9d6cc, 0.5, 0.25, 0.04, 0.4);        // the haze lifting off
+    else if (pm.kind === 'carpet') G.burst(wM.x, wM.y, wM.z, 2, FCOL[m && m.col] || 0x8a2e2b, 0.5, 0.3, 0.03, 0.3);
     else G.burst(wM.x, wM.y, wM.z, last ? 4 : 2, 0xe8d9b0, 0.6, 0.7, 0.05, 0.3);
     G.cam.shake = Math.min(G.cam.shake + (last ? 0.07 : 0.035) * feel().shake, 0.3);
     if (G.juice) G.juice.hitStop = (last ? 0.07 : 0.035) * feel().hitStop;
@@ -990,7 +1040,7 @@
   beaconMesh.frustumCulled = false; beaconMesh.visible = false; beaconMesh.renderOrder = 6; beaconMesh.count = 0;
   G.scene.add(beaconMesh);
   V.aimed = new Set(); V.beacons = []; V.beaconT = 0;
-  const STAGE_PART = { 'roof-frame': 'roof', 'roof-deck': 'roof', 'dry-in': 'roof', roofing: 'roof', gutters: 'roof', foundation: 'floor', 'floor-frame': 'floor', subfloor: 'floor' };
+  const STAGE_PART = { flooring: 'floor', 'roof-frame': 'roof', 'roof-deck': 'roof', 'dry-in': 'roof', roofing: 'roof', gutters: 'roof', foundation: 'floor', 'floor-frame': 'floor', subfloor: 'floor' };
   function yRange(g) {
     if (g.yr) return g.yr;
     let lo = 1e9, hi = -1e9;
@@ -1289,6 +1339,12 @@
     if (done('subfloor')) celebrate('deck');
     if (j.kind === 'rafter' && Object.values(pr.members).filter((m) => m.kind === 'rafter' && m.built).length === 1) celebrate('firstRafter');
     if (done('roofing')) { celebrate('driedIn'); const w = G.sim.state.sys.weather; if (w && w.rainMmH > 0.05) setTimeout(() => note('It is raining', 'And it is dry inside your ' + low(pr.name) + '.'), 4200); }
+    if (done('flooring')) celebrate('floorDown');
+    else if (j.kind === 'plank' || j.kind === 'tile') {
+      const g = geom(pr.id), m0 = g && g.byId.get(j.memberId);
+      if (m0 && m0.row === 0 && !V.named['row0:' + m0.parent + j.kind] && Object.keys(pr.members).every((id) => { const q = pr.members[id], m = g.byId.get(id); return q.kind !== j.kind || q.parent !== m0.parent || !m || m.row !== 0 || q.built; })) { V.named['row0:' + m0.parent + j.kind] = 1; if (j.kind === 'plank') celebrate('firstRow'); else note('First row of tile set', 'Keep going row by row. The joints stay even because every tile follows this row.'); }
+      if (j.kind === 'tile' && Object.values(pr.members).every((q) => q.kind !== 'tile' || q.built) && !V.named['tiled:' + pr.id]) { V.named['tiled:' + pr.id] = 1; note('Every tile set', 'Next the grout: float it into the joints, then sponge off the haze before it dries.'); }
+    }
     if (j.kind === 'door') { celebrate('doorHung'); sounds.play('creak'); setTimeout(() => sounds.play('creak'), 450); }     // it swings once on its hinges
     for (const st of r.stagesDone) { flush(pr.id); if (!['subfloor', 'roofing'].includes(st) && !r.done) note(C.STAGE[st].name + ' done', nextLine(pr)); }
     if (r.done) { flush(pr.id); celebrate('finished', pr.planId === 'shed' ? 'You built this. New in the plan book: the small cabin, and drawing your own plans.' : null); }
@@ -1420,7 +1476,9 @@
       const A = V.auto, w = V.working && workLabel(pr, V.working.memberId), v = plan(A.id).view.stages.find((q) => q.id === A.stage);
       setPrompt('E', 'Stop · ' + (V.raise ? 'raising the wall' : w ? low(w.text) : A.wait > 0 ? 'fetching more' : low(C.STAGE[A.stage].name)), v ? v.built + ' of ' + v.total : '', V.raise ? Math.min(1, V.raise.p) : W.job ? W.progress() : null);
     } else if (ctx.kind === 'raise') setPrompt('E', 'Hold and push up to raise the wall', '', V.raise ? Math.min(1, V.raise.p) : 0);
-    else if (ctx.kind === 'hands') { const w = workLabel(pr, ctx.mid), pm = pr.members[ctx.mid], b = V.blows[ctx.mid], of = b ? b.of : nailCount(geom(ctx.id), pm, ctx.mid); setPrompt('E', ctx.act === 'set' ? (api.knows(S(), pm.kind) && sweepable(pr, ctx.mid, geom(ctx.id)) ? 'Hold and drag along the run: ' + low(w.text).replace(/s$/, '') : 'Set the ' + low(w.text)) + (pm.line && pr.lines[pm.line].sheet && !api.needsStock(S(), pr, ctx.mid) ? ' (from an offcut)' : '') : ctx.act === 'dig' ? 'Dig and level' : pm.kind === 'pier' ? 'Stamp it level: ' + (b ? b.n : 0) + ' of ' + of : 'Nail them: ' + (b ? b.n : 0) + ' of ' + of, ctx.act === 'set' ? w.count : '', ctx.act === 'set' ? null : (b ? b.n : 0) / of); }
+    else if (ctx.kind === 'hands') { const w = workLabel(pr, ctx.mid), pm = pr.members[ctx.mid], b = V.blows[ctx.mid], of = b ? b.of : nailCount(geom(ctx.id), pm, ctx.mid), gm = geom(ctx.id).byId.get(ctx.mid), fh = pm.stage === 'flooring' && C.floorHands ? C.floorHands(pm.kind, gm && gm.type) : null;
+      if (fh && ctx.act !== 'dig') { const know = api.knows(S(), pm.kind) && sweepable(pr, ctx.mid, geom(ctx.id)); setPrompt('E', ctx.act === 'set' ? (know ? 'Hold and drag along the row: ' + low(fh[0]) : fh[0]) + (gm && gm.cut && gm.cut - gm.cutTo > 0.004 ? ' (cut to fit)' : '') : fh[1] + ': ' + (b ? b.n : 0) + ' of ' + of + ' ' + fh[2], ctx.act === 'set' ? w.count : '', ctx.act === 'set' ? null : (b ? b.n : 0) / of); }
+      else setPrompt('E', ctx.act === 'set' ? (api.knows(S(), pm.kind) && sweepable(pr, ctx.mid, geom(ctx.id)) ? 'Hold and drag along the run: ' + low(w.text).replace(/s$/, '') : 'Set the ' + low(w.text)) + (pm.line && pr.lines[pm.line].sheet && !api.needsStock(S(), pr, ctx.mid) ? ' (from an offcut)' : '') : ctx.act === 'dig' ? 'Dig and level' : pm.kind === 'pier' ? 'Stamp it level: ' + (b ? b.n : 0) + ' of ' + of : 'Nail them: ' + (b ? b.n : 0) + ' of ' + of, ctx.act === 'set' ? w.count : '', ctx.act === 'set' ? null : (b ? b.n : 0) / of); }
     else if (ctx.kind === 'lean') setPrompt('E', 'Lean the ladder here', '', null);
     else if (ctx.kind === 'anchor') setPrompt('E', 'Fix a roof anchor at the ridge and clip in', '', null);
     else if (ctx.kind === 'clip') setPrompt('E', 'Clip in to the roof anchor', '', null);
@@ -1481,6 +1539,10 @@
     if (['dry-in', 'roofing'].includes(v.id) && RW && c && c.itemId === ln.itemId && pr.level !== 'guided' && !s.options.auto) {
       if (!RW.on()) return { ...out, line: 'Roofers work on the roof: climb the ladder and keep walking, onto the deck. On a steep roof, fix an anchor at the ridge and clip in first.', target: at };
       return { ...out, line: 'From the eave up, each layer lapping the one below. The glowing strip is the next one; the blue chalk line marks its top edge.' + (V.clip == null && RW.at() && RW.at().k > RWC.slideK ? ' Steep: clip in at the ridge first.' : ''), target: at };
+    }
+    if (v.id === 'flooring' && first && pr.level !== 'guided' && !s.options.auto && c && c.itemId === ln.itemId && !api.knows(s, pr.members[first].kind)) {
+      const words = { underlay: 'Roll the underlayment out from the far wall, strip by strip, and fasten it down.', backer: 'Cement board first: set each sheet in thinset and screw it down, the joints staggered.', plank: 'Row by row from the far wall. The glowing row is next and the blue chalk line marks its edge: set a board, then nail or tap it tight against the row before.', tile: 'Row by row from the chalk line. Set each tile in thinset, then beat it in level. The cut tiles at the walls go through the wet saw.', grout: 'Float grout across each row, then sponge off the haze.', tackstrip: 'Tack strip round the walls, a finger\'s width out from them, broken at the door.', pad: 'Roll the pad out inside the tack strip and staple the seams.', carpet: 'Unroll the carpet, then kick it tight onto the tack strip all along the walls.', baseboard: 'Baseboard last: it hides the gap left at the walls. Nail it into the studs.', threshold: 'A threshold under each door, where this floor meets the next.' }[pr.members[first].kind];
+      if (words) return { ...out, line: words, target: at };
     }
     if (c && c.itemId === ln.itemId && first && api.knows(s, pr.members[first].kind)) return { ...out, line: 'You know this work: hold the button and drag along the glowing places. Each piece is set and nailed as you pass.', target: at };
     if (c && c.itemId === ln.itemId) return { ...out, line: 'Carry the ' + stackName(c.itemId) + ' to the ' + low(pr.name) + '. Point at a glowing place: one click sets three pieces, then one strike nails a piece. Hold to keep going.', target: at };
@@ -1859,7 +1921,7 @@
   function nextPiece() {
     const pr = current(); if (!pr) return null;
     const pl = plan(pr.id), g = geom(pr.id), c = S().carried;
-    for (const mid of pl.inst) { const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid), set = !ln || pm.need - pm.got < 1e-6; if (!set && !(c && c.itemId === ln.itemId)) continue; if (!m) return { mid, x: V.structs.get(pr.id).x, z: V.structs.get(pr.id).z, site: true }; const hw = C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null; worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); wM.lerpVectors(wA, wB, 0.5); const w = { x: wM.x, y: wM.y, z: wM.z }; wM.project(G.camera); return { mid, ...w, sx: (wM.x * 0.5 + 0.5) * reach.w, sy: (-wM.y * 0.5 + 0.5) * reach.h, set }; }
+    for (const mid of pl.inst) { const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid), set = !ln || pm.need - pm.got < 1e-6; if (V.sawing.has(mid) || (!set && !(c && c.itemId === ln.itemId))) continue; if (!m) return { mid, x: V.structs.get(pr.id).x, z: V.structs.get(pr.id).z, site: true }; const hw = C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null; worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); wM.lerpVectors(wA, wB, 0.5); const w = { x: wM.x, y: wM.y, z: wM.z }; wM.project(G.camera); return { mid, ...w, sx: (wM.x * 0.5 + 0.5) * reach.w, sy: (-wM.y * 0.5 + 0.5) * reach.h, set }; }
     return null;
   }
   window.__construct = { roof: RW, syncRoof, tryHop, ladderTop, ladderSpot, chalkLines: (id) => chalkLines(S().progress[id], geom(id)), scaffoldSpot, scaffold: SC, station: CS, press: (c) => press(c || V.ctx), beaconAt, finishPlace, nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };

@@ -67,6 +67,8 @@ add('plywood', 'Plywood', 'wood', 500, 0.13, 1600, {
   strengthBasis: 'characteristic', bendingStrengthMPa: 24, compressiveStrengthMPa: 18, elasticModulusGPa: 6, approx: true, source: 'ISO 10456 plywood 500 kg/m3; strengths are nominal softwood-ply values (EN 12369-2 family)' });
 add('osb', 'OSB', 'wood', 650, 0.13, 1700, {
   strengthBasis: 'characteristic', bendingStrengthMPa: 18, compressiveStrengthMPa: 15, elasticModulusGPa: 4.93, source: 'ISO 10456 OSB 650 kg/m3; EN 300 OSB/3 major-axis bending and modulus' });
+add('engineered_oak', 'Engineered oak (oak on plywood)', 'wood', 600, 0.14, 1600, { approx: true, source: 'A 3-4 mm oak wear layer on a birch-ply core: mass-weighted from ISO 10456 oak 700 and plywood 500' });
+add('hdf', 'High-density fibreboard (laminate core)', 'wood', 850, 0.14, 1700, { source: 'ISO 10456 fibreboard 800-900 kg/m3: 0.14-0.18; laminate flooring core' });
 add('glulam', 'Glulam (GL24h)', 'wood', 420, 0.12, woodCp(0.12), {
   strengthBasis: 'characteristic', bendingStrengthMPa: 24, compressiveStrengthMPa: 24, elasticModulusGPa: 11.5, source: 'EN 14080 GL24h; mean density 420' });
 
@@ -85,6 +87,8 @@ add('sandstone', 'Sandstone', 'masonry', 2600, 2.3, 1000, {
   compressiveStrengthMPa: 70, source: 'ISO 10456 sandstone 2600 kg/m3; compressive strength typical (30-150 MPa)', approx: true });
 add('marble', 'Marble', 'masonry', 2800, 3.5, 1000, {
   compressiveStrengthMPa: 100, elasticModulusGPa: 55, source: 'ISO 10456 marble 2800 kg/m3; strength typical', approx: true });
+add('porcelain', 'Porcelain tile', 'masonry', 2400, 1.3, 840, { approx: true, source: 'ISO 10456 ceramic/porcelain 2300 kg/m3: 1.3; cp 840' });
+add('cement_board', 'Cement backer board', 'masonry', 1150, 0.25, 1000, { approx: true, source: 'Glass-mesh cement board: 1100-1200 kg/m3, conductivity 0.2-0.3 (manufacturer data)' });
 add('gypsum_board', 'Gypsum board', 'masonry', 700, 0.21, 1000, {
   source: 'ISO 10456 gypsum plasterboard 700 kg/m3' });
 add('lime_plaster', 'Lime plaster', 'masonry', 1600, 0.8, 1000, {
@@ -140,6 +144,10 @@ add('clay_tile', 'Clay tile', 'roofing', 1900, 0.8, 800, { compressiveStrengthMP
 // ------------------------------------------------------------------ membranes, fabric
 add('housewrap', 'Housewrap (spunbonded HDPE)', 'membrane', 950, 0.5, 1900, { source: 'High-density polyethylene (ISO 10456 / ASHRAE plastics); thin film, thermally negligible' });
 add('poly_vapour_barrier', 'Polyethylene vapour barrier', 'membrane', 920, 0.33, 2300, { source: 'Low-density polyethylene (ISO 10456: 0.33)' });
+add('rosin_paper', 'Rosin paper', 'fabric', 750, 0.12, 1400, { approx: true, source: 'Kraft-type building paper ~0.37 kg/m2 at 0.5 mm; paper cp 1400' });
+add('pe_foam', 'Polyethylene foam underlay', 'insulation', 30, 0.035, 1900, { approx: true, source: 'Closed-cell PE foam 25-35 kg/m3, lambda 0.033-0.040; foam cp taken a little under solid LDPE (2300)' });
+add('rebond_foam', 'Rebond carpet pad', 'insulation', 100, 0.04, 1400, { approx: true, source: 'Bonded PU foam pad, 6-8 lb/ft3 (96-128 kg/m3); CIBSE carpet underlay ~0.04-0.06' });
+add('vinyl_plank', 'Rigid-core vinyl plank (stone-polymer)', 'masonry', 1900, 0.25, 1000, { approx: true, source: 'SPC (stone-polymer core) vinyl ~1900-2100 kg/m3; ISO 10456 PVC 0.17, filled 0.2-0.3' });
 add('canvas', 'Canvas (cotton duck)', 'fabric', 500, 0.07, 1300, { approx: true, source: 'Cotton fabric ~400 g/m2 at 0.8 mm; cotton cp 1300; conductivity typical of dry fabric' });
 add('carpet', 'Wool carpet', 'fabric', 200, 0.06, 1300, { approx: true, source: 'CIBSE/ASHRAE carpet and underlay ~0.06; wool cp ~1300' });
 
@@ -176,6 +184,7 @@ export const APPEARANCE_BY_KIND = frozen({
   floor: frozen({
     planks: 'pine_seasoned', flags: 'sandstone', dark: 'oak_seasoned', tile: 'clay_tile',
     marble: 'marble', cobble: 'granite', carpet: 'carpet', moss: 'soil_moist',
+    hardwood: 'oak_seasoned', engineered: 'engineered_oak', laminate: 'hdf', lvp: 'vinyl_plank', porcelain: 'porcelain', berber: 'carpet', subfloor: 'osb',
   }),
   roof: frozen({
     thatch: 'thatch', slate: 'slate', tile: 'clay_tile', shingle: 'cedar_shake', copper: 'copper', redslate: 'slate',

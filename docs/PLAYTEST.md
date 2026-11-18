@@ -449,3 +449,25 @@ The ground is a physical thing now: a smooth surface you shape 10 cm at a time, 
 
 - Every piece that can go in next breathes with a faint glow from any distance, not only within arm's reach, so you can see what's next from across the yard.
 - Pale means you can reach it from where you stand; amber means it is above you: get on the ladder, a scaffold or the roof first. The colour changes as you climb.
+
+## Flooring: finished floors laid by hand (branch `flooring`)
+
+**What is new**
+
+- A Flooring stage after the lining (`docs/FLOORING.md`). Plan mode's Floor swatches now include Oak strip, Engineered oak, Laminate, Vinyl plank, Porcelain tile, Berber carpet and Bare subfloor alongside the old ones; every wood, tile and carpet floor is laid piece by piece the way the trade does it, then baseboard and a threshold.
+- Only the row being laid glows, with a blue chalk line at its edge. Boards slide in (click boards angle in and drop), tiles drop onto thinset, rolls unroll, grout sweeps along; then nails, taps, mallet beats, staples, knee kicks or sponge wipes. Cut boards and tiles go through the saw (tiles on the wet saw) and a row's cut-off starts the next row.
+- Laid floors stay drawn as their real boards and tiles, also in sandbox and on finished buildings: staggered oak strip, terracotta on grout lines.
+- The small cabin's floor is pine floorboards on rosin paper. The tool shed's deck is its floor (no flooring stage), so the tutorial is unchanged.
+- Fix: changing a floor (or anything) in the plan after its material was used no longer leaves the stage unorderable ("Needs rosin paper" with nothing to order).
+
+**Try this**
+
+1. Build the small cabin up to its floor (or use Guided for the earlier stages), order the Flooring stage, carry the rosin paper in and roll it out, then the boards row by row. Watch for the cut-off starting the next row.
+2. In Plan mode pick another floor for the cabin (Terracotta, then Carpet) and lay it: cement board, tile, grout and sponge; tack strip, pad, kicks.
+3. In sandbox, draw a room and try each floor swatch to see how it looks laid.
+
+**Known gaps**
+
+- Spacers along the walls for floating floors, transition strips between two different floors and floor sanding/finishing are not modelled.
+- Thermal: a finished floor's layers count only once the whole floor is down.
+- Stairs, tower rooms and round floors have no flooring pieces yet.

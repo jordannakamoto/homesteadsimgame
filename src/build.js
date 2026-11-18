@@ -204,7 +204,7 @@
     batten: { name: "Board and batten", plank: col(0xc7b79b), beam: col(0x6f5a47), stone: C.stone },
   };
   const PATHS = { cobble: { name: "Cobbles", c: col(0x8e8a80) }, dirt: { name: "Packed earth", c: col(0x8a6b47) }, gravel: { name: "Gravel", c: col(0xb5ad9c) }, boards: { name: "Boardwalk", c: col(0x9b7b4f) } };
-  const FLOORS = { planks: { name: "Planks", c: C.floor }, flags: { name: "Flagstone", c: col(0x9a968c) }, dark: { name: "Dark boards", c: col(0x6b5238) }, tile: { name: "Clay tiles", c: col(0xb4654a), c2: col(0xc98a62) }, marble: { name: "Marble", c: col(0xd9d6cf), c2: col(0x4c4f55) }, cobble: { name: "Cobbles", c: col(0x86837b), c2: col(0x77746c) }, carpet: { name: "Red carpet", c: col(0x8c2f2c) }, moss: { name: "Lawn", c: col(0x5f8a3c) } };
+  const FLOORS = { planks: { name: "Planks", c: C.floor }, flags: { name: "Flagstone", c: col(0x9a968c) }, dark: { name: "Dark boards", c: col(0x6b5238) }, tile: { name: "Clay tiles", c: col(0xb4654a), c2: col(0xc98a62) }, marble: { name: "Marble", c: col(0xd9d6cf), c2: col(0x4c4f55) }, cobble: { name: "Cobbles", c: col(0x86837b), c2: col(0x77746c) }, carpet: { name: "Red carpet", c: col(0x8c2f2c) }, moss: { name: "Lawn", c: col(0x5f8a3c) }, hardwood: { name: "Oak strip", c: col(0xa97c4a), look: "boards" }, engineered: { name: "Engineered oak", c: col(0x94693f), look: "boards" }, laminate: { name: "Laminate", c: col(0xab9374), look: "boards" }, lvp: { name: "Vinyl plank", c: col(0x8c8172), look: "boards" }, porcelain: { name: "Porcelain tile", c: col(0xc9c4ba), c2: col(0xb3aea4), look: "grid" }, berber: { name: "Berber carpet", c: col(0xbcb096) }, subfloor: { name: "Bare subfloor", c: col(0xc9a468) } };
   // Roof coverings. look: how the surface is drawn (courses of a given exposure in metres, standing seams, corrugations,
   // a flat membrane, a planted mat). min / max: the slopes it is laid at, as rise in inches per 12 of run (roofers' pitch).
   const ROOFS = {
@@ -252,6 +252,13 @@
       cobble: Object.freeze([LY("sand", 0.04, "bedding"), LY("cobblestone", 0.08, "finish")]),
       carpet: Object.freeze([LY("air", 0.085, "joist-bay"), LY("softwood-boards", 0.025, "deck"), LY("wool-carpet", 0.01, "finish")]),
       moss: Object.freeze([LY("topsoil", 0.09, "bedding"), LY("turf", 0.03, "finish")]),
+      hardwood: Object.freeze([LY("air", 0.095, "joist-bay"), LY("rosin-paper", 0.0005, "finish"), LY("oak-boards", 0.019, "finish")]),
+      engineered: Object.freeze([LY("air", 0.095, "joist-bay"), LY("foam-underlay", 0.002, "finish"), LY("engineered-oak", 0.014, "finish")]),
+      laminate: Object.freeze([LY("air", 0.095, "joist-bay"), LY("foam-underlay", 0.002, "finish"), LY("laminate", 0.008, "finish")]),
+      lvp: Object.freeze([LY("air", 0.095, "joist-bay"), LY("vinyl-plank", 0.006, "finish")]),
+      porcelain: Object.freeze([LY("lime-mortar", 0.09, "bedding"), LY("porcelain", 0.01, "finish")]),
+      berber: Object.freeze([LY("air", 0.085, "joist-bay"), LY("softwood-boards", 0.025, "deck"), LY("carpet-pad", 0.011, "finish"), LY("wool-carpet", 0.01, "finish")]),
+      subfloor: Object.freeze([LY("air", 0.095, "joist-bay"), LY("osb-board", 0.018, "deck")]),
     },
     roof: {
       thatch: Object.freeze([LY("thatch", 0.3, "covering")]),
@@ -7739,7 +7746,7 @@
   const swatches = (set, kind) =>
     Object.keys(set).map((k) => {
       const m = set[k];
-      return { v: k, name: m.name, sw: kind === "wall" ? [m.courses ? "courses" : m.brace ? "brace" : m.flat ? "flat" : "planks", hexOf(m.plank), hexOf(m.beam)] : [kind === "floor" ? (m.c2 ? "check" : k === "planks" || k === "dark" ? "boards" : "plain") : kind === "roof" ? (k === "asphalt" ? "asph" : { seam: "seam", corr: "corr", flat: "plain", green: "green" }[m.look] || "roof") : kind, hexOf(m.c), hexOf(m.c2 || shade(m.c, kind === "roof" && m.look === "seam" ? 1.5 : 0.72))] };
+      return { v: k, name: m.name, sw: kind === "wall" ? [m.courses ? "courses" : m.brace ? "brace" : m.flat ? "flat" : "planks", hexOf(m.plank), hexOf(m.beam)] : [kind === "floor" ? (m.look || (k === "tile" || k === "marble" ? "grid" : m.c2 ? "check" : k === "planks" || k === "dark" ? "boards" : "plain")) : kind === "roof" ? (k === "asphalt" ? "asph" : { seam: "seam", corr: "corr", flat: "plain", green: "green" }[m.look] || "roof") : kind, hexOf(m.c), hexOf(m.c2 || shade(m.c, kind === "roof" && m.look === "seam" ? 1.5 : 0.72))] };
     });
   const SW = { wall: swatches(WALLS, "wall"), floor: swatches(FLOORS, "floor"), roof: swatches(ROOFS, "roof"), path: swatches(PATHS, "path"), dye: DYES.map((d, n) => ({ v: n, name: d[0], sw: ["dye", hexOf(d[1]), hexOf(d[1])] })) };
   const tiles = (names, pre) => Object.keys(names).map((k) => ({ v: k, name: names[k], icon: pre + k }));
@@ -9249,6 +9256,22 @@
         return l && r ? 0 : l ? -1 : 1;
       };
     if (!S.po) {
+      desc.edges = [];
+      const doorGaps = (opens) => opens.filter((q) => (q.sill || 0) < 0.2).map((q) => ({ s0: q.offset, s1: q.offset + q.width, door: q.kind === "door" }));
+      for (const g of S.runs) {
+        if (g.cls !== "wall") continue;
+        const x = g.d === 0, opens = [];
+        for (const e of g.m) opening(opens, e.t - g.t0, 1, e.type, S.oid.get(e.k));
+        for (const o of S.fopen) o.g === g && opens.push(OP.freeToFraming(o.f, o.off));
+        desc.edges.push({ a: x ? [g.t0, g.line] : [g.line, g.t0], b: x ? [g.t1, g.line] : [g.line, g.t1], half: HALF_T, gaps: doorGaps(opens) });
+      }
+      for (const g of S.fruns) {
+        if (g.cls !== "wall") continue;
+        const opens = [];
+        for (const q of g.mods) opening(opens, q.s, q.len, q.type, S.segs[q.idx][7]);
+        for (const o of S.fopen) o.g === g && opens.push(OP.freeToFraming(o.f, o.off));
+        desc.edges.push({ a: [g.x0, g.z0], b: [g.x1, g.z1], half: HALF_T, gaps: doorGaps(opens) });
+      }
       for (const g of S.regs) desc.floors.push({ id: g.id, outline: outlineOf(g.m)[0], y0: 0, ground: S.level === 0, groundY, mat: g.mat });
       for (const p of S.polys) desc.floors.push({ id: p.id, outline: p.pts, y0: 0, ground: S.level === 0, groundY, mat: p.fmat });
       for (const g of S.runs) {
@@ -9394,6 +9417,9 @@
     if (S.knownVer === S.ver && S.knownMode === B.cmode && S.known) return;
     const ids = plannable(S),
       all = new Set(ids);
+    if (!S.known && B.cmode)
+      for (const id of [...S.plan])
+        if (/\.fl$/.test(id) && !all.has(id)) for (const m of membersOf(S).list) m.stage === "flooring" && m.parent === id.slice(0, -3) && S.plan.add(m.id);
     if (S.known && B.cmode) for (const id of ids) S.known.has(id) || S.plan.add(id);
     S.known = all;
     for (const id of [...S.plan]) all.has(id) || S.plan.delete(id);
@@ -9416,6 +9442,12 @@
       kids = (id) => mem.byParent.get(id),
       fin = (id, tail) => (kids(id) ? (tail === ".cl" ? !kids(id).some((m) => m.kind === "cladding" && P(m.id)) : !P(id + tail)) : !P(id)),
       bare = (id) => (kids(id) ? kids(id).every((m) => P(m.id)) : true),
+      floorFin = (id) => {
+        const k = kids(id) || [], fl = k.filter((m) => m.stage === "flooring");
+        if (fl.length) return !fl.some((m) => P(m.id));
+        const deck = k.concat(kids(id + ".fd") || []).filter((m) => m.stage === "subfloor" || m.kind === "slab");
+        return deck.length ? !deck.some((m) => P(m.id)) : kids(id) ? !k.some((m) => P(m.id)) : !P(id);
+      },
       Db = { ...S, floors: new Set(), walls: new Map(), segs: [], polys: [], roofs: [], rings: [], portals: [], stairs: [], pillars: [], free: [] },
       Ds = { ...Db, floors: new Set(), walls: new Map(), segs: [], polys: [], roofs: [], rings: [], portals: [], stairs: [], pillars: [], decor: [], paths: [], polyRoofs: [], free: [] };
     st.finRun = new Set();
@@ -9453,13 +9485,13 @@
       if (D) for (const o of S.fopen) o.g === g && D.free.push({ ...o.f, out: o.f.out, built: D === Db && !P(o.f.id) });
     }
     for (const g of S.regs) {
-      const f = fin(g.id, ".fl"),
+      const f = floorFin(g.id),
         D = f ? Db : bare(g.id) && (!kids(g.id + ".fd") || bare(g.id + ".fd")) ? Ds : null;
       f && st.finFloor.add(g.id);
       if (D) for (const c of g.m) D.floors.add(c);
     }
     for (const p of S.polys) {
-      const f = fin(p.id, ".fl");
+      const f = floorFin(p.id);
       f && st.finFloor.add(p.id);
       if (f) Db.polys.push(p);
       else if (bare(p.id) && (!kids(p.id + ".fd") || bare(p.id + ".fd"))) Ds.polys.push({ ...p, roofed: false });
@@ -9528,6 +9560,7 @@
   const tapeMat = new T.MeshLambertMaterial({ color: 0x8e9692 });
   const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), siding: col(0xc7b79b), sidingDark: col(0x6f5a47), concrete: CONCRETE, gravel: col(0x8f8b82) };
   for (const [k, h] of Object.entries(FR.ROOF_COLORS || {})) MCOL[k] = col(h); // the roofing layers while they go on (src/framing.js)
+  for (const [k, h] of Object.entries((window.__flooring && window.__flooring.FLOOR_COLORS) || {})) MCOL[k] = col(h); // boards, tile, carpet and what goes under (src/flooring.js)
   const _m4 = new T.Matrix4(),
     _c = new T.Color();
   function dropMembers(S) {
@@ -9577,6 +9610,7 @@
       else if (roofId) (st.all || st.finRoof.has(roofId)) || sets[1].push(m);
       else if (m.stage === "subfloor" || m.type === "floor-batt") (st.all || st.finFloor.has(m.parent)) || sets[0].push(m);
       else if (m.kind === "cladding") sets[0].push(m); // siding stays drawn as boards, even once the wall is finished
+      else if (m.stage === "flooring") sets[0].push(m); // so do floorboards, tiles and carpet (the floor surface under them shows in the seams)
       else (st.all || st.finRun.has(m.parent)) || sets[0].push(m);
     }
     for (const m of mem.opens) P(m.id) && ghostAdd(m, 0);
@@ -9613,7 +9647,7 @@
         mesh.setMatrixAt(n, _m4);
         if (solid) {
           const c = MCOL[m.col || "timber"],
-            v = /^siding/.test(m.col || "") ? 0.975 + 0.05 * hash(n, list.length, 7) : 0.9 + 0.2 * hash(n, list.length, 7);
+            v = m.tone !== undefined ? 1 - (m.vary ?? 0.1) + 2 * (m.vary ?? 0.1) * m.tone : /^siding/.test(m.col || "") ? 0.975 + 0.05 * hash(n, list.length, 7) : 0.9 + 0.2 * hash(n, list.length, 7);
           mesh.setColorAt(n, _c.setRGB(c[0] * v, c[1] * v, c[2] * v));
         }
       });
@@ -9731,7 +9765,8 @@
     const kids = membersOf(S).byParent.get(id) || [],
       fd = membersOf(S).byParent.get(id + ".fd") || [],
       on = (f) => kids.concat(fd).some(f) && kids.concat(fd).filter(f).every((m) => !S.plan.has(m.id)),
-      fin = on((m) => m.type === "flooring") ? [def[def.length - 1]] : [];
+      finish = def.filter((l) => l.role === "finish"),
+      fin = on((m) => m.stage === "flooring") ? (finish.length ? finish : [def[def.length - 1]]) : [];
     if (kids.some((m) => m.kind === "joist")) {
       if (!on((m) => m.kind === "joist")) return Object.freeze([]);
       return Object.freeze([on((m) => m.kind === "insulation") ? Lz(S.ins, 0.14, "insulation") : Lz("air", 0.184, "joist-bay"), ...(on((m) => m.type === "subfloor") ? [Lz("osb", 0.018, "subfloor")] : []), ...fin]);
@@ -9813,7 +9848,7 @@
   }
   /* ready-made plans: small buildings in real framing sizes, set down whole */
   const PLANS = {
-    shed: { id: "shed", name: "Tool shed", size: "2.4 x 3.0 m", w: 2.4, l: 3.0, note: "A single-pitch roof, one door and one window, on six pier blocks.", roof: { shape: "shed", dir: 0, axis: "x", pitch12: 4, eave: 0.3, rake: 0.25, mat: "shingle", gutters: true }, door: [2, 0], windows: [[1, 1]], found: "pier-blocks", ins: null, lining: null },
+    shed: { id: "shed", name: "Tool shed", size: "2.4 x 3.0 m", w: 2.4, l: 3.0, note: "A single-pitch roof, one door and one window, on six pier blocks.", roof: { shape: "shed", dir: 0, axis: "x", pitch12: 4, eave: 0.3, rake: 0.25, mat: "shingle", gutters: true }, door: [2, 0], windows: [[1, 1]], found: "pier-blocks", ins: null, lining: null, fmat: "subfloor" },
     cabin: { id: "cabin", name: "Small cabin", size: "3.6 x 4.8 m", w: 3.6, winW: 0.9, l: 4.8, note: "A gable roof, a door and two windows, insulated and lined, on pier blocks.", roof: { shape: "gable", dir: 0, axis: "z", pitch12: 8, mat: "shingle", gutters: true }, door: [2, 1], windows: [[1, 2], [3, 2]], found: "pier-blocks", ins: "fibreglass_batt", lining: "boards" },
   };
   const planList = () => Object.values(PLANS).map((p) => ({ id: p.id, name: p.name, size: p.size, widthM: p.w, lengthM: p.l, note: p.note, foundation: p.found }));
@@ -9847,6 +9882,10 @@
     }
     S.roofs.push({ i0: -hw, i1: hw - 1, j0: -hl, j1: hl - 1, ...pl.roof });
     rebuild(S);
+    if (pl.fmat) {
+      for (const q of S.pids) q[3] = pl.fmat;
+      rebuild(S);
+    }
     if (!S.sitePlanned) {
       const inner = [];
       for (let a = -hw; a <= hw + 1e-6; a += pl.w / 4) for (let b = -hl; b <= hl + 1e-6; b += pl.l / 4) inner.push(toWorld(S, a, b));

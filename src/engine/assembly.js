@@ -80,7 +80,8 @@
         members.forEach((m, n) => {
           L.at.set(m.id, n);
           L.solid.setMatrixAt(n, local(L, m, m4, 0, 0));
-          const k = look.colorOf(m), s = /^siding/.test(m.col || '') ? 0.98 + 0.04 * ((n * 7919) % 13) / 13 : 0.92 + 0.16 * ((n * 7919) % 13) / 13;
+          // a member may carry its own shade (tone 0..1, vary: how far it strays), so it looks the same wherever it is drawn
+          const k = look.colorOf(m), s = m.tone !== undefined ? 1 - (m.vary ?? 0.1) + 2 * (m.vary ?? 0.1) * m.tone : /^siding/.test(m.col || '') ? 0.98 + 0.04 * ((n * 7919) % 13) / 13 : 0.92 + 0.16 * ((n * 7919) % 13) / 13;
           L.solid.setColorAt(n, c.setRGB(k[0] * s, k[1] * s, k[2] * s));
         });
         L.solid.count = members.length;

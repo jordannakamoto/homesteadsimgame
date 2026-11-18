@@ -15,6 +15,8 @@ export const LAYER_MATERIAL = Object.freeze({
   'wood-shingle': 'cedar_shake', 'wool-carpet': 'carpet', 'wrought-iron': 'steel',
   'earth': 'soil_moist', 'underlayment': 'housewrap',
   'asphalt-shingle': 'asphalt_shingle', 'steel-sheet': 'steel_roofing', 'epdm-membrane': 'epdm',
+  'oak-boards': 'oak_seasoned', 'rosin-paper': 'rosin_paper', 'foam-underlay': 'pe_foam', 'engineered-oak': 'engineered_oak', 'laminate': 'hdf',
+  'vinyl-plank': 'vinyl_plank', 'porcelain': 'porcelain', 'carpet-pad': 'rebond_foam', 'osb-board': 'osb',
 });
 
 const KIND_OF = { wall: 'wall', door: 'wall', window: 'wall', post: 'wall', beam: 'wall', stair: 'wall', tower: 'wall', foundation: 'wall', floor: 'floor', roof: 'roof', path: 'path' };

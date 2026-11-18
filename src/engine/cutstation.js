@@ -4,7 +4,8 @@
 //   station.setHorses({ x, z, yaw } | null)   where the horses stand (yaw: the way a stick lies across them)
 //   station.setPile(n)                        how many kept offcuts lie by the horses
 //   station.cut(job, done)                    queue a cut: { stockM, lenM, sawn, keptM, onHorses, x, z, yaw (when not on the horses),
-//                                             to: { x, y, z } where the piece goes, power, slow }; done() when the piece has gone
+//                                             to: { x, y, z } where the piece goes, power, slow, w, h (its section, default a 2x4),
+//                                             color (of the piece), dust (colour of the sawdust) }; done() when the piece has gone
 //   station.update(dt) -> { x, z, k } of the cut in hand (k: 0..1 through a stroke), or null when idle
 //   station.near(x, z, r)                     are the horses within r of (x, z)
 (() => {
@@ -28,7 +29,7 @@
     horses.visible = false;
     G.scene.add(horses);
     // ---- the stick being cut (two boxes: the piece and the offcut), the saw, the pile of offcuts
-    const piece = part(G.scene, stick, 0.089, 0.038, 1, 0, 0, 0), off = part(G.scene, stick, 0.089, 0.038, 1, 0, 0, 0);
+    const cutMat = stick.clone(), piece = part(G.scene, cutMat, 0.089, 0.038, 1, 0, 0, 0), off = part(G.scene, cutMat, 0.089, 0.038, 1, 0, 0, 0);
     piece.visible = off.visible = false;
     const saw = new T.Group();
     part(saw, steel, 0.004, 0.11, 0.55, 0, 0, 0);
@@ -76,9 +77,11 @@
       j.u = u;
       j.piece = [j.cx - u[0] * kept / 2, j.cy, j.cz - u[1] * kept / 2];
       j.off = rest > 0.01 ? [j.cx + u[0] * rest / 2, j.cy, j.cz + u[1] * rest / 2] : null;
-      piece.scale.set(0.089, 0.038, kept); piece.rotation.set(0, j.yaw, 0); piece.position.set(...j.piece); piece.visible = true;
+      const sw = j.w || 0.089, sh = j.h || 0.038;
+      cutMat.color.setHex(j.color === undefined ? 0xdcbc8c : j.color);
+      piece.scale.set(sw, sh, kept); piece.rotation.set(0, j.yaw, 0); piece.position.set(...j.piece); piece.visible = true;
       off.visible = !!j.off;
-      if (j.off) { off.scale.set(0.089, 0.038, rest); off.rotation.set(0, j.yaw, 0); off.position.set(...j.off); }
+      if (j.off) { off.scale.set(sw, sh, rest); off.rotation.set(0, j.yaw, 0); off.position.set(...j.off); }
       saw.visible = j.sawn;
       disc.visible = body.visible = !!j.power;
       saw.children[0].visible = saw.children[1].visible = !j.power;
@@ -111,7 +114,7 @@
         if (j.power) { saw.position.set(j.cx + w[0] * (0.1 - 0.2 * k), j.cy + 0.06 - dn, j.cz + w[1] * (0.1 - 0.2 * k)); saw.rotation.set(0, j.yaw, 0); disc.rotation.x += dt * 60; }
         else { saw.position.set(j.cx + w[0] * sw * 0.12, j.cy + 0.09 - dn + 0.03 * sw, j.cz + w[1] * sw * 0.12); saw.rotation.set(0.6, j.yaw + Math.PI / 2, 0); }
         const n = Math.floor(k * j.strokes * 2);
-        if (n !== j.last) { j.last = n; G.burst(j.cx, j.cy - 0.03, j.cz, j.power ? 4 : 2, 0xe8d9b0, 0.35, 0.25, 0.035, 0.45); }
+        if (n !== j.last) { j.last = n; G.burst(j.cx, j.cy - 0.03, j.cz, j.power ? 4 : 2, j.dust === undefined ? 0xe8d9b0 : j.dust, 0.35, 0.25, 0.035, 0.45); }
         return { x: j.cx, z: j.cz, k: stroke };
       }
       if (j.off && !j.dropped) {                          // the offcut falls away: kept ones go to the pile, short ones are scrap

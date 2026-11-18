@@ -24,7 +24,8 @@ export const STAGES = Object.freeze([
   { id: 'cladding', name: 'Cladding', needs: ['openings'], verb: 'Put on the siding', what: 'Nail siding boards over the wrap.', why: 'Protects the wall from weather and sun.' },
   { id: 'gutters', name: 'Gutters', needs: ['roofing', 'cladding'], verb: 'Hang the gutters', what: 'From the ladder or scaffold: gutters along the eaves, falling a little toward a downspout at one end.', why: 'They catch the rain off the roof and carry it away from the foundation, or into a rain barrel.' },
   { id: 'insulation', name: 'Insulation', needs: ['roofing', 'sheathing'], verb: 'Insulate', what: 'Fill the spaces between studs and rafters with batts.', why: 'Slows heat leaving in winter and coming in during summer.' },
-  { id: 'lining', name: 'Lining', needs: ['insulation'], verb: 'Finish the inside', what: 'Fix boards or panels inside, and lay the floor boards.', why: 'Covers the insulation and makes a finished room.' },
+  { id: 'lining', name: 'Lining', needs: ['insulation'], verb: 'Finish the inside', what: 'Fix boards or panels inside the walls and ceiling.', why: 'Covers the insulation and makes a finished room.' },
+  { id: 'flooring', name: 'Flooring', needs: ['lining', 'openings'], verb: 'Lay the floor', what: 'What goes under first, then the floor row by row from the far wall, then baseboard round the walls and a threshold at the door.', why: 'The floor goes in last, once the room is closed and dry and the messy work above it is done. A gap is left at every wall for wood to swell into; the baseboard hides it.' },
 ]);
 export const STAGE = Object.freeze(Object.fromEntries(STAGES.map((s) => [s.id, s])));
 export const STAGE_ORDER = Object.freeze(STAGES.map((s) => s.id));
@@ -36,8 +37,12 @@ export const SUPPORT = Object.freeze({
   beam: ['pier', 'post', 'footing', 'stemwall'], rafter: ['beam'],
   // drying in and roofing, the order roofers lay them: each layer laps the one below
   membrane: ['drip'], rake: ['membrane'], ridgecap: ['roofing'], downspout: ['gutter'],
+  // a finished floor, the order installers lay it: what goes under, the floor, its joints, then the trim
+  plank: ['underlay', 'backer'], tile: ['backer'], grout: ['tile'], pad: ['tackstrip'], carpet: ['pad'],
+  baseboard: ['plank', 'tile', 'grout', 'carpet', 'paving'], threshold: ['plank', 'tile', 'grout', 'carpet', 'paving'],
 });
-export const SUPPORT_SAYS = Object.freeze({ footing: 'Lay the footings', pier: 'Set the pier blocks', post: 'Set the posts', stemwall: 'Pour the stem wall', beam: 'Set the ridge beam', drip: 'Fit the drip edge along the eaves', membrane: 'Lay the underlayment', roofing: 'Lay every course', gutter: 'Hang the gutter' });
+export const SUPPORT_SAYS = Object.freeze({ footing: 'Lay the footings', pier: 'Set the pier blocks', post: 'Set the posts', stemwall: 'Pour the stem wall', beam: 'Set the ridge beam', drip: 'Fit the drip edge along the eaves', membrane: 'Lay the underlayment', roofing: 'Lay every course', gutter: 'Hang the gutter',
+  underlay: 'Roll out the underlayment', backer: 'Screw down the cement board', plank: 'Lay every board', tile: 'Set every tile', grout: 'Grout the joints', tackstrip: 'Nail the tack strip round the walls', pad: 'Roll out the pad', carpet: 'Stretch the carpet', paving: 'Lay the floor' });
 
 // ---- what a shopping line is bought as, where the plan's own item is missing or not what a builder buys.
 // Keyed by the line's name (the part of its key after the stage). `each`: one whole unit per member.
@@ -49,7 +54,7 @@ export const LINE_ITEM = Object.freeze({
   window: { itemId: 'window_shed', each: true, label: 'Window' },
 });
 // Lines that are not carried: they sit by the stacks and are used up as the work goes on.
-export const SITE_SUPPLY = Object.freeze(['nails_framing', 'screws_wood', 'screws_structural']);
+export const SITE_SUPPLY = Object.freeze(['nails_framing', 'screws_wood', 'screws_structural', 'nails_floor', 'thinset_mortar']);
 
 // ---- items the main catalog lacks (the orchestrator merges these into src/sim/items.js). Real figures.
 export const ITEMS_CONSTRUCTION = Object.freeze({
@@ -88,14 +93,21 @@ export const ITEMS_SCAFFOLD = Object.freeze({
 // ---- learn once, then sweep: after nailing a few of a kind by hand, that kind is learned and is set and nailed as you sweep along its run
 export const LEARN = Object.freeze({
   needed: 2,
-  group: Object.freeze({ stud: 'stud', plate: 'plate', header: 'header', joist: 'joist', rafter: 'rafter', beam: 'beam', post: 'post', skid: 'skid', sheathing: 'sheet', membrane: 'sheet', roofing: 'course', lining: 'sheet', cladding: 'sheet', insulation: 'sheet', drip: 'flashing', rake: 'flashing', ridgecap: 'flashing', gutter: 'gutter', downspout: 'gutter' }),
-  says: Object.freeze({ stud: 'frame a stud wall', plate: 'lay wall plates', header: 'frame an opening', joist: 'frame a floor', rafter: 'set rafters', beam: 'set a beam', post: 'set posts', skid: 'lay skids', sheet: 'lay sheets', course: 'lay a roof course', flashing: 'fit drip edge and flashing', gutter: 'hang gutters' }),
+  group: Object.freeze({ stud: 'stud', plate: 'plate', header: 'header', joist: 'joist', rafter: 'rafter', beam: 'beam', post: 'post', skid: 'skid', sheathing: 'sheet', membrane: 'sheet', roofing: 'course', lining: 'sheet', cladding: 'sheet', insulation: 'sheet', drip: 'flashing', rake: 'flashing', ridgecap: 'flashing', gutter: 'gutter', downspout: 'gutter',
+    underlay: 'sheet', backer: 'sheet', pad: 'sheet', plank: 'floorboard', tile: 'tile', grout: 'grout', carpet: 'carpet', tackstrip: 'trimwork', baseboard: 'trimwork', threshold: 'trimwork' }),
+  says: Object.freeze({ stud: 'frame a stud wall', plate: 'lay wall plates', header: 'frame an opening', joist: 'frame a floor', rafter: 'set rafters', beam: 'set a beam', post: 'set posts', skid: 'lay skids', sheet: 'lay sheets', course: 'lay a roof course', flashing: 'fit drip edge and flashing', gutter: 'hang gutters',
+    floorboard: 'lay a floor', tile: 'set tile', grout: 'grout tile', carpet: 'stretch carpet', trimwork: 'fit trim' }),
 });
 export const learnGroup = (kind) => LEARN.group[kind] || null;
 
 // ---- how each item sits in a stack and in the arms: the page draws these forms.
 export function itemForm(itemId) {
   if (/^lumber_|^glulam/.test(itemId)) return 'lumber';
+  if (/^(floor|tile)_/.test(itemId)) return 'carton';
+  if (/^carpet_/.test(itemId) || /^underlay_/.test(itemId)) return 'roll';
+  if (itemId === 'backer_board') return 'sheet';
+  if (itemId === 'grout_sanded' || itemId === 'thinset_mortar') return 'bag';
+  if (itemId === 'tack_strip' || itemId === 'baseboard_primed' || itemId === 'threshold_oak') return 'trim';
   if (/^board_/.test(itemId)) return 'boards';
   if (/^(osb|plywood|gypsum)_/.test(itemId)) return 'sheet';
   if (itemId === 'pier_block') return 'block';
@@ -227,16 +239,30 @@ export function feelOf(s) {
 
 // ---- work: blows to put in one member of each kind, and how fast the blows come by the best tool owned
 export const WORK = Object.freeze({
-  beats: Object.freeze({ site: 8, pier: 3, post: 2, beam: 4, skid: 4, footing: 4, stemwall: 5, slab: 6, joist: 3, plate: 3, stud: 3, header: 4, rafter: 4, sheathing: 4, membrane: 3, cladding: 6, roofing: 4, insulation: 2, lining: 5, door: 6, window: 4, drip: 2, rake: 2, ridgecap: 3, gutter: 3, downspout: 2 }),
+  beats: Object.freeze({ site: 8, pier: 3, post: 2, beam: 4, skid: 4, footing: 4, stemwall: 5, slab: 6, joist: 3, plate: 3, stud: 3, header: 4, rafter: 4, sheathing: 4, membrane: 3, cladding: 6, roofing: 4, insulation: 2, lining: 5, door: 6, window: 4, drip: 2, rake: 2, ridgecap: 3, gutter: 3, downspout: 2,
+    underlay: 2, backer: 3, plank: 2, tile: 2, grout: 3, tackstrip: 2, pad: 2, carpet: 5, baseboard: 3, threshold: 2, paving: 6 }),
   beatS: 0.33,                        // seconds between blows with a hammer
   tools: Object.freeze([{ tool: 'hammer', speed: 1 }, { tool: 'framing_nailer', speed: 3, power: true }]),
-  sound: Object.freeze({ pier: 'scrape', footing: 'scrape', slab: 'scrape', stemwall: 'scrape', site: 'dig', sheathing: 'thunk', membrane: 'rustle', roofing: 'thunk', insulation: 'rustle', door: 'thunk', window: 'thunk', gutter: 'thunk' }),
+  sound: Object.freeze({ pier: 'scrape', footing: 'scrape', slab: 'scrape', stemwall: 'scrape', site: 'dig', sheathing: 'thunk', membrane: 'rustle', roofing: 'thunk', insulation: 'rustle', door: 'thunk', window: 'thunk', gutter: 'thunk',
+    underlay: 'rustle', pad: 'rustle', backer: 'thunk', tile: 'scrape', grout: 'scrape', carpet: 'rustle', paving: 'scrape' }),
   // by hand: blows to fasten a piece once it is set in place (stamps for a pier block, strokes of the shovel for the site)
-  nails: Object.freeze({ site: 6, pier: 2, post: 1, beam: 2, skid: 2, footing: 2, stemwall: 3, slab: 3, joist: 2, plate: 2, stud: 2, header: 2, rafter: 2, sheathing: 3, membrane: 2, cladding: 3, roofing: 3, insulation: 1, lining: 3, door: 2, window: 2, drip: 2, rake: 2, ridgecap: 2, gutter: 2, downspout: 2 }),
+  nails: Object.freeze({ site: 6, pier: 2, post: 1, beam: 2, skid: 2, footing: 2, stemwall: 3, slab: 3, joist: 2, plate: 2, stud: 2, header: 2, rafter: 2, sheathing: 3, membrane: 2, cladding: 3, roofing: 3, insulation: 1, lining: 3, door: 2, window: 2, drip: 2, rake: 2, ridgecap: 2, gutter: 2, downspout: 2,
+    underlay: 2, backer: 4, plank: 2, tile: 1, grout: 2, tackstrip: 2, pad: 2, carpet: 6, baseboard: 3, threshold: 2, paving: 4 }),
   swingS: 0.3,                        // seconds between swings while the button is held
   reachM: 2.1,                        // arm's reach around the character
   guidedSpeed: 2.5,                     // Guided fills a stage in this many times faster than working by hand
 });
+// ---- the floor's own gestures: [setting it, fastening it, what one blow is] (the Build panel and the prompt read these)
+export const FLOOR_HANDS = Object.freeze({
+  'underlay:rosin': ['Roll out the paper', 'Staple it', 'staples'], 'underlay:poly': ['Roll out the sheet', 'Tape the seams', 'taped'], 'underlay:foam': ['Roll out the foam', 'Tape the seam', 'taped'],
+  backer: ['Set the cement board in thinset', 'Screw it down', 'screws'],
+  'plank:nail': ['Slide the board in', 'Nail through the tongue', 'nails'], 'plank:click': ['Angle the board in and drop it', 'Tap it tight', 'taps'],
+  tile: ['Butter and set the tile', 'Beat it in level', 'set'], grout: ['Float grout across the row', 'Sponge off the haze', 'wipes'],
+  tackstrip: ['Lay the tack strip', 'Nail it down', 'nails'], pad: ['Roll out the pad', 'Staple the seams', 'staples'], carpet: ['Unroll the carpet', 'Kick it tight', 'kicks'],
+  baseboard: ['Set the baseboard', 'Nail it to the studs', 'nails'], threshold: ['Set the threshold', 'Screw it down', 'screws'], paving: ['Lay the floor', 'Bed it level', 'set'],
+});
+export const floorHands = (kind, type) => FLOOR_HANDS[kind + ':' + type] || FLOOR_HANDS[kind] || null;
+
 export function workSpeed(tools = [], hasPower = false) {
   let k = 0.6;                        // bare hands and a rock
   for (const t of WORK.tools) if (tools.includes(t.tool) && (!t.power || hasPower)) k = Math.max(k, t.speed);
@@ -278,7 +304,7 @@ export const FIRST_SHED = Object.freeze({
     { n: 10, does: 'Sheathe the walls', teaches: 'Sheets stop the frame swaying.', stages: ['sheathing'] },
     { n: 11, does: 'Wrap the walls, set the window and hang the door', teaches: 'Closing the envelope.', stages: ['wrap', 'openings'] },
     { n: 12, does: 'Put on the siding and hang the gutters', teaches: 'Protecting the wall, and leading the rain away.', stages: ['cladding', 'gutters'] },
-    { n: 13, does: 'Finish the inside', teaches: 'A finished room, and insulation seen as a number.', stages: ['insulation', 'lining'] },
+    { n: 13, does: 'Finish the inside', teaches: 'A finished room, and insulation seen as a number.', stages: ['insulation', 'lining', 'flooring'] },
   ]),
 });
 
@@ -291,4 +317,6 @@ export const MOMENTS = Object.freeze({
   driedIn: { title: 'Dried in', line: 'Rain stays outside from now on.' },
   doorHung: { title: 'Door hung', line: 'A way in that closes.' },
   finished: { title: 'Finished', line: 'You built this.' },
+  floorDown: { title: 'Floor down', line: 'Walk on it. The baseboard hides the gap left for the wood to move.' },
+  firstRow: { title: 'First row down', line: 'Straight on the chalk line: every row after it follows this one.' },
 });

@@ -4,8 +4,8 @@
    Pure arithmetic: no DOM, no three.js. The page reads it as window.__framing; tests read globalThis.__framing. */
 (() => {
   // the order a building is raised in (docs/CONSTRUCTION.md)
-  const STAGES = ["site", "foundation", "floor-frame", "subfloor", "wall-frame", "top-plates", "roof-frame", "roof-deck", "dry-in", "roofing", "sheathing", "wrap", "openings", "cladding", "gutters", "insulation", "lining", "services"];
-  const STAGE_NAME = { site: "Site", foundation: "Foundation", "floor-frame": "Floor frame", subfloor: "Subfloor", "wall-frame": "Wall frames", "top-plates": "Top plates", "roof-frame": "Roof frame", "roof-deck": "Roof deck", "dry-in": "Dry-in", roofing: "Roofing", sheathing: "Sheathing", wrap: "Wrap", openings: "Windows and doors", cladding: "Cladding", gutters: "Gutters", insulation: "Insulation", lining: "Lining", services: "Services" };
+  const STAGES = ["site", "foundation", "floor-frame", "subfloor", "wall-frame", "top-plates", "roof-frame", "roof-deck", "dry-in", "roofing", "sheathing", "wrap", "openings", "cladding", "gutters", "insulation", "lining", "flooring", "services"];
+  const STAGE_NAME = { site: "Site", foundation: "Foundation", "floor-frame": "Floor frame", subfloor: "Subfloor", "wall-frame": "Wall frames", "top-plates": "Top plates", "roof-frame": "Roof frame", "roof-deck": "Roof deck", "dry-in": "Dry-in", roofing: "Roofing", sheathing: "Sheathing", wrap: "Wrap", openings: "Windows and doors", cladding: "Cladding", gutters: "Gutters", insulation: "Insulation", lining: "Lining", flooring: "Flooring", services: "Services" };
   // actual (not nominal) sizes of North American lumber, metres: [breadth, depth]
   const LUMBER = { "2x4": [0.038, 0.089], "2x6": [0.038, 0.14], "2x8": [0.038, 0.184], "2x10": [0.038, 0.235], "2x12": [0.038, 0.286], glulam: [0.09, 0.225], "4x4": [0.089, 0.089], "6x6": [0.14, 0.14] };
   const SHEET = { w: 1.22, l: 2.44 };
@@ -199,7 +199,11 @@
         }
       sheetRows(a0, a1, b0, b1, (ua, ub, va, vb) => M(out, id(f.id, "sf"), "sheathing", "subfloor", "subfloor", f.id, "osb", T.sub, vb - va, P(ua, FLOOR_T - T.sub / 2, (va + vb) / 2), P(ub, FLOOR_T - T.sub / 2, (va + vb) / 2), dirB, { area: r3(((ub - ua) * (vb - va) * area) / ((a1 - a0) * (b1 - b0))), thickness: T.sub, col: "osb" }));
     }
-    M(out, f.id + ".fl", "lining", "flooring", "lining", f.id, f.mat || "planks", T.lining, b1 - b0, P(a0, FLOOR_T, (b0 + b1) / 2), P(a1, FLOOR_T, (b0 + b1) / 2), dirB, { area: r3(area), thickness: T.lining, draw: 0 });
+    // the finished floor (src/flooring.js): boards, plank, tile or carpet laid piece by piece the way an installer does, with
+    // what goes under and the trim round the walls. A bare subfloor is the floor; stone, cobbles and turf are one piece.
+    const FL = globalThis.__flooring, mat = f.mat || "planks";
+    if (FL && FL.lays(mat)) FL.members(out, { ...f, mat }, { M, longX, top: FLOOR_T, base: framed ? "wood" : slab ? "slab" : "plinth" });
+    else if (mat !== "subfloor") M(out, f.id + ".fl", "paving", mat, "flooring", f.id, mat, T.lining, b1 - b0, P(a0, FLOOR_T, (b0 + b1) / 2), P(a1, FLOOR_T, (b0 + b1) / 2), dirB, { area: r3(area), thickness: T.lining, draw: 0 });
   }
 
   /* ---------- walls ---------- */
@@ -685,7 +689,10 @@
   function generate(desc) {
     const out = [],
       spec = desc.spec || {};
-    for (const f of desc.floors || []) floorMembers(out, f, desc.found || "plinth", spec);
+    // the walls that stand on the floors, for the finished floor to stop at their faces (build mode gives every wall, framed
+    // or not, as desc.edges; without them the framed walls stand in, drawn 0.2 m thick)
+    const edges = desc.edges || (desc.walls || []).map((w) => ({ a: w.a, b: w.b, half: 0.1, gaps: (w.openings || []).filter((q) => (q.sill || 0) < 0.2).map((q) => ({ s0: q.offset, s1: q.offset + q.width, door: q.kind === "door" })) }));
+    for (const f of desc.floors || []) floorMembers(out, f.walls ? f : { ...f, walls: edges }, desc.found || "plinth", spec);
     for (const w of desc.walls || []) wallMembers(out, w, spec);
     for (const r of desc.roofs || []) roofMembers(out, r, spec);
     return out;
@@ -703,6 +710,8 @@
   const FLOOR_ITEM = { planks: ["board_pine_1x6", "m"], dark: ["board_oak_1x6", "m"], flags: ["flagstone_40", "m2"], cobble: ["flagstone_40", "m2"] };
   // what a member is bought as: [key, itemId, unit, quantity, label, why]
   function buyAs(m) {
+    const FL = globalThis.__flooring, fq = FL && m.stage === "flooring" ? FL.buyAs(m) : undefined;
+    if (fq !== undefined) return fq;
     const k = m.kind,
       t = m.type,
       sz = k === "header" ? m.size : m.section ? sizeOf(m) : null,
@@ -731,7 +740,7 @@
     if (k === "cladding") return ["clad" + m.material, m.material === "dark" ? "board_oak_1x6" : m.material === "log" ? "board_cedar_1x6" : "board_pine_1x6", "m", m.area / 0.14, "Siding boards", "The boards on the outside. They protect the wall from weather and sun."];
     if (k === "roofing") return ["roof" + m.material, ROOF_ITEM[m.material] || null, "m2", m.area, "Roofing", "The outer skin of the roof. It keeps the water out.", ROOF_ITEM[m.material] ? undefined : "roofing: " + m.material];
     if (k === "insulation") return ["ins" + m.material, INS_ITEM[m.material] || null, "m2", m.area, "Insulation batts", "Fills the spaces between studs, joists and rafters. It slows heat leaving in winter.", INS_ITEM[m.material] ? undefined : "insulation: " + m.material];
-    if (k === "lining" && t === "flooring") {
+    if (k === "paving") {
       const f = FLOOR_ITEM[m.material];
       return ["floor" + m.material, f ? f[0] : null, f ? f[1] : "m2", f && f[1] === "m" ? m.area / 0.14 : m.area, "Flooring", "The finished floor you walk on.", f ? undefined : "flooring: " + m.material];
     }
@@ -744,8 +753,8 @@
   // Sheet goods are cut to fit: pieces are cut biggest first, each from the smallest offcut that will do, else from a new sheet
   // whose rest is kept (a rest under MIN_KEEP is waste). Same rule as src/sim/content/construction.js (packSheets).
   const MIN_KEEP = 0.06;
-  function packSheets(areas) {
-    const A = SHEET.w * SHEET.l, pool = [];
+  function packSheets(areas, A = SHEET.w * SHEET.l) {
+    const pool = [];
     let sheets = 0;
     for (const a0 of areas.slice().sort((p, q) => q - p)) {
       const a = Math.min(a0, A),
@@ -786,19 +795,24 @@
       ln.members.push([m.id, r3(q[3])]);
       if (q[2] === "m" && /^lumber_/.test(q[1] || "")) (ln.pieces || (ln.pieces = [])).push(...Array(m.plies || 1).fill(m.length));
       if (q[6]) ln.missing = q[6];
+      if (q[7]) ln.sheetA = q[7];
       ln.qty += q[3];
       ln.count++;
       // fasteners: about 25 g of nails for each metre of framing, 60 g of screws for each square metre of sheet
       if (q[2] === "m" && /^lumber_/.test(q[1] || "")) nails.set(m.stage + "|nails_framing", (nails.get(m.stage + "|nails_framing") || 0) + m.length * 0.025);
       else if (q[2] === "sheet") nails.set(m.stage + "|screws_wood", (nails.get(m.stage + "|screws_wood") || 0) + m.area * 0.06);
+      // flooring uses up cleats, thinset and finish nails as it goes down
+      const sp = m.stage === "flooring" && globalThis.__flooring && globalThis.__flooring.supplies(m);
+      if (sp) nails.set(m.stage + "|" + sp[0], (nails.get(m.stage + "|" + sp[0]) || 0) + sp[1]);
     }
     for (const [key, kg] of nails) {
       const [stage, item] = key.split("|");
-      lines.set(key, { key, members: [], stage, itemId: item, qty: kg, unit: "kg", label: item === "nails_framing" ? "Framing nails" : "Screws", why: item === "nails_framing" ? "Hold the frame together. Bought by weight and used up as you build." : "Fix the sheets down. Bought by weight and used up as you build.", count: 0 });
+      const fw = globalThis.__flooring && globalThis.__flooring.SUPPLY_WORDS[item];
+      lines.set(key, { key, members: [], stage, itemId: item, qty: kg, unit: "kg", label: fw ? fw[0] : item === "nails_framing" ? "Framing nails" : "Screws", why: fw ? fw[1] : item === "nails_framing" ? "Hold the frame together. Bought by weight and used up as you build." : "Fix the sheets down. Bought by weight and used up as you build.", count: 0 });
     }
     const out = [...lines.values()];
     for (const ln of out) {
-      if (ln.unit === "sheet") ((ln.areaM2 = r3(ln.qty)), (ln.qty = packSheets(ln.members.map((q) => q[1]))), (ln.unit = "each"));
+      if (ln.unit === "sheet") ((ln.areaM2 = r3(ln.qty)), (ln.qty = packSheets(ln.members.map((q) => q[1]), ln.sheetA)), (ln.unit = "each"), delete ln.sheetA);
       else if (ln.pieces) ((ln.lengthM = r3(ln.qty)), (ln.qty = packSticks(ln.pieces)), delete ln.pieces);
       else if (ln.unit === "each") ln.qty = Math.round(ln.qty);
       else if (ln.unit === "kg") ln.qty = ln.itemId === "concrete_mix" ? Math.ceil(ln.qty / 25) * 25 : Math.ceil(ln.qty * 2) / 2;

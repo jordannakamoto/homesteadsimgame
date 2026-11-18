@@ -493,6 +493,9 @@ function setPlan(ctx, p) {
       else if (m.got > m.need) m.got = m.need;
       L.used = round6(L.used + m.got);
     }
+    // material that went into pieces the plan no longer has (a floor changed to another, a wall redrawn) is spent: it is
+    // no longer counted as ordered, so the stage can be ordered again for the pieces that replace them
+    if (o && o.used > L.used + 1e-6) L.ordered = round6(Math.max(L.used, o.ordered - (o.used - L.used)));
   }
   if (!s.offcuts) s.offcuts = {};
   if (!s.waste) s.waste = {};
@@ -504,7 +507,14 @@ function setPlan(ctx, p) {
     const o = old && old.lines[LADDER_KEY];
     pr.lines[LADDER_KEY] = { stage: C.LADDER.stage, itemId: C.LADDER.itemId, qty: 1, unit: 'each', label: 'Ladder', why: C.LADDER.why, count: 1, supply: false, ordered: o ? o.ordered : 0, used: o ? o.used : 0 };
   }
-  for (const key in pr.lines) { const ln = pr.lines[key]; if (ln.supply) { const t = pr.tally[ln.stage]; ln.used = old && old.lines[key] ? Math.min(old.lines[key].used, ln.qty) : 0; if (!old && t && t[1]) ln.used = round6((ln.qty * t[0]) / t[1]); } }
+  for (const key in pr.lines) {
+    const ln = pr.lines[key];
+    if (!ln.supply) continue;
+    const t = pr.tally[ln.stage], o = old && old.lines[key], due = t && t[1] ? round6((ln.qty * t[0]) / t[1]) : 0;
+    ln.used = o ? Math.min(o.used, ln.qty) : due;
+    // nails and thinset used up by pieces that are gone: spent, and ordered again with the pieces that replace them
+    if (o && ln.used > due + 1e-6) { ln.ordered = round6(Math.max(due, o.ordered - (o.used - due))); ln.used = due; }
+  }
   s.progress[p.structId] = pr;
   if (p.tutorial && s.tutorial.shed === null && !s.tutorial.done) s.tutorial.shed = p.structId;
   const was = old ? old.done : false;
