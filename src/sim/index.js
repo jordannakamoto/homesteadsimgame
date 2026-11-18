@@ -17,6 +17,7 @@ import { structure } from './structure.js';
 import { garden } from './garden.js';
 import { landscape } from './landscape.js';
 import { groundSystem } from './ground.js';
+import { foundationSystem } from './foundation.js';
 import { FLAG as LANDSCAPE_FLAG } from './content/landscape.js';
 import { createPartsSystem } from './core/parts.js';
 import { createRoutesSystem } from './core/routes.js';
@@ -24,7 +25,7 @@ import { services, servicesGuard } from './services.js';
 import { SERVICE_CLASSES } from './content/services.js';
 import { plumbingSystem } from './plumbing.js';
 import { createVehicleSystem } from './core/vehicles.js';
-import { VEHICLE_KINDS, IMPLEMENT_KINDS, VEHICLE_HOOKS } from './content/vehicles.js';
+import { VEHICLE_KINDS, IMPLEMENT_KINDS, VEHICLE_HOOKS, VEHICLE_SURFACES } from './content/vehicles.js';
 import { PLUMBING_KINDS, PLUMBING_MATES, PLUMBING_STEP_M, PLUMBING_PIPE, STARTER_KIT } from './content/plumbing-parts.js';
 
 export * from './sim.js';
@@ -47,6 +48,8 @@ export { landscape, landscapeRead, reliefAt, plantSize } from './landscape.js';
 export { SURFACES, THINGS, PLANTS as NURSERY, SCOOP_M3, SCOOP_SCALES, ITEMS_LANDSCAPE } from './content/landscape.js';
 export * as earthwork from './core/earthwork.js';
 export { groundSystem, groundRead, setGroundBase } from './ground.js';
+export { foundationSystem, foundationRead } from './foundation.js';
+export * as cure from './core/cure.js';
 export { SOILS, AMENDMENTS, MULCH } from './content/soils.js';
 export { ITEMS_GARDEN } from './content/garden-items.js';
 export { findRooms, roomAt, compassName } from './rooms.js';
@@ -61,12 +64,14 @@ export * from './fixtures.js';
 export { createPartsSystem, ROTATIONS as PART_ROTATIONS, rotationTo } from './core/parts.js';
 export { compileLinks } from './core/links.js';
 export { createRoutesSystem, runState as routeRunState, toNeutral as routesToNeutral, worldOf as routeWorldOf, pathLength } from './core/routes.js';
+export { find as routeFind } from './core/routefind.js';
+export { channelsFor as frameChannelsFor, channelsFromMembers as frameChannels, attach as frameAttach, snap as frameSnap, rayHit as frameRayHit } from './content/frame-channels.js';
 export { plumbingSystem, compilePlumbing } from './plumbing.js';
 export * from './content/plumbing-parts.js';
 export { services, servicesSystem, compileServices, servicesGuard, runInfo as serviceRunInfo, overlayData as servicesOverlay } from './services.js';
 export { SERVICE_CLASSES, SERVICE_SPECS, NODE_KINDS as SERVICE_NODE_KINDS, DEVICES as SERVICE_DEVICES, FIXTURES_SERVICES, PRESETS_M as SERVICE_PRESETS_M } from './content/services.js';
 export * as vehicleCore from './core/vehicles.js';
-export { VEHICLE_KINDS, IMPLEMENT_KINDS, ITEMS_VEHICLES, FUEL_ITEM } from './content/vehicles.js';
+export { VEHICLE_KINDS, IMPLEMENT_KINDS, ITEMS_VEHICLES, FUEL_ITEM, VEHICLE_SURFACES } from './content/vehicles.js';
 
 // Systems are added here, in dependency order, as the iterations land. Electrical runs before water
 // so a pump's request for power is answered in the same minute; the garden runs after water, whose draws it uses,
@@ -74,11 +79,11 @@ export { VEHICLE_KINDS, IMPLEMENT_KINDS, ITEMS_VEHICLES, FUEL_ITEM } from './con
 // Kit parts fitted by hand (generic), then plumbing, which compiles them for water, which runs after both.
 const partsSystem = createPartsSystem({ name: 'parts', stepM: PLUMBING_STEP_M, kinds: PLUMBING_KINDS, mates: PLUMBING_MATES });
 // Vehicles (generic mechanism, homestead records): parked poses, fuel, seats, hitches, rentals. The page drives them.
-const vehicles = createVehicleSystem({ name: 'vehicles', kinds: VEHICLE_KINDS, implementKinds: IMPLEMENT_KINDS, hooks: VEHICLE_HOOKS });
+const vehicles = createVehicleSystem({ name: 'vehicles', kinds: VEHICLE_KINDS, implementKinds: IMPLEMENT_KINDS, hooks: VEHICLE_HOOKS, surfaces: VEHICLE_SURFACES });
 const plumbing = plumbingSystem({ kinds: PLUMBING_KINDS, mates: PLUMBING_MATES, stepM: PLUMBING_STEP_M, material: PLUMBING_PIPE, kit: STARTER_KIT });
 // Runs in buildings (generic routes with services content), compiled by services before electrical and water read them.
 const routesSystem = createRoutesSystem({ name: 'routes', classes: SERVICE_CLASSES, guard: servicesGuard });
-export const GAME_SYSTEMS = [weather, streams, stockSystem(), siteSystem(), structure, routesSystem, services, electrical, partsSystem, plumbing, water, thermal, cookingSystem(), chickensSystem(), physicalKitchenSystem(), groundSystem({ tampBits: [LANDSCAPE_FLAG.TAMP1, LANDSCAPE_FLAG.TAMP2] }), landscape, garden, constructionSystem(), vehicles];
+export const GAME_SYSTEMS = [weather, streams, stockSystem(), siteSystem(), structure, routesSystem, services, electrical, partsSystem, plumbing, water, thermal, cookingSystem(), chickensSystem(), physicalKitchenSystem(), groundSystem({ tampBits: [LANDSCAPE_FLAG.TAMP1, LANDSCAPE_FLAG.TAMP2] }), landscape, garden, constructionSystem(), foundationSystem(), vehicles];
 
 export function createGameSim(seed, opts = {}) {
   return createSim({ seed, systems: GAME_SYSTEMS, ...opts });

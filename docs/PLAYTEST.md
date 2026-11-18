@@ -604,6 +604,275 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 - Macro (1 m) cuts and fills are blocky next to the 10 cm hand-dug ground, and a machine-sized cut wipes hand-dug detail under it (by design: it absorbs it).
 - Build mode's site cut still goes through the old path (slice A3 routes it through `ground.grade`).
 
+## Services S5 + S6 — plan cable and pipe through the frame in two clicks
+
+**What is new**
+
+- A router finds the way a run takes through a building's frame (`src/sim/core/routefind.js` over channels read from the framing members, `src/sim/content/frame-channels.js`): up and down beside a stud, sideways through the studs at outlet height, waist height or near the top, up through the top plates and over the ceiling joists, or down through the bottom plate into a joist bay and along or across the joists (hung under them over a crawl space). Openings block their bays: a window keeps the bays under its sill and over its header; a header is never bored.
+- Holes are sized and checked to code: a bearing stud loses at most 40% of its depth (IRC R602.6), a joist a third and never within 2 in of an edge (R502.8.1), a top plate half its width; a hole nearer than 1-1/4 in (cable) or 1-1/2 in (pipe) to the stud face gets a nail plate (NEC 300.4, IRC P2603.2.1). A 2 in drain will not go through 2x4 studs or 2x8 joists, and says so.
+- A drain only ever runs downhill and falls 2 cm a metre (1 cm for 3 in and up, IPC 704.1); it starts high in a joist bay to have room. Too long a run for the floor's depth is refused in plain words.
+- Planning by hand (`src/services-plan.js`). Hands (F) near a framed building shows Power, Cold, Hot, Waste (keys 1 to 4). Places a run can start glow: a breaker panel (its next free breaker), a tank, pump or heater, a box, a stub, a drain exit. Click one, or a stud to start fresh. Aim at the frame: a ghost box or stub snaps beside the nearest stud at the preset height; the wheel steps the preset (outlet 0.40 m, switch 1.20 m, counter 1.10 m on 12/2, ceiling light; sink, toilet, shower; sink drain, toilet and shower floor drains, out of the building). The route draws itself in dashes with a dot at every hole (silver where a nail plate goes) and the hint line reads like "14/2 cable, 4.5 m, 11 holes, through the studs". R tries another way (up to three). Drag the dashes to pin a point the route must pass; right-click unpins. Click plans it, and the new box is the next start, so a circuit is a chain of clicks. Right-click steps back.
+- Runs ride on their building's frame, now kept in step with where the building stands: a moved building takes its runs along.
+
+**Try this**
+
+1. Set down the cabin plan (Build, Plans) and stand inside its walls. F, then 1. Click a stud low on one wall (a new outlet box), aim at another wall: watch the dashes, press R a couple of times, click. Click on round the room.
+2. Wheel to Switch and plan a box at 1.2 m beside the door; wheel to Ceiling light and aim at the floor under where the light should be.
+3. Press 4 (Waste). Wheel to Sink drain, click a stud on an outside wall, wheel to Out of the building, aim low at an outside wall: the drain drops into the floor and falls to the exit. On a building on skids (no crawl space), a sink drain run far across the floor is refused when the joists are not deep enough for its fall; over the cabin's crawl space it hangs under the joists instead.
+4. With a panel placed on a wall (Equip), its glow is breaker 1; the run you plan from it becomes that breaker's circuit.
+5. Console: `__servicesPlan.plan('power', [x, y, z], [x, y, z], 'outlet')` plans between two frame-local points; `__game.routes.find(...)` and `__game.routes.channelsFor(structId)` are the router and the channels.
+
+**What's weak**
+
+- Clicking the middle of a planned run to branch from it is not there yet. Vents are not planned (S11).
+- Water equipment standing in the yard cannot be routed to: the line in from outside comes with the ground work (S13). Start supply from a stub, or from a tank or heater inside the building.
+- The cost of a hole is a guess (worth 40 cm of extra run), so the first route sometimes goes over the top where an electrician would bore straight through; R shows the others.
+- Planned runs are not yet worked (drill, pull, crimp: S7) and the Build panel does not list rough-in yet (S8).
+
+## Services S7 — rough-in by hand: drill, fix boxes, pull, clamp and crimp
+
+**What is new**
+
+- Planned cable and PEX runs are now put in by hand (`src/services-hands.js`, Hands F, with no Power/Cold/Hot/Waste mode picked). The hint line near a building lists what is left: "Rough-in: 2 boxes to fix, 5 holes to drill, 1 run to pull, 2 ends to crimp."
+- **Boxes and stub-outs:** a planned one is drawn pale. Click it twice: hold it to the stud, then nail it (puff, hammer pose); it turns solid.
+- **Drill:** hold the button on a yellow dot and sweep along the wall. Every dot the pointer passes within reach is queued and drilled in turn: the drill sits in the hole, chips fly, the dot goes dark. The sweep is wider with a higher per-gesture setting (Build panel, 1x to 4x). With power near (`powerAvailable`) a hole takes 0.2 s, on the battery 0.5 s. A quick flick still catches the dots between frames.
+- **Pull:** hold the cable (or PEX) end at the start of the run; a spool or coil sits on the floor beside it and turns as it pays out. Drag along the run, or walk along it holding on: the cable follows through the holes (at most 3 m/s, never backwards, only within reach). Let go anywhere; progress is kept. Staples tick in behind it (within 20 cm of each end, then every 1.2 m for cable, NEC 334.30; every 0.8 m for PEX, IRC P2605.1), and steel nail plates go over the holes that need them as the run passes.
+- **Clamp / crimp:** hold on an end until the ring closes (PEX) or the cable is clamped in its box: the ring darkens, green flash. Every end waiting at that box goes at once. The first finished run gets the overhead "Roughed in!" beat.
+
+**Try this**
+
+1. Cabin plan, stand inside. F, 1, plan an outlet circuit of two or three boxes (right-click to leave planning).
+2. With no mode picked, click each pale box twice. Hold on the first yellow dot and sweep along the wall.
+3. Grab the cable end at the first box and drag it along to the next box, or hold on and walk. Then hold on each end.
+4. `__servicesHands.summary()` counts the work near you; `__servicesHands.targets()` lists it. `node test/services.smoke.mjs` does all of the above with the pointer.
+
+**What's weak**
+
+- An end that sits on a box still to fix is aimed as the box: fix the box first, then clamp.
+- No tool or supply check yet: the drill, cable and staples are free until S8 (supply lines in the Build panel). Drains are not worked by hand yet (S11).
+- The drill is only a model at the hole, not in the character's hand; the hammer for boxes is a pose only. No sound.
+- Walls are not checked for being in the way of the pointer: you can aim at a dot through a lined wall (covered runs cannot be worked, though).
+
+## Services S8 — rough-in and trim-out are stages of the building
+
+**What is new**
+
+- The Build panel lists **Rough-in** after Gutters and **Trim-out** after Lining, but only for a building with cable or pipe planned in it. With nothing planned (the shed) nothing changes: no new stages, insulation as before.
+- Rough-in has its own shopping lines, worked out from what is planned: 14/2 or 12/2 cable and blue or red PEX by the metre (each run plus 30 cm spare at each box for cable, 20 cm for PEX), wall and ceiling boxes, cable or PEX staples, nail plates (two per hole near a stud face), crimp rings (one per PEX end). Order them like any stage; they come as stacks. Staples, plates and rings sit by the stacks and are used up (never carried).
+- The hands draw on them: nailing a box takes a box, pulling takes the metres pulled with their staples and plates, crimping takes a ring. They come from the spool in your arms if you carry it, otherwise from the stacks. Short of something, the gesture stops and says "Out of 14/2 nm cable: order the rough-in in the Build panel (L)". Sandbox: free.
+- **Insulation waits for rough-in** while runs are planned. **Close up anyway** (Build panel, or the note on the left) leaves whatever is not roughed in out of the stage; it stays as plan lines.
+- **Do it for me** on Rough-in drills, pulls and crimps every run and nails every box of that building, from the stacks. On Trim-out it puts an outlet in each wall box, a light in each ceiling box, a breaker in each slot (devices by hand are S9b).
+- **Lining covers the runs:** once a wall's lining is on, the runs inside it cannot be worked. A marker on such a run (Hands, F) says the wall is closed: **hold** on it to open the wall. Its lining and batts come off (the whole face: lining is one piece per wall), the books stay straight, and the stages go back to wanting them.
+- Unlocks: finishing a cabin opens `services:in-wall` (nothing is gated on it yet).
+
+**Try this**
+
+1. Cabin plan, framed and roofed (sandbox off). F, 1, plan an outlet circuit. Open the Build panel (L): Rough-in after Gutters, with cable, boxes, staples and plates. Order it.
+2. Fix the boxes, drill, pull and crimp by hand (S7). Watch the Rough-in count climb; Insulation opens when it is done.
+3. Or plan a second circuit and press **Close up anyway**: insulation opens and the new circuit stays as a plan.
+4. Line a wall with a run in it, plan another run through it: the marker says it is closed; hold on it to open the wall.
+5. Console: `__game.sim.commandNow('services.auto', { structId: <id>, stage: 'rough-in' })`, `'services.defer'`, `'services.openWall', { structId, host: '<wall id>' }`; `__game.sim.state.sys.services.want` shows the lines the Build panel was told.
+
+**What's weak**
+
+- Trim-out has no shopping lines yet (outlets, switches, lights, breakers come with S9b) and no hands: only "Do it for me". A cabin with services planned is not finished until trim-out is done.
+- Planning cable into a finished building reopens it (Rough-in and Trim-out appear), and finishing it again counts as a second finish.
+- Spools are drawn from the stacks wherever you stand, like nails; carrying one only decides where it comes from.
+- Floors do not cover runs (a crawl space is reachable from below); a ceiling's lining does.
+- Drains and vents have no lines and no hands yet (S11): "Do it for me" fits them.
+- The shed gate (`test/shed.e2e.mjs`) fails on current `main` and on this branch alike (the hand-building loop keeps picking up the wrong stack at the foundation, 10 checks); it is not caused by S8.
+
+## Ground A3 and foundations B1 — sites through the ground, concrete that cures (branch `ground-a3b1`)
+
+**What is new**
+
+- Levelling a building site (finishing its Site stage, or placing a building outside construction mode) now goes through the ground system. Pads should look as before. A hole you dug by hand in the Yard (key 6) where the new building stands is filled when the site is levelled; ground outside the pad is left alone.
+- Concrete cures on the sim clock. A building on a slab, poured piers or a stem wall can be given a foundation job; while its concrete is below half strength, framing refuses with "The concrete is still green" and opens by itself once the concrete reaches it. Warmth speeds it, cold slows it, a hard frost on fresh concrete weakens it for good.
+
+**Try this**
+
+1. Yard (6): dig a hole with the shovel. Place a Tool shed plan over it (construction mode) and finish its Site stage: the hole is gone and the pad is flat. `__game.ground.verify()` reports `tiles: 0`.
+2. Foundations (console). Build a cabin on a slab (Plan mode, foundation "Slab on grade"), then with `id` its building id (`__build.structs()`):
+   `__game.sim.commandNow('foundation.setPlan', { structId: id })`, then `__game.sim.commandNow('foundation.debugPour', { structId: id })`. The foundation stage is done; try to frame: "The concrete is still green". Watch `__game.sim.state.sys.foundation.jobs` (`elements[0].cure.strength`); at 100x or 1000x speed the framing opens after a few world hours with the default 20-day year (about 3.5 days with a real-length year).
+
+**What's weak**
+
+- No hands-on steps yet (layout, dig, base, forms, pour, screed, finish, strip come in B2-B8); `debugPour` jumps straight to curing, and there is no cure tint or gate chip on the slab yet.
+- The foundation job is not created automatically: it needs the console call above until the foundation view (B2) does it.
+- A building drawn with only walls (no floor) samples its site round the walls, so the middle of a large plan is levelled only partly, as before; a hole there is filled only where the pad really is level.
+
+
+## Foundations B2 — layout strings and dig to the line (branch `ground-b2`)
+
+**What is new**
+
+- A building with a **slab**, **stem wall** or **poured piers** put up in construction mode is now a foundation job: its site is no longer levelled by magic and its site and foundation stages are done by hand (the construction panel says so).
+- **Site tool, key 7** (also a button on the tool strip). Two things in hand:
+  - **Layout kit**: press a glowing corner and a stake goes in with two hammer blows. Keep holding and pull toward the next corner: you walk after your hand, the pink string pays out behind you, and every corner your hand reaches gets its stake. The last one closes the loop: batter boards pop up beyond the corners, the strings go up on them at finished height, the diagonals flash white (square).
+  - **Shovel** (the Yard's own): inside the white painted line, ground still to dig is **dark amber** (darker = more to go), ground within a few cm of the line is **pale yellow**, dug too deep is faint blue. A yellow tape hangs from the string at the blade and the hint reads "Here: 9 cm to go". Once most of the dark amber is gone, **right-drag** the flat of the blade across the yellow: it trims to the line and pushes the earth out past the edge. When it is all down, "Dug to the line" and the site stage is done.
+- Escape puts the site tools away.
+
+**Try this**
+
+1. On flat-ish ground: L, choose the tool shed, set it down, then in Plan mode (B) change its foundation to Slab (or console: `__build.setFoundation(__build.structs().at(-1).id, 'slab')`).
+2. Press 7, stake the four corners in one drag. Take up the shovel (2), dig the amber (Yard store scoop size 2x or 4x speeds it up), trim, watch the amber go.
+3. Then `__foundation.debugPour()` in the console: framing says the concrete is still green until it cures (speed time up).
+
+**Weak / not in yet**
+
+- After the dig the gravel base, forms and pour are B3-B5; until then use `__foundation.debugPour()`.
+- The slab's thickened edges are not dug as trenches yet (only the pad to the gravel bottom); stem-wall trenches and pier holes are dug the same way but are deep and slow by hand (an auger or machine is later).
+- On a slope the low side ends up below the line (blue); filling it is the gravel base's job (B3).
+- Hammer-blow pose and batter-board look are first passes; untuned against a real playtest. Guided level has no one-click layout yet.
+- Console: `__foundation.drawn()`, `__game.foundation.jobView(__game.sim.state, '1')`. Smoke test: `node test/foundation.smoke.mjs`.
+
+## Foundations B3 + B4 — gravel base, forms, barrow concrete and the screed (branch `ground-b3b4`)
+
+**What is new**
+
+- After the dig, a **slab** carries on by hand in the Site tool (key 7); the bar changes with the step.
+  - **Base**: **Gravel**: press and drag along the pad and the truck tips heaps where you guide it (the building's ordered gravel, or gravel bought in the Yard store). **Barrow** (click a heap to shovel in, drag down to tip), **Rake** (drag: the back of it pulls gravel to the line under the strings, the tines even it), **Tamper** (click to thump, hold and walk for a strip). The overlay: amber wants more gravel, blue stands proud, faint dots are not yet tamped twice. The bar reads gravel / level / tamped %. Done when level and twice tamped: the gravel bed member is finished.
+  - **Forms**: hold a **board** near a string: a ghost snaps along the run; click sets as many as the gesture setting (Supplier/construction 1x-4x). Then the **Stakes** (hammer): glowing marks outside the boards; click one, two blows, and it and its neighbours go in. Missing boards or stakes: a Buy button in the hint. Unstaked boards wobble.
+  - **Pour**: **Barrow**: drag **up** to slash bags in (gesture count, three fill it), hold the **right button** to run the hose, drag **side to side** to hoe it through, drag **down** at the forms to tip. A meter under the hint shows water/cement against dry / stiff / right / wet / soupy. Too dry sits in a crumbly heap and tears under the screed; too wet slumps flat and cures weaker (Abrams). **Rake** spreads it into the corners. **Screed**: press at one end and drag the board toward you; it rides the forms at the slab's top, the surplus rolls ahead as a ridge, the top behind it turns flat and wet-bright; dull patches are hollows (tip a little more ahead, pass again). Fully screeded: a burst, "Screeded", the slab starts to cure and framing waits for half strength.
+  - An **unstaked form bows** under the concrete (a real beam deflection between whatever holds it) and **leaks** grey out at its foot; stake it during the pour and it stops (what ran out stays out).
+- Building plans sent again by build mode no longer drop the green-concrete hold.
+
+**Try this**
+
+1. As B2 (a shed with a slab on flat ground; 7; stake; dig). Buy a rake, tamper and wheelbarrow in the Yard store if you have none (the hint offers Buy buttons), and order the building's materials (gravel, concrete mix).
+2. Gravel: one drag over the pad. Rake it until the amber and blue are gone, tamp it over twice.
+3. Boards on the four strings, then the stakes (try setting gesture to 3x). Leave one long side unstaked to see it bow and leak.
+4. Mix: up, right-hold for ~6 s for three bags, hoe until 100%, tip. About 14 batches for the 3 x 2.4 m shed slab at 1x. Then screed. Console shortcuts: `__game.sim.commandNow('foundation.mix', { jobId: '1', bags: 3 })`, `{ waterL: 9 }`, `{ work: 5 }`, then `foundation.tip { jobId: '1', x, z }`.
+
+**Weak / not in yet**
+
+- Slabs only: stem walls and piers still use `__foundation.debugPour()` (B8). Finishing (float, joints, broom), cure colour, covers and stripping the forms are B5; the wet mesh disappears when the screed finishes and the slab member is drawn.
+- Leaked concrete cannot be shovelled back yet; it is lost. The ridge pushed past the far form ends up on it (shovel-off is not modelled).
+- The barrow is the only mixer; 14 barrow batches for a shed slab is real but long (the mixer is B7, ready-mix B9).
+- Gravel coverage is read as "filled to half the base depth over the dig line" once the job's own gravel has been tipped in (core earthwork loses track of a raked layer's thickness, so the label alone is not reliable).
+- Water feedback is the meter, the colour of the heap in the barrow and the hint; no sloshing or crumb visuals in the tub yet. The screed's "saw" is a small wobble of the board.
+- Console: `__foundation.drawn()`, `__game.foundation.jobView(__game.sim.state, '1')`, `__game.foundation.carry(__game.sim.state)`. Tests: `node --test test/foundation-pour.test.mjs`, `node test/foundation.smoke.mjs`.
+
+## Foundations B5 — finishing, cure, covers, bolts and stripping (branch `ground-b5`)
+
+**What is new**
+
+- Screeded, a slab is no longer "poured and done": it is **finished by hand** (step `finish`) and **cures from the moment it is placed**. The Site bar (key 7) becomes the finishing kit (one tool in the store, **Concrete finishing kit**, $95): **Float** (bull float: drag over the screeded top, it goes from wet-bright to an even satin), **Trowel** and **Broom** (drag), **Edger** (drag along inside a form), **Joints** (the groover along dashed lines; only slabs with a span over 3 m need them, at most 2.5 m apart) and **Bolts** (anchor bolts, $1.6 each: press a glowing mark along the sill line; `gesture` at a time).
+- **Timing matters.** The wet top bleeds: a bright sheen of water rises after the screed. Float right away, then **wait for the sheen to go** (the wet-bright look fades; a wetter mix bleeds longer). Trowel or broom **before** that works the water into the skin: pale scaled blotches and a weaker top. After **final set** the tools tear and refuse; the finish step ends by itself and what was not worked stays as it is. All windows are in units of the concrete's set time at its temperature, so cold stretches them and heat shrinks them (and pausing the clock removes the pressure). The hint and the chip tell you the phase and the hours left.
+- **Anchor bolts** are needed on a slab: **framing refuses** ("Anchor bolts first...") until every mark has a bolt, even once the concrete is strong. They push in while it is wet; after initial set they are drilled and epoxied in, one at a time.
+- The finish step ends when the top is floated and worked (troweled or broomed), jointed where needed and bolted: the wet field goes and build mode draws the slab.
+- **Cure look**: a thin dark overlay on the slab (not build mode's member) that is wet-dark at first and **lightens with strength**; misting darkens it again; drying out shows pale crazing, frost shows scaled patches. A **chip** at the top of the screen shows the strength with ticks at walk 10% / strip 20% / frame 50% and what is next.
+- **Covers**: **Blanket** (holds moisture and heat in: for cold nights) and **Plastic** (holds moisture in), $70 / $28, reusable, press to roll over, press again to take off. **Mist** (a garden hose, $35 in the Yard store): the top stays wet for half an hour (not in frost). Both feed the cure's drying and frost terms: a hot windy day on a bare slab crazes it.
+- **Strip**: at a fifth of the strength the Strip tool pries a side (`gesture` boards at a time); the first board off takes that side's stakes. Boards and stakes go back to stock. A side whose edge was not run with the edger chips as it comes off.
+- Fixed: the screed's strength factor (a wet mix, a cold joint) used to be overwritten by the next cure step; it now sticks (`cure.q`).
+
+**Try this**
+
+1. As B4 (a slab shed, dig, base, forms, pour, screed), but buy the finishing kit, a blanket (or plastic), a hose and 8+ anchor bolts first (the hints have Buy buttons).
+2. After the screed: float the whole top, watch the sheen. Try the broom on a corner right away (scales), then wait until the hint says the sheen is gone and broom the rest. Click each bolt mark.
+3. Cover it, wait until the chip shows Strip forms at 20%, strip the sides. Framing opens at 50% with the bolts in.
+4. Console: `__game.foundation.finish(__game.sim.state, '1')` (window, bolts, joints, cover), `__game.sim.commandNow('foundation.finishAt', { jobId: '1', x, z, kind: 'float' })`, `foundation.setBolt`, `foundation.joint`, `foundation.cover { kind }`, `foundation.mist`, `foundation.strip`, `foundation.finish` (stop working the top now). Time speeds the cure: `__game.sim.runTicks(60)` is an hour.
+
+**Weak / not in yet**
+
+- The windows are tuned on paper (bleed ends at 0.3 of initial set, tools stop at 1.5), with the 2.5x working-time scale; they need a playtest against the real game clock. The sheen and phase are read from the cure every 10 sim minutes, so they lag a little.
+- Slabs only (stem walls and piers by `debugPour` have no finish step, bolts or strip yet: B8). No saw-cut for a joint missed in time, and a slab left unjointed is not cracked yet. No rebar (B6).
+- The cover is a flat sheet with a pop-in, no cloth physics; the mist is a particle spray with no water use. Hand models for the finishing tools are first-pass boxes.
+- The tint is an overlay at the slab top; if build mode's slab member is raised or changed in height it will not follow (it reads the job's top).
+- Tests: `node --test test/foundation-finish.test.mjs`, `node test/foundation.smoke.mjs` (now through strip).
+
+## Vehicles V3 + V4 — ride the ATV (branch `vehicles-v3v4-atv`)
+
+**What is new**
+
+- A utility ATV is parked a few steps past the old well in every world (new worlds, and once in older saves). It is modelled on a real mid-size 4x4 automatic quad (table below): racks front and rear, fenders, footwells, a winch, a ball hitch, 24 in tyres with tread you can see turning, handlebars that turn with the steering.
+- **Get on by walking into its side** (between the axles, pushing toward the seat) for a quarter of a second: it glows faintly when you are in the zone, then you swing on. Refused with a line if your arms are full or you are in build mode.
+- **Drive like walking**: push where you want to go (WASD relative to the camera, or the left touch stick). Space brakes, Shift is gentle throttle (slippery slopes, tight spots). Push behind you at a crawl and it reverses. **E** brakes to a stop and steps you off on the side toward the camera's right (else the other side, else behind).
+- It handles like a 290 kg machine: about 4 s to 50 km/h through a five-speed automatic (you can see the nose squat and dip at each shift), engine braking when you let go, a slow creep on hard floors, a rider-held brake once it is nearly stopped. Grip comes from the ground under it: dry grass, wet grass (when it rains), packed or loose dirt, mud (wet dirt), gravel and stone paths, mulch, sand, snow, stream water and floors each have their own peak and sliding grip and rolling drag. Too much throttle on wet grass or mud spins the wheels; it climbs about 25 degrees of dry grass, not of wet grass, and nothing past about 33 degrees. Steering slows and narrows with speed, and the front washes out (understeer) rather than drifting.
+- Weight transfer you can see: it dips under braking, squats under power, leans out of turns and bobs on its springs (0.2 m of travel, about 2 Hz). It leaves the ground off humps and lands with a thump, a little camera shake and a puff of dust. On a steep side slope or in a hard turn it warns you ("Steep side slope: ease off"); go past it and it rolls over softly, you jump clear uphill, and it is set back on its wheels after a few seconds.
+- The rider straddles the seat with hands on the grips and feet on the footrests, leans forward, leans into turns and turns with the bars. The hatchet is put away and the tool keys (1-6), build mode (B), the hands (F) and the construction keys are locked while seated; the panels (I, U, J, Y, H) still open.
+- The camera stays high and yours: it looks a little ahead of where you are going and draws back slightly at speed.
+- It stays where you left it: the position and fuel go to the world twice a second while you drive, when you step off, and before the page closes; reload while seated and you are still on it.
+
+**Try this**
+
+1. New world: walk past the well; the ATV is there. Walk into its side to get on. Drive around trees and the house; get off with E; reload; it is where you left it.
+2. Hold W down a long grass slope and let go: feel the engine braking. Turn hard at speed: it leans and runs wide. Make it rain (weather panel, Y) and try the same slope again.
+3. Drive across a dug or graded patch (Yard, key 6) and a gravel path: the grip and drag change (`__vehicles.body('v1').surface`).
+4. Console: `__vehicles.body(__vehicles.driven())` (speed, rpm, gear, spin, tip), `__vehicles.spawn('atv')` (another one in front of you), `__vehicles.bench()` (microseconds per drive step here), `__vehicles.stats()`.
+
+**Real-world references the ATV is tuned against** (Honda FourTrax Rancher 4x4 420 published specifications; tyre figures are typical published off-road ranges)
+
+| Figure | Real | In the game |
+|---|---|---|
+| Length x width x height | 84.6 x 47.4 x 46.8 in (2.15 x 1.20 x 1.19 m) | 2.15 x 1.20 x 1.19 m |
+| Wheelbase | 51.0 in (1.295 m) | 1.295 m |
+| Seat height / ground clearance | 34.9 in (0.886 m) / 9.2 in (0.234 m) | 0.886 m / 0.234 m |
+| Turning radius | 11.5 ft (3.5 m) | 23 degrees of lock, 3.5 m |
+| Tyres | 24 x 8-12 front, 24 x 10-11 rear | radius 0.305 m |
+| Curb mass | 643-676 lb (292-307 kg) | 292 kg + 80 kg rider |
+| Engine | 420 cc single, about 26.6 hp (19.8 kW) | 32 N m peak, 19.8 kW, 7000 rpm limiter, 5-speed automatic |
+| Suspension travel | 7.3 in front, 8.5 in rear (0.19-0.22 m) | 0.20 m, 2.0 Hz, lightly damped |
+| Fuel | 3.9 gal (14.8 L) | 14.8 L, about 5 L/h flat out |
+| Towing | 848 lb (385 kg) | trailer: 350 kg on the bed |
+| Top speed | about 55 mph claimed (24 m/s) | governed at 18 m/s (65 km/h), see below |
+| Tyre peak grip (knobby) | dry grass 0.6-0.7, wet grass 0.3-0.4, packed dirt 0.65-0.75, gravel 0.55-0.65, mud 0.2-0.35 | 0.65, 0.39, 0.72, 0.6, 0.29 (sliding about 85 percent of peak) |
+| Rolling resistance | hard ground 0.03, grass 0.05, mud and sand 0.1-0.15 | 0.034-0.135 by surface |
+
+**Frame cost**
+
+Measured headless (SwiftShader, Low preset, same view, `main` at e09c44a vs this branch); `__game.bench()` itself did not finish in 25 minutes without a GPU timer, so these are the CPU numbers plus draw calls:
+
+| | before | after |
+|---|---|---|
+| Draw calls / triangles, standing at arrival with the ATV 12 m away | 67 / 369,464 | 70 / 370,892 (+1 body, +1 wheels, +1 bars) |
+| Vehicles' per-frame hooks with the ATV parked | - | 0.002 ms (+0.005 ms for the starter check) |
+| One drive substep (4 ground reads, 3 push-outs, the model): `__vehicles.bench()` | - | 0.011-0.017 ms; at 144 fps that is about 1.2 substeps a frame, about 0.02 ms |
+| The whole seated update per frame (substeps, drawing the unit, posing the rider, sync) at 1/144 s | - | 0.055-0.085 ms (noisy, software-rendered host) |
+| `step()` median at 1/144 s, driving flat out | 0.10 ms (standing) | 0.10 ms |
+
+No new passes; parked units cost nothing per frame beyond the zone check. On your machine: Graphics panel JS ms while driving, and `__vehicles.stats()` (ms per frame, substeps per frame).
+
+**What's weak**
+
+- Top speed is governed at 18 m/s rather than the real 20-24 m/s: chunk streaming builds a new row of 32 m chunks each time you cross one (every 1.8 s at 18 m/s), and headless software rendering cannot show whether that hitches on a real GPU. Check the Graphics panel's JS milliseconds while driving flat out; if it holds, raise `topMps` in `src/sim/content/vehicles.js`.
+- No touch "Off" button yet (V6): on a phone the act button gets you off. No HUD chip (speed, fuel) yet (V6). No dust, tracks or splashes beyond the landing puff (V5). No trailer on the page yet (V7): the trailer is still a grey box if spawned.
+- The rider is the existing blocky character with one-piece legs, so knees do not bend; the legs reach the footrests straight.
+- Fuel runs down but there is no way to refuel by hand yet (V9); `__game.sim.commandNow('vehicles.refuel', { id })` takes gasoline from stock.
+- Collisions with buildings and trees use three circles along the body; it can clip a corner slightly.
+
+## Vehicles V7 + V8 — tow the trailer, haul lumber with it (branch `vehicles-v7v8-trailer`)
+
+**What is new**
+
+- **A small utility trailer comes with the ATV** (for now, in new worlds and once in older saves; V9 moves it to the supplier). It is parked loose alongside the ATV, on its far side from you and a little ahead, facing the same way: an ATV dump trailer of the common steel kind, 1.8 x 1.1 m bed, 90 kg, rated 350 kg, on a 2-inch ball. Steel tub with a front board, side rails and the tailgate hung open for long loads, A-frame tongue with a coupler and jack post, two wheels under fenders.
+- **Hitch by backing onto it.** Reverse toward the tongue: within 3 m a faint line runs from the ball to the coupler (pale yellow, greener when you are lined up). Get the ball within 0.4 m with the trailer lined up within 35 degrees and it latches with a clunk ("Hitched"). Not lined up: it says so. **X unhitches** while seated (stop first).
+- **Towing feels the load.** The trailer's mass and its load add to what the engine pulls and what the ATV's brakes stop (small trailers have no brakes of their own), so a full trailer pulls away slower and stops longer (in the test, deceleration on dry grass drops by over a quarter with 350 kg on). A tenth of its gross weight sits on the ball, behind the rear axle: more weight on the driven wheels, less on the front, so the steering washes out sooner with a heavy load. It follows on the ball without sliding at its own axle, so it cuts corners and swings in a tight turn. Backing up is unstable the way it is in life: it folds, and at 75 degrees (the jackknife stop) the rig binds and stops ("Jackknifed: pull forward to straighten the trailer").
+- **Loading at a pile: hold.** With the trailer parked within about 4 m of a pile, aim at the pile and hold the left button (or E). The press picks up an armful as always; still holding after half a second, that armful goes onto the bed and the rest of the pile streams after it, about eight pieces a second, each flying from the pile to its place, until you let go, the pile is gone or the bed reaches 350 kg. A tap is exactly the old pick-up. Studs and joists lie along the bed and hang over the open tailgate; sheets lie flat; boxes and bags in rows. Mixed loads stack layer on layer.
+- **Build straight off the trailer.** What is on the bed stays a construction pile that rides with the trailer, so a trailer parked by the work is the pile the build draws from (guided building, work until done, cutting at the sawhorses take from the nearest pile), and by hand you can take an armful off the bed (walk up to it: "Pick up ... off the trailer").
+- **Tipping.** While seated with the trailer on, hold the left button: the bed tips up about its pivot (30 degrees a second, to 48). Past about 27 degrees (dry lumber on steel) the load slides off the tail and lands as an ordinary pile behind the trailer. Let go and the bed comes down.
+
+**Try this**
+
+1. New world or an old save: walk past the well. The trailer is alongside the ATV. Get on, swing round so the trailer's tongue is behind you, then hold S (or push away from the nose): watch the guide line and back onto the tongue. Tow it around the house; back it into a spot between two trees (Shift is gentle throttle).
+2. Order lumber (Build panel), drive the trailer to the delivered pile, step off, hold at the stud pile. Drive to the far side of the building and build with "work until done": the studs come off the trailer.
+3. Tip the rest off behind the building; X to unhitch.
+4. Console: `__vehicles.bed('v2')` (tip angle, pieces, kg), `__vehicles.hitch()`, `__vehicles.unhitch()`, `__vehicles.tip(true)`.
+
+**What's weak**
+
+- The trailer is given with the ATV, not bought: V9 adds it to the supplier (the item `trailer_small`, $450, is already in the catalog).
+- No touch control yet for tipping or unhitching (V6: "Use" and a long press). On a phone, the trailer can be towed and loaded but not tipped or unhitched.
+- A loose trailer cannot be pulled around by hand yet; only the ATV moves it.
+- Its tongue rests at ball height on the jack whether hitched or not (no crank). Loads longer than the bed pass through the open tailgate's line rather than over it.
+- The pieces flying onto the bed are drawn by the trailer's own instanced load (a short arc), not by construction's member fly-in, which is tied to building members.
+- The trailer pushes no sideways force into the ATV through the ball (the tow model is kinematic: the trailer's mass slows and lengthens stops, its tongue load moves the ATV's grip, and it binds at the jackknife stop, but it cannot shove the ATV's tail out on a downhill turn).
+
+## Shed by hand again: the barrow, the sawhorses and the last pieces stop getting in the way
+- **New:** the wheelbarrow arrives beside the stacks on the far side from the building, no longer on its footprint (it used to take E from "Work until done" and from the pier blocks). Pointing at a pile nearer than the barrow picks up the pile. A wall frame ready to tilt up, or a glowing place right under the pointer, comes before cutting at or grabbing the sawhorses that stand by the wall. With empty hands (or a load too short for the next stick), the note sends you to the stacks even when only a few places are left; the view no longer offers to set a piece the arms hold too little lumber for.
+- **Try:** a new world, the tool shed by hand (L, place, order, level). Stand by the east wall near the sawhorses and nail, cut, raise: E does what the note says.
+- **Test:** `node test/shed.e2e.mjs` passes again (it aims at the foot of a pile, cuts at the sawhorses, and expects bare framing to let the player through).
+- **Weak:** the sawhorses still stand close to the building when the delivery spot is near it; pointing at the top of a pile on a steep slope can still pick the pile behind it (the ring shows where the pointer lands).
 ## Interior walls: hang, tape and mud (branch `interior`, design in `docs/design/interior-walls.md`)
 
 - Lining is hung piece by piece. Drywall: sheets 1.2 m tall laid flat, the top row first, end joints on the studs and staggered between rows, cut round windows and doors; each sheet set and screwed. Pine boards: a course at a time from the floor up, blind-nailed.

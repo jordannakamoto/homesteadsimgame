@@ -3,18 +3,21 @@
 // src/sim/core/supply.js; the stages, texts, prices of missing items and rates are src/sim/content/construction.js.
 //
 // State, at sim.state.sys.construction:
-//   { dropPoint, orders, deliveries, stacks: [{ id, itemId, qty, x, z }], carried: { itemId, qty } | null, nextId, ledger,
+//   { dropPoint, orders, deliveries, stacks: [{ id, itemId, qty, x, z, barrow?, carrier? }], carried: { itemId, qty } | null, nextId, ledger,
 //     level: "guided" | "hands-on" | "piece"            (the default for new buildings),
 //     progress: { [structId]: { id, name, planId, x, z, r, level, stage, done, lines, members, tally, raised } },
 //     unlocked: [...], tutorial: { card, shed, seen: { [stage]: true }, done }, options: { sandbox, instant, cards, auto, mute }, finished }
 //   progress[..].lines[key]   = { stage, itemId, qty, unit, label, why, count, supply, ordered, used }
 //   progress[..].members[id]  = { stage, kind, parent, line, need, got, built }
+//   progress[..].ext[stage]   = [built, total]: work another system tallies (services: rough-in, trim-out), added to the tally
+//   progress[..].extLines[source] = { sig, lines }: that system's shopping lines, merged into lines (marked `ext`)
 // Build mode owns the shape of a building; the page hands its members and shopping lines to construction.setPlan.
 // Commands return { ok, reason? ... } and change nothing when they fail.
 
 import { ITEMS } from './items.js';
 import * as SUP from './core/supply.js';
 import * as C from './content/construction.js';
+import { VEHICLE_KINDS } from './content/vehicles.js';
 
 const { round6, cents } = SUP;
 const LADDER_KEY = C.LADDER.stage + '|ladder';
@@ -212,6 +215,7 @@ export function stageSatisfied(pr, stage, seen = {}) {
 export function stageOpen(pr, stage) {
   const def = C.STAGE[stage];
   if (!def) return false;
+  if (pr.hold && pr.hold[stage]) return false;      // held by another system (green concrete: construction.setHold)
   const seen = {};
   return def.needs.every((n) => stageSatisfied(pr, n, seen));
 }
@@ -239,6 +243,7 @@ export function blocked(pr, id) {
   if (m.built) return 'already built';
   const def = C.STAGE[m.stage];
   if (!def) return 'not part of the build';
+  if (pr.hold && pr.hold[m.stage]) return pr.hold[m.stage];
   if (!stageOpen(pr, m.stage)) return 'stage not open';
   if (def.parentFirst) for (const o in pr.members) { const q = pr.members[o]; if (!q.built && q.parent === m.parent && def.parentFirst.includes(q.stage)) return 'frame not finished'; }
   if (def.flat && flatCurrent(pr, m.stage) !== m.parent) return 'one frame at a time';
@@ -377,6 +382,7 @@ function ensureCard(ctx, s) {
 function retally(pr) {
   pr.tally = {};
   for (const id in pr.members) { const m = pr.members[id]; const t = pr.tally[m.stage] || (pr.tally[m.stage] = [0, 0]); t[1]++; if (m.built) t[0]++; }
+  for (const st in pr.ext || {}) { const e = pr.ext[st]; if (!e || !(e[1] > 0)) continue; const t = pr.tally[st] || (pr.tally[st] = [0, 0]); t[0] += e[0]; t[1] += e[1]; }
 }
 function refresh(ctx, s, pr) {
   const was = pr.done;
@@ -462,7 +468,7 @@ function ensureLadder(ctx) {
     if (!any && !pr.done && Object.values(pr.lines).some((l) => l.ordered > 0) && (needsHeight(pr) || (pr.lines[LADDER_KEY] && pr.lines[LADDER_KEY].ordered > 0))) any = pr;
   }
   if (!any || isLadderAt(s)) return;
-  const near = s.stacks.find((k) => !k.barrow), at = near ? { x: near.x - 1.6, z: near.z } : dropOf(s, any);
+  const near = s.stacks.find((k) => !k.barrow && !k.carrier), at = near ? { x: near.x - 1.6, z: near.z } : dropOf(s, any);
   SUP.addToStacks(s, C.LADDER.itemId, 1, at.x, at.z, C.DELIVERY.layout);
   const L = s.ledger.ladder || (s.ledger.ladder = { bought: 0, used: 0, spent: 0 });
   L.bought = round6(L.bought + 1);
@@ -534,6 +540,9 @@ function setPlan(ctx, p) {
   if (!s.waste) s.waste = {};
   requote(s, pr);
   if (old) for (const k in old.raised) pr.raised[k] = true;
+  if (old && old.ext) pr.ext = JSON.parse(JSON.stringify(old.ext));               // work another system tallies stays with the building
+  if (old && old.extLines) pr.extLines = JSON.parse(JSON.stringify(old.extLines));
+  if (old && old.hold && Object.keys(old.hold).length) pr.hold = { ...old.hold };   // holds belong to another system (construction.setHold): a plan sent again keeps them
   if (!old) for (const st of C.STAGES) if (st.flat) for (const par of flatParents(pr, st.id)) if (frameReady(pr, st.id, par)) pr.raised[par] = true;
   retally(pr);
   if (!pr.lines[LADDER_KEY] && C.LADDER.with.some((st) => pr.tally[st] && pr.tally[st][1]) && item(C.LADDER.itemId)) {   // work at height is done from a ladder: it comes with the order
@@ -541,6 +550,7 @@ function setPlan(ctx, p) {
     pr.lines[LADDER_KEY] = { stage: C.LADDER.stage, itemId: C.LADDER.itemId, qty: 1, unit: 'each', label: 'Ladder', why: C.LADDER.why, count: 1, supply: false, ordered: o ? o.ordered : 0, used: o ? o.used : 0 };
   }
   for (const key in pr.lines) { const ln = pr.lines[key]; if (ln.supply) { const t = pr.tally[ln.stage]; ln.used = old && old.lines[key] ? Math.min(old.lines[key].used, ln.qty) : 0; if (!old && t && t[1]) ln.used = round6((ln.qty * t[0]) / t[1]); } }
+  if (old && old.extLines) applyExtLines(s, pr, old.lines);
   s.progress[p.structId] = pr;
   if (p.tutorial && s.tutorial.shed === null && !s.tutorial.done) s.tutorial.shed = p.structId;
   const was = old ? old.done : false;
@@ -578,7 +588,7 @@ function rentScaffold(ctx, p) {
   }
   if (!pr) return { ok: false, reason: 'unknown building' };
   if (!pay(ctx, usd)) return { ok: false, reason: 'not enough money', costUsd: usd };
-  const at = s.stacks.find((k) => !k.barrow) || dropOf(s, pr);
+  const at = s.stacks.find((k) => !k.barrow && !k.carrier) || dropOf(s, pr);
   s.scaffold = { until: round6(ctx.state.t + days * 86400), x: round6(at.x + 1.8), z: round6(at.z - 1.6), set: null };
   ctx.emit('construction.scaffold', { rented: true, days });
   return { ok: true, costUsd: usd, until: s.scaffold.until };
@@ -610,7 +620,8 @@ function setUpHorses(s, pr, dx, dz) {
 }
 function land(ctx, s, id) {
   const r = SUP.deliver(s, id, C.DELIVERY.layout);
-  if (r.ok && !s.barrow) s.barrow = { x: round6(r.delivery.x - 2.4), z: round6(r.delivery.z + 1.2), yaw: 0.6, held: false };
+  // the wheelbarrow stands beside the stacks on the side away from the building (the stacks run +x from the drop point), never on its footprint
+  if (r.ok && !s.barrow) { const pb = r.delivery.tag && s.progress[r.delivery.tag.structId], away = pb && Number.isFinite(pb.x) && pb.x < r.delivery.x ? 6.2 : -2.4; s.barrow = { x: round6(r.delivery.x + away), z: round6(r.delivery.z + 1.2), yaw: 0.6, held: false }; }
   if (r.ok && !s.horses && r.delivery.lines.some((l) => C.isStickItem(l.itemId))) { const pr = r.delivery.tag && s.progress[r.delivery.tag.structId]; if (pr) setUpHorses(s, pr, r.delivery.x, r.delivery.z); }
   if (r.ok) ctx.emit('construction.delivered', { deliveryId: id, stacks: r.stacks, x: r.delivery.x, z: r.delivery.z, tag: r.delivery.tag });
   return r;
@@ -637,7 +648,7 @@ function barrowLoad(ctx, p) {
   const s = ctx.s, b = s.barrow;
   if (!b || !b.held) return { ok: false, reason: 'not holding the wheelbarrow' };
   const from = p && p.hands ? null : s.stacks.find((k) => k.id === (p && p.stackId));
-  if (!p.hands && (!from || from.barrow)) return { ok: false, reason: 'no such stack' };
+  if (!p.hands && (!from || from.barrow || from.carrier)) return { ok: false, reason: 'no such stack' };
   const itemId = p.hands ? (s.carried && s.carried.itemId) : from.itemId;
   if (!itemId) return { ok: false, reason: 'nothing to load' };
   if (isSupply(itemId)) return { ok: false, reason: 'stays by the stacks' };
@@ -654,6 +665,61 @@ function barrowLoad(ctx, p) {
   if (load) load.qty = round6(load.qty + n);
   else s.stacks.push({ id: 's' + s.nextId++, itemId, qty: n, x: b.x, z: b.z, barrow: true });
   return { ok: true, itemId, qty: n };
+}
+
+// ---- a trailer's load: stacks flagged `carrier: unitId` that ride on a vehicle (the vehicles system's unit). They stay
+// ordinary stacks, so the ledger needs nothing new and the build draws from a trailer parked by the work as from any pile.
+// Loading moves material from a ground stack onto the bed up to the unit's capacity (its record's cargo.capKg); the page
+// moves the load with the unit (carrierMove) and tips it off as a ground stack (carrierUnload).
+const CARRIER_REACH_M = 6;           // stack to the trailer's axle: the page asks for the bed within 4 m of the pile
+const carrierStacks = (s, id) => s.stacks.filter((k) => k.carrier === id);
+const carrierKg = (s, id) => carrierStacks(s, id).reduce((n, k) => n + k.qty * item(k.itemId).massKgPerUnit, 0);
+function carrierUnit(ctx, id) {
+  const vs = ctx.get('vehicles'), u = vs && vs.units && vs.units[id];
+  if (!u) return null;
+  const k = VEHICLE_KINDS[u.kind];
+  return k && k.cargo ? { u, capKg: k.cargo.capKg } : null;
+}
+function carrierLoad(ctx, p) {
+  const s = ctx.s, id = p && p.carrier, cu = id != null ? carrierUnit(ctx, id) : null;
+  if (!cu) return { ok: false, reason: 'no such trailer' };
+  // from a ground stack, or (hands) what the arms hold, put on the bed
+  const from = p.hands ? (s.carried ? { itemId: s.carried.itemId, qty: s.carried.qty, x: p.x, z: p.z } : null) : s.stacks.find((k) => k.id === (p && p.stackId));
+  if (!from || from.barrow || from.carrier) return { ok: false, reason: p.hands ? 'nothing carried' : 'no such stack' };
+  if (isSupply(from.itemId)) return { ok: false, reason: 'stays by the stacks' };
+  if (!p.hands && Math.hypot(from.x - cu.u.x, from.z - cu.u.z) > CARRIER_REACH_M) return { ok: false, reason: 'too far' };
+  if (p.hands && Number.isFinite(p.x) && Math.hypot(p.x - cu.u.x, p.z - cu.u.z) > CARRIER_REACH_M) return { ok: false, reason: 'too far' };
+  const it = item(from.itemId), capKg = Math.min(cu.capKg, Number.isFinite(p.capKg) && p.capKg > 0 ? p.capKg : Infinity);
+  const room = capKg - carrierKg(s, id);
+  let n = Math.min(from.qty, room / it.massKgPerUnit, p.qty > 0 ? p.qty : Infinity);
+  if (it.unit === 'each') n = Math.floor(n + 1e-9);
+  n = round6(n);
+  if (!(n > 1e-6)) return { ok: false, reason: 'full' };
+  if (p.hands) { s.carried.qty = round6(s.carried.qty - n); if (s.carried.qty <= 1e-6) s.carried = null; }
+  else { from.qty = round6(from.qty - n); if (from.qty <= 1e-6) s.stacks = s.stacks.filter((k) => k !== from); }
+  const load = s.stacks.find((k) => k.carrier === id && k.itemId === from.itemId);
+  if (load) load.qty = round6(load.qty + n);
+  else s.stacks.push({ id: 's' + s.nextId++, itemId: from.itemId, qty: n, x: round6(cu.u.x), z: round6(cu.u.z), carrier: id });
+  return { ok: true, itemId: from.itemId, qty: n, kg: round6(carrierKg(s, id)), capKg };
+}
+function carrierMove(ctx, p) {
+  if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.z)) return { ok: false, reason: 'bad place' };
+  const list = carrierStacks(ctx.s, p.carrier);
+  for (const k of list) { k.x = round6(p.x); k.z = round6(p.z); }
+  return { ok: true, n: list.length };
+}
+// the load slides off the tipped bed (or is left where a trailer was taken away): ordinary stacks on the ground there
+function carrierUnload(ctx, p) {
+  const s = ctx.s, list = carrierStacks(s, p && p.carrier);
+  if (!list.length) return { ok: false, reason: 'empty' };
+  if (!Number.isFinite(p.x) || !Number.isFinite(p.z)) return { ok: false, reason: 'bad place' };
+  const cu = carrierUnit(ctx, p.carrier);
+  if (cu && Math.hypot(p.x - cu.u.x, p.z - cu.u.z) > CARRIER_REACH_M) return { ok: false, reason: 'too far' };
+  const out = [];
+  s.stacks = s.stacks.filter((k) => k.carrier !== p.carrier);
+  for (const k of list) { const st = SUP.addToStacks(s, k.itemId, k.qty, p.x, p.z, { ...C.DELIVERY.layout, mergeR: 1.6 }); if (st) out.push(st.id); }
+  ctx.emit('construction.unloaded', { carrier: p.carrier, stacks: out, x: p.x, z: p.z });
+  return { ok: true, stacks: out };
 }
 
 // cut the next piece (or the one named) at the sawhorses: its stock comes from the arms if they hold that lumber, else the
@@ -733,7 +799,7 @@ function install(ctx, p) {
   for (const id of p.memberIds || []) {
     const m = pr.members[id];
     const why = blocked(pr, id);
-    if (why) { out.refused.push({ id, reason: why, missing: why === 'support missing' ? supportMissing(pr, id) : undefined }); break; }
+    if (why) { out.refused.push({ id, reason: why, missing: why === 'support missing' ? supportMissing(pr, id) : undefined, held: m && pr.hold && pr.hold[m.stage] ? 1 : undefined }); break; }
     const ln = m.line ? pr.lines[m.line] : null;
     if (m.kind === 'joint') {      // a drywall seam: one pass per call (tape and first coat, fill, finish, then sanding)
       const r = mudPass(ctx, s, pr, m, ln, fromStacks);
@@ -861,10 +927,12 @@ function dismantle(ctx, p) {
   const at = dropOf(s, pr);
   const standsOn = (stage) => C.STAGES.filter((q) => q.needs.includes(stage) || (q.parentFirst || []).includes(stage)).map((q) => q.id);
   const anyBuilt = (stage, seen = {}) => { if (seen[stage]) return false; seen[stage] = 1; const t = pr.tally[stage]; return (t && t[0] > 0) || standsOn(stage).some((q) => anyBuilt(q, seen)); };
+  // local: only what stands on this wall (or floor, or roof plane) counts: opening one wall to get at what is inside it
+  const builtOn = (stage, parent, seen = {}) => { if (seen[stage]) return false; seen[stage] = 1; for (const o in pr.members) { const q = pr.members[o]; if (q.built && q.stage === stage && q.parent === parent) return true; } return standsOn(stage).some((q) => builtOn(q, parent, seen)); };
   for (const id of p.memberIds || []) {
     const m = pr.members[id];
     if (!m || !(m.built || m.got > 0)) { out.refused.push({ id, reason: 'not built' }); continue; }
-    if (standsOn(m.stage).some((q) => anyBuilt(q))) { out.refused.push({ id, reason: 'something stands on it' }); continue; }
+    if (p.local ? standsOn(m.stage).some((q) => builtOn(q, m.parent)) : standsOn(m.stage).some((q) => anyBuilt(q))) { out.refused.push({ id, reason: 'something stands on it' }); continue; }
     const ln = m.line ? pr.lines[m.line] : null;
     if (ln && ln.stick && m.got > 0) {       // sawn pieces come off as offcuts of their own length
       for (const q of piecesOf(pr, id)) keepOrScrap(ln, q.len);
@@ -873,13 +941,13 @@ function dismantle(ctx, p) {
       if (!s.offcuts) s.offcuts = {};
       (s.offcuts[ln.itemId] || (s.offcuts[ln.itemId] = [])).push(m.area);
       m.cut = null;
-    } else if (ln && m.got > 0) {
+    } else if (ln && m.got > 0 && m.kind !== 'joint') {      // (taped seams: the compound is spent, nothing comes back)
       SUP.giveBack(s, ln.itemId, m.got, at.x, at.z, C.DELIVERY.layout);
       ln.used = round6(ln.used - m.got);
       out.returned[ln.itemId] = round6((out.returned[ln.itemId] || 0) + m.got);
     }
     if (m.built) { m.built = 0; pr.tally[m.stage][0]--; supplies(s, pr, m.stage, pr.tally[m.stage][0], false, ctx.get('stock')); }
-    m.got = 0;
+    m.got = 0; delete m.coat; delete m.dryAt;
     if (C.STAGE[m.stage].flat && m.parent) delete pr.raised[m.parent];
     out.removed.push(id);
   }
@@ -890,6 +958,74 @@ function dismantle(ctx, p) {
   refresh(ctx, s, pr);
   ctx.emit('construction.dismantled', { structId: pr.id, ids: out.removed });
   return out;
+}
+
+// ---- work another system tallies and buys through the Build panel (services: rough-in, trim-out; docs/design services S8).
+// Its lines are ordinary lines (ordered, delivered as stacks, carried), marked `ext`; it uses them up through construction.use.
+function setExternal(ctx, p) {
+  const s = ctx.s, pr = s.progress[p && p.structId];
+  if (!pr) return { ok: false, reason: 'unknown building' };
+  if (!C.STAGE[p.stage]) return { ok: false, reason: 'unknown stage' };
+  const total = Math.max(0, Math.round(+p.total || 0)), built = Math.max(0, Math.min(total, Math.round(+p.built || 0)));
+  if (!pr.ext) pr.ext = {};
+  const was = pr.ext[p.stage] || [0, 0];
+  if (was[0] === built && was[1] === total) return { ok: true, changed: false };
+  if (total > 0) pr.ext[p.stage] = [built, total]; else delete pr.ext[p.stage];
+  const before = stageComplete(pr, p.stage);
+  retally(pr);
+  refresh(ctx, s, pr);
+  ctx.emit('construction.external', { structId: pr.id, stage: p.stage, built, total, done: !before && stageComplete(pr, p.stage) });
+  return { ok: true, changed: true, stage: pr.stage, done: pr.done };
+}
+// the lines of every source, merged into pr.lines; what was ordered and used of a line is kept (prev: where to read it),
+// and a line no longer wanted stays while any of it was ordered or used (at what was used, so nothing more is ordered)
+function applyExtLines(s, pr, prev) {
+  const keep = {};
+  for (const key in prev) if (prev[key].ext) keep[key] = { ordered: prev[key].ordered, used: prev[key].used, stage: prev[key].stage, itemId: prev[key].itemId, label: prev[key].label, why: prev[key].why, ext: prev[key].ext };
+  for (const key of Object.keys(pr.lines)) if (pr.lines[key].ext) delete pr.lines[key];
+  const want = {};
+  for (const src in pr.extLines || {}) for (const l of pr.extLines[src].lines) want[l.key] = { ...l, ext: src };
+  for (const key of new Set([...Object.keys(keep), ...Object.keys(want)])) {
+    const o = keep[key], w = want[key] || { ...o, qty: 0, count: 0 }, it = item(w.itemId);
+    const used = o ? o.used : 0, ordered = o ? o.ordered : 0, qty = round6(Math.max(+w.qty || 0, used));
+    if (!it || !C.STAGE[w.stage] || (qty <= 1e-9 && ordered <= 1e-9)) continue;
+    pr.lines[key] = { stage: w.stage, itemId: w.itemId, qty, unit: it.unit, label: w.label || it.name, why: w.why || '', count: w.count || 0, supply: isSupply(w.itemId), ordered, used, ext: w.ext };
+  }
+}
+function setExtLines(ctx, p) {
+  const s = ctx.s, pr = s.progress[p && p.structId];
+  if (!pr) return { ok: false, reason: 'unknown building' };
+  if (!p.source || !Array.isArray(p.lines)) return { ok: false, reason: 'bad lines' };
+  const lines = [];
+  for (const l of p.lines) {
+    if (!l || !C.STAGE[l.stage] || !item(l.itemId) || !(+l.qty >= 0)) return { ok: false, reason: 'bad line', itemId: l && l.itemId };
+    lines.push({ key: String(l.key || l.stage + '|' + p.source + ':' + l.itemId), stage: l.stage, itemId: l.itemId, qty: round6(+l.qty), label: l.label || '', why: l.why || '', count: Math.max(0, Math.round(+l.count || 0)) });
+  }
+  if (!pr.extLines) pr.extLines = {};
+  pr.extLines[p.source] = { sig: p.sig === undefined ? null : p.sig, lines };
+  applyExtLines(s, pr, pr.lines);
+  ctx.emit('construction.extLines', { structId: pr.id, source: p.source });
+  return { ok: true, lines: lines.length };
+}
+// use up some of an outside line: from the arms, or from the stacks (small supplies: the stacks, then the inventory).
+// check: only say whether there is enough. Sandbox, or a building not under construction: free, nothing is drawn.
+function useExt(ctx, p) {
+  const s = ctx.s, pr = s.progress[p && p.structId];
+  if (s.options.sandbox || !pr) return { ok: true, used: 0, free: true };
+  const qty = round6(+(p && p.qty));
+  if (!(qty > 0)) return { ok: false, reason: 'nothing to use' };
+  const key = p.key && pr.lines[p.key] ? p.key : Object.keys(pr.lines).find((k) => pr.lines[k].ext && pr.lines[k].itemId === p.itemId);
+  const ln = key ? pr.lines[key] : null;
+  if (!ln) return { ok: false, reason: 'not in the plan', itemId: p.itemId };
+  const stock = ctx.get('stock'), fromArms = p.from === 'carried';
+  const have = fromArms ? (s.carried && s.carried.itemId === ln.itemId ? s.carried.qty : 0) : ln.supply ? haveSupply(s, stock, ln.itemId) : SUP.stackQty(s, ln.itemId);
+  if (have + 1e-6 < qty) return { ok: false, reason: 'no material', itemId: ln.itemId, have: round6(have), key };
+  if (p.check) return { ok: true, used: 0, have: round6(have), key, itemId: ln.itemId };
+  const used = round6(fromArms ? SUP.useCarried(s, ln.itemId, qty) : ln.supply ? drawSupply(s, stock, ln.itemId, qty, pr.x, pr.z) : SUP.useFromStacks(s, ln.itemId, qty, pr.x, pr.z, { partial: true }));
+  ln.used = round6(ln.used + used);
+  if (ln.used > ln.qty) ln.qty = ln.used;              // more went in than planned: the line is what went in
+  ctx.emit('construction.used', { structId: pr.id, key, itemId: ln.itemId, qty: used });
+  return { ok: true, used, key, itemId: ln.itemId };
 }
 
 export const constructionSystem = () => ({
@@ -944,6 +1080,9 @@ export const constructionSystem = () => ({
       return { ok: true, anchor: c.s.anchors[p.structId] };
     },
     'construction.barrowGrab': barrowGrab,
+    'construction.carrierLoad': carrierLoad,
+    'construction.carrierMove': carrierMove,
+    'construction.carrierUnload': carrierUnload,
     'construction.barrowLoad': barrowLoad,
     'construction.barrowMove': (c, p) => { if (!c.s.barrow || !c.s.barrow.held) return { ok: false, reason: 'not held' }; barrowPlace(c.s, p.x, p.z, p.yaw); return { ok: true }; },
     'construction.barrowSet': (c, p) => { if (!c.s.barrow || !c.s.barrow.held) return { ok: false, reason: 'not held' }; barrowPlace(c.s, p && p.x, p && p.z, p && p.yaw); c.s.barrow.held = false; return { ok: true }; },
@@ -955,6 +1094,25 @@ export const constructionSystem = () => ({
       for (const id of p.memberIds || []) { const m = pr.members[id]; if (!m || m.built || m.kind === 'site') continue; m.got = m.need; m.built = 1; m.builtAt = round6(ctx.state.t); pr.tally[m.stage][0]++; done.push(id); }
       if (done.length) refresh(c, c.s, pr);
       return { ok: done.length > 0, settled: done };
+    },
+    // another system holds stages of a building (green concrete holds framing): { structId, stage | stages, reason | null }
+    'construction.setHold': (c, p) => {
+      const pr = c.s.progress[p && p.structId], stages = p && (Array.isArray(p.stages) ? p.stages : [p.stage]);
+      if (!pr) return { ok: false, reason: 'unknown building' };
+      if (!stages.length || !stages.every((st) => C.STAGE[st])) return { ok: false, reason: 'unknown stage' };
+      if (!pr.hold) pr.hold = {};
+      for (const st of stages) if (p.reason) pr.hold[st] = String(p.reason); else delete pr.hold[st];
+      refresh(c, c.s, pr);
+      c.emit('construction.hold', { structId: pr.id, stages, reason: p.reason || null });
+      return { ok: true };
+    },
+    // another system uses up the building's material from its stacks (nearest (x, z) first), then from the inventory
+    // (the gravel base, bags of concrete mix): { itemId, qty, x?, z?, structId? } -> { ok, qty: what was drawn }
+    'construction.draw': (c, p) => {
+      if (!p || !item(p.itemId) || !(p.qty > 0)) return { ok: false, reason: 'nothing to draw' };
+      const pr = p.structId !== undefined ? c.s.progress[p.structId] : null, x = Number.isFinite(p.x) ? p.x : pr ? pr.x : 0, z = Number.isFinite(p.z) ? p.z : pr ? pr.z : 0;
+      const got = round6(drawSupply(c.s, p.stacksOnly ? null : c.get('stock'), p.itemId, round6(p.qty), x, z));
+      return { ok: got > 1e-9, qty: got, reason: got > 1e-9 ? undefined : 'none on site' };
     },
     'construction.dismantle': dismantle,
     'construction.setLevel': (c, p) => { if (!LEVELS.includes(p.level)) return { ok: false, reason: 'unknown level' }; const pr = c.s.progress[p.structId]; if (pr) pr.level = p.level; else c.s.level = p.level; return { ok: true }; },
@@ -968,6 +1126,10 @@ export const constructionSystem = () => ({
       return { ok: true, feel: C.feelOf(c.s) };
     },
     'construction.seeCard': (c, p) => { c.s.tutorial.seen[p.stage] = true; return { ok: true }; },
+    // work another system puts in (services: cable and pipe): its tally of a stage, its shopping lines, and what it uses up
+    'construction.setExternal': setExternal,
+    'construction.setExtLines': setExtLines,
+    'construction.use': useExt,
   },
-  api: { content: C, wantItem, nextCut, liningCovered, feelOf: (s) => C.feelOf(s), knows: (s, kind) => !!(s.learn && s.learn.known[C.learnGroup(kind)]), sheetSource, needsStock, stockNeed, stickSource, stickImbalance, cutList, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance },
+  api: { content: C, wantItem, nextCut, liningCovered, feelOf: (s) => C.feelOf(s), knows: (s, kind) => !!(s.learn && s.learn.known[C.learnGroup(kind)]), sheetSource, needsStock, stockNeed, stickSource, stickImbalance, cutList, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance, carrierKg },
 });

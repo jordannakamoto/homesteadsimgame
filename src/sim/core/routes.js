@@ -13,7 +13,7 @@
 //   State (plain JSON, saved): { v, version, next, frames, nodes, runs }
 //     frames { [frameId]: { x, y, z, yaw } }                       // null frame = the world
 //     nodes  { [id]: { id, frame, at: [x, y, z], kind, ref?, host?, set?, state: 'planned' | 'set' | 'trimmed' } }
-//     runs   { [id]: { id, cls, spec, frame, a, b, path: [[x, y, z]], lengthM, bores: [{ at, parent, done }],
+//     runs   { [id]: { id, cls, spec, frame, a, b, path: [[x, y, z]], lengthM, bores: [{ at, parent, done, plate? }],
 //                      hosts: [ids], pulled, joined: { a, b }, segs?, segsDone?, state: 'planned' | 'roughed' | 'done',
 //                      group?, props?, legacy?, stray? } }
 //     Positions are frame-local metres. A run's length is worked out here from its path (or the straight line
@@ -148,7 +148,7 @@ export function createRoutesSystem({ name = 'routes', classes, guard } = {}) {
   };
   const restate = (s, run) => { run.state = runState(run, classes[run.cls], s.nodes).state; };
   const pts = (path) => (Array.isArray(path) ? path.map(vec) : []);
-  const boresOf = (b) => (Array.isArray(b) ? b.map((x) => ({ at: vec(x.at) || [0, 0, 0], parent: x.parent ?? null, done: x.done ? 1 : 0 })) : []);
+  const boresOf = (b) => (Array.isArray(b) ? b.map((x) => ({ at: vec(x.at) || [0, 0, 0], parent: x.parent ?? null, done: x.done ? 1 : 0, ...(x.plate ? { plate: 1 } : {}) })) : []);
   const strayOn = (s) => {
     for (const x of [...Object.values(s.nodes), ...Object.values(s.runs)]) {
       if (x.frame != null && !s.frames[x.frame]) x.stray = true; else delete x.stray;

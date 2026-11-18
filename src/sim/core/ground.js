@@ -122,6 +122,31 @@ export function absorb(G, fine, R) {
   if (any) fine.rev++;
   return { m3Net: (mm / 1000) * fine.step * fine.step, tilesDropped: dropped };
 }
+// absorb() for the fine points whose nearest point on a coarser lattice (spacing `cs`) is in `cells` ('i,j' keys):
+// visits only fine tiles that exist inside the box. Returns the net m3 taken.
+function absorbCells(fine, cells, cs, box) {
+  const fs = fine.step, T = fine.T, span = fs * T;
+  let mm = 0, any = false;
+  for (const k of keysIn(fine, box[0], box[1], box[2], box[3])) {
+    const t = fine.tiles[k];
+    if (!t) continue;
+    const [tx, tz] = k.split(',').map(Number);
+    let hit = false;
+    for (let n = 0; n < T * T; n++) {
+      if (!t.h[n] && !t.s[n] && !t.l[n] && !t.f[n] && !t.t[n]) continue;
+      const x = tx * span + (n % T) * fs, z = tz * span + ((n / T) | 0) * fs;
+      if (!cells.has(Math.round(x / cs) + ',' + Math.round(z / cs))) continue;
+      mm += t.h[n];
+      t.h[n] = t.s[n] = t.l[n] = t.f[n] = t.t[n] = 0;
+      hit = true;
+    }
+    if (!hit) continue;
+    any = true;
+    if (tileEmpty(t)) delete fine.tiles[k];
+  }
+  if (any) fine.rev++;
+  return (mm / 1000) * fs * fs;
+}
 // Spread m3 (either sign) over the macro points of a region in whole millimetres; returns what was spread.
 function spread(g, R, m3, t) {
   const pts = [...pointsIn(g, R)];
@@ -192,14 +217,16 @@ export function tamp(G, fine, x, z, r, passes = 1, bits = [0, 0], { on } = {}) {
 
 // ------------------------------------------------------------------------------------------------ pads and levels
 // Level a pad: macro points within `core` of any sample go to targetY; out to `rim` they blend back to the ground
-// with a smoothstep (the maths build mode's site cut has always used). `pit`: only ever lowers. Fine ground under the
-// core is absorbed (counted as cut or fill). Returns { cutM3, fillM3, keys }.
+// with a smoothstep (the maths build mode's site cut has always used). `pit`: only ever lowers. Fine ground on the pad
+// (every macro cell that ends at least half way to targetY, so the middle of a big pad as well as the ring round its
+// samples) is absorbed: a hand-dug hole there is filled, a heap is taken off (counted as fill or cut). Returns
+// { cutM3, fillM3, keys }.
 export function gradePad(G, fine, base, samples, targetY, { core, rim, pit = false, absorb: abs = true, t = 0 } = {}) {
   const g = G.macro, s = g.step, A = s * s;
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
   for (const [x, z] of samples) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
   let cutM3 = 0, fillM3 = 0;
-  const keys = new Set(), graded = EW.code(g, GRADED);
+  const keys = new Set(), graded = EW.code(g, GRADED), pad = new Set();
   for (let j = Math.floor((z0 - rim) / s); j <= Math.ceil((z1 + rim) / s); j++) for (let i = Math.floor((x0 - rim) / s); i <= Math.ceil((x1 + rim) / s); i++) {
     const u = i * s, v = j * s;
     let dist = Infinity;
@@ -209,7 +236,9 @@ export function gradePad(G, fine, base, samples, targetY, { core, rim, pit = fal
     let k = clamp((dist - core) / (rim - core), 0, 1);
     k = k * k * (3 - 2 * k);
     const want = targetY + (cur - targetY) * k;
-    if (!(Math.abs(want - cur) > 0.01) || (pit && want > cur)) continue;
+    if (pit && want > cur + 0.01) continue;
+    if (k <= 0.5) pad.add(i + ',' + j);
+    if (!(Math.abs(want - cur) > 0.01)) continue;
     const [tl, n, key] = at(g, i, j, true), mm = Math.round(clamp(want - b, -10, 10) * 1000), d = mm - tl.h[n];
     if (!d) continue;
     tl.h[n] = mm; tl.s[n] = graded; tl.t[n] = t; tl.l[n] = 0; tl.f[n] &= ~EW.LOOSE_BIT;
@@ -217,8 +246,8 @@ export function gradePad(G, fine, base, samples, targetY, { core, rim, pit = fal
     keys.add(key);
   }
   if (keys.size) g.rev++;
-  if (abs && fine) {
-    const vf = absorb(G, fine, { near: samples, r: core }).m3Net;
+  if (abs && fine && pad.size) {
+    const vf = absorbCells(fine, pad, s, [x0 - rim, z0 - rim, x1 + rim, z1 + rim]);
     if (vf > 0) cutM3 += vf; else fillM3 -= vf;
   }
   G.rev++;

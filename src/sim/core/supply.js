@@ -4,7 +4,8 @@
 // State (plain data, lives inside a system's state):
 //   { dropPoint: { x, z } | null, orders: [{ id, t, lines: [{ itemId, qty, costUsd }], costUsd, tag }],
 //     deliveries: [{ id, orderId, dueT, lines: [{ itemId, qty }], x, z, tag }],
-//     stacks: [{ id, itemId, qty, x, z }], carried: { itemId, qty } | null, nextId, ledger: { [itemId]: { bought, used, spent } } }
+//     stacks: [{ id, itemId, qty, x, z, carrier? }], carried: { itemId, qty } | null, nextId, ledger: { [itemId]: { bought, used, spent } } }
+// A stack with `carrier: unitId` rides on a vehicle (its x, z follow it); deliveries never merge into it.
 // Every operation returns { ok, reason? ... } and changes nothing when it fails.
 // Conservation, per item: ledger.bought = in deliveries + in stacks + carried + ledger.used + ledger.spent.
 
@@ -51,7 +52,7 @@ export const dueDeliveries = (s, t) => s.deliveries.filter((d) => d.dueT <= t);
 // Add to the stack of the same item near (x, z), or start a new one in the first free slot of a grid there.
 export function addToStacks(s, itemId, qty, x, z, { cols = 4, dx = 1.5, dz = 3.4, mergeR = 9, slot = null } = {}) {
   if (!(qty > 0)) return null;
-  let st = s.stacks.find((k) => !k.barrow && k.itemId === itemId && Math.hypot(k.x - x, k.z - z) <= mergeR);
+  let st = s.stacks.find((k) => !k.barrow && !k.carrier && k.itemId === itemId && Math.hypot(k.x - x, k.z - z) <= mergeR);
   if (st) { st.qty = round6(st.qty + qty); return st; }
   let px = x, pz = z;
   for (let i = 0; i < 400; i++) {

@@ -32,7 +32,9 @@
   const RW = window.__roofwalk && window.__framing ? window.__roofwalk.create(G) : null;   // standing on a decked roof, clipped in at the ridge
   const FR = window.__framing, RWC = C.ROOFWALK || { slideK: 0.5, slideMps: 0.55, ropeM: 14, anchorReachM: 1.3, edgeM: 0.22, says: '' };
   const REACH = C.WORK.reachM;
-  const OFF = { build: 1, garden: 1, hands: 1 };       // other tools own the pointer while they are out
+  const OFF = { build: 1, garden: 1, hands: 1, site: 1 };       // other tools own the pointer while they are out
+  // a poured foundation built by hand (src/foundation-view.js) owns its building's site and foundation stages
+  const handBuilt = (id, pm) => (pm.stage === 'site' || pm.stage === 'foundation') && !!window.__foundation && window.__foundation.owns(id);
   const V = {
     sim: null, rev: 1, bv: -1, sel: null, structs: new Map(), geom: new Map(), plans: new Map(), planVer: new Map(), fresh: new Map(), flushing: [],
     working: null, auto: null, raise: null, ctx: null, fWas: false, idleT: 0, placing: null, pendingPlan: null, book: false, expand: null, quotes: {},
@@ -93,13 +95,14 @@
   // per building, per change: what can go in now (in order), which frame waits to be raised, and the panel's view of it
   function plan(id) {
     let p = V.plans.get(id);
-    if (p && p.rev === V.rev) return p;
+    const fo = !!window.__foundation && window.__foundation.owns(id);
+    if (p && p.rev === V.rev && p.fo === fo) return p;
     const pr = S().progress[id], g = geom(id);
     if (!pr || !g) return null;
-    const inst = api.installable(pr).filter((m) => g.byId.has(m) || pr.members[m].kind === 'site').sort((a, b) => (g.rank.get(a) || 0) - (g.rank.get(b) || 0));
+    const inst = api.installable(pr).filter((m) => (g.byId.has(m) || pr.members[m].kind === 'site') && !handBuilt(id, pr.members[m])).sort((a, b) => (g.rank.get(a) || 0) - (g.rank.get(b) || 0));
     let raise = null;
     for (const st of C.STAGES) if (st.flat && api.stageOpen(pr, st.id)) { const cur = api.flatCurrent(pr, st.id); if (cur && api.frameReady(pr, st.id, cur)) raise = cur; }
-    p = { rev: V.rev, inst, raise, view: api.buildingView(S(), id) };
+    p = { rev: V.rev, fo, inst, raise, view: api.buildingView(S(), id) };
     V.plans.set(id, p);
     return p;
   }
@@ -114,6 +117,8 @@
   // the item this member takes from the arms: its line's, the cut piece once it is cut at the sawhorses, or null until then
   const wantOf = (pr, id) => api.wantItem(pr, id);
   const holds = (c, pr, id) => !!c && c.itemId === wantOf(pr, id);
+  // held, and enough of it: a piece sawn from a whole stick needs that stick's length in the arms, as the simulation asks
+  const enough = (c, pr, id) => { if (!holds(c, pr, id)) return false; const ln = lineOf(pr, id); return !ln || !ln.stick || c.qty + 1e-6 >= api.stockNeed(S(), pr, id); };
   const usable = (pr, pl, c) => pl.inst.filter((id) => { const ln = lineOf(pr, id); return !ln || pr.members[id].need - pr.members[id].got < 1e-6 || pr.members[id].prep || holds(c, pr, id) || (!pr.members[id].site && !api.needsStock(S(), pr, id)); });
 
   // ------------------------------------------------------------------ keeping build mode and the simulation in step
@@ -129,6 +134,7 @@
       if (!type.startsWith('construction.')) return;
       V.rev++;
       if (type === 'construction.delivered') { say('Your delivery has arrived.', 'good'); note('Delivery', 'Your materials are at the delivery spot.'); }
+      if (type === 'construction.dismantled' && data && S().progress[data.structId]) reconcile(data.structId);   // a wall opened from Hands (services)
     });
   }
   function syncPlans() {
@@ -396,11 +402,11 @@
   function drawStacks() {
     const s = S();
     let sig = '';
-    for (const k of s.stacks) if (!k.barrow) sig += k.id + ':' + describe(k.itemId, k.qty).n + ',';
+    for (const k of s.stacks) if (!k.barrow && !k.carrier) sig += k.id + ':' + describe(k.itemId, k.qty).n + ',';
     sig += V.terrainV || 0;
     if (sig !== V.stackSig) {
       V.stackSig = sig;
-      carry.setStacks(s.stacks.filter((k) => !k.barrow).map((k) => { const d = describe(k.itemId, k.qty); if (d.scaleH) d.h *= d.scaleH; return { id: k.id, x: k.x, z: k.z, itemId: k.itemId, ...d }; }), (d) => {
+      carry.setStacks(s.stacks.filter((k) => !k.barrow && !k.carrier).map((k) => { const d = describe(k.itemId, k.qty); if (d.scaleH) d.h *= d.scaleH; return { id: k.id, x: k.x, z: k.z, itemId: k.itemId, ...d }; }), (d) => {
         if (performance.now() - V.lastLand > 140) { sounds.play('thud'); V.lastLand = performance.now(); G.cam.shake = Math.min(G.cam.shake + 0.03, 0.3); }
         G.burst(d.x, G.heightAt(d.x, d.z) + 0.1, d.z, 5, 0xb9a88a, 1.4, 0.8, 0.09, 0.5);
       });
@@ -809,7 +815,7 @@
         if (score < bs) { bs = score; best = { mid, act: sand ? 'sand' : 'mud' }; }
         continue;
       }
-      const wi = !set0(pm, ln) && wantOf(pr, mid), set = set0(pm, ln), act = pm.kind === 'site' ? 'dig' : set ? 'nail' : pm.site && !pm.prep ? 'tocut' : pm.prep || holds(c, pr, mid) || (!pm.site && !api.needsStock(S(), pr, mid)) || (wi && stackWithin(wi, takeM())) ? 'set' : 'want';
+      const wi = !set0(pm, ln) && wantOf(pr, mid), set = set0(pm, ln), act = pm.kind === 'site' ? 'dig' : set ? 'nail' : pm.site && !pm.prep ? 'tocut' : pm.prep || enough(c, pr, mid) || (!pm.site && !api.needsStock(S(), pr, mid)) || (wi && stackWithin(wi, takeM())) ? 'set' : 'want';
       if (act === 'tocut') { if (!tocut) tocut = mid; continue; }
       let score;
       if (!m) { if (Math.hypot(P.x - st.x, P.z - st.z) > g.reach + 0.5) continue; score = 0; }
@@ -831,7 +837,7 @@
     }
     const sk = V.stick;
     if (sk && sk.id === pr.id) { const pm = pr.members[sk.mid]; if (pm && !pm.built && pm.need > 0 && pm.got >= pm.need - 1e-6 && q.includes(sk.mid)) best = { mid: sk.mid, act: 'nail' }; else V.stick = null; }
-    if (best) return { kind: 'hands', id: pr.id, act: best.act, mid: best.mid, q };
+    if (best) return { kind: 'hands', id: pr.id, act: best.act, mid: best.mid, q, off: bs };   // off: how far the pointer is from it (pixels, or cm without a pointer)
     if (!want && V.wetNext) { const m2 = Math.ceil((V.wetNext - G.sim.state.t) / 60); V.wetNext = 0; return { kind: 'hint', text: 'The mud is drying: the next coat in ' + (m2 >= 60 ? Math.floor(m2 / 60) + ' h ' + (m2 % 60) + ' min' : m2 + ' min'), id: pr.id }; }
     V.wetNext = 0;
     if (want) return { kind: 'hint', text: 'Needs ' + low(plain(lineOf(pr, want).label)), id: pr.id };
@@ -1168,7 +1174,7 @@
   function leftInStage(pr) {
     const g = geom(pr.id), pl = plan(pr.id);
     if (!g || !pl || !pl.view.next) return null;
-    const ids = Object.keys(pr.members).filter((k) => { const pm = pr.members[k]; return pm.stage === pl.view.next && !pm.built && pm.kind !== 'site' && g.byId.has(k); });
+    const ids = Object.keys(pr.members).filter((k) => { const pm = pr.members[k]; return pm.stage === pl.view.next && !pm.built && pm.kind !== 'site' && g.byId.has(k) && !handBuilt(pr.id, pm); });
     if (!ids.length || ids.length > 5) return null;
     const [ylo, yhi] = yRange(g), P = G.player, c = wB.set(g.cx, 0, g.cz).applyMatrix4(g.matrix), cx = c.x, cz = c.z, list = [], seen = [];
     let high = false;
@@ -1305,7 +1311,7 @@
   function cutCtx() {
     const P = G.player, s = S(), h = s.horses, c = s.carried;
     if (!CS || !h || V.horsesHeld || (s.barrow && s.barrow.held)) return null;
-    if (Math.hypot(h.x - P.x, h.z - P.z) > 2.6 || Math.hypot(h.x - reach.x, h.z - reach.z) > 1.3) return null;
+    if (Math.hypot(h.x - P.x, h.z - P.z) > 2.6 || Math.hypot(h.x - reach.x, h.z - reach.z) > 1.3 || onWork()) return null;
     let pr = null, mid = null;
     for (const q of inProgress()) { const m = api.nextCut(q); if (m) { pr = q; mid = m; break; } }
     if (!mid) return null;
@@ -1337,14 +1343,18 @@
     const strong = ladderCtx(true);
     if (strong) return strong;
     if (V.horsesHeld) return { kind: 'hset' };
+    // a wall frame ready to tilt up comes before the sawhorses standing by the building (cutting or carrying them)
+    if (!(c && c.itemId === LAD.itemId) && !(s.barrow && s.barrow.held)) { const pr = nearBuilding(P.x, P.z), pl = pr && plan(pr.id); if (pl && pl.raise) return { kind: 'raise', id: pr.id, parent: pl.raise }; }
     { const cx = cutCtx(); if (cx) return cx; }
-    if (CS && s.horses && !c && !(s.barrow && s.barrow.held) && Math.hypot(s.horses.x - P.x, s.horses.z - P.z) < 2.4 && Math.hypot(s.horses.x - reach.x, s.horses.z - reach.z) < 1.1) return { kind: 'hgrab' };
+    if (CS && s.horses && !c && !(s.barrow && s.barrow.held) && Math.hypot(s.horses.x - P.x, s.horses.z - P.z) < 2.4 && Math.hypot(s.horses.x - reach.x, s.horses.z - reach.z) < 1.1 && !onWork()) return { kind: 'hgrab' };
     {
       const b = s.barrow;
       if (b && b.held) { const st = carry.nearest(reach.x, reach.z, 1.2, pickable) || carry.nearest(P.x, P.z, 2.0, pickable); return st ? { kind: 'bload', stack: st } : { kind: 'bdown' }; }
-      const lk = s.stacks.find((q) => q.barrow && q.qty > 1e-6); if (b && (!c || (lk && lk.itemId === c.itemId)) && Math.hypot(b.x - P.x, b.z - P.z) < C.BARROW.reachM && Math.hypot(b.x - reach.x, b.z - reach.z) < 2.2) return lk ? { kind: 'bgrab', load: lk.id } : { kind: 'bgrab' };
+      // a pile nearer the pointer than the barrow is what is meant: the barrow's handles come only when it is the nearest thing
+      const pk = b ? carry.nearest(reach.x, reach.z, 1.0, pickable) : null, bd = b ? Math.hypot(b.x - reach.x, b.z - reach.z) : 0;
+      const lk = s.stacks.find((q) => q.barrow && q.qty > 1e-6); if (b && (!c || (lk && lk.itemId === c.itemId)) && Math.hypot(b.x - P.x, b.z - P.z) < C.BARROW.reachM && bd < 2.2 && !(pk && !pk.barrow && Math.hypot(pk.x - reach.x, pk.z - reach.z) < bd)) return lk ? { kind: 'bgrab', load: lk.id } : { kind: 'bgrab' };
     }
-    const pr = nearBuilding(P.x, P.z), stack = carry.nearest(reach.x, reach.z, 1.0, pickable) || (V.wantItem && carry.nearest(P.x, P.z, 2.1, wantedStack)) || carry.nearest(P.x, P.z, 2.1, pickable) || carry.nearest(P.x, P.z, 1.3);
+    const pr = nearBuilding(P.x, P.z), stack = carry.nearest(reach.x, reach.z, 1.0, pickable) || (V.wantItem && carry.nearest(P.x, P.z, 2.1, wantedStack)) || carry.nearest(P.x, P.z, 2.1, pickable) || carry.nearest(P.x, P.z, 1.3) || bedStack(c);
     if (c && c.itemId === LAD.itemId && !s.ladder) {
       if (pr) { const spot = ladderSpot(pr); if (spot) return { kind: 'lean', id: pr.id, spot }; return { kind: 'hint', text: 'Point at a wall: the ladder leans there', id: pr.id, drop: true }; }
     }
@@ -1352,6 +1362,7 @@
       const pl = plan(pr.id);
       if (pl) {
         if (pl.raise) return { kind: 'raise', id: pr.id, parent: pl.raise };
+        if (!pl.inst.length && pl.view.next && C.STAGE[pl.view.next].by && !c && !stack) return { kind: 'hint', text: C.STAGE[pl.view.next].hint || C.STAGE[pl.view.next].name, id: pr.id };
         const mine = usable(pr, pl, c);
         if (pr.level === 'guided' || s.options.auto) { if (pl.inst.length && !(stack && !c && pr.level !== 'guided' && !mine.length && false)) return { kind: 'auto', id: pr.id, q: pl.inst, stage: pr.members[pl.inst[0]].stage, guided: pr.level === 'guided' }; }
         else { const near = carry.nearest(reach.x, reach.z, 0.9, pickable), h = near && !(c && wantsHere(pr, pl, c)) ? null : aimHands(pr); if (h && (h.kind === 'hands' || !stack)) return h.kind === 'hands' ? h : ladderCtx(false) || h; }
@@ -1360,14 +1371,60 @@
     { const soft = ladderCtx(false); if (soft) return soft; }
     if (stack) {
       if (C.SITE_SUPPLY.includes(stack.itemId)) return { kind: 'hint', text: plain(CAT[stack.itemId].name) + ': used up as you build' };
-      if (!c) return { kind: 'pick', stack };
+      if (!c) { const tr = !stack.carrier && window.__vehicles && window.__vehicles.carrierNear ? window.__vehicles.carrierNear(stack.x, stack.z, 4) : null; return tr ? { kind: 'pick', stack, trailer: tr } : { kind: 'pick', stack }; }
       if (c.itemId === stack.itemId) { const it = CAT[c.itemId], a = api.armful(s, c.itemId, Math.max(it.unit === 'each' ? 1 : 0, C.carryLimitKg(G.sim.state.sys.stock.tools, gesture()) / it.massKgPerUnit)); return a !== Infinity && a > c.qty + 1e-4 ? { kind: 'pick', stack, more: true } : { kind: 'back', stack }; }
       return { kind: 'swap', stack };
     }
     if (c) return pr ? { kind: 'hint', text: (c.itemId === 'door_prehung' || c.itemId === 'window_shed') && !api.stageOpen(pr, 'openings') ? (c.itemId === 'door_prehung' ? 'Wrap the wall before the door goes in' : 'Wrap the wall before the window goes in') : (c.itemId === 'door_prehung' || c.itemId === 'window_shed') ? 'Walk to the opening: it glows' : 'Nothing here needs ' + stackName(c.itemId) + ' yet', drop: true } : { kind: 'drop' };
     return null;
   }
-  function homeStack(itemId) { const P = G.player; let best = null, bd = 3; for (const k of S().stacks) if (k.itemId === itemId) { const d = Math.hypot(k.x - P.x, k.z - P.z); if (d < bd) { bd = d; best = k; } } return best; }
+  // a trailer's load within reach (it is drawn on the bed by the vehicles view, not as a pile): take an armful off it
+  const _bp = {};
+  function bedStack(c) {
+    const VV = window.__vehicles, P = G.player;
+    if (!VV) return null;
+    for (const k of S().stacks) {
+      if (k.carrier == null || (c && c.itemId !== k.itemId) || C.SITE_SUPPLY.includes(k.itemId) || !VV.bedPoint(k.carrier, _bp)) continue;
+      if (Math.hypot(_bp.x - reach.x, _bp.z - reach.z) < 1.3 || Math.hypot(_bp.x - P.x, _bp.z - P.z) < 1.7) return k;
+    }
+    return null;
+  }
+  // hold at a pile with a trailer by it: the press picks up an armful as always; still held, that armful goes onto the
+  // bed and the rest of the pile streams after it, about eight pieces a second, until you let go or the bed is full
+  const T_HOLD_S = 0.5;
+  function tickTHold(dt) {
+    const h = V.tHold;
+    if (!h) return;
+    if (!(V.mDown || G.keys.KeyE)) {
+      V.tHold = null;
+      if (h.n) flash(h.n + (h.n === 1 ? ' piece' : ' pieces') + ' of ' + stackName(h.itemId) + ' on the trailer');
+      return;
+    }
+    h.t += dt;
+    if (h.t < T_HOLD_S) return;
+    const c = S().carried;
+    if (!h.n && c && c.itemId === h.itemId) {
+      const P = G.player, r = cmd('carrierLoad', { hands: true, carrier: h.trailer, x: P.x, z: P.z });
+      if (r.ok) { window.__vehicles.flyFrom(h.trailer, { x: P.x, y: P.y + 1.3, z: P.z }); h.n++; sounds.play('thunk'); }
+    }
+    for (h.next -= dt; h.next <= 0; h.next += 0.125) {
+      const k = S().stacks.find((q) => q.id === h.stack);
+      if (!k) { V.tHold = null; V.mDown = false; flash('All of it is on the trailer'); return; }
+      const d = describe(k.itemId, k.qty);
+      window.__vehicles.flyFrom(h.trailer, { x: k.x, y: G.heightAt(k.x, k.z) + 0.25, z: k.z });
+      const r = cmd('carrierLoad', { stackId: k.id, carrier: h.trailer, qty: k.qty / Math.max(1, d.n) });
+      if (!r.ok) { V.tHold = null; V.mDown = false; flash(r.reason === 'full' ? 'The trailer is full' : r.reason === 'too far' ? 'Bring the trailer closer to the pile' : 'That cannot go on the trailer'); return; }
+      h.n++; if (h.n % 2) sounds.play('thunk');
+    }
+  }
+  function homeStack(itemId) { const P = G.player; let best = null, bd = 3; for (const k of S().stacks) if (k.itemId === itemId && !k.carrier) { const d = Math.hypot(k.x - P.x, k.z - P.z); if (d < bd) { bd = d; best = k; } } return best; }
+  // the pointer right on a place to work (a loose piece to nail, say) by a building: that comes before grabbing the sawhorses beside it
+  function onWork() {
+    const pr = nearBuilding(G.player.x, G.player.z), pl = pr && !pr.done ? plan(pr.id) : null;
+    if (!pl || pl.raise || pr.level === 'guided' || S().options.auto) return false;
+    const h = aimHands(pr);
+    return !!h && h.kind === 'hands' && h.off < 30;
+  }
   function putDown() {
     const c = S().carried; if (!c) return;
     const h = homeStack(c.itemId), P = G.player;
@@ -1415,6 +1472,7 @@
     else if (ctx.kind === 'cut') cutNext(ctx);
     else if (ctx.kind === 'hgrab') { V.horsesHeld = true; V.rev++; sounds.play('lift'); flash('Carry the sawhorses to the work; press again to set them down'); }
     else if (ctx.kind === 'hset') { const h = CS.horses; V.horsesHeld = false; if (h) cmd('moveHorses', { x: h.x, z: h.z, yaw: h.yaw }); sounds.play('thunk'); }
+    else if (ctx.kind === 'pick' && ctx.trailer) { V.tHold = { t: 0, n: 0, next: 0, stack: ctx.stack.id, itemId: ctx.stack.itemId, trailer: ctx.trailer }; pickUp(ctx.stack); }     // a tap picks up; held, it loads the trailer
     else if (ctx.kind === 'pick') pickUp(ctx.stack);
     else if (ctx.kind === 'back' || ctx.kind === 'drop' || (ctx.kind === 'hint' && ctx.drop)) putDown();
     else if (ctx.kind === 'swap') { putDown(); pickUp(ctx.stack); }
@@ -1439,8 +1497,18 @@
     if (!pr) return;
     if (!stage) { const pl = plan(id); stage = pl && pl.inst.length ? pr.members[pl.inst[0]].stage : pl && pl.raise ? 'wall-frame' : null; }
     if (!stage) return;
+    if (C.STAGE[stage] && C.STAGE[stage].by) { byAuto(id, stage); return; }      // tallied by another system: it does the work
     V.auto = { id, stage, guided: !!guided, wait: 0 };
     V.sel = id;
+  }
+  // a stage another system does (services: rough-in, trim-out): "do it for me" is its command, using what is on the stacks
+  function byAuto(id, stage) {
+    const by = C.STAGE[stage].by, name = by + '.auto';
+    const r = G.sim.handlers.has(name) ? G.sim.commandNow(name, { structId: id, stage }) : { ok: false, reason: 'not here' };
+    V.rev++; G.markStockDirty && G.markStockDirty();
+    if (r.ok) { say(C.STAGE[stage].name + ': done for you' + (r.covered ? '. ' + r.covered + ' in closed walls wait: open them from Hands (F)' : '.'), 'good'); sounds.play('seat'); }
+    else say(r.reason === 'no material' ? 'Out of ' + stackName(r.itemId) + ': order the stage in the Build panel' : r.reason === 'Open this wall first' ? 'Those runs are inside closed walls: open the wall from Hands (F) first' : r.reason === 'rough-in first' ? 'Rough-in comes first' : 'Nothing to do there', 'bad');
+    return r;
   }
   function stopAuto(why) { if (!V.auto) return; V.auto = null; W.job && W.cancel(); if (V.raise) V.raise.hold = false; if (why) flash(why); V.rev++; }
 
@@ -1473,7 +1541,7 @@
     onCancel(j) { V.working = null; redraw(j.id); },
   });
   const vTmp = new T.Vector3();
-  const reason = (r, kind, mid) => r.reason === 'support missing' ? ((C.SUPPORT_SAYS[r.missing] || 'Set the supports') + ' first') : (kind === 'door' || kind === 'window') && (r.reason === 'stage not open' || r.reason === 'frame not finished') ? (r.reason === 'frame not finished' ? 'Frame the opening first' : 'Wrap the wall before the ' + kind + ' goes in') : ({ 'no material': 'You need ' + (r.itemId ? stackName(r.itemId) : 'material') + ' for that', 'wrong material': 'That needs ' + (r.itemId ? stackName(r.itemId) : 'something else'), 'no fasteners': 'Out of ' + (r.itemId ? low(CAT[r.itemId].name) : 'fasteners') + ': buy more in the Supplier (U)', 'stage not open': 'Not yet: an earlier stage comes first', 'cut first': 'Cut it at the sawhorses first', 'no sawhorses': 'The sawhorses come with the lumber', 'nothing to cut': 'Nothing left to cut' })[r.reason] || 'That cannot go in yet';
+  const reason = (r, kind, mid) => r.held ? r.reason : r.reason === 'support missing' ? ((C.SUPPORT_SAYS[r.missing] || 'Set the supports') + ' first') : (kind === 'door' || kind === 'window') && (r.reason === 'stage not open' || r.reason === 'frame not finished') ? (r.reason === 'frame not finished' ? 'Frame the opening first' : 'Wrap the wall before the ' + kind + ' goes in') : ({ 'no material': 'You need ' + (r.itemId ? stackName(r.itemId) : 'material') + ' for that', 'wrong material': 'That needs ' + (r.itemId ? stackName(r.itemId) : 'something else'), 'no fasteners': 'Out of ' + (r.itemId ? low(CAT[r.itemId].name) : 'fasteners') + ': buy more in the Supplier (U)', 'stage not open': 'Not yet: an earlier stage comes first', 'cut first': 'Cut it at the sawhorses first', 'no sawhorses': 'The sawhorses come with the lumber', 'nothing to cut': 'Nothing left to cut' })[r.reason] || 'That cannot go in yet';
   function autoCan(s, pr, mid, ln, c) {
     const pm = pr.members[mid], sn = api.stockNeed(s, pr, mid);
     if (pm.prep) return true;                   // cut and waiting at the sawhorses
@@ -1654,7 +1722,8 @@
     else if (ctx.kind === 'sdrop') setPrompt('E', 'Put the scaffold down (point at a wall for a bay, or inside the frame for a tower)', '', null);
     else if (ctx.kind === 'sstrike') setPrompt('E', 'Take the scaffold down', '', null);
     else if (ctx.kind === 'hset') setPrompt('E', 'Set the sawhorses down here', '', null);
-    else if (ctx.kind === 'pick') setPrompt('E', (ctx.more ? 'Take more ' : 'Pick up ') + stackName(ctx.stack.itemId), '', null);
+    else if (ctx.kind === 'pick' && ctx.trailer) setPrompt('E', 'Tap: pick up ' + stackName(ctx.stack.itemId) + ' · Hold: load the trailer', V.tHold && V.tHold.n ? V.tHold.n + ' on' : '', V.tHold && !V.tHold.n ? Math.min(1, V.tHold.t / T_HOLD_S) : null);
+    else if (ctx.kind === 'pick') setPrompt('E', (ctx.more ? 'Take more ' : 'Pick up ') + stackName(ctx.stack.itemId) + (ctx.stack.carrier ? ' off the trailer' : ''), '', null);
     else if (ctx.kind === 'back') setPrompt('E', 'Put back the ' + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'swap') setPrompt('E', 'Swap for ' + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'drop') setPrompt(s.carried ? 'E' : '', s.carried ? 'Put down the ' + stackName(s.carried.itemId) : '', '', null);
@@ -1677,9 +1746,16 @@
     if (!v) return pr.done ? null : { k: pr.name, title: 'Waiting', line: 'Nothing can go in just now.' };
     const out = { k: pr.name + ' · ' + C.STAGE_ORDER.filter((q) => pl.view.stages.some((w) => w.id === q)).indexOf(v.id) + ' of ' + pl.view.stages.length + ' stages done', title: v.name, stage: v.id, what: v.what, why: v.why };
     out.k = pr.name + ' · stage ' + (pl.view.stages.indexOf(v) + 1) + ' of ' + pl.view.stages.length;
+    { const fh = (v.id === 'site' || v.id === 'foundation') && window.__foundation && window.__foundation.owns(pr.id) ? window.__foundation.hint(pr.id) : null;
+      if (fh) return { ...out, line: fh, target: at, btn: Object.values(pr.lines).every((l) => l.ordered <= 1e-9) && pl.view.toOrderUsd > 0 ? ['order:all', 'Order everything, ' + money(pl.view.toOrderUsd)] : null }; }
     if (Object.values(pr.lines).every((l) => l.ordered <= 1e-9) && pl.view.toOrderUsd > 0) return { ...out, line: 'Order the materials. While they are on their way, level the ground: stand on the plan and hold <kbd>E</kbd>.', btn: ['order:all', 'Order everything, ' + money(pl.view.toOrderUsd)], target: at };
     if (V.auto && V.auto.id === pr.id) return { ...out, line: (V.auto.guided ? 'Building. ' : 'Working until it is done. ') + '<kbd>E</kbd> stops.', target: at };
     if (pl.raise) return { ...out, line: 'The frame is ready. Stand by it and hold <kbd>E</kbd> to raise the wall.', target: at };
+    if (C.STAGE[v.id] && C.STAGE[v.id].by) {         // done by another system's hands (services): no pieces to nail here
+      if (v.status === 'not-ordered' && v.toOrderUsd > 0) return { ...out, line: 'Order the materials for this stage.', btn: ['order:' + v.id, 'Order this stage, ' + money(v.toOrderUsd)] };
+      if (v.status === 'ordered') { const d = s.deliveries[0], mins = d ? Math.max(1, Math.ceil((d.dueT - G.sim.state.t) / 60)) : 1; return { ...out, line: 'Your delivery arrives in about ' + mins + ' min of game time.' + (G.speed === 0 ? ' Time is paused.' : ''), wait: true }; }
+      return { ...out, line: C.STAGE[v.id].hint || '', btn: ['auto:' + v.id, 'Do it for me'], btn2: v.id === 'rough-in' ? ['svdefer', 'Close up anyway'] : null, target: at };
+    }
     const first = pl.inst.find((id) => pr.members[id].stage === v.id) || pl.inst[0], ln = first ? lineOf(pr, first) : null;
     const have = (itemId) => s.stacks.some((k) => k.itemId === itemId) || (s.carried && s.carried.itemId === itemId);
     if (ln && !have(ln.itemId)) {
@@ -1687,7 +1763,10 @@
       return { ...out, line: 'Order the materials for this stage.', btn: ['order:' + v.id, 'Order this stage, ' + money(v.toOrderUsd || v.costUsd)], btn2: pl.view.toOrderUsd > (v.toOrderUsd || 0) + 1 ? ['order:all', 'Order everything, ' + money(pl.view.toOrderUsd)] : null };
     }
     const lf = pr.level !== 'guided' && !V.auto ? leftInStage(pr) : null;
-    if (lf) return { ...out, line: lf.text, target: { x: lf.list[0].x, z: lf.list[0].z, y: lf.list[0].y + 1.5 } };
+    // the last few places are marked, but with empty hands (or the wrong load) the next thing is still the stacks
+    const fm = first && pr.members[first], short = !!(ln && ln.stick && fm && !fm.prep && s.carried && s.carried.itemId === ln.itemId && !enough(s.carried, pr, first));
+    const fetch = ln && fm && fm.need - fm.got > 1e-6 && !fm.prep && !C.SITE_SUPPLY.includes(ln.itemId) && (short || !(s.carried && s.carried.itemId === ln.itemId));
+    if (lf && !fetch) return { ...out, line: lf.text, target: { x: lf.list[0].x, z: lf.list[0].z, y: lf.list[0].y + 1.5 } };
     if (pr.level === 'guided') return { ...out, line: 'Stand by the ' + low(pr.name) + ' and press <kbd>E</kbd>, or use the button.', btn: ['auto:' + v.id, v.verb], target: at };
     if (!ln) return { ...out, line: 'Stand on the plan and hold <kbd>E</kbd> (or the mouse button) to dig it level.', target: at };
     const looseOne = pl.inst.find((id) => pr.members[id].need > 0 && pr.members[id].got >= pr.members[id].need - 1e-6);
@@ -1714,8 +1793,8 @@
       if (!RW.on()) return { ...out, line: 'Roofers work on the roof: climb the ladder and keep walking, onto the deck. On a steep roof, fix an anchor at the ridge and clip in first.', target: at };
       return { ...out, line: 'From the eave up, each layer lapping the one below. The glowing strip is the next one; the blue chalk line marks its top edge.' + (V.clip == null && RW.at() && RW.at().k > RWC.slideK ? ' Steep: clip in at the ridge first.' : ''), target: at };
     }
-    if (c && c.itemId === ln.itemId && first && api.knows(s, pr.members[first].kind)) return { ...out, line: 'You know this work: hold the button and drag along the glowing places. Each piece is set and nailed as you pass.', target: at };
-    if (c && c.itemId === ln.itemId) return { ...out, line: 'Carry the ' + stackName(c.itemId) + ' to the ' + low(pr.name) + '. Point at a glowing place: one click sets three pieces, then one strike nails a piece. Hold to keep going.', target: at };
+    if (c && c.itemId === ln.itemId && !short && first && api.knows(s, pr.members[first].kind)) return { ...out, line: 'You know this work: hold the button and drag along the glowing places. Each piece is set and nailed as you pass.', target: at };
+    if (c && c.itemId === ln.itemId && !short) return { ...out, line: 'Carry the ' + stackName(c.itemId) + ' to the ' + low(pr.name) + '. Point at a glowing place: one click sets three pieces, then one strike nails a piece. Hold to keep going.', target: at };
     const stack = homeStack(ln.itemId) || s.stacks.find((k) => k.itemId === ln.itemId);
     return { ...out, line: (s.options.auto ? 'Press <kbd>E</kbd> by the ' + low(pr.name) + ' to work until done, or pick' : 'Pick') + ' up ' + stackName(ln.itemId) + ' at the stacks: point at them and click, or <kbd>E</kbd>.', target: s.options.auto ? at : stack ? { x: stack.x, z: stack.z, y: 1.9 } : null, item: ln.itemId };
   }
@@ -1796,6 +1875,7 @@
       else if (nx.toOrderUsd > 0 && nx.status === 'not-ordered') h += `<button type="button" class="go" data-act="order:${nx.id}">Order this stage, ${money(nx.toOrderUsd)}</button>`;
       else if (nx.status === 'ordered') h += `<button type="button" disabled>Delivery on its way</button>`;
       else if (V.auto && V.auto.id === pr.id) h += `<button type="button" class="go" data-act="stop">Stop working</button>`;
+      else if (C.STAGE[nx.id].by) h += `<button type="button" class="go" data-act="auto:${nx.id}" title="${esc(C.STAGE[nx.id].hint || '')}">Do it for me: ${esc(low(nx.name))}</button>` + (nx.id === 'rough-in' ? `<button type="button" data-act="svdefer" title="What is not roughed in stays planned and leaves this stage, so the walls can be closed">Close up anyway</button>` : '');
       else if (pr.level === 'guided') h += `<button type="button" class="go" data-act="auto:${nx.id}">${esc(nx.verb)}</button>`;
       else h += `<button type="button" class="go" data-act="auto:${nx.id}" title="Your character keeps working this stage, fetching from the stacks. F stops.">Work until done: ${esc(low(nx.name))}</button>`;
       if (!Object.values(pr.lines).every((l) => l.ordered <= 1e-9) && v.toOrderUsd > (nx.status === 'not-ordered' ? nx.toOrderUsd : 0) + 1) h += `<button type="button" data-act="order:all">Order everything, ${money(v.toOrderUsd)}</button>`;
@@ -1817,7 +1897,8 @@
         if (q.lines.length) h += '<span class="mats">' + q.lines.map((l) => `<span>${esc(plain(l.label))}${l.count > 1 ? ' × ' + l.count : ''}</span><i title="${l.sticks ? esc(num(l.qty) + ' m of lumber in stock lengths') : ''}">${l.sticks && l.sticks.length ? l.sticks.map((c) => c.pre ? c.n + ' × cut to ' + mm(c.lenM) : c.n + ' × ' + c.ft + ' ft').join(', ') : num(l.qty) + (UNIT[l.unit] || '')}</i><i>${money(l.costUsd)}</i><em>${esc(l.why)}</em>`).join('') + '</span>';
         let act = '';
         if (!q.complete && q.toOrderUsd > 0 && !isNext) act += `<button type="button" data-act="order:${q.id}">Order this stage, ${money(q.toOrderUsd)}</button>`;
-        if ((q.built > 0 || q.complete) && !V.auto) act += `<button type="button" data-act="apart:${q.id}" title="The material goes back on the stacks">Take this stage apart</button>`;
+        if (q.id === 'rough-in' && !q.complete) act += `<button type="button" data-act="svdefer" title="What is not roughed in stays planned and leaves this stage">Close up anyway</button>`;
+        if ((q.built > 0 || q.complete) && !V.auto && !C.STAGE[q.id].by) act += `<button type="button" data-act="apart:${q.id}" title="The material goes back on the stacks">Take this stage apart</button>`;
         if (act) h += `<span class="act">${act}</span>`;
       }
       h += '</li>';
@@ -1870,6 +1951,7 @@
     else if (k === 'rent' && pr) { const r = cmd('rentScaffold', { structId: pr.id, days: +arg }); if (r.ok) { say('Scaffolding rented for ' + money(r.costUsd) + '. The bundle is by your stacks: take it and point at a wall.', 'good'); sounds.play('seat'); } else say(r.reason === 'not enough money' ? 'Not enough money: that costs ' + money(r.costUsd) + '.' : 'Cannot rent that now.', 'bad'); }
     else if (k === 'unrent') { if (SC && SC.on()) SC.release(); cmd('returnScaffold'); say('The scaffolding goes back to the yard.', 'good'); }
     else if (k === 'stop') stopAuto();
+    else if (k === 'svdefer' && pr && G.sim.handlers.has('services.defer')) { const r = G.sim.commandNow('services.defer', { structId: pr.id }); say(r.ok && r.deferred ? 'Closed up anyway: what was not roughed in stays planned. Insulation can go in.' : 'Nothing left to rough in.', r.ok ? 'good' : 'bad'); }
     else if (k === 'level' && pr) { cmd('setLevel', { structId: pr.id, level: arg }); cmd('setLevel', { level: arg }); stopAuto(); }
     else if (k === 'feelp') { cmd('setFeel', { preset: arg }); }
     else if (k === 'feelr') { cmd('setFeel', { reset: true }); }
@@ -2000,7 +2082,7 @@
       }
     }
     if (V.fTap) { V.fTap = false; if (!OFF[G.player.tool]) { press(V.ctx); V.ctx = context(); V.ctxSig = -1; } }   // what the press changed is read at once: a stale 'put down' with empty arms threw
-    tickBHold(dt); tickLadder(dt); tickScaffold(dt); tickRoof(dt); drawLadder(); tickMark(dt); drawBeacons(dt); drawBarrow(dt); tickStation(dt);
+    tickBHold(dt); tickTHold(dt); tickLadder(dt); tickScaffold(dt); tickRoof(dt); drawLadder(); tickMark(dt); drawBeacons(dt); drawBarrow(dt); tickStation(dt);
     if (!s.options.sandbox) tickWork(dt);
     glow(V.ctx); farGlow(); drawMud();
     {
@@ -2091,8 +2173,8 @@
   function nextPiece() {
     const pr = current(); if (!pr) return null;
     const pl = plan(pr.id), g = geom(pr.id), c = S().carried;
-    for (const mid of pl.inst) { const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid), set = !ln || pm.need - pm.got < 1e-6; if (!set && !holds(c, pr, mid)) continue; if (!m) return { mid, x: V.structs.get(pr.id).x, z: V.structs.get(pr.id).z, site: true }; const hw = C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null; worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); wM.lerpVectors(wA, wB, 0.5); const w = { x: wM.x, y: wM.y, z: wM.z }; wM.project(G.camera); return { mid, ...w, sx: (wM.x * 0.5 + 0.5) * reach.w, sy: (-wM.y * 0.5 + 0.5) * reach.h, set }; }
+    for (const mid of pl.inst) { const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid), set = !ln || pm.need - pm.got < 1e-6; if (!set && !pm.prep && !enough(c, pr, mid)) continue; if (!m) return { mid, x: V.structs.get(pr.id).x, z: V.structs.get(pr.id).z, site: true }; const hw = C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null; worldPt(g, hw, m.a, wA); worldPt(g, hw, m.b, wB); wM.lerpVectors(wA, wB, 0.5); const w = { x: wM.x, y: wM.y, z: wM.z }; wM.project(G.camera); return { mid, ...w, sx: (wM.x * 0.5 + 0.5) * reach.w, sy: (-wM.y * 0.5 + 0.5) * reach.h, set }; }
     return null;
   }
-  window.__construct = { redraw, asm, roof: RW, syncRoof, tryHop, ladderTop, ladderSpot, chalkLines: (id) => chalkLines(S().progress[id], geom(id)), scaffoldSpot, scaffold: SC, station: CS, press: (c) => press(c || V.ctx), beaconAt, finishPlace, nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };
+  window.__construct = { describe, redraw, asm, roof: RW, syncRoof, tryHop, ladderTop, ladderSpot, chalkLines: (id) => chalkLines(S().progress[id], geom(id)), scaffoldSpot, scaffold: SC, station: CS, press: (c) => press(c || V.ctx), beaconAt, finishPlace, nextPiece, reach, V, plan, geom, current, context: () => V.ctx, open: openPanel, close: closePanel, act, startPlacing, sounds, carry, asm, nextAction, flushAll: () => { for (const [id] of V.fresh) flush(id); } };
 })();

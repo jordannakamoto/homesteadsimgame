@@ -15,6 +15,8 @@ import { INGREDIENTS, foodId } from './food-catalog.js';
 import { ITEMS_GARDEN, GARDEN_CATEGORIES } from './content/garden-items.js';
 import { ITEMS_LANDSCAPE, LANDSCAPE_CATEGORIES } from './content/landscape.js';
 import { ITEMS_VEHICLES, VEHICLE_CATEGORIES } from './content/vehicles.js';
+import { ITEMS_SERVICES, SERVICE_ITEM_CATEGORIES } from './content/services.js';
+import { ITEMS_CONCRETE } from './content/concrete-items.js';
 import { openingItems, openingItemFromId } from './content/openings.js';
 
 export const ITEM_UNITS = Object.freeze(['each', 'm', 'm2', 'm3', 'kg', 'L']);
@@ -37,6 +39,7 @@ export const ITEM_CATEGORIES = Object.freeze([
   ...GARDEN_CATEGORIES,
   ...LANDSCAPE_CATEGORIES,
   ...VEHICLE_CATEGORIES,
+  ...SERVICE_ITEM_CATEGORIES,
 ]);
 export const isToolCategory = (c) => c === 'tools_hand' || c === 'tools_power';
 
@@ -131,6 +134,9 @@ add({ id: 'gravel', name: 'Gravel (bulk)', category: 'stone', unit: 'm3', materi
 add({ id: 'concrete_mix', name: 'Concrete mix (dry)', category: 'stone', unit: 'kg', material: 'concrete', priceUsd: 0.19, blurb: 'Add water. Cures to concrete' });
 add({ id: 'mortar_mix', name: 'Mortar mix (dry)', category: 'stone', unit: 'kg', material: 'mortar', priceUsd: 0.22 });
 
+// forms for poured foundations: boards and stakes (src/sim/content/concrete-items.js)
+for (const g of ITEMS_CONCRETE) add(g);
+
 // ---- fasteners, by weight
 add({ id: 'nails_framing', name: 'Framing nails (galvanised)', category: 'fasteners', unit: 'kg', material: 'steel', priceUsd: 6.2 });
 add({ id: 'screws_wood', name: 'Wood screws', category: 'fasteners', unit: 'kg', material: 'steel', priceUsd: 12.5 });
@@ -172,6 +178,9 @@ for (const g of ITEMS_LANDSCAPE) add(g);
 
 // ---- vehicles: fuel, the fuel can and the trailer (src/sim/content/vehicles.js)
 for (const g of ITEMS_VEHICLES) add(g);
+
+// ---- cable and pipe inside the walls: spools, coils, boxes, staples, plates, rings (src/sim/content/services.js)
+for (const g of ITEMS_SERVICES) add(g);
 
 // Read-only. A made-to-order door or window (any size off the store's list) is not listed but is made from its id the
 // first time it is asked for, the same every time, so saves and orders that name one keep working.

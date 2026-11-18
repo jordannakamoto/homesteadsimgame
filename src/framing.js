@@ -4,8 +4,8 @@
    Pure arithmetic: no DOM, no three.js. The page reads it as window.__framing; tests read globalThis.__framing. */
 (() => {
   // the order a building is raised in (docs/CONSTRUCTION.md)
-  const STAGES = ["site", "foundation", "floor-frame", "subfloor", "wall-frame", "top-plates", "roof-frame", "roof-deck", "dry-in", "roofing", "sheathing", "wrap", "openings", "cladding", "gutters", "insulation", "lining", "finish", "services"];
-  const STAGE_NAME = { site: "Site", foundation: "Foundation", "floor-frame": "Floor frame", subfloor: "Subfloor", "wall-frame": "Wall frames", "top-plates": "Top plates", "roof-frame": "Roof frame", "roof-deck": "Roof deck", "dry-in": "Dry-in", roofing: "Roofing", sheathing: "Sheathing", wrap: "Wrap", openings: "Windows and doors", cladding: "Cladding", gutters: "Gutters", insulation: "Insulation", lining: "Lining", finish: "Tape and mud", services: "Services" };
+  const STAGES = ["site", "foundation", "floor-frame", "subfloor", "wall-frame", "top-plates", "roof-frame", "roof-deck", "dry-in", "roofing", "sheathing", "wrap", "openings", "cladding", "gutters", "rough-in", "insulation", "lining", "finish", "trim-out", "services"];
+  const STAGE_NAME = { site: "Site", foundation: "Foundation", "floor-frame": "Floor frame", subfloor: "Subfloor", "wall-frame": "Wall frames", "top-plates": "Top plates", "roof-frame": "Roof frame", "roof-deck": "Roof deck", "dry-in": "Dry-in", roofing: "Roofing", sheathing: "Sheathing", wrap: "Wrap", openings: "Windows and doors", cladding: "Cladding", gutters: "Gutters", "rough-in": "Rough-in", insulation: "Insulation", lining: "Lining", finish: "Tape and mud", "trim-out": "Trim-out", services: "Services" };
   // actual (not nominal) sizes of North American lumber, metres: [breadth, depth]
   const LUMBER = { "2x4": [0.038, 0.089], "2x6": [0.038, 0.14], "2x8": [0.038, 0.184], "2x10": [0.038, 0.235], "2x12": [0.038, 0.286], glulam: [0.09, 0.225], "4x4": [0.089, 0.089], "6x6": [0.14, 0.14] };
   const SHEET = { w: 1.22, l: 2.44 };

@@ -2,16 +2,16 @@
 // carries the vehicles system, and an old save without it loads and can receive the starter ATV once.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createGameSim, makeSave, readSave, ITEMS, ITEM_CATEGORIES, VEHICLE_KINDS, FUEL_ITEM, vehicleCore } from '../src/sim/index.js';
+import { createGameSim, makeSave, readSave, ITEMS, ITEM_CATEGORIES, VEHICLE_KINDS, VEHICLE_SURFACES, FUEL_ITEM, vehicleCore } from '../src/sim/index.js';
 
 const { createBody, stepBody, hitchPose, SUB } = vehicleCore;
 const FLAT = { ground: () => 0 };
 const ATV = VEHICLE_KINDS.atv, TRAILER = VEHICLE_KINDS.trailer_small;
 
-test('vehicle records: the ATV reaches 11 m/s, a full tank lasts about three hours flat out, the trailer tows', () => {
+test('vehicle records: the ATV reaches its governed top speed, a full tank lasts about three hours flat out, the trailer tows', () => {
   const b = createBody(ATV, { fuelL: ATV.fuel.tankL }, FLAT);
   for (let i = 0; i < 20 / SUB; i++) stepBody(b, ATV, { throttle: 1 }, FLAT);
-  assert.ok(Math.abs(b.u - 11) < 0.2, 'top speed ' + b.u);
+  assert.ok(Math.abs(b.u - ATV.topMps) < 0.5, 'top speed ' + b.u);
   const hours = ATV.fuel.tankL / ATV.fuel.burnLph;
   assert.ok(hours > 2.5 && hours < 3.5, hours + ' h');
   const t = createBody(TRAILER, hitchPose(b, ATV, TRAILER, 0), FLAT);
@@ -61,4 +61,61 @@ test('an old save without vehicles loads, and receives the starter ATV once', ()
   again.load(readSave(JSON.stringify(makeSave(sim.serialize(), {}))).sim);
   assert.equal(again.state.sys.vehicles.starter, true);
   assert.equal(Object.keys(again.state.sys.vehicles.units).length, 1);
+});
+
+// ---- the ATV handles like the real machine it is modelled on (figures in docs/PLAYTEST.md)
+const on = (surf, ground = () => 0) => ({ ground, surface: () => VEHICLE_SURFACES[surf] });
+const ridden = (env) => { const b = createBody(ATV, { fuelL: 10 }, env); b.cargoKg = ATV.riderKg; return b; };
+const drive = (b, input, env, secs, each) => { for (let i = 0; i < secs / SUB; i++) { stepBody(b, ATV, typeof input === 'function' ? input(b) : input, env); if (each) each(b); } return b; };
+
+test('ATV: 0-50 km/h takes a few seconds through the gears; wet grass spins the wheels and is slower', () => {
+  const t50 = (surf) => { const b = ridden(on(surf)); let t = 0, spun = 0, gears = new Set(); drive(b, { throttle: 1 }, on(surf), 12, (q) => { if (q.u < 50 / 3.6) t += SUB; if (q.spin > 0.5) spun += SUB; gears.add(q.gear); }); return { t, spun, gears: gears.size }; };
+  const dry = t50('grass'), wet = t50('grass_wet');
+  assert.ok(dry.t > 3 && dry.t < 6, '0-50 on dry grass ' + dry.t);
+  assert.ok(dry.spun === 0 && dry.gears >= 3, 'grips and shifts: ' + JSON.stringify(dry));
+  assert.ok(wet.t > dry.t * 1.2 && wet.spun > 0.5, 'wet grass: ' + JSON.stringify(wet));
+});
+
+test('ATV: lifting off brakes through the engine; it creeps at idle; braking takes longer on wet grass', () => {
+  const up = (b) => drive(b, (q) => ({ throttle: q.u < 14 ? 1 : 0 }), on('grass'), 8);
+  const b = up(ridden(on('grass'))), u0 = b.u;
+  drive(b, {}, on('grass'), 1);
+  const decel = u0 - b.u;
+  assert.ok(decel > 1.2 && decel < 3, 'engine braking about 0.15 g: ' + decel);
+  const c = drive(ridden(on('floor')), {}, on('floor'), 8);
+  assert.ok(c.u > 0.3 && c.u <= ATV.engine.creepMps + 0.05, 'creeps: ' + c.u);
+  const stop = (surf) => { const q = ridden(on(surf)); drive(q, (z) => ({ throttle: z.u < 12 ? 1 : 0 }), on(surf), 8); const z0 = q.z; drive(q, { brake: 1 }, on(surf), 5); return q.z - z0; };
+  const dry = stop('grass'), wet = stop('grass_wet');
+  assert.ok(dry > 9 && dry < 16 && wet > dry * 1.3, `stops in ${dry} m dry, ${wet} m wet`);
+});
+
+test('ATV: it climbs 25 degrees of dry grass but spins out on wet grass; 35 degrees is too steep', () => {
+  const climb = (deg, surf) => { const g = (x, z) => Math.max(0, z - 2) * Math.tan((deg * Math.PI) / 180), b = ridden({ ground: g }); drive(b, { throttle: 1 }, on(surf, g), 10); return b; };
+  assert.ok(climb(25, 'grass').u > 3, 'dry 25');
+  const wet = climb(25, 'grass_wet');
+  assert.ok(wet.u < 0.5 && wet.spin > 0.5, 'wet 25 spins: ' + wet.u);
+  assert.ok(climb(35, 'grass').u < 0.5, 'dry 35');
+});
+
+test('ATV: hard cornering leans it and washes the front out before it tips; a side slope adds to the tip', () => {
+  const b = ridden(on('grass'));
+  drive(b, (q) => ({ throttle: q.u < 11 ? 1 : 0.3 }), on('grass'), 6);
+  let tip = 0, roll = 0;
+  drive(b, { throttle: 0.5, steer: 1 }, on('grass'), 4, (q) => { tip = Math.max(tip, q.tip); roll = Math.max(roll, q.roll); });
+  assert.ok(roll > 0.06, 'leans out of the turn: ' + roll);
+  assert.ok(tip > 0.5 && tip < 1, 'stays on its wheels on the flat: ' + tip);
+  assert.ok(b.slip < 1.5, 'no drift: ' + b.slip);
+  const side = (x) => x * Math.tan((22 * Math.PI) / 180), s = ridden({ ground: side });
+  drive(s, {}, on('grass', side), 1);
+  assert.ok(s.tip > 0.45, 'a 22 degree side slope: ' + s.tip);
+});
+
+test('ATV: heading steer backs up when pushed behind, then stops and drives off when pushed ahead; no push coasts then holds', () => {
+  const { headingControl } = vehicleCore, env = on('grass'), b = ridden(env);
+  drive(b, (q) => headingControl(q, ATV, 0, -1), env, 3);
+  assert.ok(b.u < -1 && b.gear === -1, 'reversing: ' + b.u);
+  drive(b, (q) => headingControl(q, ATV, 0, 1), env, 4);
+  assert.ok(b.u > 3 && b.gear >= 1, 'forward again: ' + b.u);
+  drive(b, (q) => headingControl(q, ATV, 0, 0), env, 12);
+  assert.ok(b.u === 0, 'coasted down and held: ' + b.u);
 });
