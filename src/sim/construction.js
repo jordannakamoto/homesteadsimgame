@@ -488,11 +488,10 @@ function setPlan(ctx, p) {
     if (!C.STAGE[m.stage]) continue;
     const o = old && old.members[m.id];
     pr.members[m.id] = { stage: m.stage, kind: m.kind, parent: m.parent || null, line: null, need: 0, got: o ? o.got : 0, built: o ? o.built : m.built ? 1 : 0 };
-    if (o && o.prep && !o.built) pr.members[m.id].prep = 1;      // already cut at the sawhorses
     // a save from before walls were hung sheet by sheet: one lining piece per wall. If that was in, the wall's sheets (or
     // boards) and its seams are in too, so a finished room stays finished
     if (!o && old && (m.kind === 'lining' || m.kind === 'joint') && m.parent && old.members[m.parent + '.ln'] && old.members[m.parent + '.ln'].built) { pr.members[m.id].built = 1; if (m.kind === 'joint') pr.members[m.id].coat = C.FINISH.coats + 1; }
-    if (o && o.coat) { pr.members[m.id].coat = o.coat; if (o.dryAt) pr.members[m.id].dryAt = o.dryAt; }
+
     if (m.len > 0) { pr.members[m.id].len = round6(m.len); pr.members[m.id].pcs = m.pcs > 1 ? m.pcs : 1; }
   }
   for (const ln of p.lines) {
@@ -510,6 +509,11 @@ function setPlan(ctx, p) {
     pr.lines[ln.key] = L;
     if (L.stick) {                         // sawn from stock lengths: each member's share is its own length, the line is the sticks it takes
       for (const q of own) { const m = pr.members[q[0]]; m.line = ln.key; m.need = round6(m.len * (m.pcs || 1)); if (m.built) m.got = m.need; else if (m.got > m.need) m.got = m.need; m.cut = o_cut(old, q[0]); if (C.isSiteCut(m.kind, m.len)) m.site = 1; else delete m.prep; }
+      // the same line as before (a plan sent again unchanged, as after a reload): its cut list stays exactly as it was
+      const same = !!(o && o.cut) && own.length === Object.keys(old.members).filter((id) => old.members[id].line === ln.key).length &&
+        own.every((q) => { const om = old.members[q[0]]; return om && om.line === ln.key && Math.abs((om.len || 0) - (pr.members[q[0]].len || 0)) < 1e-9 && !!om.site === !!pr.members[q[0]].site; });
+      if (same) { L.used = o.used; L.scrap = o.scrap || 0; L.cut = { sticks: o.cut.sticks.map((st) => ({ ...st })), at: { ...o.cut.at } }; continue; }
+      for (const q of own) { const om = old && old.members[q[0]], m = pr.members[q[0]]; if (om && om.prep && !om.built && m.site) m.prep = 1; }   // cut already: not planned again
       if (o && o.cut) { L.used = o.used; L.scrap = o.scrap || 0; L.cut = { sticks: o.cut.sticks.map((st) => ({ ...st })), at: {} }; }
       else {                                // members already built (a plan sent as built): their sticks are opened and sawn
         const pk = C.packSticks(own.filter((q) => pr.members[q[0]].built).flatMap((q) => piecesOf(pr, q[0])), []);
@@ -551,6 +555,15 @@ function setPlan(ctx, p) {
   }
   for (const key in pr.lines) { const ln = pr.lines[key]; if (ln.supply) { const t = pr.tally[ln.stage]; ln.used = old && old.lines[key] ? Math.min(old.lines[key].used, ln.qty) : 0; if (!old && t && t[1]) ln.used = round6((ln.qty * t[0]) / t[1]); } }
   if (old && old.extLines) applyExtLines(s, pr, old.lines);
+  // what a piece picked up in play (cut at the sawhorses, coats of mud, when it went in), carried over after the plan's own
+  // fields, in the order play adds them, so a plan sent again unchanged (as after a reload) leaves the record exactly as it was
+  if (old) for (const id in pr.members) {
+    const o = old.members[id], m = pr.members[id];
+    if (!o) continue;
+    if (o.prep && !o.built && m.site) m.prep = 1;
+    if (o.coat) { m.coat = o.coat; if (o.dryAt) m.dryAt = o.dryAt; }
+    if (o.builtAt !== undefined && m.built) m.builtAt = o.builtAt;
+  }
   s.progress[p.structId] = pr;
   if (p.tutorial && s.tutorial.shed === null && !s.tutorial.done) s.tutorial.shed = p.structId;
   const was = old ? old.done : false;
