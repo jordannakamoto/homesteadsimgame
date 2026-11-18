@@ -206,10 +206,10 @@ const SKY_COMMON = /* glsl */ `
             od *= 52.0;
             // powder: the thin, outer parts facing the light scatter less of it back, so the billows stand out
             float powder = 1.0 - exp(-den * 16.0);
-            float sunL = (exp(-od) * pf + 0.5 * exp(-od * 0.3) * pb + 0.25 * exp(-od * 0.1) * pc) * mix(0.5, 1.0, powder);
+            float sunL = (exp(-od) * pf + 0.5 * exp(-od * 0.3) * pb + 0.25 * exp(-od * 0.1) * pc) * mix(0.8, 1.0, powder);
             // (with the sun low the sky's light is most of what a cloud's body gets: more of it, so dusk clouds go lavender
             // and slate, not mud)
-            vec3 amb = mix(ambLo, ambHi, smoothstep(0.0, 1.0, h)) * mix(0.55, 1.0, h) * (0.7 + 0.3 * powder) * (1.0 + 0.9 * (1.0 - smoothstep(0.0, 0.35, uTrueSun.y)));
+            vec3 amb = mix(ambLo, ambHi, smoothstep(-0.2, 1.2, h)) * mix(0.62, 1.0, smoothstep(0.0, 1.0, h)) * (0.85 + 0.15 * powder) * (1.0 + 0.9 * (1.0 - smoothstep(0.0, 0.35, uTrueSun.y)));
             // (scaled so a cloud's sunlit face sits just under white: brighter, every lit face tone-maps to the same flat
             // white and the cloud loses its shading)
             vec3 S = uSunHi * sunL * 0.17 + amb;
@@ -421,7 +421,7 @@ ${SKY_COMMON}      void main() {
         if (uOpt.y > 1.5 && uMainCam > 0.5) {
           vec4 cl = texture2D(uCloudTex, gl_FragCoord.xy / uScreen);
           sunDisc *= 1.0 - cl.a;
-          col = mix(col, cl.rgb * 2.0, cl.a);
+          col = col * (1.0 - cl.a) + cl.rgb * 2.0;
         }
         // flat clouds: heaps low down, self-shadowed toward the sun
         else if (uOpt.y > 0.5) {
@@ -512,7 +512,10 @@ ${SKY_COMMON}      void main() {
         vec3 cc = cl.rgb / cl.a;
         cc = mix(cc, mix(uSky, uZenith, 0.25) * 0.9, uGrey * 0.6);
         cc = mix(cc, skyAbove(d), 1.0 - exp(-tMid / 22.0));    // far clouds fade into the haze
-        return vec4(min(cc * 0.5, vec3(1.0)), cl.a * smoothstep(0.0, 0.07, d.y));
+        // stored premultiplied (colour times cover): enlarged and blended over frames, the empty sky round a cloud
+        // then adds nothing, where straight colour would bleed its black in as a dark rim
+        float a = cl.a * smoothstep(0.0, 0.07, d.y);
+        return vec4(min(cc * 0.5, vec3(1.0)) * a, a);
       }`,
   });
   const cloudQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), cloudMat); cloudQuad.frustumCulled = false;
