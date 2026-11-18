@@ -21,6 +21,7 @@ export const RIVER_SHADE = /* glsl */ `
   uniform vec4 uWin;                       // the live simulation's window (x0, z0, x1, z1); x1 < x0 when there is none
   uniform samplerCube uEnv, uEnv2; uniform vec4 uEnvPos; uniform float uEnvMix;
   uniform sampler2D uRefl; uniform mat4 uReflMat; uniform vec4 uReflOn;   // the mirror (reflect-plane.js)
+  uniform sampler2D uRipTex; uniform vec4 uRipWin;      // the fine waves round the player (ripple-sim.js): x0, z0, size, on
   uniform vec4 uWake; uniform vec2 uWakeK;   // someone wading: where, the current past their legs (x, z); how deep, on          // the reflection probe (reflect-probe.js): where, and w on/off
   uniform vec4 uRip[24]; uniform vec2 uRipV[24], uRipD[24];   // ripples; the current that carries each; the way its maker was moving      // ripples, and the current that carries each one away                   // ripples: x, z, start time, strength
   const mat4 BAYER = mat4(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
@@ -151,6 +152,19 @@ export const RIVER_SHADE = /* glsl */ `
       g += chop * min(slosh, 1.2) * 0.42 + ringG * (0.55 + 0.45 * chop.x);
       foamIn = max(foamIn, smoothstep(0.5, 1.2, slosh) * 0.25);
     }
+    // the fine waves round the player: bow waves, wakes, sloshing, as their slope
+    if (uRipWin.w > 0.5) {
+      vec2 rp = (q - uRipWin.xy) / uRipWin.z;
+      if (rp.x > 0.0 && rp.y > 0.0 && rp.x < 1.0 && rp.y < 1.0) {
+        float ex = 0.05 / uRipWin.z;
+        float hx = texture2D(uRipTex, rp + vec2(ex, 0.0)).r - texture2D(uRipTex, rp - vec2(ex, 0.0)).r;
+        float hz = texture2D(uRipTex, rp + vec2(0.0, ex)).r - texture2D(uRipTex, rp - vec2(0.0, ex)).r;
+        float fadeW = smoothstep(0.0, 0.08, min(min(rp.x, rp.y), min(1.0 - rp.x, 1.0 - rp.y)));
+        vec2 rg = vec2(hx, hz) / 0.1 * fadeW;
+        g += rg * 1.4;
+        foamIn = max(foamIn, smoothstep(0.35, 1.0, length(rg)) * 0.35);
+      }
+    }
     if (uSnap > 0.5) g = floor(g * 8.0 + 0.5) / 8.0;                // pixel style: ripples as facets
     vec3 N = normalize(vec3(-g.x, 1.0, -g.y));
     vec3 V = normalize(cameraPosition - world);
@@ -162,6 +176,10 @@ export const RIVER_SHADE = /* glsl */ `
     float graze = 1.0 - ndv;
     fres *= mix(1.0, 0.55, smoothstep(0.1, 0.9, rough) * smoothstep(0.6, 0.95, graze));
     fres = min(fres, mix(0.85, 0.65, rough));
+    // the shallow fringe by the banks: stirred-up silt, bits of leaf and scum, a film on the water; dull rather than
+    // glossy, and cloudier
+    float fringe = 1.0 - smoothstep(0.03, 0.2, d);
+    fres *= mix(1.0, 0.4, fringe);
     float skyVis = mix(1.0, texture2D(uSkyMap, (q + 0.5) / 512.0).r, uSkyK);
     vec3 R = reflect(-V, N); R.y = abs(R.y);
     // What the water reflects is mostly its surroundings, not an empty sky (an even sky on a wavy surface is what
@@ -199,7 +217,7 @@ export const RIVER_SHADE = /* glsl */ `
     vec3 H = normalize(V + uSunDir);
     float nh = max(dot(N, H), 0.0);
     float sparkle = step(0.9, snoise(vec3((q - v * s0 * 1.2) * 9.0, uTime * 2.0)) * 0.5 + 0.5) * smoothstep(0.4, 1.0, rough);   // only on broken water
-    vec3 glint = uSunCol * (pow(nh, 160.0) * 0.4 + pow(sd, 400.0) * 0.5) * sparkle * skyVis * step(line, R.y);   // only glints on broken water, no wide sheen; none where the reflection is trees
+    vec3 glint = uSunCol * (pow(nh, 160.0) * 0.4 + pow(sd, 400.0) * 0.5) * sparkle * skyVis * step(line, R.y) * (1.0 - fringe);   // only glints on broken water, no wide sheen; none where the reflection is trees
     float path = d * (1.0 + 1.0 / max(V.y, 0.25));
     // loss a metre: stream water carries fine sediment and dissolved organic matter even on a fair day (red lost
     // first, then blue: the olive-green to tea-brown of a real brook), much more when it runs muddy. Shallows show
@@ -212,6 +230,8 @@ export const RIVER_SHADE = /* glsl */ `
     float fwd = pow(max(dot(-V, uSunDir), 0.0), 6.0);
     // aerated water (under and round foam) scatters more light back: it pales and goes milky
     vec3 body = scatter * lightIn * (1.0 + 2.5 * fwd) + lightIn * vec3(0.16, 0.18, 0.17) * foamIn * smoothstep(0.02, 0.12, d);
+    body = mix(body, lightIn * vec3(0.15, 0.125, 0.085), fringe * 0.7);              // silty at the edges
+    opaque = max(opaque, fringe * 0.3 * smoothstep(0.0, 0.03, d));
     vec2 bedP = q - V.xz / max(V.y, 0.3) * d;
     float ca = texture2D(uTex, bedP * 0.42 + uTime * vec2(0.03, 0.017) + g).b * texture2D(uTex, bedP * 0.61 - uTime * vec2(0.021, 0.031)).b;
     ca = uSnap > 0.5 ? step(0.42, ca) : smoothstep(0.36, 0.5, ca);
