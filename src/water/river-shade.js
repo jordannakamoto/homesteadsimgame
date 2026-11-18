@@ -124,19 +124,32 @@ export const RIVER_SHADE = /* glsl */ `
     // the finest ruffle, too small to take differences of: tilts each spot a little at random
     vec3 rq = vec3((q - v * s0 * 1.2) * 9.0, uTime * 1.7);
     g += vec2(snoise(rq), snoise(rq + 31.7)) * 0.006 * rough;
-    // ripples spreading where the water was touched: a travelling ring in the slope
+    // Where the water is disturbed (a step, a leg, something dropped in) it sloshes: a patch of short, choppy, broken
+    // waves that spreads out and dies down, with only a faint, broken ring running ahead of it; real disturbed water
+    // does not make clean circles. Each disturbance gives an envelope; one chop field, carried by the current and
+    // changing fast, fills them all.
+    float slosh = 0.0; vec2 ringG = vec2(0.0);
     for (int i = 0; i < 24; i++) {
       vec4 r = uRip[i];
       float age = uTime - r.z;
       if (age < 0.0 || age > 2.4 || r.w <= 0.0) continue;
       vec2 dp = q - r.xy - uRipV[i] * age; float dd = length(dp) + 1e-4;
-      float R = 0.12 + age * 0.75, wv = 0.05 + age * 0.05;
-      float x = (dd - R) / wv;
-      // a ring left by something moving (uRipD: its heading) shows only its sides: the overlapping sides of rings
-      // dropped along a path are what make a wake's two arms, and a whole circle from each would show as rings
+      // left by something moving (uRipD: its heading): mostly to its sides, which run together into a wake's arms
       float side = 1.0;
-      if (dot(uRipD[i], uRipD[i]) > 0.25) { float c = dot(dp / dd, uRipD[i]); side = (1.0 - c * c) * (1.0 - c * c); }
-      g += dp / dd * (x * exp(-x * x)) * r.w * 0.9 * exp(-age * 1.3) / (1.0 + dd * 2.0) * side;
+      if (dot(uRipD[i], uRipD[i]) > 0.25) { float c = dot(dp / dd, uRipD[i]); side = 0.25 + 0.75 * (1.0 - c * c); }
+      float amp = r.w * exp(-age * 1.7) * side;
+      float R = 0.15 + age * 0.55;
+      slosh += amp * exp(-dd * dd / (R * R * 0.7 + 0.02));
+      float wv = 0.06 + age * 0.06, x = (dd - R - 0.1) / wv;
+      ringG += dp / dd * (x * exp(-x * x)) * amp * 0.3 / (1.0 + dd * 2.0);
+    }
+    if (slosh > 0.001 || dot(ringG, ringG) > 1e-6) {
+      vec3 cq = vec3((q - v * s0 * 1.2) * 5.5, uTime * 3.2);
+      vec2 chop = vec2(snoise(cq), snoise(cq + 23.1));
+      vec3 cq2 = vec3((q - v * s0 * 1.2) * 13.0, uTime * 5.0 + 4.0);
+      chop += 0.5 * vec2(snoise(cq2), snoise(cq2 + 11.7));
+      g += chop * min(slosh, 1.2) * 0.42 + ringG * (0.55 + 0.45 * chop.x);
+      foamIn = max(foamIn, smoothstep(0.5, 1.2, slosh) * 0.25);
     }
     if (uSnap > 0.5) g = floor(g * 8.0 + 0.5) / 8.0;                // pixel style: ripples as facets
     vec3 N = normalize(vec3(-g.x, 1.0, -g.y));
