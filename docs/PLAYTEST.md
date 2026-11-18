@@ -579,3 +579,28 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 - No planning or gestures yet (S5 to S7): runs come only from the console. The sample sets the building's frame once; frames do not follow a moved building until the plan UI syncs them.
 - Overlay colours are per run, not per segment, and there are no moving dashes yet (S12). Drains and vents compile but nothing drains through them indoors yet (S11).
 - A switch box is just a box: switching what it controls comes with trim-out (S9b).
+
+## Services S5 + S6 — plan cable and pipe through the frame in two clicks
+
+**What is new**
+
+- A router finds the way a run takes through a building's frame (`src/sim/core/routefind.js` over channels read from the framing members, `src/sim/content/frame-channels.js`): up and down beside a stud, sideways through the studs at outlet height, waist height or near the top, up through the top plates and over the ceiling joists, or down through the bottom plate into a joist bay and along or across the joists (hung under them over a crawl space). Openings block their bays: a window keeps the bays under its sill and over its header; a header is never bored.
+- Holes are sized and checked to code: a bearing stud loses at most 40% of its depth (IRC R602.6), a joist a third and never within 2 in of an edge (R502.8.1), a top plate half its width; a hole nearer than 1-1/4 in (cable) or 1-1/2 in (pipe) to the stud face gets a nail plate (NEC 300.4, IRC P2603.2.1). A 2 in drain will not go through 2x4 studs or 2x8 joists, and says so.
+- A drain only ever runs downhill and falls 2 cm a metre (1 cm for 3 in and up, IPC 704.1); it starts high in a joist bay to have room. Too long a run for the floor's depth is refused in plain words.
+- Planning by hand (`src/services-plan.js`). Hands (F) near a framed building shows Power, Cold, Hot, Waste (keys 1 to 4). Places a run can start glow: a breaker panel (its next free breaker), a tank, pump or heater, a box, a stub, a drain exit. Click one, or a stud to start fresh. Aim at the frame: a ghost box or stub snaps beside the nearest stud at the preset height; the wheel steps the preset (outlet 0.40 m, switch 1.20 m, counter 1.10 m on 12/2, ceiling light; sink, toilet, shower; sink drain, toilet and shower floor drains, out of the building). The route draws itself in dashes with a dot at every hole (silver where a nail plate goes) and the hint line reads like "14/2 cable, 4.5 m, 11 holes, through the studs". R tries another way (up to three). Drag the dashes to pin a point the route must pass; right-click unpins. Click plans it, and the new box is the next start, so a circuit is a chain of clicks. Right-click steps back.
+- Runs ride on their building's frame, now kept in step with where the building stands: a moved building takes its runs along.
+
+**Try this**
+
+1. Set down the cabin plan (Build, Plans) and stand inside its walls. F, then 1. Click a stud low on one wall (a new outlet box), aim at another wall: watch the dashes, press R a couple of times, click. Click on round the room.
+2. Wheel to Switch and plan a box at 1.2 m beside the door; wheel to Ceiling light and aim at the floor under where the light should be.
+3. Press 4 (Waste). Wheel to Sink drain, click a stud on an outside wall, wheel to Out of the building, aim low at an outside wall: the drain drops into the floor and falls to the exit. Try a sink drain far across the cabin: it is refused when the joists are not deep enough for the fall.
+4. With a panel placed on a wall (Equip), its glow is breaker 1; the run you plan from it becomes that breaker's circuit.
+5. Console: `__servicesPlan.plan('power', [x, y, z], [x, y, z], 'outlet')` plans between two frame-local points; `__game.routes.find(...)` and `__game.routes.channelsFor(structId)` are the router and the channels.
+
+**What's weak**
+
+- Clicking the middle of a planned run to branch from it is not there yet. Vents are not planned (S11).
+- Water equipment standing in the yard cannot be routed to: the line in from outside comes with the ground work (S13). Start supply from a stub, or from a tank or heater inside the building.
+- The cost of a hole is a guess (worth 40 cm of extra run), so the first route sometimes goes over the top where an electrician would bore straight through; R shows the others.
+- Planned runs are not yet worked (drill, pull, crimp: S7) and the Build panel does not list rough-in yet (S8).
