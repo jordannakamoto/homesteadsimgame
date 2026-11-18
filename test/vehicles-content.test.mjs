@@ -109,3 +109,13 @@ test('ATV: hard cornering leans it and washes the front out before it tips; a si
   drive(s, {}, on('grass', side), 1);
   assert.ok(s.tip > 0.45, 'a 22 degree side slope: ' + s.tip);
 });
+
+test('ATV: heading steer backs up when pushed behind, then stops and drives off when pushed ahead; no push coasts then holds', () => {
+  const { headingControl } = vehicleCore, env = on('grass'), b = ridden(env);
+  drive(b, (q) => headingControl(q, ATV, 0, -1), env, 3);
+  assert.ok(b.u < -1 && b.gear === -1, 'reversing: ' + b.u);
+  drive(b, (q) => headingControl(q, ATV, 0, 1), env, 4);
+  assert.ok(b.u > 3 && b.gear >= 1, 'forward again: ' + b.u);
+  drive(b, (q) => headingControl(q, ATV, 0, 0), env, 12);
+  assert.ok(b.u === 0, 'coasted down and held: ' + b.u);
+});

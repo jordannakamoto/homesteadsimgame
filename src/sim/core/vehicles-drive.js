@@ -410,6 +410,7 @@ export function headingControl(b, kind, mx, mz, { gentle = false } = {}) {
     const steer = tracked ? clamp(errT * 2, -1, 1) : clamp((-errT * 1.5) / Math.max(kind.steerMaxRad, 0.1), -1, 1);
     return { throttle: -mag * k * Math.max(0.3, Math.cos(errT)), steer, brake: 0, handbrake: false };
   }
+  if (kind.engine && b.u < -0.6) return { throttle: 0, steer: 0, brake: mag, handbrake: false };   // still rolling back: stop first
   if (tracked) return { throttle: mag * k * Math.max(0, Math.cos(err)), steer: clamp(err * 2, -1, 1), brake: 0, handbrake: false };
   const lim = kind.steerMaxRad * (1 - (kind.steerSpeedFalloff || 0) * Math.min(1, Math.abs(b.u) / kind.topMps));
   return { throttle: mag * k * Math.max(0.25, Math.cos(err)), steer: clamp((err * 1.5) / Math.max(lim, 0.05), -1, 1), brake: 0, handbrake: false };

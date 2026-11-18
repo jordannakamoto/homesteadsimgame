@@ -579,3 +579,63 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 - No planning or gestures yet (S5 to S7): runs come only from the console. The sample sets the building's frame once; frames do not follow a moved building until the plan UI syncs them.
 - Overlay colours are per run, not per segment, and there are no moving dashes yet (S12). Drains and vents compile but nothing drains through them indoors yet (S11).
 - A switch box is just a box: switching what it controls comes with trim-out (S9b).
+
+## Vehicles V3 + V4 — ride the ATV (branch `vehicles-v3v4-atv`)
+
+**What is new**
+
+- A utility ATV is parked a few steps past the old well in every world (new worlds, and once in older saves). It is modelled on a real mid-size 4x4 automatic quad (table below): racks front and rear, fenders, footwells, a winch, a ball hitch, 24 in tyres with tread you can see turning, handlebars that turn with the steering.
+- **Get on by walking into its side** (between the axles, pushing toward the seat) for a quarter of a second: it glows faintly when you are in the zone, then you swing on. Refused with a line if your arms are full or you are in build mode.
+- **Drive like walking**: push where you want to go (WASD relative to the camera, or the left touch stick). Space brakes, Shift is gentle throttle (slippery slopes, tight spots). Push behind you at a crawl and it reverses. **E** brakes to a stop and steps you off on the side toward the camera's right (else the other side, else behind).
+- It handles like a 290 kg machine: about 4 s to 50 km/h through a five-speed automatic (you can see the nose squat and dip at each shift), engine braking when you let go, a slow creep on hard floors, a rider-held brake once it is nearly stopped. Grip comes from the ground under it: dry grass, wet grass (when it rains), packed or loose dirt, mud (wet dirt), gravel and stone paths, mulch, sand, snow, stream water and floors each have their own peak and sliding grip and rolling drag. Too much throttle on wet grass or mud spins the wheels; it climbs about 25 degrees of dry grass, not of wet grass, and nothing past about 33 degrees. Steering slows and narrows with speed, and the front washes out (understeer) rather than drifting.
+- Weight transfer you can see: it dips under braking, squats under power, leans out of turns and bobs on its springs (0.2 m of travel, about 2 Hz). It leaves the ground off humps and lands with a thump, a little camera shake and a puff of dust. On a steep side slope or in a hard turn it warns you ("Steep side slope: ease off"); go past it and it rolls over softly, you jump clear uphill, and it is set back on its wheels after a few seconds.
+- The rider straddles the seat with hands on the grips and feet on the footrests, leans forward, leans into turns and turns with the bars. The hatchet is put away and the tool keys (1-6), build mode (B), the hands (F) and the construction keys are locked while seated; the panels (I, U, J, Y, H) still open.
+- The camera stays high and yours: it looks a little ahead of where you are going and draws back slightly at speed.
+- It stays where you left it: the position and fuel go to the world twice a second while you drive, when you step off, and before the page closes; reload while seated and you are still on it.
+
+**Try this**
+
+1. New world: walk past the well; the ATV is there. Walk into its side to get on. Drive around trees and the house; get off with E; reload; it is where you left it.
+2. Hold W down a long grass slope and let go: feel the engine braking. Turn hard at speed: it leans and runs wide. Make it rain (weather panel, Y) and try the same slope again.
+3. Drive across a dug or graded patch (Yard, key 6) and a gravel path: the grip and drag change (`__vehicles.body('v1').surface`).
+4. Console: `__vehicles.body(__vehicles.driven())` (speed, rpm, gear, spin, tip), `__vehicles.spawn('atv')` (another one in front of you), `__vehicles.bench()` (microseconds per drive step here), `__vehicles.stats()`.
+
+**Real-world references the ATV is tuned against** (Honda FourTrax Rancher 4x4 420 published specifications; tyre figures are typical published off-road ranges)
+
+| Figure | Real | In the game |
+|---|---|---|
+| Length x width x height | 84.6 x 47.4 x 46.8 in (2.15 x 1.20 x 1.19 m) | 2.15 x 1.20 x 1.19 m |
+| Wheelbase | 51.0 in (1.295 m) | 1.295 m |
+| Seat height / ground clearance | 34.9 in (0.886 m) / 9.2 in (0.234 m) | 0.886 m / 0.234 m |
+| Turning radius | 11.5 ft (3.5 m) | 23 degrees of lock, 3.5 m |
+| Tyres | 24 x 8-12 front, 24 x 10-11 rear | radius 0.305 m |
+| Curb mass | 643-676 lb (292-307 kg) | 292 kg + 80 kg rider |
+| Engine | 420 cc single, about 26.6 hp (19.8 kW) | 32 N m peak, 19.8 kW, 7000 rpm limiter, 5-speed automatic |
+| Suspension travel | 7.3 in front, 8.5 in rear (0.19-0.22 m) | 0.20 m, 2.0 Hz, lightly damped |
+| Fuel | 3.9 gal (14.8 L) | 14.8 L, about 5 L/h flat out |
+| Towing | 848 lb (385 kg) | trailer: 350 kg on the bed |
+| Top speed | about 55 mph claimed (24 m/s) | governed at 18 m/s (65 km/h), see below |
+| Tyre peak grip (knobby) | dry grass 0.6-0.7, wet grass 0.3-0.4, packed dirt 0.65-0.75, gravel 0.55-0.65, mud 0.2-0.35 | 0.65, 0.39, 0.72, 0.6, 0.29 (sliding about 85 percent of peak) |
+| Rolling resistance | hard ground 0.03, grass 0.05, mud and sand 0.1-0.15 | 0.034-0.135 by surface |
+
+**Frame cost**
+
+Measured headless (SwiftShader, Low preset, same view, `main` at e09c44a vs this branch); `__game.bench()` itself did not finish in 25 minutes without a GPU timer, so these are the CPU numbers plus draw calls:
+
+| | before | after |
+|---|---|---|
+| Draw calls / triangles, standing at arrival with the ATV 12 m away | 67 / 369,464 | 70 / 370,892 (+1 body, +1 wheels, +1 bars) |
+| Vehicles' per-frame hooks with the ATV parked | - | 0.002 ms (+0.005 ms for the starter check) |
+| One drive substep (4 ground reads, 3 push-outs, the model): `__vehicles.bench()` | - | 0.011-0.017 ms; at 144 fps that is about 1.2 substeps a frame, about 0.02 ms |
+| The whole seated update per frame (substeps, drawing the unit, posing the rider, sync) at 1/144 s | - | 0.055-0.085 ms (noisy, software-rendered host) |
+| `step()` median at 1/144 s, driving flat out | 0.10 ms (standing) | 0.10 ms |
+
+No new passes; parked units cost nothing per frame beyond the zone check. On your machine: Graphics panel JS ms while driving, and `__vehicles.stats()` (ms per frame, substeps per frame).
+
+**What's weak**
+
+- Top speed is governed at 18 m/s rather than the real 20-24 m/s: chunk streaming builds a new row of 32 m chunks each time you cross one (every 1.8 s at 18 m/s), and headless software rendering cannot show whether that hitches on a real GPU. Check the Graphics panel's JS milliseconds while driving flat out; if it holds, raise `topMps` in `src/sim/content/vehicles.js`.
+- No touch "Off" button yet (V6): on a phone the act button gets you off. No HUD chip (speed, fuel) yet (V6). No dust, tracks or splashes beyond the landing puff (V5). No trailer on the page yet (V7): the trailer is still a grey box if spawned.
+- The rider is the existing blocky character with one-piece legs, so knees do not bend; the legs reach the footrests straight.
+- Fuel runs down but there is no way to refuel by hand yet (V9); `__game.sim.commandNow('vehicles.refuel', { id })` takes gasoline from stock.
+- Collisions with buildings and trees use three circles along the body; it can clip a corner slightly.
