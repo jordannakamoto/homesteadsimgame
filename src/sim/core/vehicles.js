@@ -14,6 +14,7 @@
 // hooks (content): takeFuel(ctx, litres) -> litres actually taken (pays from stock; default: free),
 //                  pay(ctx, usd) -> bool (rentals; default: refuses)
 // kinds: the vehicle records (see vehicles-drive.js); a kind with rentUsdPerDay can be rented.
+// surfaces: { [name]: { mu, slide, roll } } for the page's env.surface (content names the ground; api.surfaces).
 
 import { hitchPose, towPoint, wrap, ARTIC_MAX } from './vehicles-drive.js';
 export * from './vehicles-drive.js';
@@ -40,7 +41,7 @@ export function seatOf(s, actor) {
   return null;
 }
 
-export function createVehicleSystem({ name = 'vehicles', kinds, implementKinds = {}, hooks = {} } = {}) {
+export function createVehicleSystem({ name = 'vehicles', kinds, implementKinds = {}, hooks = {}, surfaces = {} } = {}) {
   if (!kinds) throw new Error('createVehicleSystem needs kinds');
   const takeFuel = hooks.takeFuel || ((ctx, l) => l);
   const pay = hooks.pay || (() => false);
@@ -247,6 +248,6 @@ export function createVehicleSystem({ name = 'vehicles', kinds, implementKinds =
       }
     },
     commands,
-    api: { kinds, implementKinds, fuelImbalance, seatOf, seated, hitchPose },
+    api: { kinds, implementKinds, surfaces, fuelImbalance, seatOf, seated, hitchPose },
   };
 }
