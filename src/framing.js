@@ -222,7 +222,7 @@
     const [ux, uz] = c.u,
       col = c.mat === "dark" ? "sidingDark" : "siding",
       upV = [-c.out[0] * Math.sin(LEAN), Math.cos(LEAN), -c.out[2] * Math.sin(LEAN)],
-      common = { thickness: T.clad, col, out: c.out, u: [ux, uz] }, trimC = { ...common, col: "trim" };
+      common = { thickness: T.clad, col, out: c.out, u: [ux, uz], ...(c.roof ? { roof: c.roof } : {}) }, trimC = { ...common, col: "trim" };
     // trim round every door and window: two jambs and a head (and a sill under a window), 90 x 20 mm, flat to the wall; the siding butts into it
     const tw0 = c.trim === false ? 0 : TRIM_W, W = TRIM_W, tmid = c.off + 0.006;
     for (const q of c.openings || []) {
@@ -668,14 +668,14 @@
       }
       const o = g.out || 1,
         mid = [(g.a[0] + g.b[0]) / 2, g.y0, (g.a[1] + g.b[1]) / 2],
-        ext = { area: r3(g.area || area), draw: 0 };
+        ext = { area: r3(g.area || area), draw: 0, roof: r.id };    // the gable belongs to its roof: hidden with it when you are inside
       M(out, g.id + ".sh", "sheathing", "wall", "sheathing", g.id, "osb", T.osb, L, mid, [mid[0], g.y1 || g.y0 + 1, mid[2]], [ux, 0, uz], { ...ext, thickness: T.osb });
       M(out, g.id + ".wr", "membrane", "housewrap", "wrap", g.id, "housewrap", T.wrap, L, mid, [mid[0], g.y1 || g.y0 + 1, mid[2]], [ux, 0, uz], { ...ext, thickness: T.wrap });
       {
         // siding on the gable: the same courses, each cut to the roof slope (stepped lengths)
         const gt = (q) => g.top(g.a[0] + ux * q, g.a[1] + uz * q) - 0.16;
         let gn = 0;
-        sidingCourses(out, (c) => g.id + "." + c + gn++, { u: [ux, uz], out: [nrm[0] * o, 0, nrm[2] * o], mat: g.mat, parent: g.id, y0: g.y0, y1: g.y1 || g.y0 + 1, trim: false, off: o * (0.0445 + T.osb + 0.012), L,
+        sidingCourses(out, (c) => g.id + "." + c + gn++, { u: [ux, uz], out: [nrm[0] * o, 0, nrm[2] * o], mat: g.mat, parent: g.id, roof: r.id, y0: g.y0, y1: g.y1 || g.y0 + 1, trim: false, off: o * (0.0445 + T.osb + 0.012), L,
           at: (q, y, off) => [g.a[0] + ux * q + nrm[0] * (off || 0), y, g.a[1] + uz * q + nrm[2] * (off || 0)],
           spans: (ya) => { let lo = -1, hi = -1; for (let q = 0; q <= L + 1e-6; q += 0.02) if (gt(q) > ya + 0.1) { lo < 0 && (lo = q); hi = q; } return lo >= 0 && hi - lo > 0.1 ? [[lo, hi]] : []; },
           // board and batten goes on up the gable: each vertical board stops under the rake (at the lower of its two top corners)

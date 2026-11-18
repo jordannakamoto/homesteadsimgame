@@ -38,11 +38,11 @@
     saw.add(disc);
     saw.visible = false;
     G.scene.add(saw);
-    const pile = new T.InstancedMesh(box, stick, 12);
+    const PILE_N = 64, pile = new T.InstancedMesh(box, stick, PILE_N);
     pile.count = 0; pile.castShadow = true; pile.frustumCulled = false;
     G.scene.add(pile);
     const m4 = new T.Matrix4(), q = new T.Quaternion(), e = new T.Euler(), v = new T.Vector3(), sc = new T.Vector3(), up = new T.Vector3(0, 1, 0);
-    let at = null, pileN = -1, job = null, drop = null;
+    let at = null, job = null, drop = null;
     const queue = [];
     const H = 0.735;                                    // the top of a horse, where a stick lies
     function setHorses(h) {
@@ -51,20 +51,33 @@
       at = h ? { ...h, sig } : null;
       horses.visible = !!at;
       if (at) { horses.position.set(at.x, G.heightAt(at.x, at.z), at.z); horses.rotation.y = at.yaw; }
-      pileN = -1;
+      pileKey = '';
     }
-    function setPile(n) {
-      n = Math.max(0, Math.min(12, n | 0));
-      if (n === pileN) return;
-      pileN = n;
+    // what lies by the horses, stacked the way a carpenter keeps it: two neat stacks on the ground beside them, the pieces
+    // cut and waiting to go in on the near side and the offcuts kept for short pieces on the far side. Each stack is sorted
+    // longest first, laid side by side with their ends flush, four to a layer, layer on layer.
+    // list: [{ len, w, d, waiting }] (metres: length, width across, thickness up)
+    let pileKey = '';
+    function setPile(list) {
+      if (typeof list === 'number') list = [];            // an old caller: a count of loose offcuts
+      const key = (at ? at.x.toFixed(2) + at.z.toFixed(2) + at.yaw.toFixed(2) : '-') + '|' + list.map((p) => p.len.toFixed(2) + (p.waiting ? 'w' : '') + p.w).join(',');
+      if (key === pileKey) return;
+      pileKey = key;
       if (!at) { pile.count = 0; return; }
-      const c = Math.cos(at.yaw), s = Math.sin(at.yaw), gy = G.heightAt(at.x, at.z);
-      for (let i = 0; i < n; i++) {
-        // short sticks in a loose heap beside the far horse
-        const lx = 0.62 + ((i * 37) % 5) * 0.07, lz = -0.9 + ((i * 53) % 7) * 0.06, len = 0.3 + ((i * 29) % 9) * 0.07;
-        e.set(0, ((i * 71) % 13) * 0.21, 0); q.setFromEuler(e);
-        v.set(at.x + lx * c + lz * s, gy + 0.02 + Math.floor(i / 4) * 0.04, at.z - lx * s + lz * c);
-        pile.setMatrixAt(i, m4.compose(v, q.multiply(new T.Quaternion().setFromAxisAngle(up, at.yaw)), sc.set(0.089, 0.038, len)));
+      const c = Math.cos(at.yaw), s = Math.sin(at.yaw), gy = G.heightAt(at.x, at.z), rot = new T.Quaternion().setFromAxisAngle(up, at.yaw);
+      let n = 0;
+      for (const [waiting, side] of [[true, -1], [false, 1]]) {
+        const stack = list.filter((p) => !!p.waiting === waiting).sort((a, b) => b.len - a.len);
+        let row = 0, layer = 0, y = gy + 0.01, layerH = 0, across = 0;
+        for (const p of stack) {
+          if (n >= PILE_N) break;
+          if (row === 4) { row = 0; layer++; y += layerH + 0.002; layerH = 0; across = 0; }
+          // across the horses' line: beside them (side), the pieces of a layer side by side; along: ends flush at one end
+          const lx = side * (0.75 + across + p.w / 2), lz = -0.6 + p.len / 2;
+          v.set(at.x + lx * c + lz * s, y + p.d / 2, at.z - lx * s + lz * c);
+          pile.setMatrixAt(n++, m4.compose(v, rot, sc.set(p.w, p.d, p.len)));
+          across += p.w + 0.012; layerH = Math.max(layerH, p.d); row++;
+        }
       }
       pile.count = n;
       pile.instanceMatrix.needsUpdate = true;

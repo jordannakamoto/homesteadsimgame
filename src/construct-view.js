@@ -190,6 +190,8 @@
   function redraw(id) {
     const pr = S().progress[id], g = geom(id);
     if (!pr || !g) return;
+    // a finished building is build mode's to draw (siding on its walls, no nails, no framing): the construction view lets go
+    if (pr.done) { asm.remove(id); return; }
     asm.setMats(id, look.matsFor ? look.matsFor(id) : null);      // its building's materials: cut open with the walls when you are inside
     asm.setFrame(id, g.matrix);
     const w = V.working && V.working.id === id && !V.working.partial ? V.working : null;
@@ -428,7 +430,7 @@
   const dotLayers = new Map();
   function dotsFor(id) {
     const pr = S().progress[id], g = geom(id);
-    if (!pr || !g) return;
+    if (!pr || !g || pr.done) return;
     const by = new Map();
     for (const mid in pr.members) {
       const pm = pr.members[mid];
@@ -1141,9 +1143,14 @@
     else CS.setHorses(s.options.sandbox || !V.anyOpen ? null : s.horses);
     if (V.pileRev !== V.rev) {
       V.pileRev = V.rev;
-      let n = 0;
-      for (const pr of Object.values(s.progress)) if (!pr.done) for (const k in pr.lines) { const ln = pr.lines[k]; if (ln.stick && ln.cut) for (const st of ln.cut.sticks) if (st.open && st.left > 0) n++; }
-      CS.setPile(n);
+      // by the horses: each piece cut and waiting to go in, and each offcut kept, at its real length and section
+      const list = [], sec = (itemId) => { const d = CAT[itemId] && CAT[itemId].dims; return d ? { w: d.depthM || 0.089, d: d.widthM || 0.038 } : { w: 0.089, d: 0.038 }; };
+      for (const pr of Object.values(s.progress)) {
+        if (pr.done) continue;
+        for (const id in pr.members) { const m = pr.members[id], ln = m.line && pr.lines[m.line]; if (m.prep && !m.built && ln) for (let k = 0; k < (m.pcs || 1); k++) list.push({ len: m.len, ...sec(ln.itemId), waiting: true }); }
+        for (const k in pr.lines) { const ln = pr.lines[k]; if (ln.stick && ln.cut) for (const st of ln.cut.sticks) if (st.open && st.left > 0) list.push({ len: st.left, ...sec(ln.itemId), waiting: false }); }
+      }
+      CS.setPile(list);
     }
     V.cutNow = CS.update(dt);
   }
