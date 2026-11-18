@@ -15,7 +15,7 @@ import { createWaterFx } from './water/water-fx.js';
 import { createReflectProbe } from './water/reflect-probe.js';
 import { createReflectPlane } from './water/reflect-plane.js';
 import { createRippleSim } from './water/ripple-sim.js';
-import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, stringifySave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork, powerNear, vehicleCore, groundRead, setGroundBase } from './sim/index.js';
+import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, stringifySave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork, powerNear, vehicleCore, groundRead, setGroundBase, foundationRead } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -4746,6 +4746,7 @@ window.__game = {
   control, groundAt, pushOut,
   // one ground (src/sim/ground.js): ground.cmd('cut' | 'fill' | 'push' | 'grade' | 'trim' | 'tamp', payload) moves earth;
   // heightAt is the graded ground (base + macro), ground.surfaceAt the walked surface (plus the fine, hand-dug ground)
+  foundation: foundationRead,     // reads of the foundation system (jobs, layout, dig, cure gates): src/sim/foundation.js
   ground: {
     read: groundRead,
     cmd: (name, p) => { flushMacro(); return sim.commandNow('ground.' + name, p); },
