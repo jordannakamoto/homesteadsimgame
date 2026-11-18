@@ -21,6 +21,7 @@ export const RIVER_SHADE = /* glsl */ `
   uniform vec4 uWin;                       // the live simulation's window (x0, z0, x1, z1); x1 < x0 when there is none
   uniform samplerCube uEnv, uEnv2; uniform vec4 uEnvPos; uniform float uEnvMix;
   uniform sampler2D uRefl; uniform mat4 uReflMat; uniform vec4 uReflOn;   // the mirror (reflect-plane.js)
+  uniform sampler2D uRefl2; uniform mat4 uReflMat2; uniform vec4 uReflOn2;   // the second mirror, for another step of the stream
   uniform float uCloud;                                  // how overcast it is (0-1)
   uniform float uRain;                                   // how hard it is raining (0-1)
   float bankNear = 0.0;                                  // set by the caller: how close dry land is (0-1)
@@ -55,6 +56,21 @@ export const RIVER_SHADE = /* glsl */ `
   }
   vec2 waterCell(vec2 p) { return floor(p * uTPM); }
   vec2 waterTexel(vec2 p) { return uSnap > 0.5 ? (floor(p * uTPM) + 0.5) / uTPM : p; }
+  // one planar mirror (reflect-plane.js) at a water point: its picture and how much of it to use (only water at the
+  // mirror's own level, within about 30 m of where it was centred, and where the mirror drew anything)
+  vec4 mirrorAt(sampler2D tex, mat4 M, vec4 on, vec3 world, vec2 q, vec2 wob, float smear) {
+    if (on.x < 0.5) return vec4(0.0);
+    float kp = (1.0 - smoothstep(0.08, 0.25, abs(world.y - on.y))) * (1.0 - smoothstep(22.0, 34.0, distance(q, on.zw)));
+    if (kp <= 0.0) return vec4(0.0);
+    vec4 pr = M * vec4(world.x, on.y, world.z, 1.0);
+    vec2 ruv = pr.xy / pr.w + wob;
+    kp *= smoothstep(0.0, 0.03, min(min(ruv.x, 1.0 - ruv.x), min(ruv.y, 1.0 - ruv.y)));
+    vec4 m4 = texture2D(tex, clamp(ruv, 0.001, 0.999)) * 0.36;
+    m4 += texture2D(tex, clamp(ruv + vec2(0.0, smear), 0.001, 0.999)) * 0.22 + texture2D(tex, clamp(ruv - vec2(0.0, smear), 0.001, 0.999)) * 0.22;
+    m4 += texture2D(tex, clamp(ruv + vec2(0.0, smear * 2.2), 0.001, 0.999)) * 0.1 + texture2D(tex, clamp(ruv - vec2(0.0, smear * 2.2), 0.001, 0.999)) * 0.1;
+    if (m4.a <= 0.01) return vec4(0.0);
+    return vec4(m4.rgb / m4.a, kp * clamp(m4.a, 0.0, 1.0));
+  }
   // 3D simplex noise (Gustavson / Ashima Arts, MIT)
   vec4 sxPerm(vec4 x) { return mod(((x * 34.0) + 1.0) * x, 289.0); }
   float snoise(vec3 v) {
@@ -234,24 +250,21 @@ export const RIVER_SHADE = /* glsl */ `
     if (envK > 0.0) sky = mix(sky, mix(textureLod(uEnv, R, lod).rgb, textureLod(uEnv2, R, lod).rgb, uEnvMix), envK);
     // and where this water lies at the mirror's level, the mirror: the banks and what hangs over them, in place,
     // wavering with the ripples
-    if (uReflOn.x > 0.5) {
-      // only water at the mirror's own level: a pool on a step above or below would show it misplaced
-      float kp = (1.0 - smoothstep(0.08, 0.25, abs(world.y - uReflOn.y))) * (1.0 - smoothstep(22.0, 34.0, distance(q, uReflOn.zw)));
-      if (kp > 0.0) {
-        vec4 pr = uReflMat * vec4(world.x, uReflOn.y, world.z, 1.0);
-        vec2 ruv = pr.xy / pr.w + g * (0.05 + 0.08 * rough);
-        float smear = (0.003 + 0.012 * rough) * (1.0 + 3.0 * smoothstep(0.6, 0.98, graze));
-        kp *= smoothstep(0.0, 0.03, min(min(ruv.x, 1.0 - ruv.x), min(ruv.y, 1.0 - ruv.y)));
-        // (alpha: whether the mirror drew anything there; where it did not, the sky and far surroundings above stand)
-        vec4 m4 = texture2D(uRefl, clamp(ruv, 0.001, 0.999)) * 0.36;
-        m4 += texture2D(uRefl, clamp(ruv + vec2(0.0, smear), 0.001, 0.999)) * 0.22 + texture2D(uRefl, clamp(ruv - vec2(0.0, smear), 0.001, 0.999)) * 0.22;
-        m4 += texture2D(uRefl, clamp(ruv + vec2(0.0, smear * 2.2), 0.001, 0.999)) * 0.1 + texture2D(uRefl, clamp(ruv - vec2(0.0, smear * 2.2), 0.001, 0.999)) * 0.1;
-        vec3 mir = m4.a > 0.01 ? m4.rgb / m4.a : sky;
-        kp *= clamp(m4.a, 0.0, 1.0);
+    // Streams step down in pools, and a mirror is right only for water at its own level: one mirror follows the
+    // water by you, the other the next step in view (above or below). Each pool takes the one at its level.
+    {
+      vec2 wob = g * (0.05 + 0.08 * rough);
+      float smear = (0.003 + 0.012 * rough) * (1.0 + 3.0 * smoothstep(0.6, 0.98, graze));
+      vec4 m1 = mirrorAt(uRefl, uReflMat, uReflOn, world, q, wob, smear);
+      vec4 m2 = mirrorAt(uRefl2, uReflMat2, uReflOn2, world, q, wob, smear);
+      vec4 m = m1.a >= m2.a ? m1 : m2;
+      if (m.a > 0.0) {
+        // (where the mirror drew nothing, the sky and far surroundings above stand)
+        vec3 mir = m.rgb;
         // a reflection is a little darker and greyer than what it shows (some light goes into the water, the surface
         // is never quite clean), more so in the silty shallows by the banks
         mir = mix(mir, vec3(dot(mir, vec3(0.3, 0.5, 0.2))), 0.2 + 0.3 * fringe) * mix(0.82, 0.6, fringe);
-        sky = mix(sky, mir, kp);
+        sky = mix(sky, mir, m.a);
       }
     }
     float sd = max(dot(R, uSunDir), 0.0);

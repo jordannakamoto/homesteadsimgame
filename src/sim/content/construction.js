@@ -299,8 +299,8 @@ export const PLAN_BOOK = Object.freeze({
 
 // ---- what finishing things opens (docs/CONSTRUCTION.md, "Unlocks")
 export const UNLOCKS = Object.freeze([
-  { when: 'start', opens: ['plan:tent', 'plan:shed', 'found:pier-blocks', 'method:stick-frame', 'roof:metal', 'roof:shingle'], says: '' },
-  { when: 'plan:shed', opens: ['plan:cabin', 'plan:draw', 'choice:windows', 'choice:insulation', 'fixture:wood-stove'], says: 'The small cabin plan, drawing your own plans, window and insulation choices, the wood stove' },
+  { when: 'start', opens: ['plan:tent', 'plan:shed', 'plan:cabin', 'found:pier-blocks', 'method:stick-frame', 'roof:metal', 'roof:shingle'], says: '' },
+  { when: 'plan:shed', opens: ['plan:draw', 'choice:windows', 'choice:insulation', 'fixture:wood-stove'], says: 'Drawing your own plans, window and insulation choices, the wood stove' },
   { when: 'plan:cabin', opens: ['found:piers', 'found:slab', 'plan:larger', 'method:timber-frame', 'fixture:power', 'fixture:water'], says: 'Concrete piers and slabs, larger plans, timber frame, power and water equipment' },
   { when: 'buildings:2', opens: ['method:log', 'found:stemwall', 'plan:a-frame'], says: 'Log construction, stem-wall foundations, the A-frame' },
 ]);

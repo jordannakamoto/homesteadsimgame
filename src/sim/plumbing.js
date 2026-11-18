@@ -15,55 +15,39 @@
 // plumbing.note { key } -> { first }.
 
 import { graph, partEnds, toWorld } from './core/parts.js';
+import { compileLinks } from './core/links.js';
 
 const STATE_V = 1;
 const fresh = () => ({ v: STATE_V, partsV: -1, version: 0, pieces: [], sig: '[]', runs: {}, yard: null, kits: {}, nextKit: 1, notes: {} });
 
 // Pure: (parts state, kinds, mates, options) -> { pieces, runs }
+// The walk itself is the generic one in core/links.js: the parts become a neutral graph (a part is a node,
+// a join an edge, a stretch part's length and a fitting's equivalent length the cost of entering it, a
+// closed valve a blocked joint) and the result is read back into pipe and leak pieces.
 export function compilePlumbing(parts, { kinds, mates, stepM, material, innerM = 0.0204 }) {
   const g = graph({ kinds, mates }, parts), pieces = [], runs = {};
-  const openAt = new Map();
-  for (const e of g.open) { if (!openAt.has(e.part)) openAt.set(e.part, []); openAt.get(e.part).push(e); }
-  const anchors = Object.values(parts.parts).filter((p) => p.at && p.ref && p.ref.piece != null).sort((a, b) => (a.id < b.id ? -1 : 1));
-  for (const A of anchors) {
-    // breadth first over joined parts, carrying length, fittings and whether a closed valve was passed
-    const best = new Map([[A.id, { lenM: 0, equivM: 0, shut: [], via: [] }]]);
-    let frontier = [A.id];
-    const run = (runs[A.id] = { reaches: [], open: 0, shut: [] });
-    while (frontier.length) {
-      const next = [];
-      for (const id of frontier) {
-        const cur = best.get(id), part = parts.parts[id], spec = kinds[part.kind];
-        if (id !== A.id && part.ref) continue;                        // another connection: the run ends there
-        for (const ln of g.adj.get(id) || []) {
-          const o = parts.parts[ln.other], os = kinds[o.kind];
-          const shut = o.set && o.set.open === false ? [...cur.shut, o.id] : cur.shut;
-          const cand = { lenM: cur.lenM + (os.stretch ? (o.len || os.stretch.max) * stepM : 0), equivM: cur.equivM + (os.equivD || 0) * innerM, shut, via: [...cur.via, o.id] };
-          const had = best.get(ln.other);
-          if (had && (had.shut.length < cand.shut.length || (had.shut.length === cand.shut.length && had.lenM <= cand.lenM))) continue;
-          best.set(ln.other, cand); next.push(ln.other);
-        }
-        void spec;
-      }
-      frontier = next;
-    }
-    for (const [id, r] of best) {
-      if (id === A.id) continue;
-      const part = parts.parts[id];
-      if (part.ref) {
-        run.reaches.push(id);
-        if (r.shut.length) for (const v of r.shut) if (!run.shut.includes(v)) run.shut.push(v);
-        if (A.id < id) pieces.push({ id: 'run:' + A.id + '>' + id, kind: 'pipe', from: { ...A.ref }, to: { ...part.ref }, lengthM: Math.max(0.05, r.lenM), equivM: r.equivM,
-          material, shut: r.shut.length > 0, valves: r.shut, via: r.via.slice(0, -1) });
+  const terminals = [], joints = {};
+  for (const id of g.adj.keys()) {
+    const o = parts.parts[id], os = kinds[o.kind];
+    joints[id] = { lengthM: os.stretch ? (o.len || os.stretch.max) * stepM : 0, equivM: (os.equivD || 0) * innerM,
+      blocked: !!(o.set && o.set.open === false), stop: !!o.ref };
+    if (o.ref && o.ref.piece != null) terminals.push({ id, ref: o.ref });
+  }
+  const res = compileLinks({ terminals, joints, edges: g.joins.map((j) => ({ a: j.a.part, b: j.b.part })), openEnds: g.open.map((e) => ({ ...e, at: e.part })) },
+    { start: () => 0, sum: (acc, step) => acc + step.joint.equivM });
+  for (const w of res.walks) {
+    const A = parts.parts[w.terminal], run = (runs[A.id] = { reaches: w.reaches, open: 0, shut: w.blocked });
+    for (const r of w.found) {
+      if (r.type === 'link') {
+        if (!(A.id < r.b)) continue;                                   // as before: a connection with no piece links one way only
+        pieces.push({ id: 'run:' + A.id + '>' + r.b, kind: 'pipe', from: { ...A.ref }, to: { ...parts.parts[r.b].ref }, lengthM: Math.max(0.05, r.lengthM), equivM: r.acc,
+          material, shut: r.blocked.length > 0, valves: r.blocked, via: r.via });
         continue;
       }
-      if (r.shut.length) continue;                                     // dry beyond a closed valve
-      for (const e of openAt.get(id) || []) {
-        const w = toWorld(parts, e.p, stepM);
-        run.open++;
-        if (A.ref.port === 'out') pieces.push({ id: 'leak:' + id + ':' + e.end, kind: 'leak', from: { ...A.ref }, lengthM: Math.max(0.05, r.lenM), equivM: r.equivM, material,
-          y: w.y, a: { x: w.x, z: w.z }, part: id, end: e.end, d: e.d });
-      }
+      const e = r.end, wp = toWorld(parts, e.p, stepM);
+      run.open++;
+      if (A.ref.port === 'out') pieces.push({ id: 'leak:' + r.at + ':' + e.end, kind: 'leak', from: { ...A.ref }, lengthM: Math.max(0.05, r.lengthM), equivM: r.acc, material,
+        y: wp.y, a: { x: wp.x, z: wp.z }, part: r.at, end: e.end, d: e.d });
     }
   }
   return { pieces, runs };

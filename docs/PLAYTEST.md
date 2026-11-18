@@ -406,7 +406,8 @@ The ground is a physical thing now: a smooth surface you shape 10 cm at a time, 
 
 **The tools and how they move**
 
-- **Shovel.** The mouse is your hand on the shovel. Press where the blade should go in: it bites (a jolt and crumbs) and levers up a scoop. Keep holding and drag: the loaded blade follows your hand, a ring shows where it will land, and dots show the arc if it will be thrown. Let go and it drops there. Pull past arm's reach and your character walks after your hand. A plain click drops the scoop beside the hole. Press a bag to rip it open. Earth is conserved: every hole makes a heap somewhere. (Earth per scoop: 1×, 2× or 4× in the Tools aisle; 28 L by default.)
+- **Shovel.** The mouse is your hand on the shovel. Press where the blade should go in: it bites (a stop and crumbs, harder in turf) and levers up a scoop from a bite about 70 cm across. Keep holding and drag: the loaded blade follows your hand, a ring shows where it will land, and dots show the arc if it will be thrown. Let go and it drops there. Pull past arm's reach and your character walks after your hand. A plain click drops the scoop beside the hole. Press a bag to rip it open. No screen shake.
+- **The flat of the blade (right-drag).** Drag it along the ground: loose earth in its way is pushed ahead of it, hollows it passes are filled from what it pushes, and what is left drops where you let go. The blade only goes down as you push (it starts a few centimetres into the ground where you press and follows the ground down), so pushed into a heap from beside it, it bulldozes the heap along; dragged off the top of a heap, it spreads it out. Firm ground and turf are not cut. The middle button turns the view while the shovel is out.
 - **Cut turf.** The shovel held flat: drag along the grass to strip the turf off in a strip.
 - **Materials arrive as things.** Wood chips, bark and bed soil come in 56 L bags set down in front of you (a ring marks the spot, and the store closes so you see them): drag one with your hands, rip it open with the shovel, then scoop the heap where it goes. Gravel, crushed stone, sand and the rest are tipped in a heap. Chips thrown straight on grass work, but the grass comes up through them in a week or two; fabric under them stops it.
 - **Wheelbarrow.** Click to shovel a scoop in (up to 100 L); walk it over and drag down to tip it out.
@@ -478,6 +479,7 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 
 - Inside a building, the stretch of wall between the camera and you opens as before, and now its siding boards (and the framing, wrap and anything else drawn as pieces) open with it. Each building draws its pieces with its own copy of the materials, cut by the same planes as its walls, in build mode's drawing and in the construction view's.
 
+<<<<<<< HEAD
 ## Flooring: finished floors laid by hand (branch `flooring`)
 
 **What is new**
@@ -518,3 +520,67 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 
 - Coped inside corners, returns on stools and scarf joints in long baseboard runs are drawn as plain butts.
 - Paint is one gesture for the whole room.
+=======
+## Cutting made easy (branch `easycut`)
+
+- Fixed: after the first cut the sawhorses stopped cutting (a timer never counted down).
+- A cut piece is no longer something you carry: it waits at the sawhorses and is fetched from there when you set it. Point at its glowing place and click, whatever is in your arms; it flies in from the horses.
+- Hold E at the sawhorses to cut piece after piece. Pieces for the frame lying on the deck now are cut first.
+- The guide sends you to the sawhorses when only cut-to-fit pieces are left in a stage, then back to the frame once they are cut. Guided building and "Work until done" still cut for you.
+
+## Services S0 — power tools see real power
+
+**What is new**
+
+- `window.__game.powerAvailable()` now asks the electrical solve instead of always saying no. A corded tool has power when a live load point (an outlet, a light, any wired load) with spare watts is within 30 m of you; with no load points wired at all it falls back to the main circuit's spare.
+- The circular saw at the sawhorses, power-tool work speed and the stock panel's "needs power" note all follow it.
+
+**Try this**
+
+1. Equip: a battery or generator, an inverter, a 15 A breaker and an outlet, wired together. Stand near the outlet with a circular saw owned: cutting at the sawhorses uses the saw.
+2. Walk more than 30 m from every outlet, or trip the breaker: the saw stops counting as powered. Console: `__game.powerAvailable()`, `__game.powerAvailable(1500)`.
+
+**What's weak**
+
+- The cord is invisible and its 30 m is a fixed number; no extension cords yet.
+
+## Services S1 — one connection compiler, and a store for runs in buildings
+
+**What is new**
+
+- Nothing to see yet: this is groundwork for in-wall wiring and plumbing. First Water (the kit pipes in the yard) now compiles through the new generic `src/sim/core/links.js` and must play exactly as before; its output was checked identical on 400 random pipe networks.
+- `src/sim/core/routes.js`: a generic store of runs on frames (a building), with nodes, bores, pulling, joins and segments as work steps. Not registered in the game yet (that is S2, with the content).
+
+**Try this**
+
+1. First Water: pump, fit kit parts from the barrel to the tap, open the valve, leave an end open. Flow, leaks and the valve should behave as before.
+
+**What's weak**
+
+- No player-facing change; routes become visible with S2/S3.
+
+## Vehicles V0 — the controller stack (no visible change)
+
+**What is new**
+
+- Nothing you should notice. Under the hood the engine now has one place that decides what body your input drives and what the camera follows (`src/engine/control.js`, `__game.control`). Vehicles (the ATV next) sit on it; cooking, ladders, scaffold, roof walking and the hands move onto it later.
+- Also exposed for add-ons: `__game.groundAt(x, z, y)` (the one ground read: terrain, shaped yard ground and built floors) and `__game.pushOut(o, rad)` (the circle push-out the player uses against trees, rocks and walls).
+
+**Try this (regression only)**
+
+1. Walk, sprint, jump, scroll the camera in and out: the same as before.
+2. Climb a ladder and a scaffold, walk on a roof, open the kitchen and cook, use the hands on the water kit: all the same as before.
+3. Console: `__game.control.top().id` is `'walk'`; `__game.control.canTake('seat')` says why a seat would be refused (e.g. `arms full`, `build mode`).
+
+**Known gaps**
+
+- Nothing uses it yet; the first user is the vehicle seat (V3).
+
+## Vehicles, under the hood (branch `vehicles-v1v2-core`)
+
+- Nothing to drive yet: this is the drive model and the world's record of vehicles that the ATV (next slices) runs on. The page part lands in V3.
+- What exists: an ATV and a small trailer as records (`VEHICLE_KINDS`), gasoline, a 20 L fuel can and the trailer in the catalog (new "Vehicles and fuel" category), and a `vehicles` sim system: parked poses, fuel, seats, hitches, rentals.
+- Try from the console: `__game.sim.commandNow('vehicles.add', { kind: 'atv', x: __game.player.x + 3, z: __game.player.z })`, then look at `__game.sim.state.sys.vehicles`. `__game.vehicleCore` has the drive model (`createBody`, `stepBody`, `headingControl`).
+- Weak: no feel tuning yet (the numbers are from the design, checked only headless); towing a trailer while reversing is purely kinematic; no damage, no rollover by design.
+>>>>>>> origin/main
+- The small cabin plan is open from the start; you no longer have to finish the shed first. It comes with Craftsman trim.

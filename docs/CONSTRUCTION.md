@@ -94,7 +94,7 @@ Offered as the first card in the projects notebook: "Build your first shed". It 
 
 Each step shows one short card at the moment it is needed: a sentence of what to do, a sentence of why, and nothing else. The structure and thermal overlays are used as teaching aids at steps 6, 10 and 13.
 
-Finishing the shed opens the small cabin plan and the choices that go with it.
+The small cabin plan is open from the start (the shed is the gentler first build). Finishing the shed opens drawing your own plans and the choices that go with it.
 
 ## Below ground: trenches, pipes and wires
 
@@ -195,7 +195,7 @@ Opened by finishing things, shown as an invitation, never as a grind.
 | Finish | Opens |
 |---|---|
 | Nothing (start) | Tent and tarp, the tool shed plan, pier-block foundations, stick framing, metal and shingle roofing |
-| The shed | The small cabin plan, drawing your own plans, windows and insulation choices, the wood stove |
+| The shed | Drawing your own plans, windows and insulation choices, the wood stove |
 | The cabin | Concrete piers and slab, larger plans, timber frame, power and water equipment |
 | A second building | Log construction, stem-wall foundations, the A-frame |
 
