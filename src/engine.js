@@ -15,7 +15,7 @@ import { createWaterFx } from './water/water-fx.js';
 import { createReflectProbe } from './water/reflect-probe.js';
 import { createReflectPlane } from './water/reflect-plane.js';
 import { createRippleSim } from './water/ripple-sim.js';
-import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, stringifySave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork, powerNear, vehicleCore } from './sim/index.js';
+import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, stringifySave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork, powerNear, vehicleCore, groundRead, setGroundBase } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -208,6 +208,7 @@ function baseHeight(x, z) {
   const h = rawHeight(x, z);
   return rivers ? rivers.carve(h, x, z) : h;
 }
+setGroundBase(baseHeight);       // the ground system's untouched land (reads the current seed and rivers when called)
 // The game is a peaceful homestead builder by default. The old action-RPG combat (enemies, combat HUD) is kept
 // behind a switch: run localStorage.setItem('combat', '1') in the console and reload to bring it back.
 let COMBAT = false;
@@ -268,6 +269,67 @@ function setDelta(gx, gz, v) {
   let t = world.edits.get(k);
   if (!t) { t = new Float32Array(CS * CS); world.edits.set(k, t); }
   t[(gz - tz * CS) * CS + (gx - tx * CS)] = v;
+  macroDirty.add(k);
+}
+// world.edits is a mirror of the ground system's macro grid (sim.state.sys.ground, src/sim/ground.js), which is the
+// truth that is saved. Sim -> engine: syncMacro on 'ground.macro' and 'loaded'. Engine -> sim: old writers (the brush,
+// the starting well, build mode's site cut) still call setDelta; flushMacro hands their tiles to ground.importMacro.
+const macroDirty = new Set(), chunkRefreshQ = new Set(), _macroTmp = new Float32Array(CS * CS);
+let macroEcho = false, chunkRefreshT = -1e9;
+function flushMacro() {
+  if (!macroDirty.size) return;
+  macroEcho = true;                   // the tiles came from here: no need to mirror them back
+  try { for (const k of macroDirty) sim.commandNow('ground.importMacro', { key: k, b64: f32ToBase64(world.edits.get(k) || new Float32Array(CS * CS)) }); }
+  finally { macroEcho = false; macroDirty.clear(); }
+}
+function syncMacro(keys) {
+  for (const k of keys) {
+    const has = groundRead.macroTile(sim.state, k, _macroTmp), old = world.edits.get(k);
+    if (!has && !old) continue;
+    let i0 = CS, i1 = -1, j0 = CS, j1 = -1;
+    for (let n = 0; n < CS * CS; n++) {
+      if ((old ? old[n] : 0) === _macroTmp[n]) continue;
+      const i = n % CS, j = (n / CS) | 0;
+      if (i < i0) i0 = i; if (i > i1) i1 = i; if (j < j0) j0 = j; if (j > j1) j1 = j;
+    }
+    if (!has) world.edits.delete(k); else if (old) old.set(_macroTmp); else world.edits.set(k, _macroTmp.slice());
+    if (i1 < 0) continue;
+    // heights now (feet, wheels and heightAt read them at once); the mesh on the throttle (flushChunkRefresh)
+    const [tx, tz] = k.split(',').map(Number), gx0 = tx * CS + i0, gx1 = tx * CS + i1, gz0 = tz * CS + j0, gz1 = tz * CS + j1;
+    for (let cz = Math.floor((gz0 - 2) / CS); cz <= Math.floor((gz1 + 1) / CS); cz++) for (let cx = Math.floor((gx0 - 2) / CS); cx <= Math.floor((gx1 + 1) / CS); cx++) {
+      const c = world.chunks.get(ckey(cx, cz));
+      if (!c) continue;
+      for (let j = 0; j < P; j++) for (let i = 0; i < P; i++) c.h[j * P + i] = c.base[j * P + i] + getDelta(c.ox + i - 1, c.oz + j - 1);
+      chunkRefreshQ.add(c);
+    }
+  }
+}
+// rebuild the meshes of chunks whose ground changed, at most every 120 ms (a blade edits several times a second)
+function flushChunkRefresh(force = false) {
+  if (!chunkRefreshQ.size) return;
+  const now = performance.now();
+  if (!force && now - chunkRefreshT < 120) return;
+  chunkRefreshT = now;
+  for (const c of chunkRefreshQ) if (world.chunks.get(c.key) === c) c.refresh();
+  chunkRefreshQ.clear();
+  depthState.dirty = true;
+}
+function onSimEvent(type, data) {
+  if (type === 'ground.macro') { if (!macroEcho) syncMacro(data.keys); }
+  else if (type === 'loaded') syncMacro(new Set([...world.edits.keys(), ...groundRead.macroKeys(sim.state)]));
+}
+// the mirror against the truth: { tiles, maxDiff } (metres; brush strokes round to whole millimetres in the sim)
+function verifyGround() {
+  let maxDiff = 0, tiles = 0;
+  for (const k of new Set([...world.edits.keys(), ...groundRead.macroKeys(sim.state)])) {
+    groundRead.macroTile(sim.state, k, _macroTmp);
+    const a = world.edits.get(k);
+    let d = 0;
+    for (let n = 0; n < CS * CS; n++) d = Math.max(d, Math.abs((a ? a[n] : 0) - _macroTmp[n]));
+    if (d > 0.001) tiles++;
+    maxDiff = Math.max(maxDiff, d);
+  }
+  return { tiles, maxDiff };
 }
 function heightAt(x, z) {
   const cx = Math.floor(x / CS), cz = Math.floor(z / CS);
@@ -3196,12 +3258,13 @@ function placeStartingWell(build) {
   if (!stockState().tools.includes('watering_can')) runStockCommand(sim, 'stock.add', { id: 'watering_can', qty: 1 });
 }
 function syncSite() {
+  flushMacro();
   // hand build mode the real equipment catalog once it has loaded
   if (!simCtl.catalogSet && window.__build && window.__build.setFixtureCatalog) { window.__build.setFixtureCatalog(PLACEABLE_FIXTURES); simCtl.catalogSet = true; }
   const build = window.__build;
   if (!build) return;
   build.ensureLoaded();
-  if (simCtl.newWorld) { simCtl.newWorld = false; placeStartingWell(build); }
+  if (simCtl.newWorld) { simCtl.newWorld = false; placeStartingWell(build); flushMacro(); }
   if (build.version === simCtl.siteV) return;
   const version = build.version;
   sim.commandNow('site.setPieces', { pieces: mapPieces(build.pieces()) });
@@ -3211,10 +3274,8 @@ function syncSite() {
 // live: hand the simulation state by reference (for saveGame, which only stringifies it: no 4 MB deep copy)
 function saveData(live = false) {
   syncSite();
-  const edits = {};
-  for (const [k, a] of world.edits) edits[k] = f32ToBase64(a);
   return makeSave(live ? sim.state : sim.serialize(), {
-    edits, removed: [...world.removed], wood: world.wood, stone: world.stone,
+    removed: [...world.removed], wood: world.wood, stone: world.stone,
     player: { x: player.x, z: player.z }, cam: { yaw: cam.yaw, pitch: cam.pitch, dist: cam.dist },
     builds: window.__build && window.__build.serialize ? window.__build.serialize() : simCtl.builds,
   });
@@ -3233,7 +3294,7 @@ function applySave(raw) {
   if ((save.sim.seed >>> 0) !== SEED) return false;
   sim.load(save.sim);
   const w = save.world || {};
-  for (const k in (w.edits || {})) world.edits.set(k, base64ToF32(w.edits[k]));
+  // terrain edits are in the simulation (sys.ground); sim.load's 'loaded' event has mirrored them into world.edits
   for (const id of (w.removed || [])) world.removed.add(id);
   world.wood = w.wood || 0; world.stone = w.stone || 0;
   simCtl.builds = w.builds || null;
@@ -3497,11 +3558,12 @@ function resetWorld(seed) {
   noise = makeSimplex(SEED);
   rivers = makeRivers();
   sim = createGameSim(SEED); simCtl.builds = null; simCtl.siteV = -1;
+  sim.listen(onSimEvent);
   clearEnemies();
   if (window.__game?.cooking?.active) window.__game.cooking.close();
   if (window.__build) window.__build.reset();
   chunkStream.reset(); farLand.reset();
-  world.edits.clear(); world.removed.clear();
+  world.edits.clear(); world.removed.clear(); macroDirty.clear(); chunkRefreshQ.clear();
   for (const f of world.fallers) scene.remove(f.mesh);
   for (const L of world.logs) scene.remove(L.mesh);
   for (const p of world.pickups) scene.remove(p.mesh);
@@ -4341,6 +4403,7 @@ function step(dt) {
   // Refresh geometry before a tick or save can read the headless site.
   syncSite();
   sim.advance(dt * WORLD_SECONDS_PER_REAL_SECOND * (keys.KeyT ? Math.max(simCtl.speed, 100) : simCtl.speed), 24);
+  flushChunkRefresh();
   simCtl.saveT += dt;
   if (simCtl.saveT > 20) { simCtl.saveT = 0; saveGame(); }
   chunkStream.update(player.x, player.z, 5); farLand.update(player.x, player.z);
@@ -4659,6 +4722,15 @@ window.__game = {
   handPose: null, sea: SEA,
   // the controller stack (src/engine/control.js), the one ground read and the circle push-out, for vehicles and other bodies
   control, groundAt, pushOut,
+  // one ground (src/sim/ground.js): ground.cmd('cut' | 'fill' | 'push' | 'grade' | 'trim' | 'tamp', payload) moves earth;
+  // heightAt is the graded ground (base + macro), ground.surfaceAt the walked surface (plus the fine, hand-dug ground)
+  ground: {
+    read: groundRead,
+    cmd: (name, p) => { flushMacro(); return sim.commandNow('ground.' + name, p); },
+    surfaceAt: (x, z) => heightAt(x, z) + (reliefFn ? reliefFn(x, z) : 0),
+    get rev() { return sim.state.sys.ground ? sim.state.sys.ground.rev : 0; },
+    verify: () => { flushMacro(); return verifyGround(); },
+  },
   // the sky as reflections see it (world sun direction and colour, horizon and zenith), kept up to date each frame
   skyU: { uGSunDir: waterUniforms.uSunDir, uGSunCol: waterUniforms.uSunCol, uGSky: waterUniforms.uSky, uGZen: waterUniforms.uZenith },
 };
