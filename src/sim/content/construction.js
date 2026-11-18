@@ -6,12 +6,14 @@
 
 import { SERVICE_SUPPLY } from './services.js';
 
-// ---- stages, in the order a building is raised. `needs`: the stages it stands on. `parentFirst`: stages whose
+// ---- stages, in the order a building is raised. `hint` + `handsKey`: the tool and key the construction note names when the job is a
+// slab, stem wall or pier foundation (hand-built in the Site tool, key 7). `by` is NOT set on these: a stage with `by` is tallied by
+// another system and skips the pieces; here the pieces and the job both count. `needs`: the stages it stands on. `parentFirst`: stages whose
 // members of the same wall or gable must be in first. `flat`: its frames are put together lying down, one at a
 // time, and then raised.
 export const STAGES = Object.freeze([
-  { id: 'site', name: 'Site', needs: [], verb: 'Level the ground', what: 'Stake out the plan, then clear and level the ground.', why: 'A building needs flat, firm ground.' },
-  { id: 'foundation', name: 'Foundation', needs: ['site'], verb: 'Set the foundation', what: 'Set the pier blocks, posts and beams.', why: 'Keeps the wood off wet ground and spreads the weight.' },
+  { id: 'site', name: 'Site', needs: [], hint: 'Site (7): lay the strings out, dig to the line and rake the base level', handsKey: '7', verb: 'Level the ground', what: 'Stake out the plan, then clear and level the ground.', why: 'A building needs flat, firm ground.' },
+  { id: 'foundation', name: 'Foundation', needs: ['site'], hint: 'Site (7): set the forms and rebar, pour, finish and cure the concrete', handsKey: '7', verb: 'Set the foundation', what: 'Set the pier blocks, posts and beams.', why: 'Keeps the wood off wet ground and spreads the weight.' },
   { id: 'floor-frame', name: 'Floor frame', needs: ['foundation'], verb: 'Frame the floor', what: 'Rim joists round the edge, then joists every 40 cm.', why: 'Joists carry the floor. Closer joists make a stiffer floor.' },
   { id: 'subfloor', name: 'Subfloor', needs: ['floor-frame'], verb: 'Lay the subfloor', what: 'Lay sheets across the joists.', why: 'Gives you a deck to stand and build on.' },
   { id: 'wall-frame', name: 'Wall frames', needs: ['subfloor'], flat: true, verb: 'Frame the walls', what: 'Lay plates and studs flat on the deck, then tilt each wall up.', why: 'Studs carry the roof down to the floor. A header carries the load around a door or window.' },

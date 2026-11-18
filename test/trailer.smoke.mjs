@@ -1,6 +1,6 @@
 // Browser smoke test of the trailer: node test/trailer.smoke.mjs  (needs dist/index.html and Playwright)
 // A trailer comes with the starter ATV; backing the ball onto its tongue hitches it; it follows and swings behind;
-// X unhitches while seated; lumber loads onto its bed by holding at a pile, rides with it, the build can draw from it,
+// holding R unhitches while seated; lumber loads onto its bed by holding at a pile, rides with it, the build can draw from it,
 // and holding the left button tips the load off as a pile on the ground. The construction ledger balances throughout.
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 const file = 'file://' + process.cwd() + '/dist/index.html';
@@ -94,8 +94,8 @@ await G(() => __vehicles.tip(true)); await frames(150); await G(() => __vehicles
 const tipped = await G(({ t }) => { const s = __game.sim.state.sys.construction; return { on: s.stacks.filter((q) => q.carrier === t).length, ground: s.stacks.filter((q) => q.itemId === 'lumber_2x4' && !q.carrier).map((q) => q.qty), bed: __vehicles.bed(t), imb: JSON.stringify(__game.sim.systems.find((q) => q.name === 'construction').api.imbalance(s)) }; }, { t: tr.id });
 check('holding the left button tips the load off as a pile', tipped.on === 0 && tipped.ground.length >= 1, JSON.stringify(tipped));
 check('the ledger balances after tipping', tipped.imb === pile.imb, tipped.imb);
-await page.keyboard.press('KeyX'); await frames(10);
-check('X unhitches while seated', await G(({ t }) => !__game.sim.state.sys.vehicles.units[t].towedBy, { t: tr.id }));
+await page.keyboard.down('KeyR'); await frames(60); await page.keyboard.up('KeyR'); await frames(10);
+check('holding R unhitches while seated', await G(({ t }) => !__game.sim.state.sys.vehicles.units[t].towedBy, { t: tr.id }));
 const cost = await G(() => __vehicles.stats());
 console.log('frame cost', JSON.stringify(cost));
 check('no page errors', errors.length === 0, errors.slice(0, 4).join(' | '));

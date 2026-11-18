@@ -29,7 +29,7 @@ await page.keyboard.down('KeyW'); await frames(40); await page.keyboard.up('KeyW
 await frames(25);
 const on = await G(() => ({ top: __game.control.top().id, driven: __vehicles.driven(), seats: Object.values(__game.sim.state.sys.vehicles.units)[0].seats }));
 check('walking into its side mounts it', on.top === 'seat' && on.driven === id, JSON.stringify(on));
-await page.keyboard.press('Digit2'); await frames(2);
+await page.keyboard.press('Digit5'); await frames(2);
 check('tools are locked while seated', await G(() => __game.player.tool === 'axe'));
 
 // drive: point the camera along its nose and hold W
@@ -52,8 +52,8 @@ const off = await G((id) => ({ top: __game.control.top().id, u: __game.sim.state
 check('E stops it and steps off', off.top === 'walk' && !Object.values(off.u.seats).some(Boolean) && Math.abs(off.u.x - off.b.x) < 0.05, JSON.stringify({ top: off.top, sx: off.u.x, bx: off.b.x }));
 const d = Math.hypot(off.P.x - off.b.x, off.P.z - off.b.z);
 check('put down beside it', d > 0.6 && d < 2.2, d.toFixed(2));
-await page.keyboard.press('Digit2'); await frames(2);
-check('tools come back on foot', await G(() => __game.player.tool === 'dig'));
+await page.keyboard.press('Digit5'); await frames(2);
+check('tools come back on foot', await G(() => __game.player.tool === 'garden'));
 await page.keyboard.press('Digit1');
 
 // reload: parked where it was left; then seated at save time comes back seated

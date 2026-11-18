@@ -882,3 +882,8 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - To try it: in plan options choose Inside: Drywall (the cabin defaults to pine boards). `__build.placePlan('cabin', x, z, yaw, { lining: 'gypsum' })` does it from the console.
 - Old saves: a wall lined in one piece before this change counts its new sheets and seams as in, so finished buildings stay finished.
 - Known: `test/shed.e2e.mjs` still fails at the foundation (the pointer picks a neighbouring stack and puts it back), as noted above; not from this branch.
+
+## Key map, help on ? / F1, X means overlays (branch `wave2-k1-keys`)
+- **New:** `src/game/keymap.js` is one table of every key by context; the Controls sheet is drawn from it (combat rows only with `localStorage.combat`), and `__keymap.chip('E')` gives key chips for prompts. The sheet opens on `?` or F1 (H is the Hens'). Unhitching a trailer is now hold R while stopped (a prompt shows; X is overlays everywhere). The 2/3/4 terrain brush needs `localStorage.sandbox = '1'` (its buttons are hidden otherwise). Site and Foundation notes name "Site (7)" for slab, stem wall and pier foundations. Esc also leaves the terrain brush.
+- **Try:** `?` in the world; drive the ATV with a trailer, stop, hold R; `localStorage.sandbox='1'` then reload for keys 2-4.
+- **Weak:** the table is hand-kept (no test ties it to the real handlers); `by` was not set on site/foundation stages (it would make another system tally them), only `hint`.
