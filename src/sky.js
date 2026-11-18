@@ -39,21 +39,94 @@ export const SKY_NOISE_GLSL = /* glsl */ `
     float n = fbm4(p * 0.55 + w * 1.4);
     return smoothstep(1.0 - cover - 0.04, 1.0 - cover + 0.3, n);
   }
+  // ---- volumetric clouds (Schneider's Nubis recipe, as in Horizon and RDR2, cut down): a tiling Perlin-Worley
+  // noise (r: billowy base shapes; g, b, a: Worley at 2, 4 and 8 times the frequency, for eroding the edges) shapes a
+  // layer 1.3 to 3 km up; a weather map (the same noise, much larger) gathers them into fields and gaps
+  uniform sampler2D uCloudNoise;
+  const float C_BASE = 1.3, C_TOP = 3.3;
+  float remap(float v, float a, float b, float c, float d) { return c + (v - a) / (b - a) * (d - c); }
+  float cloudCov(vec2 p, float cover) {
+    float wm = textureLod(uCloudNoise, p * 0.011 + vec2(0.31, 0.77), 2.0).r;
+    return clamp(cover * 1.25 * (0.25 + 1.1 * wm) - 0.08 + 0.35 * smoothstep(0.7, 1.0, cover), 0.0, 1.0);
+  }
+  // density at p (km, on the ground plan) and h (0 at the base .. 1 at the top), coverage cov; fine: erode the edges
+  float fine_k = 1.0;                     // how much of the fine erosion to use (less far off, where it would alias)
+  float cloud_t = 1.0;                    // distance (km) of the sample: picks the noise's level of detail (sampling in a
+                                          // loop that may stop early, the automatic choice is not to be trusted)
+  float cloudDens(vec2 p, float h, float cov, float t, bool fine) {
+    if (h < 0.0 || h > 1.0 || cov <= 0.0) return 0.0;
+    float shape = textureLod(uCloudNoise, p * 0.085 + h * vec2(0.035, 0.02), clamp(log2(cloud_t * 0.0142), 0.0, 7.0)).r;
+    // flat bases, rounded tops; under a heavy cover they build higher
+    float prof = smoothstep(0.0, 0.07, h) * smoothstep(1.0, 0.45 - 0.3 * cov, h);
+    float d = remap(shape * prof, 1.0 - cov * 0.62, 1.0, 0.0, 1.0);
+    if (d <= 0.0 || !fine) return clamp(d, 0.0, 1.0) * cov;
+    vec4 e = textureLod(uCloudNoise, p * 0.24 + h * vec2(0.07, -0.05) + vec2(0.5, 0.2) + t * 0.0015, clamp(log2(cloud_t * 0.04), 0.0, 7.0));
+    float wf = e.g * 0.8 + e.b * 0.2;
+    float det = mix(1.0 - wf, wf, clamp(h * 3.0, 0.0, 1.0));     // wispy at the base, billowed above
+    d = remap(d, det * 0.42 * fine_k, 1.0, 0.0, 1.0);
+    return clamp(d, 0.0, 1.0) * cov;
+  }
+  // distance to height hk along a ray rising dy, and the height at distance t (curved Earth)
+  float altAt(float t, float dy) { float r = 6360.0; return sqrt(r * r + t * t + 2.0 * r * t * dy) - r; }
   // how much cloud stands in front of direction d (0 clear .. 1 hidden)
   float cloudCover(vec3 d, float cover, vec2 wind, float on) {
     if (on < 0.5 || d.y <= 0.0) return 0.0;
-    float a = clamp(cumulus(d.xz * layerT(d.y, 1.5) + wind, cover) * 1.15, 0.0, 1.0);
-    return max(a, smoothstep(0.75, 1.0, cover) * 0.7);
+    if (on < 1.5) return max(clamp(cumulus(d.xz * layerT(d.y, 1.5) + wind, cover) * 1.15, 0.0, 1.0), smoothstep(0.75, 1.0, cover) * 0.7);
+    vec2 p = d.xz * layerT(d.y, 1.8) + wind;
+    float a = 0.0;
+    for (int i = 0; i < 3; i++) { float h = 0.15 + 0.25 * float(i); vec2 q = d.xz * layerT(d.y, C_BASE + h * (C_TOP - C_BASE)) + wind; a += cloudDens(q, h, cloudCov(q, cover), 0.0, false); }
+    return clamp(a * 1.5, 0.0, 1.0);
   }
 `;
 
+// the clouds' noise, made once on the graphics card: 256 x 256, tiling, with mipmaps for the distance
+function makeCloudNoise(renderer) {
+  const target = new THREE.WebGLRenderTarget(256, 256, { depthBuffer: false, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, wrapS: THREE.RepeatWrapping, wrapT: THREE.RepeatWrapping });
+  const mat = new THREE.ShaderMaterial({
+    depthTest: false, depthWrite: false,
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: /* glsl */ `
+      varying vec2 vUv;
+      vec2 h22(vec2 p) { p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3))); return fract(sin(p) * 43758.5453); }
+      float worley(vec2 uv, float P) {
+        vec2 p = uv * P, i = floor(p), f = fract(p); float md = 1.0;
+        for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+          vec2 c = vec2(float(x), float(y));
+          md = min(md, length(c + h22(mod(i + c, P)) - f));
+        }
+        return clamp(md, 0.0, 1.0);
+      }
+      float gnoise(vec2 uv, float P) {
+        vec2 p = uv * P, i = floor(p), f = fract(p), u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+        float a = dot(h22(mod(i, P)) * 2.0 - 1.0, f), b = dot(h22(mod(i + vec2(1.0, 0.0), P)) * 2.0 - 1.0, f - vec2(1.0, 0.0));
+        float c = dot(h22(mod(i + vec2(0.0, 1.0), P)) * 2.0 - 1.0, f - vec2(0.0, 1.0)), d = dot(h22(mod(i + vec2(1.0, 1.0), P)) * 2.0 - 1.0, f - vec2(1.0, 1.0));
+        return mix(mix(a, b, u.x), mix(c, d, u.x), u.y) + 0.5;
+      }
+      void main() {
+        vec2 uv = vUv;
+        float pf = (gnoise(uv, 4.0) * 0.5 + gnoise(uv, 8.0) * 0.25 + gnoise(uv, 16.0) * 0.125 + gnoise(uv, 32.0) * 0.0625) / 0.9375;
+        float w1 = 1.0 - worley(uv, 4.0), w2 = 1.0 - worley(uv, 8.0), w3 = 1.0 - worley(uv, 16.0), w4 = 1.0 - worley(uv, 32.0);
+        float wf = w1 * 0.625 + w2 * 0.25 + w3 * 0.125;
+        float pw = clamp((pf - (wf - 1.0)) / (2.0 - wf), 0.0, 1.0);     // Perlin-Worley: Perlin's spread, Worley's billows
+        gl_FragColor = vec4(pw, w2, w3, w4);
+      }`,
+  });
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat); quad.frustumCulled = false;
+  const sc = new THREE.Scene(); sc.add(quad);
+  const prev = renderer.getRenderTarget();
+  renderer.setRenderTarget(target); renderer.render(sc, new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)); renderer.setRenderTarget(prev);
+  mat.dispose(); quad.geometry.dispose();
+  return target.texture;
+}
+
 export function createSkyDome({ scene, camera, renderer, water, U, SEA = 0 }) {
   const view = createSkyView(renderer);
+  const cloudNoise = makeCloudNoise(renderer);
   const mwTex = new THREE.TextureLoader().load(MILKY_WAY);
   mwTex.wrapS = THREE.RepeatWrapping; mwTex.colorSpace = THREE.NoColorSpace;
   const uniforms = {
     uSunDir: water.uSunDir, uSunCol: water.uSunCol, uAmb: water.uAmb, uSky: water.uSky, uZenith: water.uZenith, uDeep: water.uDeep, uTime: U.time,
-    uView: { value: view.texture }, uHz: { value: null }, uMW: { value: mwTex },
+    uView: { value: view.texture }, uHz: { value: null }, uMW: { value: mwTex }, uCloudNoise: { value: cloudNoise },
     uTrueSun: { value: new THREE.Vector3(0, 1, 0) }, uSunLo: { value: new THREE.Color() }, uSunHi: { value: new THREE.Color() }, uSunCi: { value: new THREE.Color() },
     uCloud: { value: 0.3 }, uGrey: { value: 0 }, uNight: { value: 0 }, uDay: { value: 1 }, uWind: { value: new THREE.Vector2() }, uWindOff: { value: new THREE.Vector2() },
     uFogC: { value: new THREE.Color() }, uFog: { value: new THREE.Vector3(60, 1000, 1) }, uCamY: { value: 10 }, uSea: { value: SEA },
@@ -95,8 +168,51 @@ export function createSkyDome({ scene, camera, renderer, water, U, SEA = 0 }) {
         vec3 col = airAt(d);
         // overcast greys it, and night's own sky (moonlit air, the glow of the dark) lies under it
         col = mix(col, mix(uSky, uZenith, 0.35) * 1.05, uGrey);
-        col += mix(uSky, uZenith, pow(max(d.y, 0.0), 0.5)) * uNight * (0.45 + 0.55 * uMoon.w * step(0.0, uMoon.y));
+        col += mix(uSky, uZenith, pow(max(d.y, 0.0), 0.5)) * uNight * (0.2 + 0.8 * uMoon.w * smoothstep(-0.02, 0.15, uMoon.y));
         return col;
+      }
+      // the cloud layer along d: 12 steps through it, each lit through the cloud toward the sun (three samples) with
+      // a few lobes of light scattered again and again inside (Wrenninge's octaves: what makes the interiors soft and
+      // bright and the edges toward the sun silver), and the sky's light from above and, dimmer, below; returns the
+      // light and how much it covers, and (w) the distance it mostly lies at
+      vec4 marchClouds(vec3 d, float cover, vec2 wind, float mu, vec3 ambHi, vec3 ambLo, out float tMid) {
+        float t0 = layerT(d.y, C_BASE), t1 = min(layerT(d.y, C_TOP), t0 + 3.5);   // (past 3.5 km in, a cloud is opaque or the haze has it)
+        const int N = 24;
+        float span = smoothstep(1.0, 3.5, t1 - t0);
+        float jit = 0.5 + mix(0.12, 0.22, span) * (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 2.0 - 1.0);
+        fine_k = mix(1.0, 0.35, span) * (1.0 - smoothstep(6.0, 30.0, t0));
+        float dt = (t1 - t0) / float(N);
+        vec3 L = vec3(0.0); float T = 1.0, tw = 0.0, tws = 0.0;
+        vec3 s3 = uTrueSun;
+        float pf = 0.55 + 2.4 * hg(mu, 0.7), pb = 0.55 + 2.4 * hg(mu, 0.35), pc = 0.55 + 2.4 * hg(mu, 0.17);
+        for (int i = 0; i < N; i++) {
+          float t = t0 + (float(i) + jit) * dt;
+          cloud_t = t;
+          float h = (altAt(t, d.y) - C_BASE) / (C_TOP - C_BASE);
+          vec2 p = d.xz * t + wind;
+          float cov = cloudCov(p, cover);
+          float den = cloudDens(p, h, cov, uTime, true);
+          if (den > 0.003) {
+            float od = 0.0;
+            od += cloudDens(p + s3.xz * 0.1, h + s3.y * 0.1 / (C_TOP - C_BASE), cov, 0.0, false) * 0.1;
+            od += cloudDens(p + s3.xz * 0.3, h + s3.y * 0.3 / (C_TOP - C_BASE), cov, 0.0, false) * 0.2;
+            od += cloudDens(p + s3.xz * 0.75, h + s3.y * 0.75 / (C_TOP - C_BASE), cov, 0.0, false) * 0.45;
+            od += cloudDens(p + s3.xz * 1.5, h + s3.y * 1.5 / (C_TOP - C_BASE), cov, 0.0, false) * 0.75;
+            od *= 52.0;
+            // powder: the thin, outer parts facing the light scatter less of it back, so the billows stand out
+            float powder = 1.0 - exp(-den * 16.0);
+            float sunL = (exp(-od) * pf + 0.55 * exp(-od * 0.25) * pb + 0.35 * exp(-od * 0.07) * pc) * mix(0.4, 1.0, powder);
+            vec3 amb = mix(ambLo, ambHi, smoothstep(0.0, 1.0, h)) * mix(0.45, 1.0, h) * (0.6 + 0.4 * powder);
+            vec3 S = uSunHi * sunL * 0.5 + amb;
+            float st = exp(-den * 48.0 * dt);
+            L += T * S * (1.0 - st);
+            tw += t * T * (1.0 - st); tws += T * (1.0 - st);
+            T *= st;
+            if (T < 0.03) break;
+          }
+        }
+        tMid = tws > 0.0 ? tw / tws : t0;
+        return vec4(L, 1.0 - T);
       }
       void main() {
         vec3 d = normalize(vDir);
@@ -138,8 +254,23 @@ export function createSkyDome({ scene, camera, renderer, water, U, SEA = 0 }) {
             vec3 e = uEq * d;                                 // into the stars' frame: x to the equinox, z to the pole
             vec2 uv = vec2(atan(e.y, e.x) / 6.2831853, asin(clamp(e.z, -1.0, 1.0)) / 3.14159265 + 0.5);
             float mw = texture2D(uMW, uv).r;
-            float grain = 0.55 + 0.45 * fbm4(uv * vec2(260.0, 130.0));
-            col += vec3(0.62, 0.68, 0.85) * pow(mw, 1.3) * grain * 0.13 * clear * dark;
+            // the band: star clouds and dark lanes of dust in it, warm toward the bright core, cooler out along it
+            float clouds = fbm4(uv * vec2(180.0, 90.0)) * 0.6 + fbm4(uv * vec2(520.0, 260.0)) * 0.4;
+            float lanes = smoothstep(0.35, 0.75, fbm4(uv * vec2(90.0, 45.0) + 3.0));
+            float glow = pow(mw, 1.5) * (0.35 + 0.95 * clouds) * mix(1.0, 0.45, lanes * smoothstep(0.25, 0.7, mw));
+            vec3 band = mix(vec3(0.55, 0.62, 0.85), vec3(1.0, 0.88, 0.72), smoothstep(0.45, 0.95, mw));
+            col += band * glow * 0.32 * clear * dark;
+            // the faint stars past what the catalogue holds: a dust of them, many times thicker along the band
+            vec3 q = e * 1100.0, c = floor(q);
+            float hs = h3(c);
+            float pr = 0.035 + 0.22 * mw;
+            if (hs < pr) {
+              vec3 sp = c + 0.5 + (vec3(h3(c + 1.7), h3(c + 4.1), h3(c + 9.3)) - 0.5) * 0.6;
+              float b = smoothstep(0.5, 0.0, length(q - sp)) * (0.05 + 0.2 * h3(c + 6.0));
+              col += b * mix(vec3(0.75, 0.82, 1.0), vec3(1.0, 0.9, 0.78), h3(c + 2.0)) * clear * dark * 1.6;
+            }
+            // airglow: the faint green-gold light of the high air itself, low round the horizon on the darkest nights
+            col += vec3(0.010, 0.016, 0.008) * exp(-max(d.y, 0.0) * 9.0) * dark * (1.0 - uMoon.w * 0.8);
           } else {
             vec3 q = (uEq * d) * 420.0, c = floor(q);
             float hs = h3(c), star = 0.0;
@@ -176,7 +307,7 @@ export function createSkyDome({ scene, camera, renderer, water, U, SEA = 0 }) {
         float hor = smoothstep(0.0, 0.07, d.y);
         vec3 zen = airAt(vec3(0.0, 1.0, 0.0));
         // cirrus: long streaks, high and thin, lit longest at dusk
-        if (uOpt.y > 1.5) {
+        if (uOpt.y > 0.5) {
           float tc = layerT(d.y, 8.0);
           vec2 pcs = mat2(0.9, 0.44, -0.44, 0.9) * (d.xz * tc + wind * 2.5);
           float ci = fbm4(vec2(pcs.x * 0.05, pcs.y * 0.32)) * 0.75 + fbm2(pcs * 0.6) * 0.25;
@@ -186,8 +317,23 @@ export function createSkyDome({ scene, camera, renderer, water, U, SEA = 0 }) {
           ciCol = mix(ciCol, col, 1.0 - exp(-tc / 160.0));
           col = mix(col, ciCol, ciA);
         }
-        // cumulus: heaps low down, self-shadowed toward the sun
-        if (uOpt.y > 0.5) {
+        // volumetric clouds
+        if (uOpt.y > 1.5 && d.y > 0.0) {
+          vec3 ambHi = zen * 0.85 + mix(uSky, uZenith, 0.5) * uNight * (0.25 + 0.5 * uMoon.w);
+          vec3 ambLo = airAt(normalize(vec3(d.x, 0.06, d.z))) * 0.42 + uAmb * 0.06;
+          float tMid;
+          vec4 cl = marchClouds(d, cover, wind, mu, ambHi, ambLo, tMid);
+          if (cl.a > 0.001) {
+            vec3 cc = cl.rgb / cl.a;
+            cc = mix(cc, mix(uSky, uZenith, 0.25) * 0.9, uGrey * 0.6);
+            cc = mix(cc, col, 1.0 - exp(-tMid / 45.0));        // far clouds fade into the haze
+            float a = cl.a * hor;
+            sunDisc *= 1.0 - a;
+            col = mix(col, cc, a);
+          }
+        }
+        // flat clouds: heaps low down, self-shadowed toward the sun
+        else if (uOpt.y > 0.5) {
           float tl = layerT(d.y, 1.5);
           vec2 p = d.xz * tl + wind;
           float dens = cumulus(p, cover);
@@ -234,7 +380,7 @@ export function createSkyDome({ scene, camera, renderer, water, U, SEA = 0 }) {
     u.uMoon.value.copy(o.moon); u.uEq.value.copy(o.eq);
     if (u.uOpt.value.x > 0.5) view.update(o.trueSun);
   }
-  const MODEL = { physical: 1, painted: 0 }, CLOUDS = { layered: 2, heaped: 1, off: 0 }, NIGHT = { real: 2, simple: 1, off: 0 };
+  const MODEL = { physical: 1, painted: 0 }, CLOUDS = { volume: 2, layered: 2, flat: 1, heaped: 1, off: 0 }, NIGHT = { real: 2, simple: 1, off: 0 };
   return {
     mesh, update, view, uniforms,
     setHorizon(tex) { uniforms.uHz.value = tex; },

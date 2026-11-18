@@ -49,7 +49,7 @@ THREE.ShaderChunk.opaque_fragment += '\nif ( isnan( gl_FragColor.r + gl_FragColo
 // default), 'fsr' (AMD FSR 1: made for smooth, photoreal, anti-aliased images; on pixel textures it smears texel
 // edges into brush strokes) or 'sharp' (area-weighted nearest: every render pixel stays a crisp block, only the
 // seams between blocks are blended, the usual way to scale pixel art by uneven amounts).
-const LOOK = { ao: false, hudBlur: true, lightBloom: false, compactHdr: false, grassShadows: true, tuftShadow: true, drawOrder: true, farGrass: 'normal', rootShade: 1, grassClumps: true, grassBacklight: true, skyShade: true, sunFog: true, grassSheen: true, farBlend: true, crownShade: true, camFx: false, upscaler: 'bicubic', toneMap: 'aces', taa: false, edgeBelts: true, riverWater: 'live', waterTexel: 'smooth', bedStyle: 'voxel', waterReflect: 'probe', skyModel: 'physical', skyClouds: 'layered', nightSky: 'real', farLand: true, openSea: true, haze: 'normal' };
+const LOOK = { ao: false, hudBlur: true, lightBloom: false, compactHdr: false, grassShadows: true, tuftShadow: true, drawOrder: true, farGrass: 'normal', rootShade: 1, grassClumps: true, grassBacklight: true, skyShade: true, sunFog: true, grassSheen: true, farBlend: true, crownShade: true, camFx: false, upscaler: 'bicubic', toneMap: 'aces', taa: false, edgeBelts: true, riverWater: 'live', waterTexel: 'smooth', bedStyle: 'voxel', waterReflect: 'probe', skyModel: 'physical', skyClouds: 'volume', nightSky: 'real', farLand: true, openSea: true, haze: 'normal' };
 const LOOK_KEY = 'homestead:look';
 try { const s = JSON.parse(localStorage.getItem(LOOK_KEY) || 'null'); if (s) for (const k in LOOK) if (typeof s[k] === typeof LOOK[k]) LOOK[k] = s[k]; } catch (e) { /* no storage */ }
 const saveLook = () => { try { localStorage.setItem(LOOK_KEY, JSON.stringify(LOOK)); } catch (e) { /* no storage */ } };
@@ -3090,7 +3090,8 @@ const MOTES = 140;
 const motes = (() => {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MOTES * 3), 3));
-  const mat = new THREE.PointsMaterial({ color: 0xfff6c8, size: 0.16, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true });
+  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(MOTES * 3), 3));
+  const mat = new THREE.PointsMaterial({ color: 0xfff6c8, size: 0.16, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true, vertexColors: true });
   const p = new THREE.Points(g, mat); p.frustumCulled = false;
   p.userData.noReflect = true;   // the motes (green fireflies at night) glare in the water's reflections
   scene.add(p);
@@ -3100,16 +3101,33 @@ const motes = (() => {
   p.userData.seeds = seeds;
   return p;
 })();
+// By day, specks of pollen and dust drifting in the light. By night, fireflies: only in pockets (gathered toward
+// the edges of woods and in patches of meadow, none over open ground or water), low over the grass, each blinking a
+// short flash every few seconds rather than glowing, so the sky above stays dark for the stars.
 function updateMotes() {
-  const pos = motes.geometry.attributes.position.array, seeds = motes.userData.seeds, t = U.time.value;
+  const pos = motes.geometry.attributes.position.array, col = motes.geometry.attributes.color.array, seeds = motes.userData.seeds, t = U.time.value;
+  const night = SKYK.night;
   for (let i = 0; i < MOTES; i++) {
     const s = seeds[i];
     const x = player.x + ((((s[0] + Math.sin(t * 0.3 + s[3]) * 2 - player.x) % 70) + 70) % 70) - 35;
     const z = player.z + ((((s[2] + Math.cos(t * 0.23 + s[3]) * 2 - player.z) % 70) + 70) % 70) - 35;
+    const gy = heightAt(x, z);
     pos[i * 3] = x; pos[i * 3 + 2] = z;
-    pos[i * 3 + 1] = Math.max(heightAt(x, z), SEA) + s[1] + Math.sin(t * 0.7 + s[3]) * 0.4;
+    let k = 1, fly = s[1];
+    if (night > 0.05) {
+      // the pocket field: patches tens of metres across, more where meadow meets wood
+      const f = forestAt(x, z), edge = 1 - Math.abs(f - 0.22) * 4;
+      const pocket = smoothstep(0.3, 0.55, fbm(x * 0.03 + 41, z * 0.03 - 17, 2) + 0.25 * edge);
+      const blink = Math.pow(Math.max(0, Math.sin(t * (0.9 + (s[3] % 1) * 0.8) + s[3] * 7)), 14);
+      const fireK = (gy > SEA + 0.3 ? pocket : 0) * (0.08 + 0.92 * blink) * (i % 5 < 3 ? 1 : 0);
+      k = lerp(1, fireK, night);
+      fly = lerp(s[1], 0.3 + (s[1] - 0.4) * 0.4, night);       // low over the grass
+    }
+    col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = k;
+    pos[i * 3 + 1] = Math.max(gy, SEA) + fly + Math.sin(t * 0.7 + s[3]) * 0.4;
   }
   motes.geometry.attributes.position.needsUpdate = true;
+  motes.geometry.attributes.color.needsUpdate = true;
 }
 // The sun follows the calendar (sim/calendar.js): its height and path change with the date and the
 // site's latitude. Weather from the simulation greys and dims the light.
@@ -3158,6 +3176,10 @@ function updateSky() {
   const dayF = smoothstep(0.02, 0.4, e), nightF = 1 - smoothstep(-0.22, 0.06, e);
   const goldF = clamp(1 - dayF - nightF, 0, 1);
   SKYK.day = dayF; SKYK.night = nightF;
+  // the real night: as dark as the moon allows (a moonless night is starlight only; a full moon lights the land)
+  skyFrame(sim.calendarT(), site.latitudeDeg, SKYF);
+  const moonK = SKYF.moon.w * smoothstep(0.02, 0.2, SKYF.moon.y);
+  const nightDark = LOOK.nightSky === 'real' ? lerp(1, lerp(0.3, 1.05, moonK), nightF) : 1;
   const mix3 = (k) => SKY.day[k] * dayF + SKY.gold[k] * goldF + SKY.night[k] * nightF;
   const mixC = (out, k) => out.setRGB(
     SKY.day[k].r * dayF + SKY.gold[k].r * goldF + SKY.night[k].r * nightF,
@@ -3177,22 +3199,22 @@ function updateSky() {
   { const ce = Math.cos(sp.elevationRad); ATM.sun.set(Math.sin(sp.azimuthRad) * ce, Math.sin(sp.elevationRad), -Math.cos(sp.azimuthRad) * ce); }
   updateAtmosphere(ATM.sun);
   const atmK = LOOK.skyModel === 'physical' ? 1 - nightF : 0;   // by night the palette's own dark sky stands
-  mixC(_fogC, 'fog'); _fogC.lerp(ATM.hor, atmK * 0.9); towardOvercast(_fogC, O.fog, grey); _fogC.multiplyScalar(1 - 0.1 * ov - 0.08 * wet);
+  mixC(_fogC, 'fog'); _fogC.lerp(ATM.hor, atmK * 0.9); towardOvercast(_fogC, O.fog, grey); _fogC.multiplyScalar((1 - 0.1 * ov - 0.08 * wet) * lerp(1, nightDark, 0.85));
+  hemi.intensity *= lerp(1, nightDark, 0.9);
   scene.fog.color.copy(_fogC); scene.background.copy(_fogC);
   // falling rain and snow close the distance in (updateCamera sets the clear-air distances each frame)
   scene.fog.near *= 1 - 0.45 * wet; scene.fog.far *= 1 - 0.4 * wet;
   // the sun comes from its true azimuth (world +x east, +z south); below the horizon the same light
   // plays the moon, from the opposite side of the sky
-  skyFrame(sim.calendarT(), site.latitudeDeg, SKYF);
   const up = e >= -0.05;
   let el = Math.max(up ? sp.elevationRad : -sp.elevationRad, SKY.minElevation);
   let hx = Math.sin(sp.azimuthRad) * (up ? 1 : -1), hz = -Math.cos(sp.azimuthRad) * (up ? 1 : -1);
   // with the real night sky, the night's light is the moon's: from where it stands, as bright as its phase; with
   // no moon up, the dimmer light of the stars and the glow of the sky
   if (!up && LOOK.nightSky === 'real') {
-    const m = SKYF.moon, mUp = smoothstep(0.02, 0.2, m.y);
+    const m = SKYF.moon;
     if (m.y > 0.06) { el = Math.max(Math.asin(m.y), SKY.minElevation); const hl = Math.hypot(m.x, m.z) || 1; hx = m.x / hl; hz = m.z / hl; }
-    sun.intensity *= lerp(0.55, 1.05, m.w * mUp);
+    sun.intensity *= nightDark;
   }
   const tx = Math.round(player.x), tz = Math.round(player.z);
   sun.target.position.set(tx, player.y, tz);
@@ -3511,8 +3533,8 @@ const gfxPanel = (() => {
       h('div', { className: 'sec', textContent: 'Sky' }),
       seg('Sky', [['physical', 'Physical'], ['painted', 'Painted']], LOOK.skyModel, (v) => setLook('skyModel', v)),
       h('div', { className: 'hint', textContent: 'Physical works the sky out from how air and haze scatter sunlight: the blue, the pale horizon, the glow round the sun and the colours of sunrise and sunset, which also tint the distance haze. Painted is the earlier two-colour sky.' }),
-      seg('Clouds', [['layered', 'Heaped + cirrus'], ['heaped', 'Heaped only'], ['off', 'Off']], LOOK.skyClouds, (v) => setLook('skyClouds', v)),
-      h('div', { className: 'hint', textContent: 'Heaped clouds low down and thin streaks of cirrus high up, which glow at dusk. Cover follows the weather.' }),
+      seg('Clouds', [['volume', 'Volumetric'], ['flat', 'Flat'], ['off', 'Off']], LOOK.skyClouds === 'layered' ? 'volume' : LOOK.skyClouds === 'heaped' ? 'flat' : LOOK.skyClouds, (v) => setLook('skyClouds', v)),
+      h('div', { className: 'hint', textContent: 'Volumetric: clouds with depth, worked out by marching through a cloud layer 1.3 to 3 km up: flat bases, billowed tops, lit through themselves from the sun, silver-edged toward it, glowing pink from below at sunset. Flat: the cheaper painted heaps. Both have thin cirrus high up. Cover follows the weather.' }),
       seg('Night sky', [['real', 'Real stars'], ['simple', 'Simple'], ['off', 'Off']], LOOK.nightSky, (v) => setLook('nightSky', v)),
       h('div', { className: 'hint', textContent: 'Real: the 5000 stars the eye can see, in their true constellations for the date, hour and latitude, the Milky Way, and the moon in its true place and phase, which lights the night. Simple: made-up stars and a fixed moonlight.' }),
       seg('Distance haze', [['light', 'Light'], ['normal', 'Normal'], ['heavy', 'Heavy']], LOOK.haze, (v) => setLook('haze', v)),
@@ -4348,7 +4370,7 @@ function afterCamera(dist) {
   const wxf = sim.state.sys.weather;
   const clearAir = wxf ? clamp(1 - 1.1 * smoothstep(0.35, 0.95, wxf.cloud) - 0.8 * smoothstep(0.85, 0.99, wxf.humidity), 0, 1) : 0.5;
   if (LOOK.farLand) { scene.fog.near = lerp(20, 60, clearAir); scene.fog.far = lerp(330, 1100, clearAir * clearAir) * HAZE[LOOK.haze]; }
-  else { scene.fog.near = lerp(lerp(cam.dist + 16, cam.dist + 52, clearAir), lerp(28, 60, clearAir), k); scene.fog.far = lerp(cam.dist + 96, 122, k); }   // the old wall at the world's edge
+  else { scene.fog.near = lerp(lerp(cam.dist + 16, cam.dist + 52, clearAir), lerp(28, 60, clearAir), cam.aimK); scene.fog.far = lerp(cam.dist + 96, 122, cam.aimK); }   // the old wall at the world's edge
   // screen position of the player, for the see-through fade on trees
   const size = renderer.getDrawingBufferSize(_v2);
   if (viaComposer()) size.multiplyScalar(renderScale());     // the scene is drawn at render resolution
