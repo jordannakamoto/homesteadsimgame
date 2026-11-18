@@ -4035,8 +4035,15 @@
 
   /* ---------- terrain ---------- */
   // Level the site under new pieces: cut and fill to floor height, with a blended rim.
+  // Ground A3: the levelling goes through the sim's ground system (ground.grade, the same maths), which also fills any
+  // hand-dug ground under the pad and redraws the terrain itself. The loops below are the old fallback (one release).
   function cutTerrain(S, samples, pit) {
     if (!samples.length) return;
+    if (window.__foundation && window.__foundation.owns && window.__foundation.owns(S.id)) return; // dug by hand instead
+    if (G.ground && samples.length <= 4096) {
+      const r = G.ground.cmd("grade", { samples: samples.map(([x, z]) => [x, z]), targetY: S.y0 - dropOf(S), core: pit ? 0.8 : 1.05, rim: pit ? 0.801 : 2.9, pit: !!pit });
+      if (r && r.ok) return;
+    }
     let x0 = 1e9,
       x1 = -1e9,
       z0 = 1e9,
