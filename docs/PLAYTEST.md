@@ -603,3 +603,23 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 
 - Macro (1 m) cuts and fills are blocky next to the 10 cm hand-dug ground, and a machine-sized cut wipes hand-dug detail under it (by design: it absorbs it).
 - Build mode's site cut still goes through the old path (slice A3 routes it through `ground.grade`).
+
+## Ground A3 and foundations B1 — sites through the ground, concrete that cures (branch `ground-a3b1`)
+
+**What is new**
+
+- Levelling a building site (finishing its Site stage, or placing a building outside construction mode) now goes through the ground system. Pads should look as before. A hole you dug by hand in the Yard (key 6) where the new building stands is filled when the site is levelled; ground outside the pad is left alone.
+- Concrete cures on the sim clock. A building on a slab, poured piers or a stem wall can be given a foundation job; while its concrete is below half strength, framing refuses with "The concrete is still green" and opens by itself once the concrete reaches it. Warmth speeds it, cold slows it, a hard frost on fresh concrete weakens it for good.
+
+**Try this**
+
+1. Yard (6): dig a hole with the shovel. Place a Tool shed plan over it (construction mode) and finish its Site stage: the hole is gone and the pad is flat. `__game.ground.verify()` reports `tiles: 0`.
+2. Foundations (console). Build a cabin on a slab (Plan mode, foundation "Slab on grade"), then with `id` its building id (`__build.structs()`):
+   `__game.sim.commandNow('foundation.setPlan', { structId: id })`, then `__game.sim.commandNow('foundation.debugPour', { structId: id })`. The foundation stage is done; try to frame: "The concrete is still green". Watch `__game.sim.state.sys.foundation.jobs` (`elements[0].cure.strength`); at 100x or 1000x speed the framing opens after a few world hours with the default 20-day year (about 3.5 days with a real-length year).
+
+**What's weak**
+
+- No hands-on steps yet (layout, dig, base, forms, pour, screed, finish, strip come in B2-B8); `debugPour` jumps straight to curing, and there is no cure tint or gate chip on the slab yet.
+- The foundation job is not created automatically: it needs the console call above until the foundation view (B2) does it.
+- A building drawn with only walls (no floor) samples its site round the walls, so the middle of a large plan is levelled only partly, as before; a hole there is filled only where the pad really is level.
+
