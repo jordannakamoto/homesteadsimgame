@@ -610,3 +610,27 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 - Water equipment standing in the yard cannot be routed to: the line in from outside comes with the ground work (S13). Start supply from a stub, or from a tank or heater inside the building.
 - The cost of a hole is a guess (worth 40 cm of extra run), so the first route sometimes goes over the top where an electrician would bore straight through; R shows the others.
 - Planned runs are not yet worked (drill, pull, crimp: S7) and the Build panel does not list rough-in yet (S8).
+
+## Services S7 — rough-in by hand: drill, fix boxes, pull, clamp and crimp
+
+**What is new**
+
+- Planned cable and PEX runs are now put in by hand (`src/services-hands.js`, Hands F, with no Power/Cold/Hot/Waste mode picked). The hint line near a building lists what is left: "Rough-in: 2 boxes to fix, 5 holes to drill, 1 run to pull, 2 ends to crimp."
+- **Boxes and stub-outs:** a planned one is drawn pale. Click it twice: hold it to the stud, then nail it (puff, hammer pose); it turns solid.
+- **Drill:** hold the button on a yellow dot and sweep along the wall. Every dot the pointer passes within reach is queued and drilled in turn: the drill sits in the hole, chips fly, the dot goes dark. The sweep is wider with a higher per-gesture setting (Build panel, 1x to 4x). With power near (`powerAvailable`) a hole takes 0.2 s, on the battery 0.5 s. A quick flick still catches the dots between frames.
+- **Pull:** hold the cable (or PEX) end at the start of the run; a spool or coil sits on the floor beside it and turns as it pays out. Drag along the run, or walk along it holding on: the cable follows through the holes (at most 3 m/s, never backwards, only within reach). Let go anywhere; progress is kept. Staples tick in behind it (within 20 cm of each end, then every 1.2 m for cable, NEC 334.30; every 0.8 m for PEX, IRC P2605.1), and steel nail plates go over the holes that need them as the run passes.
+- **Clamp / crimp:** hold on an end until the ring closes (PEX) or the cable is clamped in its box: the ring darkens, green flash. Every end waiting at that box goes at once. The first finished run gets the overhead "Roughed in!" beat.
+
+**Try this**
+
+1. Cabin plan, stand inside. F, 1, plan an outlet circuit of two or three boxes (right-click to leave planning).
+2. With no mode picked, click each pale box twice. Hold on the first yellow dot and sweep along the wall.
+3. Grab the cable end at the first box and drag it along to the next box, or hold on and walk. Then hold on each end.
+4. `__servicesHands.summary()` counts the work near you; `__servicesHands.targets()` lists it. `node test/services.smoke.mjs` does all of the above with the pointer.
+
+**What's weak**
+
+- An end that sits on a box still to fix is aimed as the box: fix the box first, then clamp.
+- No tool or supply check yet: the drill, cable and staples are free until S8 (supply lines in the Build panel). Drains are not worked by hand yet (S11).
+- The drill is only a model at the hole, not in the character's hand; the hammer for boxes is a pose only. No sound.
+- Walls are not checked for being in the way of the pointer: you can aim at a dot through a lined wall (covered runs cannot be worked, though).
