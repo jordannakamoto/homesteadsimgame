@@ -3816,6 +3816,7 @@ function updatePlayer(dt) {
   let mx = fwx * iz + rxw * ix, mz = fwz * iz + rzw * ix;
   const ml = Math.hypot(mx, mz);
   if (ml > 1) { mx /= ml; mz /= ml; }                           // an analogue stick may ask for less than full speed
+  if (ml < 0.05 && P.lead) { mx = P.lead.x; mz = P.lead.z; }      // an add-on may lead the walk (a shovel load pulled past reach)
   const swimming = heightAt(P.x, P.z) < -0.75;
   const alt = !!(keys.AltLeft || keys.AltRight);
   const armed = P.tool === 'axe';
