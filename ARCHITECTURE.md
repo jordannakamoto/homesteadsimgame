@@ -131,8 +131,8 @@ piece = {
                // "p3.s4" a tower side, "p3.f0" a tower floor, "p3.r" its roof, "p3.st" its stair, "p5.fd" the footing under floor p5, "p7+p9" the beam between two pillars.
   struct,      // the structure it belongs to (persistent number); storey: its storey there (-1 cellar, 0 ground, 1..)
   kind,        // "wall" | "floor" | "roof" | "door" | "window" | "post" | "beam" | "stair" | "tower" | "foundation" | "path" | "fixture"
-  type,        // build mode's own name: wall "wall" | "rail" | "parapet" | "rampart" | "gable"; roof "gable" | "hip" | "shed" | "flat" | "cone" | "dome" | "pyramid";
-               // door "door" | "door2" | "gate" | "railgate"; window "window".."window4"; post "pillar" | "chimney"; stair "straight" | "spiral"; fixture: the furniture name
+  type,        // build mode's own name: wall "wall" | "rail" | "gable"; roof "gable" | "hip" | "shed" | "flat" | "cone" | "dome" | "pyramid";
+               // door "door" | "door2" | "railgate"; window "window" | "window2" | "window4"; post "pillar" | "chimney"; stair "straight" | "spiral"; fixture: the furniture name
   material,    // build mode's appearance name until the orchestrator maps it through APPEARANCE_MATERIAL
   a, b,        // world metres { x, z }: wall and beam ends, a roof plane's eave edge, a stair's foot and head, opposite corners of a floor; a point piece has a = b
   y0, y1,      // bottom and top in world metres (right for upper storeys, stretched storeys, raised floors and turned structures)
