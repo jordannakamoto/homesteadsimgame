@@ -152,6 +152,9 @@ export function createSea({ U, scene, world, player, CS, P, SEA, clamp, mulberry
           foam = max(foam, smoothstep(0.62, 0.9, fnz) * (1.0 - smoothstep(0.0, 0.4, abs(depth - d0))) * 0.65);
           color = mix(color, lightC * 0.92, foam);
           alpha = max(alpha, foam * 0.85) * smoothstep(-0.18, 0.03, depth);
+          // toward this mesh's edge, over deep water, it gives way to the sky dome's open sea (shaded the same way),
+          // so the sea runs on to the horizon without a line where the mesh stops
+          alpha *= 1.0 - smoothstep(98.0, 126.0, length(vWorld.xz - cameraPosition.xz)) * smoothstep(1.5, 3.0, depth);
           gl_FragColor = vec4(color, clamp(alpha + dot(sunR, vec3(0.3)), 0.0, 1.0));
           #include <tonemapping_fragment>
           #include <colorspace_fragment>

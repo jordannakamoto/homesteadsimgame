@@ -314,6 +314,8 @@ The first hands-on slice (`docs/FIRST_WATER.md`) is built as two generic modules
 
 Build mode: a fixture with `settings.viewOwned` is not drawn by build mode (an add-on draws it); water ports have no dots in the Equip tool, and the dots are redrawn when the tool or build mode is left.
 
+**Services (runs in buildings).** Generic `src/sim/core/routes.js` (runs on frames, work steps) and `src/sim/core/links.js` (the walk) carry content from `src/sim/content/services.js` (classes cable, supply, drain, vent; specs; node kinds; devices). System `services` (`src/sim/services.js`, after `routes`, before `electrical` in `GAME_SYSTEMS`) recompiles on a routes version change into `powerPieces` (a breaker `sv:br:<slot>` per trimmed panel slot, a device `sv:<node>` per trimmed box with a device, an electrical box `box_junction` otherwise, one wire `sv:w:<run>` per cable run) and `waterPieces` (one pipe `sv:p:<a>><b>` per pair of terminals through the joints between, a leak `sv:leak:<at>` per open end a source reaches, fixtures set on stubs). `electrical.js` and `water.js` merge these through memoised merges (both caches are keyed by array identity). Read-outs on the system's `api` and in `index.js`: `overlayData` (`servicesOverlay`), `runInfo` (`serviceRunInfo`). Page: `src/engine/routes.js` (`window.__routes`, generic runs view: merged prisms per frame, pick, ghost, x-ray, tint), `src/overlays.js` (`window.__overlays`: `register({ id, name, key?, on, off, legend })`, X cycles outside build mode), `src/services-view.js` (`window.__servicesView`: the looks, the Power and Water overlays, `sample()`).
+
 ## Global hooks
 
 Add-ons and tests reach the game only through these. Add a name here rather than reaching into internals.

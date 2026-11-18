@@ -4,6 +4,8 @@ import { createControl } from './engine/control.js';
 import { createChunkStream } from './world/chunk-stream.js';
 import { createSea } from './water/sea.js';
 import { createSkyDome } from './sky.js';
+import { skyRadiance, sunColor } from './atmosphere.js';
+import { createNightSky, skyFrame } from './night-sky.js';
 import { createFarLand } from './far-land.js';
 import { createRivers } from './water/rivers-gen.js';
 import { createRiverWater } from './water/rivers-render.js';
@@ -47,7 +49,7 @@ THREE.ShaderChunk.opaque_fragment += '\nif ( isnan( gl_FragColor.r + gl_FragColo
 // default), 'fsr' (AMD FSR 1: made for smooth, photoreal, anti-aliased images; on pixel textures it smears texel
 // edges into brush strokes) or 'sharp' (area-weighted nearest: every render pixel stays a crisp block, only the
 // seams between blocks are blended, the usual way to scale pixel art by uneven amounts).
-const LOOK = { ao: false, hudBlur: true, lightBloom: false, compactHdr: false, grassShadows: true, tuftShadow: true, drawOrder: true, farGrass: 'normal', rootShade: 1, grassClumps: true, grassBacklight: true, skyShade: true, sunFog: true, grassSheen: true, farBlend: true, crownShade: true, camFx: false, upscaler: 'bicubic', toneMap: 'aces', taa: false, edgeBelts: true, riverWater: 'live', waterTexel: 'smooth', bedStyle: 'voxel', waterReflect: 'probe' };
+const LOOK = { ao: false, hudBlur: true, lightBloom: false, compactHdr: false, grassShadows: true, tuftShadow: true, drawOrder: true, farGrass: 'normal', rootShade: 1, grassClumps: true, grassBacklight: true, skyShade: true, sunFog: true, grassSheen: true, farBlend: true, crownShade: true, camFx: false, upscaler: 'bicubic', toneMap: 'aces', taa: false, edgeBelts: true, riverWater: 'live', waterTexel: 'smooth', bedStyle: 'voxel', waterReflect: 'probe', skyModel: 'physical', skyClouds: 'layered', nightSky: 'real', farLand: true, openSea: true, haze: 'normal' };
 const LOOK_KEY = 'homestead:look';
 try { const s = JSON.parse(localStorage.getItem(LOOK_KEY) || 'null'); if (s) for (const k in LOOK) if (typeof s[k] === typeof LOOK[k]) LOOK[k] = s[k]; } catch (e) { /* no storage */ }
 const saveLook = () => { try { localStorage.setItem(LOOK_KEY, JSON.stringify(LOOK)); } catch (e) { /* no storage */ } };
@@ -2792,9 +2794,21 @@ const { waveHeight, depthState, updateDepthMap, uniforms: waterUniforms, mesh: w
 // ---- streams and rivers: their own water and shader (src/water/rivers-render.js), one mesh per chunk they cross
 const riverWater = createRiverWater({ U, sea, CS, P, SEA });
 // the sky itself (src/sky.js): gradient, sun and clouds from the weather, instead of the flat fog colour
-const skyDome = createSkyDome({ scene, camera, water: waterUniforms, U });
+const skyDome = createSkyDome({ scene, camera, renderer, water: waterUniforms, U, SEA });
 // the land past the loaded world, out to the horizon haze (src/far-land.js)
 const farLand = createFarLand({ scene, baseHeight, forestAt, chunks: world.chunks, CS, SEA, PAL, smoothstep });
+skyDome.setHorizon(farLand.horizon);
+// the real stars (src/night-sky.js), and the sky's frame and moon for the date and hour
+const nightSky = createNightSky({ scene, camera, sky: skyDome });
+const SKYF = { eq: new THREE.Matrix3(), eqInv: new THREE.Matrix3(), moon: new THREE.Vector4(0, -1, 0, 0), age: 0 };
+const HAZE = { light: 1.7, normal: 1, heavy: 0.5 };
+function applySkyLook() {
+  skyDome.setOptions({ model: LOOK.skyModel, clouds: LOOK.skyClouds, night: LOOK.nightSky });
+  nightSky.setOn(LOOK.nightSky === 'real');
+  farLand.setOn(LOOK.farLand); farLand.setOpenSea(LOOK.openSea); farLand.setHaze(LOOK.haze === 'heavy' ? 0.55 : LOOK.haze === 'light' ? 0.12 : 0.3);
+  skyDome.setHorizon(LOOK.farLand ? farLand.horizon : null);
+}
+applySkyLook();
 // the live tier (src/water/rivers-live.js): a shallow-water simulation on the GPU in a window round the player
 const riverLive = createRiverLive({ renderer, river: riverWater, scene, CS, heightAt, chunkAt: (x, z) => world.chunks.get(ckey(Math.floor(x / CS), Math.floor(z / CS))) });
 riverLive.setMode(LOOK.riverWater === 'baked' ? 'bed' : LOOK.riverWater);
@@ -3118,6 +3132,24 @@ function towardOvercast(c, target, k) {
   c.lerp(_ovC, k);
 }
 const SKYK = { day: 1, night: 0 };   // how much day and night there is now, for add-ons (path lights)
+// The sky's colours from the atmosphere model (src/atmosphere.js), worked out on the CPU a few times a second: the
+// haze at the horizon (an average round the compass; the fog of every material warms it toward the sun), the blue
+// overhead, and the colour of the sunlight at the ground, at the height of the heaped clouds and of the cirrus
+const ATM = { t: -1, sx: 9, sy: 9, sz: 9, hor: new THREE.Color(), zen: new THREE.Color(), lo: new THREE.Color(), hi: new THREE.Color(), ci: new THREE.Color(), sun: new THREE.Vector3() };
+function updateAtmosphere(s) {
+  const now = performance.now();
+  if (now - ATM.t < 250 && (s.x - ATM.sx) ** 2 + (s.y - ATM.sy) ** 2 + (s.z - ATM.sz) ** 2 < 1e-5) return;
+  if (now - ATM.t < 120) return;
+  ATM.t = now; ATM.sx = s.x; ATM.sy = s.y; ATM.sz = s.z;
+  const sv = [s.x, s.y, s.z], o = [0, 0, 0];
+  let r = 0, g = 0, b = 0;
+  for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; skyRadiance([Math.cos(a) * 0.9992, 0.04, Math.sin(a) * 0.9992], sv, o); r += o[0]; g += o[1]; b += o[2]; }
+  ATM.hor.setRGB(r / 8, g / 8, b / 8);
+  skyRadiance([0, 1, 0], sv, o); ATM.zen.setRGB(o[0], o[1], o[2]);
+  sunColor(sv, 0.25, o); ATM.lo.setRGB(o[0], o[1], o[2]);
+  sunColor(sv, 1.5, o); ATM.hi.setRGB(o[0], o[1], o[2]);
+  sunColor(sv, 8, o); ATM.ci.setRGB(o[0], o[1], o[2]);
+}
 function updateSky() {
   if (window.__game && !window.__game.calendar) window.__game.calendar = calendar;
   const wx = sim.state.sys.weather, site = (wx && wx.site) || SKY.site;
@@ -3141,22 +3173,40 @@ function updateSky() {
   mixC(hemi.color, 'sky'); mixC(hemi.groundColor, 'gnd'); hemi.intensity = mix3('hi') * (1 + 0.4 * ov * (1 - nightF) - 0.1 * wet);   // the whole sky glows under cloud
   towardOvercast(hemi.color, O.sky, grey); towardOvercast(hemi.groundColor, O.gnd, grey);
   if (snowK > 0) towardOvercast(hemi.groundColor, O.snowGnd, 0.45 * snowK * (1 - nightF * 0.5));   // light bounced off snow
-  mixC(_fogC, 'fog'); towardOvercast(_fogC, O.fog, grey); _fogC.multiplyScalar(1 - 0.1 * ov - 0.08 * wet);
+  // the true sun (the light below plays the moon), for the atmosphere
+  { const ce = Math.cos(sp.elevationRad); ATM.sun.set(Math.sin(sp.azimuthRad) * ce, Math.sin(sp.elevationRad), -Math.cos(sp.azimuthRad) * ce); }
+  updateAtmosphere(ATM.sun);
+  const atmK = LOOK.skyModel === 'physical' ? 1 - nightF : 0;   // by night the palette's own dark sky stands
+  mixC(_fogC, 'fog'); _fogC.lerp(ATM.hor, atmK * 0.9); towardOvercast(_fogC, O.fog, grey); _fogC.multiplyScalar(1 - 0.1 * ov - 0.08 * wet);
   scene.fog.color.copy(_fogC); scene.background.copy(_fogC);
   // falling rain and snow close the distance in (updateCamera sets the clear-air distances each frame)
   scene.fog.near *= 1 - 0.45 * wet; scene.fog.far *= 1 - 0.4 * wet;
   // the sun comes from its true azimuth (world +x east, +z south); below the horizon the same light
   // plays the moon, from the opposite side of the sky
-  const up = e >= -0.05, el = Math.max(up ? sp.elevationRad : -sp.elevationRad, SKY.minElevation);
-  const hx = Math.sin(sp.azimuthRad) * (up ? 1 : -1), hz = -Math.cos(sp.azimuthRad) * (up ? 1 : -1);
+  skyFrame(sim.calendarT(), site.latitudeDeg, SKYF);
+  const up = e >= -0.05;
+  let el = Math.max(up ? sp.elevationRad : -sp.elevationRad, SKY.minElevation);
+  let hx = Math.sin(sp.azimuthRad) * (up ? 1 : -1), hz = -Math.cos(sp.azimuthRad) * (up ? 1 : -1);
+  // with the real night sky, the night's light is the moon's: from where it stands, as bright as its phase; with
+  // no moon up, the dimmer light of the stars and the glow of the sky
+  if (!up && LOOK.nightSky === 'real') {
+    const m = SKYF.moon, mUp = smoothstep(0.02, 0.2, m.y);
+    if (m.y > 0.06) { el = Math.max(Math.asin(m.y), SKY.minElevation); const hl = Math.hypot(m.x, m.z) || 1; hx = m.x / hl; hz = m.z / hl; }
+    sun.intensity *= lerp(0.55, 1.05, m.w * mUp);
+  }
   const tx = Math.round(player.x), tz = Math.round(player.z);
   sun.target.position.set(tx, player.y, tz);
   sun.position.set(tx + hx * Math.cos(el) * 120, player.y + Math.sin(el) * 120, tz + hz * Math.cos(el) * 120);
   waterUniforms.uSunDir.value.subVectors(sun.position, sun.target.position).normalize();
   waterUniforms.uSunCol.value.copy(sun.color).multiplyScalar(sun.intensity * 0.32);
   waterUniforms.uAmb.value.copy(hemi.color).multiplyScalar(hemi.intensity * 0.3);
-  waterUniforms.uSky.value.copy(_fogC); mixC(waterUniforms.uZenith.value, 'zen'); towardOvercast(waterUniforms.uZenith.value, O.zen, grey);
-  skyDome.update(cloud, dayF, wx ? Math.sin(wx.windDirRad || 0) * (wx.windMs || 0) : 1, wx ? Math.cos(wx.windDirRad || 0) * (wx.windMs || 0) : 0);
+  waterUniforms.uSky.value.copy(_fogC); mixC(waterUniforms.uZenith.value, 'zen'); waterUniforms.uZenith.value.lerp(ATM.zen, atmK * 0.9); towardOvercast(waterUniforms.uZenith.value, O.zen, grey);
+  skyDome.update({
+    trueSun: ATM.sun, sunLo: ATM.lo, sunHi: ATM.hi, sunCi: ATM.ci, cloud, grey, night: nightF, day: dayF,
+    windX: wx ? Math.sin(wx.windDirRad || 0) * (wx.windMs || 0) : 1, windZ: wx ? Math.cos(wx.windDirRad || 0) * (wx.windMs || 0) : 0,
+    fog: scene.fog, moon: SKYF.moon, eq: SKYF.eqInv,
+  }, lastDt);
+  nightSky.update(SKYF.eq, nightF, SKYF.moon, renderer.getPixelRatio());
   motes.material.opacity = (0.22 + 0.7 * nightF + 0.25 * goldF) * (1 - 0.8 * wet);
   motes.material.color.setHex(nightF > 0.5 ? 0xd9ff8a : 0xfff6c8);
   motes.material.size = 0.13 + 0.09 * nightF;
@@ -3322,6 +3372,7 @@ function setLook(key, value) {
   if (key === 'taa') { applyGfx(); resize(); }
   if (key === 'riverWater') riverLive.setMode(value === 'baked' ? 'bed' : value);
   if (key === 'waterReflect') { if (value === 'simple') { reflectProbe.setOn(false); reflectPlane.setOn(false); reflectPlane2.setOn(false); } reflectProbe.setDetail(value === 'full'); reflectPlane.setDetail(value === 'full'); reflectPlane2.setDetail(value === 'full'); }
+  if (['skyModel', 'skyClouds', 'nightSky', 'farLand', 'openSea', 'haze'].includes(key)) applySkyLook();
   if (key === 'bedStyle') U.bedVox.value = value === 'real' ? 0 : value === 'voxelFine' ? 2 : 1;
   if (key === 'waterTexel') { riverWater.uniforms.uTPM.value = value === 'ground' ? 6.4 : 25.6; riverWater.uniforms.uSnap.value = value === 'smooth' ? 0 : 1; }      // MSAA off or back on, and the resolve path
   if (key === 'toneMap') {
@@ -3457,6 +3508,16 @@ const gfxPanel = (() => {
       chk('taa', 'Temporal upscaling (TAAU), experimental', 'Blends frames from a jittered camera in place of MSAA. Smooths edges and shimmer, but softens the pixel textures. Off: MSAA as before.'),
       chk('skyShade', 'Shade under trees and in hollows', 'Ground and grass beneath tree crowns and down in dips see less sky, so forest floors darken. Baked, no frame cost.'),
       chk('ao', 'Extra ambient occlusion', 'A second, stronger occlusion on top of the Lighting pass (Ultra full, High and Medium half resolution).'),
+      h('div', { className: 'sec', textContent: 'Sky' }),
+      seg('Sky', [['physical', 'Physical'], ['painted', 'Painted']], LOOK.skyModel, (v) => setLook('skyModel', v)),
+      h('div', { className: 'hint', textContent: 'Physical works the sky out from how air and haze scatter sunlight: the blue, the pale horizon, the glow round the sun and the colours of sunrise and sunset, which also tint the distance haze. Painted is the earlier two-colour sky.' }),
+      seg('Clouds', [['layered', 'Heaped + cirrus'], ['heaped', 'Heaped only'], ['off', 'Off']], LOOK.skyClouds, (v) => setLook('skyClouds', v)),
+      h('div', { className: 'hint', textContent: 'Heaped clouds low down and thin streaks of cirrus high up, which glow at dusk. Cover follows the weather.' }),
+      seg('Night sky', [['real', 'Real stars'], ['simple', 'Simple'], ['off', 'Off']], LOOK.nightSky, (v) => setLook('nightSky', v)),
+      h('div', { className: 'hint', textContent: 'Real: the 5000 stars the eye can see, in their true constellations for the date, hour and latitude, the Milky Way, and the moon in its true place and phase, which lights the night. Simple: made-up stars and a fixed moonlight.' }),
+      seg('Distance haze', [['light', 'Light'], ['normal', 'Normal'], ['heavy', 'Heavy']], LOOK.haze, (v) => setLook('haze', v)),
+      chk('farLand', 'Land to the horizon', 'Past the loaded world (about 100 m), a simpler sheet of the same land runs on to about 400 m and into the haze. Off: the fog closes in at the world\'s edge, as before.'),
+      chk('openSea', 'Open sea horizon', 'Far land across a wide water (more than about 90 m of it) is left out, so the sea runs to the horizon. Off: the far shores show.', LOOK.farLand),
       h('div', { className: 'row' }, h('span', {}, 'Stream water', h('span', { className: 'hint', textContent: 'Live simulates the water round you on the graphics card: it flows round what you put in it, fills what you dig and stirs as you wade. Baked is the still, cheaper version everywhere. Beyond the live window the baked water shows.' })), rw),
       h('div', { className: 'row' }, h('span', {}, 'Stream reflections', h('span', { className: 'hint', textContent: 'Surroundings: streams near you reflect what is really round them: the banks, grass and rocks mirrored in place where they meet the water, and a small picture of the surroundings further off. It draws the scene again, every other frame, at low resolution and only to 40 m. Surroundings, full: every frame, sharper and to the horizon (costly). Simple: a sky and a tree line worked out in the shader, cheapest.' })), wr),
       h('div', { className: 'row' }, h('span', {}, 'Stream beds', h('span', { className: 'hint', textContent: 'The stones under the stream water near you. Voxel draws them in small texels with a few tones, like the rest of the world (Voxel, fine: texels half the size); Realistic draws them smooth.' })), bs),
@@ -4286,7 +4347,8 @@ function afterCamera(dist) {
   // misty or overcast air closes in, to a real mist in the worst of it
   const wxf = sim.state.sys.weather;
   const clearAir = wxf ? clamp(1 - 1.1 * smoothstep(0.35, 0.95, wxf.cloud) - 0.8 * smoothstep(0.85, 0.99, wxf.humidity), 0, 1) : 0.5;
-  scene.fog.near = lerp(20, 60, clearAir); scene.fog.far = lerp(330, 1100, clearAir * clearAir);
+  if (LOOK.farLand) { scene.fog.near = lerp(20, 60, clearAir); scene.fog.far = lerp(330, 1100, clearAir * clearAir) * HAZE[LOOK.haze]; }
+  else { scene.fog.near = lerp(lerp(cam.dist + 16, cam.dist + 52, clearAir), lerp(28, 60, clearAir), k); scene.fog.far = lerp(cam.dist + 96, 122, k); }   // the old wall at the world's edge
   // screen position of the player, for the see-through fade on trees
   const size = renderer.getDrawingBufferSize(_v2);
   if (viaComposer()) size.multiplyScalar(renderScale());     // the scene is drawn at render resolution
@@ -4638,6 +4700,10 @@ window.__game = {
     rebakeShade: () => { const t0 = performance.now(); for (const c of world.chunks.values()) { c.skyT = null; markShade(c); } processShade(); return +(performance.now() - t0).toFixed(1); },
     upscaler: (v) => { if (['bicubic', 'sharp', 'fsr'].includes(v)) setLook('upscaler', v); return LOOK.upscaler; },
     toneMap: (v) => { if (['aces', 'agxlook', 'agx', 'neutral'].includes(v)) setLook('toneMap', v); return LOOK.toneMap; },
+    // the sky: __game.look.sky({ model: 'physical'|'painted', clouds: 'layered'|'heaped'|'off', night: 'real'|'simple'|'off',
+    //   farLand: bool, openSea: bool, haze: 'light'|'normal'|'heavy' }); returns the current settings
+    sky: (o = {}) => { const map = { model: 'skyModel', clouds: 'skyClouds', night: 'nightSky', farLand: 'farLand', openSea: 'openSea', haze: 'haze' }; for (const k in o) if (map[k]) setLook(map[k], o[k]); return { model: LOOK.skyModel, clouds: LOOK.skyClouds, night: LOOK.nightSky, farLand: LOOK.farLand, openSea: LOOK.openSea, haze: LOOK.haze }; },
+    skyFrame: () => ({ moon: SKYF.moon.toArray(), age: SKYF.age, eqInv: SKYF.eqInv.toArray() }),
     streamReflections: (v) => { if (['probe', 'full', 'simple'].includes(v)) setLook('waterReflect', v); return LOOK.waterReflect; },
     waterStyle: (v) => { if (['smooth', 'fine', 'ground'].includes(v)) setLook('waterTexel', v); return LOOK.waterTexel; },
     farGrass: (v) => { if (['off', 'normal', 'aggressive'].includes(v)) setLook('farGrass', v); return LOOK.farGrass; },
