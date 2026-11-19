@@ -977,3 +977,8 @@ Nothing new to see yet: this is the plumbing decks, porches, lofts, skylights an
 - Console: `__game.foundation.hard(__game.sim.state, __foundation.job().id)`; commands `foundation.bore / setTube / plumb / fill / rod / setBracket / setPanel / tie / setBeam`. `debugPour` is no longer needed for any foundation (kept for tests).
 - Weak: a frost-depth trench by shovel is a lot of earth (a 3 x 2.4 m shed is about 8 m3): wants the hired hand or a machine; panels are bought, not rented; no bucket, only the barrow, tips into a tube; no backfill step (the 70% gate is only told); the tube's cardboard stays drawn above ground; the gestures (twist and lift, the plumbing drag, the rod pump) were only tested through their commands, so their feel needs a playtest.
 
+
+## Openings lined and level wall tops (branch `open-fills`)
+
+- A finished wall's doors and windows are lined with jamb boards across the whole wall thickness (a board up each side, a head, and a sill under a window), primed white or the building's trim colour, so an opening shows finished wood from any side and in the dollhouse cut.
+- The dollhouse cut's cap sits a hair above the cut, so the cut ends of studs and plates no longer poke through it as little bumps: the wall tops read level. The cap runs over the jambs at an opening, and the cut's sides cap the wall round an opening up to the clear opening.
