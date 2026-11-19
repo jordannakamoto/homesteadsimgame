@@ -75,49 +75,51 @@ body.touch {
   --scrim: rgba(74, 53, 38, .28);
 }
 
-/* ---- minimal: premium PC strategy HUD (smoky ink, hairlines, square, one brass accent), quick and crisp ---- */
+/* ---- minimal: a strategy / management HUD (Cities: Skylines II, Frostpunk 2, Timberborn): flat slate panels, crisp sans,
+   small radii, one blue accent for selection, semantic colours used functionally; quick and crisp ---- */
 :root[data-skin="minimal"] {
   color-scheme: dark;
-  --font-body: "Inter", "Segoe UI Variable Text", "Segoe UI", "SF Pro Text", Roboto, system-ui, sans-serif;
+  --font-body: "Inter", "Segoe UI Variable Text", "Segoe UI", "SF Pro Text", -apple-system, Roboto, system-ui, sans-serif;
   --font-display: var(--font-body);
-  /* drawer titles: a thin serif in tracked caps; any serif will do offline */
-  --font-title: "Cormorant SC", "Cinzel", "Trajan Pro", "Palatino Linotype", "Book Antiqua", Palatino, "Crimson Text", Georgia, serif;
+  --font-title: var(--font-body);
   --fw-body: 500; --fw-strong: 600; --fw-display: 600;
-  --label-transform: uppercase; --label-track: .14em;
-  --r-sm: 2px; --r-md: 2px; --r-lg: 2px; --r-slot: 2px; --r-pill: 2px;
+  --label-transform: none; --label-track: 0;
+  --r-sm: 3px; --r-md: 4px; --r-lg: 4px; --r-slot: 4px; --r-pill: 3px;
   --border-w: 1px;
-  --surface-1: rgba(12, 12, 11, .74);
-  --surface-2: rgba(11, 11, 10, .92);
-  --surface-3: rgba(255, 244, 222, .045);
-  --surface-hover: rgba(255, 240, 210, .09);
-  --well: rgba(0, 0, 0, .42);
-  --edge: rgba(236, 226, 204, .13); --edge-strong: rgba(236, 226, 204, .30);
-  --ink: #ece6da; --ink-dim: #a39d91; --ink-inv: #121110;
-  --accent: #c8a96a; --accent-ink: #15120b; --accent-soft: rgba(200, 169, 106, .14); --accent-edge: #c8a96a;
-  --select-bg: rgba(200, 169, 106, .10); --select-ink: #f3e7cb; --select-edge: #c8a96a;
-  --good: #93bd88; --warn: #d6a65e; --danger: #cf7462; --info: #8fb2c7; --money: #dcc28a;
-  --shadow-1: 0 1px 3px rgba(0, 0, 0, .45);
-  --shadow-2: 0 20px 48px rgba(0, 0, 0, .55), 0 2px 6px rgba(0, 0, 0, .4);
+  --surface-1: rgba(23, 28, 35, .90);
+  --surface-2: rgba(20, 24, 30, .95);
+  --surface-3: rgba(255, 255, 255, .045);
+  --surface-hover: rgba(255, 255, 255, .07);
+  --well: rgba(0, 0, 0, .28);
+  --edge: rgba(176, 196, 220, .15); --edge-strong: rgba(176, 196, 220, .32);
+  --ink: #e7ecf2; --ink-dim: #95a2b2; --ink-inv: #0f1318;
+  --accent: #3d93ee; --accent-ink: #ffffff; --accent-soft: rgba(61, 147, 238, .16); --accent-edge: #4a9ff5;
+  --select-bg: rgba(61, 147, 238, .20); --select-ink: #dcecff; --select-edge: #4a9ff5;
+  --good: #5cc07c; --warn: #e8aa3c; --danger: #e8604e; --info: #5aaae8; --money: #f0c64e;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .35), 0 2px 8px rgba(0, 0, 0, .18);
+  --shadow-2: 0 12px 32px rgba(0, 0, 0, .45), 0 2px 6px rgba(0, 0, 0, .3);
   --lip: none; --lip-accent: none;
   --press-y: 0; --press-scale: 1;
-  --blur: blur(10px) saturate(1.2);
-  --ease: cubic-bezier(.2, .7, .2, 1); --t-fast: 90ms; --t: 160ms;
-  --icon-stroke: 1.5; --icon-fill: none;
-  /* material colours, desaturated toward the ink: icons read as near-monochrome strokes */
-  --ic-outline: #e6dfd2;
-  --ic-wood: #b8a084; --ic-steel: #b4b2ad; --ic-stone: #9c9890;
-  --ic-leaf: #a3b68e; --ic-water: #9cb3c2; --ic-soil: #85705c;
-  --ic-skin: #cdb39e; --ic-paper: #e2dccd; --ic-warn: #d6a65e;
+  --blur: blur(10px) saturate(1.1);
+  --ease: cubic-bezier(.2, .7, .2, 1); --t-fast: 80ms; --t: 140ms;
+  --icon-stroke: 1.75; --icon-fill: none;
+  /* material colours: each carries a small clear hue so resources scan at a glance, like a strategy top bar */
+  --ic-outline: #dfe5ec;
+  --ic-wood: #cf9a62; --ic-steel: #aab6c3; --ic-stone: #a9b0b8;
+  --ic-leaf: #7cc66c; --ic-water: #5cb0ec; --ic-soil: #a07a58;
+  --ic-skin: #dcb69c; --ic-paper: #e9e6de; --ic-warn: #e8aa3c;
   --lip-danger: none;
   --pressed-ink: var(--select-ink);
-  --inner-hi: inset 0 1px 0 rgba(255, 240, 210, .05);
+  --inner-hi: inset 0 1px 0 rgba(255, 255, 255, .05);
   --hover-y: 0px;
   --lift-y: 0px;
-  --scrim: rgba(0, 0, 0, .45);
-  /* skin-only: hairlines and smoky fills used by 90-skin-minimal.css */
-  --m-rule: rgba(200, 169, 106, .42);
-  --m-smoke: rgba(9, 9, 8, .80);
-  --m-text-shadow: 0 1px 2px rgba(0, 0, 0, .85), 0 0 10px rgba(0, 0, 0, .35);
+  --scrim: rgba(6, 9, 13, .5);
+  /* skin-only: the flat bar fill, header tint, hairline and a light text shadow used by 90-skin-minimal.css */
+  --m-bar: rgba(20, 24, 30, .88);
+  --m-head: rgba(255, 255, 255, .04);
+  --m-line: rgba(176, 196, 220, .12);
+  --m-accent-fill: #2f7fd6;
+  --m-text-shadow: 0 1px 2px rgba(0, 0, 0, .55);
 }
 
 /* ---- legacy names: untouched rules in head.html and injected styles follow the skin ---- */
