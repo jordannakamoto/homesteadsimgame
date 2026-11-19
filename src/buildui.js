@@ -375,6 +375,7 @@
   // Opening drawings are made once per type (or recent design) and size, then reused.
   const thumbs = new Map();
   function pic(x, size = 30) {
+    if (x.svg) return x.svg;   // a drawing view() made itself (the stair types, by __stairsGeo)
     if ((x.thumb || x.spec) && window.__openingPreview) {
       const k = (x.spec ? JSON.stringify(x.spec) : x.thumb) + "@" + size;
       if (!thumbs.has(k)) {
@@ -450,6 +451,7 @@
     stageKey = "",
     stageCache = "";
   function stageHtml(g) {
+    if (g.kind === "stairs") return g.svg ? '<div class="bstrow"><div class="bstel">' + g.svg + "</div></div>" : "";   // the stair's side view, drawn by __stairsGeo
     const P = window.__openingPreview;
     if (!P || !g.spec) return "";
     try {
@@ -545,7 +547,7 @@
     setHtml($("bfit"), !show && fit && !fit.ok ? fitHtml : "");
     $("bfit").hidden = show || !fit || fit.ok;
     // the foot: Flip and Delete for a selected unit; the next one says where it goes
-    setHtml(dfoot, show ? (stageV && stageV.mode !== "sel" ? '<span class="bdnext">' + svg(I.right, 14) + "<span>Click a wall to place it</span></span>" : "") + foot.join("") : "");
+    setHtml(dfoot, show ? (stageV && stageV.mode !== "sel" ? '<span class="bdnext">' + svg(I.right, 14) + "<span>" + esc(stageV.next || "Click a wall to place it") + "</span></span>" : "") + foot.join("") : "");
     dfoot.hidden = !show || !foot.length;
     if (!show) return;
     const head = dpanel.firstChild;
@@ -878,6 +880,8 @@
   for (const m of measEls) m.lastChild.addEventListener("click", () => (BL.measClear(m._n), back()));
 
   let barKey = "",
+    trayMax = 76,
+    peekH = 0,
     uiV = -1,
     ovV = -1,
     lastCam = NaN,
@@ -958,13 +962,20 @@
       renderSched(v.sched, v);
       // how much of the view the bar covers: build mode frames the site in what is left above it. A steady figure (the
       // bar, a tray's height and the hint row, whatever the tool), so the view does not bob about between tools.
+      // A door or window catalogue makes the tray taller than --tray-h: the tallest tray seen at this window size counts,
+      // so the frame moves once and then holds. A hint row lifted out of the stack (a phone in landscape) does not
+      // count. On a phone the inspector's sheet sits above the bar: its peek height counts (full does not; the frame
+      // keeps the peek's).
       const k = window.innerWidth + "x" + window.innerHeight;
-      if (barKey !== k) {
-        barKey = k;
-        const r = $("bmain").getBoundingClientRect(),
-          trayH = parseFloat(getComputedStyle(bar).getPropertyValue("--tray-h")) || 76;
-        B.barH = Math.round(window.innerHeight - r.top + trayH + $("bhead").offsetHeight + 12);
-      }
+      if (barKey !== k) ((barKey = k), (trayMax = parseFloat(getComputedStyle(bar).getPropertyValue("--tray-h")) || 76), (peekH = 0));
+      if (!opts.hidden) trayMax = Math.max(trayMax, opts.offsetHeight);
+      const touch = document.body.classList.contains("touch"),
+        sheet = touch && !dpanel.hidden && !(window.matchMedia && matchMedia("(orientation: landscape)").matches);
+      if (!sheet) peekH = 0;
+      else if (!dpanel.classList.contains("full")) peekH = dpanel.offsetHeight + 8;
+      const hd = $("bhead"),
+        headH = getComputedStyle(hd).position === "fixed" ? 0 : hd.offsetHeight;
+      B.barH = Math.round(window.innerHeight - $("bmain").getBoundingClientRect().top + trayMax + headH + 12 + peekH);
       // the drawers end just above the bar (CSS anchors do it where they can; this is the fallback)
       const above = Math.round(window.innerHeight - bar.getBoundingClientRect().top + 8) + "px";
       for (const p of [dpanel, sched]) p.style.bottom !== above && (p.style.bottom = above);

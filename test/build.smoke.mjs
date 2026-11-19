@@ -116,6 +116,40 @@ async function open(opts) {
     fs.writeFileSync(process.env.DUMP_SHED, JSON.stringify(shed));
   }
 
+  // stairs: a storey over the room and a stair dragged up to it; then steps onto a floor raised 0.5 m. All undone after.
+  {
+    const n0 = (await pieces()).length, u0 = await G(() => __build.state.undo.length);
+    await G(() => __build.choose('level:set', 1)); await page.keyboard.press('KeyR'); await step(2);
+    await drag(await at(0, 0, 2.96), await at(5, 4, 2.96));
+    await G(() => __build.choose('level:set', 0)); await page.keyboard.press('KeyZ'); await step(2);
+    check('the Stairs tray has a card with a drawing for every type, and Material', await G(() => document.querySelectorAll('#bopts .bcard svg.st-thumb').length >= 8 && __build.view().groups.some((g) => g.id === 'st:mat' && g.tier)));
+    await drag(await at(0.5, 0.5), await at(4.6, 0.5));
+    const st = await G(() => __build.pieces().filter((p) => p.kind === 'stair'));
+    check('a stair dragged across the floor climbs to the storey above in comfortable risers', st.length === 1 && st[0].type === 'straight' && st[0].steps >= 15 && st[0].riser >= 0.15 && st[0].riser <= 0.19 && near(st[0].height, 2.84, 1e-3) && st[0].tread >= 0.25, JSON.stringify(st.map((p) => [p.type, p.steps, p.riser, p.tread, p.height])));
+    const w = await G(() => {
+      const S = __build.state.structs.find((s) => s.level === 0 && s.stairs.length), r = S.stairs[0], U = __build.state.structs.find((s) => s.level === 1);
+      const ys = []; let y = S.y0 + 0.12;
+      for (let t = 0.05; t < 3.95; t += 0.25) { const [x, z] = __build.toWorld(S, r.x + t, r.z); y = __build.ground(x, z, y, -99); ys.push(y); }
+      const [mx, mz] = __build.toWorld(S, r.x + 2.6, r.z), [fx, fz] = __build.toWorld(S, 4.5, 3);
+      return { ys, base: S.y0 + 0.12, top: U.y0 + 0.12, mid: __build.ground(mx, mz, U.y0 + 0.12, -99), off: __build.ground(fx, fz, U.y0 + 0.12, -99) };
+    });
+    check('the floor above is opened over the stair, and stays whole beside it', w.mid < w.top - 0.4 && Math.abs(w.off - w.top) < 1e-6, JSON.stringify([w.mid, w.off, w.top]));
+    check('walking the stair climbs steadily from the floor to the storey above', w.ys[0] < w.base + 0.3 && w.ys[w.ys.length - 1] > w.top - 0.45 && w.ys.every((v, i) => !i || v >= w.ys[i - 1] - 1e-6), w.ys.map((v) => (v - w.base).toFixed(2)).join(' '));
+    // a floor beside the house and a wing of it raised half a metre: steps between them
+    await page.keyboard.press('KeyF'); await step(2);
+    await drag(await at(7, 0), await at(10, 3));
+    await G(() => __build.choose('lift', 1)); await page.keyboard.down('Shift');
+    await drag(await at(10.5, 0, 0.62), await at(12.5, 3, 0.62)); await page.keyboard.up('Shift'); await G(() => __build.choose('lift', -1));
+    await page.keyboard.press('KeyZ'); await step(2);
+    await drag(await at(8, 1.5), await at(11.5, 1.5, 0.62));
+    const steps = await G(() => __build.pieces().filter((p) => p.kind === 'stair' && p.type !== 'straight'));
+    check('dragged from a floor onto one raised 0.5 m: three steps that land on its edge', steps.length === 1 && steps[0].type === 'steps' && steps[0].steps === 3 && near(steps[0].height, 0.5, 0.02), JSON.stringify(steps.map((p) => [p.type, p.steps, p.height, p.y0, p.y1])));
+    const undos = (await G(() => __build.state.undo.length)) - u0;
+    for (let k = 0; k < undos; k++) { await page.keyboard.press('Control+z'); await step(2); }
+    await page.keyboard.press('KeyV'); await step(2);
+    check('undo takes the storey, the stairs and the floors away again', (await pieces()).length === n0, undos + ' steps');
+  }
+
   // a wall drawn point to point with a typed length
   await page.keyboard.press('KeyN'); await click(await at(8, 0)); await move(await at(11.2, 2.3));
   check('a wall in hand shows its length and angle, with a field to type in', await G(() => { const d = __build.state.ov.dims; return d.length === 2 && d[0].field === 'a' && d[1].field === 'b' && !!document.querySelector('.bdim.field input'); }));
@@ -291,12 +325,28 @@ async function open(opts) {
 }
 
 /* ---------- phone: every tool and option within reach of a thumb ---------- */
+const rectOf = (G, sel) => G((sel) => { const e = document.querySelector(sel); if (!e || (e.checkVisibility && !e.checkVisibility({ checkVisibilityCSS: true }))) return null; const r = e.getBoundingClientRect(); return r.width && r.height ? { l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height } : null; }, sel);
+const apart = (a, b) => !a || !b || a.r <= b.l + 1 || b.r <= a.l + 1 || a.b <= b.t + 1 || b.b <= a.t + 1;
+const raf = (page) => page.waitForTimeout(250);   // touch.js settles the sticks and sheets on its own frames
 {
   const { ctx, page, G, step, draw } = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
-  await G(() => window.__touch.enable());
-  await page.tap('#tools button[data-tool="build"]'); await step(70);
-  const sizes = await G(() => [...document.querySelectorAll('#bpieces button, #bsnap, #bdone, #bundo, #bredo')].map((b) => { const r = b.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; }));
-  check('phone: tools, undo, redo and snap are at least 40 px', sizes.length >= 13 && sizes.every((s) => s[0] >= 40 && s[1] >= 40), JSON.stringify(sizes.slice(0, 3)));
+  await G(() => window.__touch.enable()); await step(2); await raf(page);
+  const btns = await G(() => Object.fromEntries(['tbow', 'tjump', 'tuse', 'tkick', 'tparry', 'tdash', 'troll', 'tatk'].map((id) => { const e = document.getElementById(id); return [id, !!e && e.checkVisibility({ checkVisibilityCSS: true })]; })));
+  check('phone: the peaceful game shows Look, Jump and Use, and no combat buttons', btns.tbow && btns.tjump && btns.tuse && !btns.tkick && !btns.tparry && !btns.tdash && !btns.troll && !btns.tatk, JSON.stringify(btns));
+  check('phone: the top bar is a menu button, money, the time and the gear', await G(() => { const m = document.getElementById('hud-menu'), d = document.getElementById('dock'); return !!m && m.getBoundingClientRect().width >= 44 && !d.checkVisibility({ checkVisibilityCSS: true }); }));
+  await page.tap('#hud-menu'); await step(2);
+  check('phone: the menu opens the dock as a sheet of tiles', await G(() => { const d = document.getElementById('dock'); return d.checkVisibility({ checkVisibilityCSS: true }) && [...d.querySelectorAll('.ui-dock-btn')].filter((b) => !b.hidden).every((b) => b.getBoundingClientRect().height >= 44); }));
+  await page.tap('#hud-menu'); await step(2);
+  await page.tap('#tools button[data-tool="build"]'); await step(70); await raf(page);
+  const sizes = await G(() => [...document.querySelectorAll('#bpieces button, #bdone, #bundo, #bxtra')].map((b) => { const r = b.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; }));
+  check('phone: tools, undo, "..." and done are at least 44 px', sizes.length >= 12 && sizes.every((s) => s[0] >= 44 && s[1] >= 44), JSON.stringify(sizes.slice(0, 3)));
+  await page.tap('#bxtra'); await step(2); await page.waitForTimeout(450);   // past its opening animation
+  const xs = await G(() => { const sh = document.getElementById('baidsheet'), bs = ['bredo', 'bsnap', 'broofs', 'bsched'].map((id) => document.getElementById(id)); return { open: !sh.hidden, inside: bs.every((b) => sh.contains(b)), big: bs.every((b) => b.getBoundingClientRect().height >= 44 && b.getBoundingClientRect().width >= 44), levels: sh.querySelectorAll('#blevel button').length }; });
+  check('phone: "..." opens Redo, Snap, the storeys, Roofs and Materials, each at least 44 px', xs.open && xs.inside && xs.big && xs.levels >= 2, JSON.stringify(xs));
+  const snap0 = await G(() => __build.view().snap); await page.tap('#bsnap'); await step(2);
+  check('phone: Snap in the sheet still works', (await G(() => __build.view().snap)) === !snap0);
+  await page.tap('#bsnap'); await step(2); await page.touchscreen.tap(195, 300); await step(2);
+  check('phone: a tap elsewhere puts the sheet away', await G(() => document.getElementById('baidsheet').hidden));
   for (const id of ['room', 'roof', 'decor', 'erase']) {
     if (id === 'decor') {   // Furnish lives in the Inside group slot: a tap picks the last used, a second tap lists them
       await G(() => document.querySelector('#bpieces [data-group="inside"]').scrollIntoView({ inline: 'center' }));
@@ -305,17 +355,48 @@ async function open(opts) {
     check('phone: ' + id + ' can be reached and picked', (await G(() => __build.view().top)) === id);
   }
   await G(() => document.querySelector('#bpieces button[data-piece="wall"]').scrollIntoView({ inline: 'center' })); await page.tap('#bpieces button[data-piece="wall"]'); await step(2);
-  const strip = await G(() => { const o = document.getElementById('bopts'), items = [...o.querySelectorAll('button')].map((b) => { const r = b.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; }); return { scrolls: o.scrollWidth > o.clientWidth, wraps: o.scrollHeight > o.clientHeight + 4, items }; });
+  const strip = await G(() => { const o = document.getElementById('bopts'), items = [...o.querySelectorAll('button:not([role="tab"])')].map((b) => { const r = b.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; }); return { scrolls: o.scrollWidth > o.clientWidth, wraps: o.scrollHeight > o.clientHeight + 4, items }; });
   check('phone: the options strip scrolls sideways and its targets are at least 40 px', strip.scrolls && !strip.wraps && strip.items.every((s) => s[0] >= 40 && s[1] >= 40), JSON.stringify(strip.items.slice(0, 4)));
   await G(() => document.querySelector('#bopts .bsw[title="Brick"]').scrollIntoView({ inline: 'center' })); await page.tap('#bopts .bsw[title="Brick"]'); await step(2);
   check('phone: a material further along the strip can be chosen', (await G(() => __build.state.wmat)) === 'brick');
-  check('phone: the bar fits the screen', await G(() => { const r = document.getElementById('buildbar').getBoundingClientRect(); return r.left >= 0 && r.right <= 390 && r.bottom <= 844 && r.height < 300; }));
+  const barR = await rectOf(G, '#buildbar');
+  check('phone: the bar fits the screen and stays under 200 px', !!barR && barR.l >= 0 && barR.r <= 390 && barR.b <= 844 && barR.h < 200, JSON.stringify(barR));
+  check('phone: the sticks ride above the bar', await G(() => document.getElementById('tsl').getBoundingClientRect().bottom <= document.getElementById('buildbar').getBoundingClientRect().top));
   // a room by touch: tap a corner, then touch again to aim the opposite one
   await G(() => document.querySelector('#bpieces button[data-piece="room"]').scrollIntoView({ inline: 'center' })); await page.tap('#bpieces button[data-piece="room"]'); await step(2);
   await page.touchscreen.tap(120, 330); await step(3); await page.touchscreen.tap(290, 470); await step(4);
   check('phone: two taps build a room', await G(() => __build.pieces().some((p) => p.kind === 'floor') && __build.pieces().filter((p) => p.kind === 'wall').length === 4));
   await draw(); await page.waitForTimeout(600);
   await page.screenshot({ path: 'dist/build-smoke-phone.png' });
+  // the door designer: a bottom sheet above the bar, peek (stage and fit line) then full
+  await G(() => document.querySelector('#bpieces button[data-piece="door"]').scrollIntoView({ inline: 'center' })); await page.tap('#bpieces button[data-piece="door"]'); await step(3); await raf(page); await step(1);
+  const sh = await G(() => { const r = (id) => document.getElementById(id).getBoundingClientRect(), vis = (id) => document.getElementById(id).checkVisibility({ checkVisibilityCSS: true }), d = r('bdesign'), bar = r('buildbar'), top = r('hud-top');
+    return { open: vis('bdesign'), wide: d.left <= 8 && d.right >= 382, above: d.bottom <= bar.top + 1, under: d.top >= top.bottom, stage: vis('bdstage') && vis('bdfit'), peek: !vis('bdtabs') && !vis('bdbody'), h: Math.round(d.height), barH: __build.state.barH, bar: Math.round(844 - bar.top), sticks: vis('tsl') || vis('tsr') }; });
+  check('phone: Door opens the designer as a sheet above the bar, under the top bar, at peek: stage and fit line', sh.open && sh.wide && sh.above && sh.under && sh.stage && sh.peek && sh.h < 300, JSON.stringify(sh));
+  check('phone: the view frames the wall above the sheet, and the sticks make way', sh.barH >= sh.bar + sh.h - 4 && !sh.sticks, JSON.stringify(sh));
+  const hit = await G(() => { const h = document.querySelector('#bdstage [data-h="r"]'), r = h.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, at = (dx) => { const e = document.elementFromPoint(x + dx, y); return e && e.dataset ? e.dataset.h : null; }; return [at(-20), at(20)]; });
+  check('phone: the stage\'s edge handles reach 44 px', hit[0] === 'r' && hit[1] === 'r', JSON.stringify(hit));
+  await page.tap('#bdgrow'); await step(3);
+  const full = await G(() => { const d = document.getElementById('bdesign').getBoundingClientRect(); return { top: Math.round(d.top), hud: Math.round(document.getElementById('hud-top').getBoundingClientRect().bottom), tabs: document.getElementById('bdtabs').checkVisibility({ checkVisibilityCSS: true }), body: document.getElementById('bdbody').checkVisibility({ checkVisibilityCSS: true }) }; });
+  check('phone: the sheet opens full, up to the top bar and no further, with the tabs', full.top >= full.hud && full.top < 120 && full.tabs && full.body, JSON.stringify(full));
+  await page.tap('#bdgrow'); await step(2);
+  await page.tap('#bdesign .ui-close'); await step(3); await raf(page);
+  check('phone: closing the sheet brings the sticks back', await G(() => document.getElementById('bdesign').hidden && document.getElementById('tsl').checkVisibility({ checkVisibilityCSS: true })));
+  await ctx.close();
+}
+/* ---------- phone, landscape: the bar between the sticks, the designer a drawer on the right ---------- */
+{
+  const { ctx, page, G, step } = await open({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true });
+  await G(() => window.__touch.enable()); await step(2); await raf(page);
+  check('landscape: the hotbar stands between the sticks', apart(await rectOf(G, '#tools'), await rectOf(G, '#tsl')) && apart(await rectOf(G, '#tools'), await rectOf(G, '#tsr')));
+  await G(() => document.querySelector('#tools button[data-tool="build"]').click()); await step(70);
+  await G(() => __build.setTool('room')); await step(3); await raf(page);
+  const L = { bar: await rectOf(G, '#buildbar'), head: await rectOf(G, '#bhead'), l: await rectOf(G, '#tsl'), r: await rectOf(G, '#tsr'), stock: await rectOf(G, '#stock'), top: await rectOf(G, '#hud-top') };
+  check('landscape: the bar sits between the sticks, the hint row up between the money and the clock', !!L.bar && L.bar.h < 170 && apart(L.bar, L.l) && apart(L.bar, L.r) && !!L.head && L.head.t < 20 && apart(L.head, L.stock) && apart(L.head, L.top), JSON.stringify(L));
+  await G(() => __build.setTool('door')); await step(3); await raf(page); await step(1);
+  const D = { d: await rectOf(G, '#bdesign'), bar: await rectOf(G, '#buildbar'), top: await rectOf(G, '#hud-top'), sticks: !!(await rectOf(G, '#tsl')) };
+  check('landscape: the designer is a drawer on the right, beside the bar and under the top bar', !!D.d && D.d.r >= 836 && D.d.w <= 380 && apart(D.d, D.bar) && D.d.t >= D.top.b - 1 && !D.sticks, JSON.stringify(D));
+  await page.screenshot({ path: 'dist/build-smoke-phone-landscape.png' });
   await ctx.close();
 }
 

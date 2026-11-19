@@ -6,8 +6,8 @@ const file = 'file://' + process.cwd() + '/dist/index.html';
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] });
 const fails = [], warns = [];
 const check = (name, ok, info = '') => { console.log((ok ? 'ok   ' : 'FAIL ') + name + (info ? '  ' + info : '')); if (!ok) fails.push(name); };
-// The phone layout lands in S9; until then a phone overlap is reported, not failed.
-const PHONE_OVERLAP_IS_FAILURE = false;
+// The phone layout (P8) is in: a phone overlap fails like any other.
+const PHONE_OVERLAP_IS_FAILURE = true;
 const warn = (name, ok, info = '') => { if (ok) return check(name, true, info); console.log('WARN ' + name + (info ? '  ' + info : '')); warns.push(name); };
 
 async function open(opts) {
