@@ -28,7 +28,7 @@ Design round, 18 Nov 2026. Finish carpentry comes first (casings and baseboard, 
 
 ## Later slices
 
-2. Window stool and apron (the sill style instead of a picture frame), caulk as a bead along the top edge (a coat like the seams), miters drawn as diagonal seams, a miter saw.
+2. (Shipped) Window stool and apron (default; picture frame as `spec.winTrim: 'frame'`), caulk as a bead (a coat like the seams, `<piece>.ck`), miters drawn as real 45 degree ends (`build.js` `shapedGeo`, `m.long` the long-point side), a miter saw (`miter_saw`, faster trim cuts with power).
 3. Blocking in partitions where cabinets and shelves will hang (frame stage), a workbench by the sawhorses.
 4. **Cabinets**: base and wall cabinets as parametric designs (width in 75 mm steps, height, depth): a plywood carcass, face frame, doors and drawers, built part by part at the bench, carried in, levelled, screwed to the studs; a counter on top; the sink base over the drain from services. Their doors and frames take paint or a clear finish.
 5. **Furniture**: designs made of parts (legs, rails, aprons, tops, panels) on a fine grid (10 mm, real board sizes), with joints; tables, benches, beds, shelves, chairs; saved designs; the old hand-modelled furniture is retired.

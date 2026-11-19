@@ -2672,7 +2672,11 @@ function applyBrush(x, z, mode, dt, target) {
 // ============================================================ input
 const keys = {};
 const mouse = { x: 0, y: 0, left: false, right: false, inside: false, click: 0, swallow: false };
-const cam = { yaw: 0.6, pitch: 0.95, dist: 24, aimPitch: 0.2, aimK: 0, yawRate: 0, prevYaw: 0.6, tx: 0, ty: 0, tz: 0, shake: 0 };
+const cam = { yaw: 0.6, pitch: 0.95, dist: 24, aimPitch: 0.2, aimK: 0, yawRate: 0, prevYaw: 0.6, tx: 0, ty: 0, tz: 0, shake: 0,
+  // the near views: view is the one V chose (0 overhead, 1 close behind the shoulder, 2 first person); live is the one
+  // showing this frame (a held right button gives a close look while exploring); aimLo / aimHi bound aimPitch for
+  // every input (mouse, touch); bowK / fpK ease the bow's and first person's framing in and out
+  view: 0, live: 0, lookDist: 4.2, fpK: 0, bowK: 0, aimLo: -0.28, aimHi: 0.9, wheelAcc: 0, wheelHold: 0, fromHold: false };
 // what body the input drives and what the camera follows (src/engine/control.js); until the takeovers below move onto it,
 // nothing new may take the body while one of them holds it
 const control = createControl({ player, cam, keys, mouse });
@@ -2702,6 +2706,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyG') cycleQuality();
   // the controls sheet: ? or F1 (H is the Hens'); src/game/keymap.js renders it
   if ((e.code === 'F1' || (e.code === 'Slash' && e.shiftKey)) && !e.repeat && player.tool !== 'build') { e.preventDefault(); const h = document.getElementById('help'); if (h.hidden && window.__keymap) window.__keymap.render(); h.hidden = !h.hidden; }
+  if (e.code === 'KeyV' && !e.repeat && player.tool !== 'build') camView('next');
   if (e.altKey || ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'AltLeft', 'AltRight'].includes(e.code)) e.preventDefault();
 });
 window.addEventListener('keyup', (e) => { keys[e.code] = false; if (e.code === 'AltLeft' || e.code === 'AltRight') e.preventDefault(); });
@@ -2755,17 +2760,59 @@ canvas.addEventListener('pointermove', (e) => {
   mouse.y = -(((e.clientY - r.top) / r.height) * 2 - 1);
   mouse.inside = true;
   if (locked()) {                                    // the mouse steers the camera, and the camera is the aim
-    const sens = cam.aimK > 0.5 ? 0.0019 : 0.0026;
+    const sens = cam.aimK > 0.5 ? (cam.live ? 0.0021 : 0.0019) : 0.0026;
     cam.yaw -= e.movementX * sens;
-    if (cam.aimK > 0.5) cam.aimPitch = clamp(cam.aimPitch + e.movementY * 0.0016, -0.28, 0.9);
+    if (cam.aimK > 0.5) cam.aimPitch = clamp(cam.aimPitch + e.movementY * (cam.live ? 0.0019 : 0.0016), cam.aimLo, cam.aimHi);
     else cam.pitch = clamp(cam.pitch + e.movementY * 0.002, 0.5, 1.35);
   }
 });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
+  if (cam.live) { wheelLook(e.deltaY * (e.deltaMode === 1 ? 40 : 1)); return; }
   cam.dist = clamp(cam.dist * Math.exp(e.deltaY * 0.0012), 9, 50);
 }, { passive: false });
+// In the close view the wheel brings the camera in and out; pushed on past the closest it slides into first person,
+// and a turn back out leaves it. The push has to build up a little so a trackpad's flick does not flip views.
+function wheelLook(dy) {
+  const now = performance.now();
+  if (now < cam.wheelHold) return;
+  if (cam.live === 2) {
+    if (dy > 0) { cam.wheelAcc += dy; if (cam.wheelAcc > 90) { cam.lookDist = 1.9; setView(cam.fromHold && mouse.right ? 0 : 1, !(cam.fromHold && mouse.right)); } }
+    else cam.wheelAcc = 0;
+    return;
+  }
+  const atMin = cam.lookDist <= 1.6 + 1e-3;
+  cam.lookDist = clamp(cam.lookDist * Math.exp(dy * 0.0014), 1.6, 9);
+  if (dy < 0 && atMin) { cam.wheelAcc -= dy; if (cam.wheelAcc > 160) { cam.fromHold = cam.view === 0; setView(2); } }
+  else cam.wheelAcc = 0;
+}
+const VIEW_NAMES = ['overhead', 'close', 'first'];
+const VIEW_SAY = ['Overhead view', 'Close view: look around freely, wheel to come closer', 'First person: wheel out to step back'];
+function setView(v, say = true) {
+  cam.view = v; cam.wheelAcc = 0; cam.wheelHold = performance.now() + 350;
+  if (say && window.__ui && window.__ui.toast) window.__ui.toast(VIEW_SAY[v] + (v ? '. V changes the view' : ''), { tone: 'info', seconds: 2.2 });
+}
+// which view shows this frame. The near views are for walking about with the axe or a terrain tool; any other tool
+// (build mode, hands, garden, yard...), a seat, the kitchen or the bow uses its own camera and the choice waits
+function liveView() {
+  const P = player;
+  if (!control.walking() || window.__game?.cooking?.active || P.dead > 0 || P.aiming || !TOOLS.includes(P.tool) || window.__reach?.on) return 0;
+  if (cam.view) return cam.view;
+  return !COMBAT && mouse.right && P.tool === 'axe' && heightAt(P.x, P.z) >= -0.75 ? 1 : 0;
+}
+// __game.camView(): the view showing ('overhead' | 'close' | 'first'); camView('next') steps V's cycle; camView(name) picks one
+function camView(v) {
+  if (v === 'next' || VIEW_NAMES.includes(v)) {
+    if (!TOOLS.includes(player.tool)) {
+      if (window.__ui && window.__ui.toast) window.__ui.toast('The close views work with the axe or a terrain tool (1 to 4)', { tone: 'info', seconds: 2.4 });
+    } else {
+      const n = v === 'next' ? (cam.view + 1) % 3 : VIEW_NAMES.indexOf(v);
+      if (n !== cam.view) { if (n === 1) cam.lookDist = Math.max(cam.lookDist, 3.2); setView(n); }
+    }
+  }
+  return VIEW_NAMES[cam.live];
+}
 
 const TOOLS = ['axe', 'dig', 'raise', 'level'];
 function setTool(t) {
@@ -2784,7 +2831,7 @@ ring.rotation.x = -Math.PI / 2; ring.renderOrder = 10; ring.visible = false;
 scene.add(ring);
 
 const _ray = new THREE.Raycaster(), _v2 = new THREE.Vector2();
-// Where attacks and tools point. Exploring: the ground just ahead. Bow drawn: whatever sits under the reticle.
+// Where attacks and tools point. Exploring: the ground just ahead. Bow drawn or a near view: whatever sits under the reticle.
 function updateAim() {
   juice.onEnemy = false;
   if (cam.aimK < 0.5) {
@@ -2811,6 +2858,10 @@ function updateAim() {
     if (tc > 0 && tc < tHit + 0.5 && cx * cx + cy * cy + cz * cz - tc * tc < 0.17) { tHit = Math.min(tHit, tc); juice.onEnemy = true; }
   }
   cursor.x = o.x + d.x * tHit; cursor.y = o.y + d.y * tHit; cursor.z = o.z + d.z * tHit; cursor.valid = true;
+  if (cam.live) {                                          // a near view: the tools work where you look, within a few paces
+    const dx = cursor.x - player.x, dz = cursor.z - player.z, dl = Math.hypot(dx, dz);
+    if (dl > 6) { cursor.x = player.x + dx * 6 / dl; cursor.z = player.z + dz * 6 / dl; cursor.y = heightAt(cursor.x, cursor.z); }
+  }
 }
 
 // ============================================================ water, motes, sky
@@ -3479,14 +3530,14 @@ const gfxPanel = (() => {
 #gfxsettings .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 7px 0; }
 #gfxsettings .seg { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 #gfxsettings .seg button { padding: 3px 8px; }
-#gfxsettings button[aria-pressed="true"] { border-color: var(--accent); background: rgba(226, 182, 90, 0.18); color: var(--accent); }
+#gfxsettings button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 #gfxsettings .sec { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--panel-edge); color: var(--ink-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
 #gfxsettings label.chk { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; margin: 7px 0; }
 #gfxsettings label.chk input { margin-top: 2px; }
 #gfxsettings label.chk.off { opacity: 0.45; }
 #gfxsettings .hint { display: block; color: var(--ink-dim); font-size: 11px; }
 #gfxsettings input[type=range] { width: 130px; }
-#gfxsettings pre { white-space: pre-wrap; font-size: 11px; line-height: 1.35; max-height: 240px; overflow: auto; background: rgba(0, 0, 0, 0.28); padding: 8px; border-radius: 6px; margin: 6px 0 0; }`;
+#gfxsettings pre { white-space: pre-wrap; font-size: 11px; line-height: 1.35; max-height: 240px; overflow: auto; background: var(--well); padding: 8px; border-radius: 6px; margin: 6px 0 0; }`;
   document.head.appendChild(css);
   const box = document.createElement('div');
   box.id = 'gfxsettings'; box.className = 'panel'; box.hidden = true;
@@ -4149,9 +4200,9 @@ function updatePlayer(dt) {
     P.roll = { t: 0, dx, dz }; P.rollCd = 0.7; P.atk = null; P.charging = null; P.parry = null; spendStam(20);
     P.faceTarget = Math.atan2(dx, dz);
   }
-  // bow: hold right mouse to draw
+  // bow (combat only): hold right mouse to draw. While peaceful the same hold is the close view (liveView)
   const wasAiming = P.aiming;
-  P.aiming = mouse.right && armed && !busy() && !swimming;
+  P.aiming = COMBAT && mouse.right && armed && !busy() && !swimming;
   if (P.aiming && !wasAiming) { P.draw = 0; P.atk = null; P.charging = null; P.parry = null; cam.aimPitch = 0.2; }
   if (P.aiming) {
     P.draw += dt;
@@ -4342,6 +4393,7 @@ function updatePlayer(dt) {
   }
   if (P.parry) { P.parry.t += dt; if (P.parry.t >= 0.45) P.parry = null; }
   mouse.click = Math.max(0, mouse.click - dt);
+  if (cam.live === 2 && !P.roll) P.faceTarget = yawF;  // first person: the body turns with the eyes
   if (P.faceHold != null) P.faceTarget = P.faceHold;     // the hands add-on turns the character to what it is reaching for
   let df = P.faceTarget - P.face;
   df = Math.atan2(Math.sin(df), Math.cos(df));
@@ -4405,29 +4457,53 @@ function updateShakes(dt) {
 }
 const _proj = new THREE.Vector3();
 function updateCamera(dt) {
-  if (window.__game?.cooking?.updateCamera(dt)) return;
-  if (control.camera(dt, camera)) { afterCamera(cam.dist); return; }   // a possession placed the camera itself
-  const k = cam.aimK = lerp(cam.aimK, player.aiming ? 1 : 0, 1 - Math.exp(-11 * dt));
+  const live = liveView();
+  if (live && !cam.live && cam.aimK < 0.5) cam.aimPitch = live === 2 ? 0.08 : 0.22;   // a near view starts looking just ahead
+  cam.live = live;
+  if (player.aiming) { cam.aimLo = -0.28; cam.aimHi = 0.9; }
+  else if (live) { cam.aimLo = live === 2 ? -1.45 : -1.2; cam.aimHi = live === 2 ? 1.45 : 1.42; cam.aimPitch = clamp(cam.aimPitch, cam.aimLo, cam.aimHi); }
+  const kitchen = !!window.__game?.cooking?.updateCamera(dt);
+  if (kitchen || control.camera(dt, camera)) {            // the kitchen or a possession placed the camera
+    cam.fpK = 0; pm.root.visible = true;
+    if (camera.near !== 0.5) { camera.near = 0.5; camera.updateProjectionMatrix(); }
+    if (!kitchen) afterCamera(cam.dist);
+    return;
+  }
+  const k = cam.aimK = lerp(cam.aimK, player.aiming || live ? 1 : 0, 1 - Math.exp(-(live ? 8 : 11) * dt));
+  if (player.aiming) cam.bowK = 1; else if (live) cam.bowK = 0;                       // easing out keeps the framing it had
+  const fk = cam.fpK = lerp(cam.fpK, live === 2 ? 1 : 0, 1 - Math.exp(-8 * dt)), bk = cam.bowK;
   const follow = 1 - Math.exp(-lerp(9, 24, k) * dt);
   const f = control.follow();     // the player, or what a possession wants followed, plus its look-ahead
   cam.tx = lerp(cam.tx, f.x, follow); cam.tz = lerp(cam.tz, f.z, follow);
   cam.ty = lerp(cam.ty, f.y + 1.0, 1 - Math.exp(-lerp(5, 18, k) * dt));
   cam.shake = Math.max(0, cam.shake - dt * 1.6);
   const sh = cam.shake * cam.shake * 1.6 * (1 - 0.6 * k);
-  // exploring: high above. Bow drawn: down behind the right shoulder.
-  const dist = lerp(cam.dist * control.rig.distK, 4.4, k), pitch = lerp(control.rig.pitch(cam.pitch), cam.aimPitch, k);
-  const rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw);
-  const tx = cam.tx + rx * 0.8 * k, ty = cam.ty + 0.75 * k, tz = cam.tz + rz * 0.8 * k;
+  // exploring: high above. Bow drawn: down behind the right shoulder. Close view: just behind and over the shoulder,
+  // as near as the wheel puts it. First person: at the eyes.
+  const pitch = lerp(control.rig.pitch(cam.pitch), cam.aimPitch, k);
+  let dist = lerp(cam.dist * control.rig.distK, lerp(cam.lookDist * (1 - fk), 4.4, bk), k);
+  const side = lerp(0.42 * (1 - fk), 0.8, bk) * k, up = lerp(lerp(0.5, 0.55, fk), 0.75, bk) * k, lookW = (1 - bk) * k;
+  const rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw), sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw);
+  const tx = lerp(cam.tx, f.x, fk) + rx * side, ty = cam.ty + up, tz = lerp(cam.tz, f.z, fk) + rz * side;
   const cp = Math.cos(pitch), spn = Math.sin(pitch);
+  if (lookW > 0 && spn < 0 && dist > 0.9) {             // looking up in a near view: the camera comes in along its line, not into the ground
+    const room = (ty - Math.max(heightAt(tx + sy * cp * dist, tz + cy * cp * dist), SEA) - 0.9) / -spn;
+    if (room < dist) dist = lerp(dist, Math.max(0.9, room), lookW);
+  }
   camera.position.set(
-    tx + Math.sin(cam.yaw) * cp * dist + (Math.random() - 0.5) * sh,
+    tx + sy * cp * dist + (Math.random() - 0.5) * sh,
     ty + spn * dist + (Math.random() - 0.5) * sh,
-    tz + Math.cos(cam.yaw) * cp * dist);
-  const floor = Math.max(heightAt(camera.position.x, camera.position.z), SEA) + lerp(1.5, 0.95, k);
+    tz + cy * cp * dist);
+  const floor = Math.max(heightAt(camera.position.x, camera.position.z), SEA) + lerp(1.5, lerp(0.9, 0.95, bk), k);   // above the grass
   if (camera.position.y < floor) camera.position.y = floor;
-  camera.lookAt(tx, ty, tz);
-  const fov = lerp(control.rig.fov(40), 52, k);
-  if (Math.abs(camera.fov - fov) > 0.05) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  // the bow (and the high view) look at the player; a near view looks along its own line, so it can look at the sky
+  const L = Math.max(dist, 1), p = camera.position;
+  camera.lookAt(lerp(tx, p.x - sy * cp * L, lookW), lerp(ty, p.y - spn * L, lookW), lerp(tz, p.z - cy * cp * L, lookW));
+  const fov = lerp(control.rig.fov(40), lerp(lerp(58, 70, fk), 52, bk), k);
+  const near = lookW > 0.5 ? (fk > 0.3 ? 0.1 : 0.25) : 0.5;   // in first person a wall can be an arm's length away
+  if (Math.abs(camera.fov - fov) > 0.05 || camera.near !== near) { camera.fov = fov; camera.near = near; camera.updateProjectionMatrix(); }
+  const hide = fk > 0.55;                                   // first person: your own body would fill the view
+  if (pm.root.visible === hide) pm.root.visible = !hide;
   camera.updateMatrixWorld();
   afterCamera(dist);
 }
@@ -4473,10 +4549,11 @@ function updateHud() {
   if (armed !== hs.armed) { el('stance').hidden = !armed; hs.armed = armed; }
   const h = Math.round(Math.min(1, P.hurt * 2.2) * 20) / 20;
   if (h !== hs.hurt) { el('hurt').style.opacity = String(h); hs.hurt = h; }
-  const show = cam.aimK > 0.35;
+  // the near views show a small dot where the tools work: always in first person, with a terrain tool in the close view
+  const near = cam.live > 0, show = cam.aimK > 0.35 && (!near || cam.live === 2 || P.tool !== 'axe');
   if (show !== hs.ret) { el('reticle').hidden = !show; hs.ret = show; }
   if (show) {
-    const sc = Math.round(lerp(2.6, 1, P.charge) * 20) / 20, cls = (P.charge >= 1 ? 'full ' : '') + (juice.onEnemy ? 'on' : '');
+    const sc = near ? 0.6 : Math.round(lerp(2.6, 1, P.charge) * 20) / 20, cls = near ? '' : (P.charge >= 1 ? 'full ' : '') + (juice.onEnemy ? 'on' : '');
     if (sc !== hs.retScale) { el('reticle').style.transform = 'translate(-50%, -50%) scale(' + sc + ')'; hs.retScale = sc; }
     if (cls !== hs.retCls) { el('reticle').className = cls; hs.retCls = cls; }
   }
@@ -4789,8 +4866,17 @@ applyGfx();
 resetWorld(SEED);
 setTool('axe');
 lockUi();
+// the help card names the near views (its own rows for the bow show only with combat on)
+{
+  const dl = document.querySelector('#help dl'), at = dl && [...dl.children].find((n) => n.tagName === 'DT' && n.textContent === '1 to 4');
+  if (dl) {
+    const row = (k, v) => { const t = document.createElement('dt'), d = document.createElement('dd'); t.textContent = k; d.textContent = v; dl.insertBefore(t, at || null); dl.insertBefore(d, at || null); };
+    if (!COMBAT) row('Hold right', 'Look around up close. Wheel: nearer or farther');
+    row('V', 'Change the view: overhead, close behind you, first person. In the close view, wheel all the way in for first person');
+  }
+}
 window.__game = {
-  pm, get seed() { return SEED; }, get nightF() { return SKYK.night; },
+  pm, get seed() { return SEED; }, get nightF() { return SKYK.night; }, camView,
   stepHooks,
   get sim() { return sim; }, setYearDays: (d) => { sim.setYearDays(d); saveGame(); }, savedBuilds: () => simCtl.builds, powerAvailable: (minW = 1) => powerNear(sim.state, player.x, player.z, 30, minW),
   stock: {

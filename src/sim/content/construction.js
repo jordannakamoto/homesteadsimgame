@@ -116,7 +116,7 @@ export function itemForm(itemId) {
   if (/^board_/.test(itemId)) return 'boards';
   if (/^(osb|plywood|gypsum)_/.test(itemId)) return 'sheet';
   if (itemId === 'pier_block') return 'block';
-  if (/^(nails|screws)_/.test(itemId)) return 'box';
+  if (/^(nails|screws)_/.test(itemId) || itemId === 'caulk_acrylic') return 'box';
   if (itemId === 'housewrap' || itemId === 'roof_underlayment' || itemId === 'vapour_barrier' || itemId === 'roof_epdm' || itemId === 'roof_ice_water' || itemId === 'roof_green') return 'roll';
   if (itemId === 'drip_edge' || itemId === 'ridge_cap' || itemId === 'gutter_alu' || itemId === 'downspout_alu') return 'trim';
   if (/^roof_/.test(itemId)) return 'bundle';
@@ -165,7 +165,7 @@ export const isStickItem = (itemId) => /^(lumber|trim)_/.test(itemId);     // fr
 // fitted pieces and the angled ones: posts cut to height once the piers are level, blocking, cripples under sills and over
 // headers, gable studs, rafters and hips with their plumb cuts and seat cuts, and any stub under stubM. Those are bought as stock sticks and cut at the sawhorses as a job of their own;
 // each cut piece goes into the arms (an armful at most) or onto the horses.
-export const SITE_CUT = Object.freeze({ kinds: Object.freeze(['block', 'cripple', 'rafter', 'hip', 'post', 'casing', 'base']), armful: 6, shortM: 1.5, stubM: 0.6,
+export const SITE_CUT = Object.freeze({ kinds: Object.freeze(['block', 'cripple', 'rafter', 'hip', 'post', 'casing', 'base', 'stool']), armful: 6, shortM: 1.5, stubM: 0.6,
   says: 'Cut it at the sawhorses first', why: 'Posts, blocking, cripples and rafters are cut on site, to fit; everything else comes cut to length from the yard' });
 export const isSiteCut = (kind, len) => SITE_CUT.kinds.includes(kind) || (len > 0 && len < SITE_CUT.stubM) || ((kind === 'stud' || kind === 'jack') && len > 0 && len < SITE_CUT.shortM);
 // the pieces cut at the sawhorses from a lumber item, carried and stacked like any other item

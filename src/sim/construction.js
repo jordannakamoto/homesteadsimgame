@@ -641,7 +641,8 @@ function land(ctx, s, id) {
   const r = SUP.deliver(s, id, C.DELIVERY.layout);
   // the wheelbarrow stands beside the stacks on the side away from the building (the stacks run +x from the drop point), never on its footprint
   if (r.ok && !s.barrow) { const pb = r.delivery.tag && s.progress[r.delivery.tag.structId], away = pb && Number.isFinite(pb.x) && pb.x < r.delivery.x ? 6.2 : -2.4; s.barrow = { x: round6(r.delivery.x + away), z: round6(r.delivery.z + 1.2), yaw: 0.6, held: false }; }
-  if (r.ok && !s.horses && r.delivery.lines.some((l) => C.isStickItem(l.itemId))) { const pr = r.delivery.tag && s.progress[r.delivery.tag.structId]; if (pr) setUpHorses(s, pr, r.delivery.x, r.delivery.z); }
+  // the sawhorses come with the first lumber for a building, unless they are already by it: left at an earlier site, they move to this one
+  if (r.ok && r.delivery.lines.some((l) => C.isStickItem(l.itemId))) { const pr = r.delivery.tag && s.progress[r.delivery.tag.structId]; if (pr && (!s.horses || Math.hypot(s.horses.x - pr.x, s.horses.z - pr.z) > (pr.r || 3) + 12)) setUpHorses(s, pr, r.delivery.x, r.delivery.z); }
   if (r.ok) ctx.emit('construction.delivered', { deliveryId: id, stacks: r.stacks, x: r.delivery.x, z: r.delivery.z, tag: r.delivery.tag });
   return r;
 }
@@ -792,11 +793,13 @@ function putDownCmd(ctx, p) {
 // under them; the sanding pass after the last coat needs neither material nor anything but dry mud
 // the coats of each kind of piece that goes on wet: seams (three coats then sanding), primer (one), paint (two, over dry
 // primer). The last coat builds a primed or painted piece; it stays wet (dryAt) a while, which the view shows
-const COATS = { joint: () => ({ coats: C.FINISH.coats, dryS: C.FINISH.dryS, sand: true }), prime: () => ({ ...C.DECOR.prime, sand: false }), paint: () => ({ ...C.DECOR.paint, sand: false }) };
+const COATS = { joint: () => ({ coats: C.FINISH.coats, dryS: C.FINISH.dryS, sand: true }), prime: () => ({ ...C.DECOR.prime, sand: false }), paint: () => ({ ...C.DECOR.paint, sand: false }),
+  caulk: () => ({ coats: 1, dryS: 1800, sand: false }) };     // a bead of caulk along a piece of trim: on once it is nailed up, dry in half an hour
 export const isCoat = (kind) => !!COATS[kind];
 function mudPass(ctx, s, pr, m, ln, fromStacks, id) {
   const t = ctx.state.t, F = COATS[m.kind](), coat = m.coat || 0;
   if (m.dryAt && t + 1e-6 < m.dryAt) return { reason: 'wet', waitS: round6(m.dryAt - t) };
+  if (m.kind === 'caulk') { const tp = pr.members[String(id).replace(/\.ck$/, '')]; if (tp && !tp.built) return { reason: 'set the trim first' }; }
   if (m.kind === 'paint') {        // over its primer, dry
     const pm = pr.members[String(id).replace('.pt', '.pr')];
     if (pm && !pm.built) return { reason: 'prime first' };
@@ -831,7 +834,7 @@ function install(ctx, p) {
     const why = blocked(pr, id);
     if (why) { out.refused.push({ id, reason: why, missing: why === 'support missing' ? supportMissing(pr, id) : undefined, held: m && kept(pr, 'hold') && kept(pr, 'hold')[m.stage] ? 1 : undefined }); break; }
     const ln = m.line ? pr.lines[m.line] : null;
-    if (m.kind === 'joint' || m.kind === 'prime' || m.kind === 'paint') {      // a coat at a time: a seam (tape, fill, finish, sanding), primer, paint
+    if (COATS[m.kind]) {      // a coat at a time: a seam (tape, fill, finish, sanding), primer, paint, a bead of caulk
       const r = mudPass(ctx, s, pr, m, ln, fromStacks, id);
       if (!r.ok) { out.refused.push({ id, ...r }); break; }
       if (r.built) { pr.tally[m.stage][0]++; out.installed.push(id); } else out.set.push(id);
@@ -971,7 +974,7 @@ function dismantle(ctx, p) {
       if (!s.offcuts) s.offcuts = {};
       (s.offcuts[ln.itemId] || (s.offcuts[ln.itemId] = [])).push(m.area);
       m.cut = null;
-    } else if (ln && m.got > 0 && m.kind !== 'joint' && m.kind !== 'prime' && m.kind !== 'paint') {      // (seams, primer and paint: what was spread is spent, nothing comes back)
+    } else if (ln && m.got > 0 && !COATS[m.kind]) {      // (seams, primer, paint and caulk: what was spread is spent, nothing comes back)
       SUP.giveBack(s, ln.itemId, m.got, at.x, at.z, C.DELIVERY.layout);
       ln.used = round6(ln.used - m.got);
       out.returned[ln.itemId] = round6((out.returned[ln.itemId] || 0) + m.got);
