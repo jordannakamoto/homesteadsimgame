@@ -158,9 +158,9 @@ export function planGeometry(state, pr, type, frostM = CC.FROST_DEFAULT_M) {
     }
   };
   if (type === 'slab') {
-    out.corners = by('footing', 'edge').map((m) => m.a);
+    out.corners = dropCollinear(by('footing', 'edge').map((m) => m.a));
     const slab = by('slab')[0], bed = by('footing', 'gravel-bed')[0];
-    if (out.corners.length >= 3 && slab) out.digs.push({ poly: dropCollinear(out.corners), targetY: r4(Math.min(slab.y0, bed ? bed.y0 : Infinity)), baseY: r4(slab.y0) });
+    if (out.corners.length >= 3 && slab) out.digs.push({ poly: out.corners, targetY: r4(Math.min(slab.y0, bed ? bed.y0 : Infinity)), baseY: r4(slab.y0) });
   } else if (type === 'stemwall') {
     out.elements = [];
     const W = CC.WALL, reach = W.trenchMaxM;

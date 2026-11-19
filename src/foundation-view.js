@@ -30,15 +30,19 @@
      gates. Then cure: Blanket and Plastic (press to roll one over, again to take it off), Mist (the hose) and Strip (press a
      side: its boards and stakes come off to stock once the concrete is a fifth strength). The slab is tinted dark when wet
      and lightens with strength: a thin overlay from here (build mode's slab member is untouched).
-   Owns no truth: the job, its layout and its dig are the foundation system's (src/sim/foundation.js); the ground is
-   the ground system's. Registers window.__foundation = { owns, hint, job, redraw, tools, debugPour }.
+   - Piers and stem walls (B-1): the post-hole digger (press on a pier mark, twist, lift), tube forms (click a hole; drag a
+     leaning top until the bubble centres), the barrow into a tube or the forms, the rod (pump: the air comes up, the
+     level drops), wet-set post brackets and the beams on them; a stem wall's trench by the shovel, its footing from the
+     barrow, wall panels in pairs, snap ties, bolts in the wet top, Strip. See the B-1 block below.
+   Owns no truth: the job (made by the simulation from the building's members), its layout and its dig are the
+   foundation system's (src/sim/foundation.js); the ground is the ground system's. Registers window.__foundation =
+   { owns, hint, job, redraw, tools, drawn, debugPour (tests only: nothing needs it) }.
    Cost: a sync of jobs twice a second (cheap reads); the overlay is recoloured only when the ground changes and the
    site is near; the strings draw only while they move. */
 (() => {
   const G = window.__game, B = window.__build, H = window.__hands, PO = window.__payout, FM = window.__fieldmesh;
   if (!G || !B || !H || !PO || !FM || !G.sim || !G.foundation || !G.ground || !B.membersOf || !G.sim.handlers.has('foundation.stake')) return;
   const T = G.THREE, FR = G.foundation;
-  const POURED = ['slab', 'piers', 'stemwall'];
   const DIG = { tolUpM: 0.02, tolDownM: 0.04, roughM: 0.07 };         // as content/concrete.js DIG (the sim decides; this only tints)
   const OUT = 0.9;                                                     // batter boards stand this far beyond the corners
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -52,80 +56,30 @@
   const ownsTool = (id) => { const st = G.sim.state.sys.stock; return !st || !st.tools || st.tools.includes(id); };
   const $ = (id) => document.getElementById(id);
 
-  /* ================= jobs from build mode's buildings ================= */
-  const sent = new Map();          // structId -> struct version last sent
-  const _v = new T.Vector3();
-  // corners and dig regions of a building, in world metres, from its foundation members
-  function geometry(st) {
-    const mw = B.membersOf(st.id);
-    if (!mw) return null;
-    const M = mw.matrix, W = (x, y, z) => (_v.set(x, y, z).applyMatrix4(M), [_v.x, _v.y, _v.z]), XZ = (x, z) => { const w = W(x, 0, z); return [+w[0].toFixed(4), +w[2].toFixed(4)]; };
-    const fl = mw.list.filter((m) => m.stage === 'foundation');
-    const by = (kind, type) => fl.filter((m) => m.kind === kind && (!type || m.type === type));
-    const bottom = (m) => W(m.a[0], Math.min(m.a[1], m.b[1]) - (m.section.b || 0) / 2, m.a[2])[1];
-    const rect = (a, b, w, ext) => {        // a footprint around the line a-b (local), w wide, ext past both ends
-      const L = Math.hypot(b[0] - a[0], b[2] - a[2]) || 1, ux = (b[0] - a[0]) / L, uz = (b[2] - a[2]) / L, nx = -uz * w / 2, nz = ux * w / 2;
-      const ax = a[0] - ux * ext, az = a[2] - uz * ext, bx = b[0] + ux * ext, bz = b[2] + uz * ext;
-      return [XZ(ax + nx, az + nz), XZ(bx + nx, bz + nz), XZ(bx - nx, bz - nz), XZ(ax - nx, az - nz)];
-    };
-    let local = [], digs = [], topY = -Infinity;
-    for (const m of fl) if (m.material === 'concrete' || m.col === 'concrete') topY = Math.max(topY, W(m.a[0], Math.max(m.a[1], m.b[1]) + (m.kind === 'pier' ? 0 : (m.section.b || 0) / 2), m.a[2])[1]);
-    if (st.found === 'slab') {
-      local = by('footing', 'edge').map((m) => [m.a[0], m.a[2]]);
-      const slab = by('slab')[0], bed = by('footing', 'gravel-bed')[0];
-      if (local.length >= 3 && slab) digs.push({ poly: local.map(([x, z]) => XZ(x, z)), targetY: Math.min(bottom(slab), bed ? bottom(bed) : Infinity), baseY: +bottom(slab).toFixed(4) });
-    } else if (st.found === 'stemwall') {
-      const strips = by('footing', 'strip');
-      local = strips.map((m) => [m.a[0], m.a[2]]);
-      for (const m of strips) digs.push({ poly: rect(m.a, m.b, m.section.d + 0.2, (m.section.d + 0.2) / 2), targetY: bottom(m) });
-      for (const m of by('pier')) { const lo = m.a[1] < m.b[1] ? m.a : m.b; digs.push({ poly: rect([lo[0] - 0.2, 0, lo[2]], [lo[0] + 0.2, 0, lo[2]], 0.4, 0), targetY: W(lo[0], lo[1], lo[2])[1] }); }
-    } else if (st.found === 'piers') {
-      const pads = by('footing', 'pad');
-      let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
-      for (const m of pads) { x0 = Math.min(x0, m.a[0]); x1 = Math.max(x1, m.a[0]); z0 = Math.min(z0, m.a[2]); z1 = Math.max(z1, m.a[2]); }
-      if (pads.length) local = [[x0 - 0.3, z0 - 0.3], [x1 + 0.3, z0 - 0.3], [x1 + 0.3, z1 + 0.3], [x0 - 0.3, z1 + 0.3]];
-      for (const m of pads) digs.push({ poly: rect([m.a[0] - 0.3, 0, m.a[2]], [m.a[0] + 0.3, 0, m.a[2]], 0.6, 0), targetY: bottom(m) });
-    }
-    // corners only: points on a straight run between two others are not corners
-    local = local.filter((q, k) => { const a = local[(k + local.length - 1) % local.length], b = local[(k + 1) % local.length]; return Math.abs((q[0] - a[0]) * (b[1] - a[1]) - (q[1] - a[1]) * (b[0] - a[0])) > 1e-4; });
-    if (local.length < 3 || !digs.length || !Number.isFinite(topY)) return null;
-    const c = W(0, 0, 0);
-    return { corners: local.map(([x, z]) => XZ(x, z)), digs, topY: +topY.toFixed(4), x: c[0], z: c[2], yaw: st.yaw || 0 };
-  }
-  function send(st) {
-    const g = geometry(st);
-    if (!g) return false;
-    const r = cmd('setPlan', { structId: st.id, type: st.found, ...g });
-    if (r.ok) { sent.set(st.id, st.ver); site.sig = ''; }
-    return r.ok;
-  }
-  // build mode draws as built what the simulation says is built (the site once it is dug, a sandbox pour)
+  /* ================= jobs: the foundation system makes them from the buildings' members ================= */
+  // The job, its corners and its digs are worked out in the simulation (foundation.followPlan, called by
+  // construction.setPlan); this view only draws build mode's members as built when the simulation says they are.
+  // build mode draws as built what the simulation says is built (the site once it is dug, piers and walls poured)
   function showBuilt(st, pr) {
     const mw = B.membersOf(st.id);
     if (!mw) return;
     const on = Object.keys(pr.members).filter((id) => { const m = pr.members[id]; return m.built && (m.stage === 'site' || m.stage === 'foundation') && mw.planned.has(id); });
     if (on.length) B.setBuilt(on, true);
   }
-  function syncJobs() {
+  const builtSig = new Map();
+  function syncBuilt() {
     const cs = CS();
     if (!cs || !cs.progress) return;
-    const have = new Set();
-    for (const st of B.structs()) {
-      have.add(st.id);
-      const pr = cs.progress[st.id], job = jobFor(st.id), poured = POURED.includes(st.found) && !st.level;
-      if (job) {
-        if (!pr || !poured) { cmd('forget', { structId: st.id }); sent.delete(st.id); continue; }
-        // a plan sent again by the construction view starts without the cure's holds: put them back now
-        if (sent.get(st.id) !== st.ver || (job.held && !(((pr.keep && pr.keep.hold) || pr.hold) && Object.keys((pr.keep && pr.keep.hold) || pr.hold).length))) { send(st); showBuilt(st, pr); }
-        continue;
-      }
-      if (!pr || pr.done || !poured || (cs.options && cs.options.sandbox)) continue;
-      // a building whose ground was already dug the old way (an older save) carries on the old way
-      const ms = Object.values(pr.members), siteM = ms.filter((m) => m.kind === 'site');
-      if (siteM.length ? siteM.every((m) => m.built) : ms.some((m) => m.stage === 'foundation' && m.built)) continue;
-      send(st);
+    for (const j of Object.values(FS().jobs)) {
+      const sid = j.owner && j.owner.structId, pr = sid !== undefined && cs.progress[sid];
+      if (!pr) continue;
+      let n = 0;
+      for (const id in pr.members) { const m = pr.members[id]; if (m.built && (m.stage === 'site' || m.stage === 'foundation')) n++; }
+      if (builtSig.get(sid) === n) continue;
+      const st = B.structs().find((q) => q.id === sid);
+      if (!st) continue;
+      builtSig.set(sid, n); showBuilt(st, pr);
     }
-    for (const j of Object.values(FS().jobs)) if (j.owner && !have.has(j.owner.structId)) cmd('forget', { jobId: j.id });
   }
 
   /* ================= the site: stakes, batter boards, strings, the dig overlay ================= */
@@ -261,7 +215,7 @@
     for (const j of Object.values(FS().jobs)) {
       if (!j.layout || !j.layout.corners.length) continue;
       const C = j.layout.corners, cx = C.reduce((a, c) => a + c[0], 0) / C.length, cz = C.reduce((a, c) => a + c[1], 0) / C.length;
-      const d = Math.hypot(cx - P.x, cz - P.z) - (['layout', 'excavate', 'base', 'forms', 'pour', 'finish', 'cure', 'strip'].includes(j.step) ? 0 : 20);
+      const d = Math.hypot(cx - P.x, cz - P.z) - (['layout', 'excavate', 'base', 'footing', 'forms', 'pour', 'finish', 'cure', 'strip'].includes(j.step) ? 0 : 20);
       if (d < bd) { bd = d; best = j; }
     }
     return best;
@@ -565,13 +519,15 @@
   ICONS.screed = I('<path d="M3 20h30" stroke="#d2b07a" stroke-width="4"/><path d="M5 26c6-2 11-2 16 0" stroke="#76736d" stroke-width="3"/><path d="M22 27c3-3 6-4 10-3" stroke="#9a978f" stroke-width="2.4"/>');
 
   /* ================= B3: the base gestures (the Yard's own commands) ================= */
+  // the barrow mixes concrete in a slab's pour, and in a stem wall's footing or a pier and wall pour
+  const wetStep = (job) => !!job && (job.step === 'pour' || (job.type !== 'slab' && job.step === 'footing'));
   const lcmd = (n, p) => { try { return G.sim.commandNow('landscape.' + n, p) || { ok: false }; } catch (e) { return { ok: false, reason: e.message }; } };
   const tools = () => (G.sim.state.sys.stock && G.sim.state.sys.stock.tools) || [];
   const needTool = (id, name) => tools().includes(id) ? null : 'You need ' + name + '.' + buyBtn(id, 1);
   const baseLine = (job, x, z) => { const d = digAt(x, z) || (job.digs || [])[0]; return d ? (d.baseY ?? job.topY - 0.1) : job.topY - 0.1; };
   const b3 = { lx: 0, lz: 0, acc: 0, tipped: false, n: 0, m3: 0 };
   function heapTick() {
-    const st = G.sim.state.sys, job = site.job, pour = job && job.step === 'pour';
+    const st = G.sim.state.sys, job = site.job, pour = wetStep(job);
     const m3 = pour ? (FR.carry(G.sim.state).vol || 0) : (st.landscape && st.landscape.barrow ? st.landscape.barrow.m3 : 0), cap = pour ? 0.051 : 0.1;
     const k = clamp(m3 / cap, 0, 1);
     barrow.heap.visible = k > 0.01;
@@ -712,6 +668,7 @@
     return '<b>' + word + '.</b> ' + (m.mixed < 0.5 ? 'Hoe it through: drag back and forth in the barrow.' : m.mixed < 1 ? 'Keep hoeing (' + Math.round(m.mixed * 100) + '%).' : m.says + '.') + mixMeter();
   }
   function tipConcrete(a, job) {
+    if (job.type !== 'slab') return tipHard(a, job);
     const r = cmd('tip', { jobId: job.id, x: a.x, z: a.z });
     if (!r.ok) return say(r.reason);
     const [x, z] = r.at;
@@ -1113,14 +1070,359 @@
     if (fin.cover && fin.pop < 1) { fin.pop = Math.min(1, fin.pop + dt * 4); const k = ease(fin.pop); fin.cover.scale.set(1.04 * (0.2 + 0.8 * k), 1, 1.04 * (0.2 + 0.8 * k)); }
   }
 
+
+  /* ================= B-1: poured piers and stem walls ================= */
+  // Piers: the post-hole digger (press on a pier mark, twist side to side, lift: a plug of earth comes out of `gesture`
+  // holes), tube forms (click a hole: it drops in, leaning; press on its top and drag: the bubble on top follows, centred
+  // it snaps plumb), the barrow (drag down at a tube: it fills), the rod (press in the wet top and pump up and down: the
+  // air comes up, the level drops; top it up), post brackets (click a full top while wet) and the beams (click along a
+  // row of brackets once they can carry them). Stem walls: the trench with the shovel (the slab's dig), the footing
+  // from the barrow, panels (hold one near a run: the ghost pair snaps on, click sets `gesture` pairs), ties (the hammer
+  // on a glowing column), the wall from the barrow, rodded, anchor bolts in its wet top, then Strip.
+  const HW = { sig: '', group: null, marks: [], tubes: new Map(), ghost: null, ghostAt: null, dig: null, plumb: null, rod: null, lastBite: 0 };
+  const holeMat = new T.MeshBasicMaterial({ color: 0x17120d, side: T.BackSide }), tubeMat = mat(0xb99a66), concMat = mat(0x8a8780), concWet = mat(0x5f5d59);
+  const plyMat = mat(0xc9a86e), tieMat = mat(0x3a3d40), bracketMat = mat(0x9aa4ab), levelMat = new T.MeshBasicMaterial({ color: 0xffe9a0 }), bubbleMat = new T.MeshBasicMaterial({ color: 0x5fe05f });
+  const cylOpen = new T.CylinderGeometry(1, 1, 1, 18, 1, true), cyl = new T.CylinderGeometry(1, 1, 1, 18), disc = new T.CircleGeometry(1, 18); disc.rotateX(-Math.PI / 2);
+  const ringG = new T.RingGeometry(0.8, 1, 24); ringG.rotateX(-Math.PI / 2);
+  const hardOf = (job) => (job && job.type !== 'slab' ? FR.hard(G.sim.state, job.id) : null);
+  const nearHole = (hv, a, want, maxD = 0.8) => { let best = null, bd = maxD; for (const h of hv.holes) { if (want && !want(h)) continue; const d = Math.min(Math.hypot(h.x - a.x, h.z - a.z), a.gx != null ? Math.hypot(h.x - a.gx, h.z - a.gz) : Infinity); if (d < bd) { bd = d; best = h; } } return best; };
+  const segD = (p, q, x, z) => { const dx = q[0] - p[0], dz = q[1] - p[1], L2 = dx * dx + dz * dz, k = L2 ? clamp(((x - p[0]) * dx + (z - p[1]) * dz) / L2, 0, 1) : 0; return Math.hypot(x - p[0] - dx * k, z - p[1] - dz * k); };
+  const nearRun = (list, a, want, maxD = 1.2) => { let best = null, bd = maxD; for (const r of list) { if (want && !want(r)) continue; const d = Math.min(segD(r.a, r.b, a.x, a.z), a.gx != null ? segD(r.a, r.b, a.gx, a.gz) : Infinity); if (d < bd) { bd = d; best = r; } } return best; };
+  const rPt = (r, t) => [r.a[0] + ((r.b[0] - r.a[0]) * t) / r.len, r.a[1] + ((r.b[1] - r.a[1]) * t) / r.len];
+  const rYaw = (r) => -Math.atan2(r.b[1] - r.a[1], r.b[0] - r.a[0]);
+  const rNorm = (r) => { const L = r.len || 1; return [-(r.b[1] - r.a[1]) / L, (r.b[0] - r.a[0]) / L]; };
+  // a tube's top, leaning by its tilt (the top's offset from plumb)
+  function placeTube(m, h) {
+    const L = h.tubeL, y0 = h.botY + h.footT;
+    m.scale.set(h.d / 2, L, h.d / 2);
+    m.position.set(h.x + h.tilt[0] / 2, y0 + L / 2, h.z + h.tilt[1] / 2);
+    m.rotation.set(Math.atan2(h.tilt[1], L), 0, -Math.atan2(h.tilt[0], L));
+  }
+  function hardSig(hv) {
+    return hv ? hv.step + '|' + hv.holes.map((h) => [Math.round(h.dug * 20), h.tube, h.plumb, Math.round(h.level * 40), h.bracket, Math.round(h.tilt[0] * 400), Math.round(h.tilt[1] * 400)].join(',')).join(';') + '|' +
+      hv.footings.map((r) => Math.round(r.level * 40)).join(',') + '|' + hv.walls.map((r) => [r.panels, r.ties.join(''), Math.round(r.level * 40), r.stripped || 0].join(',')).join(';') + '|' + hv.bolts.map((b) => b[2]).join('') : '';
+  }
+  // what is in the ground and on it: holes, tubes, concrete, brackets, footings, panels, ties, bolt marks
+  function buildHard(job, hv) {
+    if (HW.group) { G.scene.remove(HW.group); HW.group = null; }
+    HW.marks = []; HW.tubes.clear();
+    if (!hv) return;
+    const g = (HW.group = new T.Group());
+    G.scene.add(g);
+    for (const h of hv.holes) {
+      const top = h.gy + 0.003;
+      if (h.dug > 0.01) { const m = new T.Mesh(cylOpen, holeMat); m.scale.set(0.17, h.dug, 0.17); m.position.set(h.x, top - h.dug / 2, h.z); g.add(m); }
+      if (!h.dugOk && hv.step === 'excavate') { const d = new T.Mesh(ringG, dotMat); d.scale.setScalar(0.19); d.position.set(h.x, surf(h.x, h.z) + 0.03, h.z); d.renderOrder = 3; d.userData = { hole: h.id }; g.add(d); HW.marks.push(d); }
+      if (h.tube) {
+        const t = new T.Mesh(cyl, tubeMat); placeTube(t, h); t.castShadow = true; g.add(t); HW.tubes.set(h.id, t);
+        // concrete inside, its top at the level (wet-dark while it can be worked)
+        if (h.level > 0.01) { const y = h.botY + (h.topY - h.botY) * h.level, c = new T.Mesh(disc, h.full && !(h.cure && h.cure.wet) ? concMat : concWet); c.scale.setScalar(h.d / 2 - 0.004); c.position.set(h.x + h.tilt[0] * ((y - h.botY - h.footT) / h.tubeL), y + 0.002, h.z + h.tilt[1] * ((y - h.botY - h.footT) / h.tubeL)); g.add(c); }
+        // the level's bubble on an unplumbed tube
+        if (!h.plumb) {
+          const L = h.tubeL, ring = new T.Mesh(ringG, levelMat), b = new T.Mesh(disc, bubbleMat), off = Math.hypot(h.tilt[0], h.tilt[1]) || 1, k = Math.min(1, off / 0.06) * 0.09;
+          ring.scale.setScalar(0.11); ring.position.set(h.x + h.tilt[0], h.botY + h.footT + L + 0.02, h.z + h.tilt[1]); b.scale.setScalar(0.025); b.position.set(ring.position.x - (h.tilt[0] / off) * k, ring.position.y + 0.003, ring.position.z - (h.tilt[1] / off) * k);
+          ring.renderOrder = b.renderOrder = 4; g.add(ring, b);
+        }
+        if (h.full && !h.bracket) { const d = new T.Mesh(ringG, dotMat); d.scale.setScalar(0.15); d.position.set(h.x, h.topY + 0.01, h.z); d.renderOrder = 3; d.userData = { bracket: h.id }; g.add(d); HW.marks.push(d); }
+        if (h.bracket) { g.add(part(bx(0.1, 0.006, 0.1), bracketMat, h.x, h.topY + 0.004, h.z), part(bx(0.006, 0.14, 0.1), bracketMat, h.x - 0.048, h.topY + 0.07, h.z), part(bx(0.006, 0.14, 0.1), bracketMat, h.x + 0.048, h.topY + 0.07, h.z)); }
+      } else if (h.dugOk && (hv.step === 'forms')) { const d = new T.Mesh(ringG, dotMat); d.scale.setScalar(0.19); d.position.set(h.x, surf(h.x, h.z) + 0.03, h.z); d.renderOrder = 3; d.userData = { tube: h.id }; g.add(d); HW.marks.push(d); }
+    }
+    for (const r of hv.footings) if (r.level > 0.01) { const [x, z] = rPt(r, r.len / 2), m = part(bx(r.len + r.w, r.t * r.level, r.w), r.full ? concMat : concWet, x, r.botY + (r.t * r.level) / 2, z); m.rotation.y = rYaw(r); g.add(m); }
+    for (const r of hv.walls) {
+      const [nx, nz] = rNorm(r), on = r.panels - (r.stripped || 0), frac = r.panelsNeed ? on / r.panelsNeed : 0, setL = r.len * frac, yaw = rYaw(r);
+      if (on > 0) for (const sd of [1, -1]) {
+        const [x, z] = rPt(r, setL / 2), off = (r.w / 2 + 0.03) * sd, m = part(bx(setL + (sd > 0 ? r.w : 0), r.h, 0.05), plyMat, x + nx * off, r.botY + r.h / 2, z + nz * off);
+        m.rotation.y = yaw; g.add(m);
+      }
+      if (r.panels >= r.panelsNeed && !r.stripped) r.tieAt.forEach((t, q) => {
+        const [x, z] = rPt(r, t);
+        if (r.ties[q]) { for (let row = 0; row < r.tieRows; row++) for (const sd of [1, -1]) g.add(part(bx(0.03, 0.03, 0.03), tieMat, x + nx * (r.w / 2 + 0.07) * sd, r.botY + (r.h * (row + 0.5)) / r.tieRows, z + nz * (r.w / 2 + 0.07) * sd)); }
+        else if (hv.step === 'forms') { const d = new T.Mesh(ringG, dotMat); d.scale.setScalar(0.1); d.position.set(x, r.topY + 0.02, z); d.renderOrder = 3; d.userData = { tie: r.k, col: q }; g.add(d); HW.marks.push(d); }
+      });
+      if (r.level > 0.01) { const [x, z] = rPt(r, r.len / 2), hh = r.h * r.level, m = part(bx(r.len + (r.stripped ? r.w : 0), hh, r.w - 0.004), r.full && !(r.cure && r.cure.wet) ? concMat : concWet, x, r.botY + hh / 2, z); m.rotation.y = yaw; g.add(m); }
+    }
+    for (const b of hv.bolts) {
+      const y = job.topY;
+      if (b[2]) g.add(part(new T.CylinderGeometry(0.0065, 0.0065, 0.1, 6), boltMat, b[0], y + 0.045, b[1]));
+      else if (['pour', 'cure', 'strip'].includes(hv.step)) { const d = new T.Mesh(dotGeo, dotMat); d.position.set(b[0], y + 0.012, b[1]); d.renderOrder = 3; d.userData = { bolt: 1 }; g.add(d); HW.marks.push(d); }
+    }
+  }
+  function hardSlow(job) {
+    const hv = hardOf(job), sig = job && hv ? job.id + ':' + hardSig(hv) : '';
+    if (sig !== HW.sig && !HW.plumb) { HW.sig = sig; buildHard(job, hv); }
+    return hv;
+  }
+  function hardTick(t) {
+    if (HW.marks.length) { const s = 1 + 0.15 * Math.sin(t / 170); for (const d of HW.marks) { const b = d.userData.base || (d.userData.base = d.scale.x); d.scale.set(b * s, 1, b * s); } }
+    // the ghost of the next thing to set: a tube over a hole, a panel pair along a run
+    const job = site.job, hv = on ? hardOf(job) : null, id = held(), a = H.aim;
+    let show = false;
+    if (hv && a.valid && id === 'tube' && hv.step === 'forms') {
+      const h = nearHole(hv, a, (q) => q.dugOk && !q.tube);
+      if (h) { if (!HW.ghost) { HW.ghost = new T.Mesh(cyl, ghostMat); G.scene.add(HW.ghost); } HW.ghost.scale.set(h.d / 2, h.tubeL, h.d / 2); HW.ghost.rotation.set(0, 0, 0); HW.ghost.position.set(h.x, h.botY + h.footT + h.tubeL / 2 + 0.05 * Math.sin(t / 160), h.z); show = true; }
+    } else if (hv && a.valid && id === 'panel' && hv.step === 'forms') {
+      const r = nearRun(hv.walls, a, (q) => q.panels < q.panelsNeed);
+      if (r) { if (!HW.ghost) { HW.ghost = new T.Mesh(cyl, ghostMat); G.scene.add(HW.ghost); } const n = Math.min(gestureN(), r.panelsNeed - r.panels), L = Math.min(r.len, (r.len * (r.panels + n)) / r.panelsNeed) - (r.len * r.panels) / r.panelsNeed, [x, z] = rPt(r, (r.len * r.panels) / r.panelsNeed + L / 2); HW.ghost.geometry = box; HW.ghost.scale.set(L, r.h, r.w + 0.16); HW.ghost.rotation.set(0, rYaw(r), 0); HW.ghost.position.set(x, r.botY + r.h / 2 + 0.03 * Math.sin(t / 160), z); show = true; }
+    }
+    if (HW.ghost) { HW.ghost.visible = show; if (!show || id === 'tube') HW.ghost.geometry = cyl; }
+  }
+  // ---- hand items
+  const diggerItem = { obj: (() => { const g = new T.Group(); for (const s of [-1, 1]) { const h = part(bx(0.026, 1.25, 0.026), handleMat, s * 0.06, 0.72, 0, 0, 0, s * 0.06); g.add(h, part(bx(0.012, 0.24, 0.12), steel, s * 0.03, 0.1, 0, 0, 0, -s * 0.12)); } return g; })(), use: 'tip', still: [0.38, 0.02, 0.24, 0, 0, 0], stillArm: -0.5, walk: [0.3, 1.74, -0.78, 2.15, 0, 0], walkArm: -1.0 };
+  const _L = { x: 0, y: 0, z: 0 };
+  diggerItem.anim = (o, pm, toLocal) => {
+    const d = HW.dig;
+    if (!d || !d.h) return false;
+    toLocal(d.h.x, d.h.gy - Math.min(d.h.dug, 0.9) * 0.5 + d.lift * 0.45, d.h.z, _L);
+    o.position.set(_L.x, _L.y, _L.z); o.rotation.set(0, d.twist, 0); o.quaternion.setFromEuler(o.rotation);
+    pm.armL.rotation.x = pm.armR.rotation.x = -1.6 + d.lift * 0.5; pm.body.rotation.x += 0.25 - d.lift * 0.2;
+    G.player.faceHold = Math.atan2(d.h.x - G.player.x, d.h.z - G.player.z);
+    return true;
+  };
+  const tubeItem = handTool([part(new T.CylinderGeometry(0.125, 0.125, 0.9, 14, 1, true), tubeMat, 0, 0, 0, 0, 0, Math.PI / 2)]);
+  const rodItem = { obj: part(bx(0.02, 1.3, 0.02), mat(0x6b5a3a), 0, 0.65, 0), use: 'tip', still: [0.38, 0.02, 0.24, 0, 0, 0], stillArm: -0.5, walk: [0.3, 1.74, -0.78, 2.15, 0, 0], walkArm: -1.0 };
+  const bracketItem = handTool([part(bx(0.1, 0.006, 0.1), bracketMat, 0, 0, 0), part(bx(0.006, 0.14, 0.1), bracketMat, -0.048, 0.07, 0), part(bx(0.006, 0.14, 0.1), bracketMat, 0.048, 0.07, 0)]);
+  const panelItem = { obj: part(bx(1.0, 0.6, 0.04), plyMat, 0, 0, 0), use: 'hand', still: [0.3, 0.9, 0.15, 0, 1.5, 0], stillArm: -0.6, walk: [0.3, 1.5, -0.1, 0, 1.5, 1.4], walkArm: -1.2 };
+  const beamItem = handTool([part(bx(0.9, 0.14, 0.14), mat(0xc8a36a), 0, 0, 0)]);
+  ICONS.digger = I('<path d="M14 4l3 22M22 4l-3 22" stroke="#d8b585" stroke-width="2.6"/><path d="M13 25l4 8 2-8M23 25l-4 8" fill="#9aa4ab" stroke="#cfd6dc"/><path d="M5 33h26" stroke="#6b4f35" stroke-width="2"/>');
+  ICONS.tube = I('<rect x="12" y="6" width="12" height="26" rx="3" fill="#b99a66" stroke="#e3c896"/><ellipse cx="18" cy="7" rx="6" ry="2" fill="#8a7048"/>');
+  ICONS.rod = I('<path d="M18 3v26" stroke="#8a6f43" stroke-width="2.8"/><path d="M8 30h20v3H8z" fill="#76736d"/><circle cx="12" cy="24" r="1.5" fill="#e8f2ff"/><circle cx="24" cy="21" r="1.2" fill="#e8f2ff"/><circle cx="21" cy="27" r="1" fill="#e8f2ff"/>');
+  ICONS.bracket = I('<path d="M9 30h18" stroke="#76736d" stroke-width="3"/><path d="M11 28V12h14v16" stroke="#aab2b8" stroke-width="2.6" fill="none"/>');
+  ICONS.panel = I('<rect x="6" y="6" width="11" height="24" fill="#c9a86e" stroke="#ecd6a8"/><rect x="19" y="6" width="11" height="24" fill="#c9a86e" stroke="#ecd6a8"/><path d="M4 13h28M4 23h28" stroke="#3a3d40" stroke-width="1.6"/>');
+  ICONS.beam = I('<path d="M4 15h28v7H4z" fill="#c8a36a" stroke="#ecd6a8"/><path d="M8 22v10M28 22v10" stroke="#aab2b8" stroke-width="2.6"/>');
+  ICONS.tie = ICONS.hammer;
+
+  // ---- gestures
+  function borePress(a, job, hv) {
+    const h = nearHole(hv, a, (q) => !q.dugOk);
+    if (!h) { say(hv.holes.every((q) => q.dugOk) ? 'Every hole is down to the frost line.' : 'Press on a glowing pier mark where the strings cross.'); return; }
+    const why = needTool(PDIG, 'a post-hole digger');
+    if (why) { say(why, 6); return; }
+    HW.dig = { h, twist: 0, sweep: 0, lastDx: a.dx || 0, lift: 0, dir: 0, ready: false };
+    G.juice.hitStop = 0.03; G.burst(h.x, surf(h.x, h.z) + 0.03, h.z, 5, 0x6b4f35, 0.7, 0.8, 0.04, 0.3);
+    say('<b>Twist</b> it side to side to loosen the earth, then <b>lift</b> (drag up) to pull the plug out.', 3);
+  }
+  function boreFrame(a, job) {
+    const d = HW.dig;
+    if (!d) return;
+    const ddx = (a.dx || 0) - d.lastDx; d.lastDx = a.dx || 0;
+    if (a.lift < 0.25) { d.sweep += Math.abs(ddx); d.twist = clamp(d.twist + ddx * 0.01, -0.9, 0.9); }
+    d.lift = d.ready ? a.lift : Math.min(a.lift, 0.15);
+    if (!d.ready && d.sweep > 110) { d.ready = true; G.burst(d.h.x, surf(d.h.x, d.h.z) + 0.03, d.h.z, 3, 0x6b4f35, 0.5, 0.5, 0.03, 0.25); say('Loose: now <b>lift</b> it out.', 1.5); }
+    if (d.ready && a.lift > 0.55) {
+      const r = cmd('bore', { jobId: job.id, x: d.h.x, z: d.h.z, n: gestureN() });
+      d.ready = false; d.sweep = 0;
+      if (!r.ok) { say(r.reason); HW.dig = null; return; }
+      G.juice.hitStop = 0.06; G.cam.shake = Math.min((G.cam.shake || 0) + 0.05, 0.25);
+      for (const b of r.bored) G.burst(b.id === d.h.id ? d.h.x : FR.hard(G.sim.state, job.id).holes.find((q) => q.id === b.id).x, surf(d.h.x, d.h.z) + 0.4, b.id === d.h.id ? d.h.z : FR.hard(G.sim.state, job.id).holes.find((q) => q.id === b.id).z, 10, 0x5a4230, 1.2, 1.6, 0.06, 0.6);
+      const me = r.bored.find((b) => b.id === d.h.id) || r.bored[0], fr = (FR.hard(G.sim.state, job.id) || {}).frost;
+      say((r.advanced ? '<b>All down to the frost line.</b> Now the tube forms: take up a <b>tube</b>.' : '<b>' + Math.round(me.dug * 100) + ' of ' + Math.round(me.depth * 100) + ' cm.</b> ' + (r.n > 1 ? r.n + ' holes a bite. ' : '') + (me.done ? 'This one is at the frost line' + (fr ? ' (' + Math.round(fr.m * 100) + ' cm)' : '') + '. ' : 'Push it back in, twist, lift. ') + r.left + ' to go.'), 3.5);
+      HW.lastBite = performance.now();
+      if (me.done) { const nx = nearHole(FR.hard(G.sim.state, job.id), a, (q) => !q.dugOk, 3); HW.dig = nx ? { ...d, h: nx, lift: 0 } : null; } else { d.h = FR.hard(G.sim.state, job.id).holes.find((q) => q.id === d.h.id) || d.h; }
+      if (r.advanced) { HW.dig = null; setTimeout(() => { if (on) { H.setSlots(slotList()); H.hold && H.hold('tube'); } }, 200); }
+    }
+  }
+  function tubePress(a, job, hv) {
+    const lean = nearHole(hv, a, (q) => q.tube && !q.plumb, 0.6);
+    if (lean) { HW.plumb = { id: lean.id, x: a.gx ?? a.x, z: a.gz ?? a.z }; say('Drag the top of the tube toward the green bubble\'s side: centred, it snaps plumb.', 3); return; }
+    const h = nearHole(hv, a, (q) => q.dugOk && !q.tube);
+    if (!h) return say(hv.holes.some((q) => !q.tube) ? 'Aim at an open hole: the tube drops in.' : 'Every tube is in. Press on a leaning one to plumb it.');
+    const r = cmd('setTube', { jobId: job.id, x: h.x, z: h.z, n: gestureN() });
+    if (!r.ok) return say(r.reason + (/tube forms/.test(r.reason) ? buyBtn('tube_form', 2, 'Buy 2') : ''), 6);
+    G.juice.hitStop = 0.06; G.cam.shake = Math.min((G.cam.shake || 0) + 0.04, 0.2);
+    for (const q of r.set) G.burst(q.x, surf(q.x, q.z) + 0.1, q.z, 8, 0xb99a66, 1.0, 1.4, 0.05, 0.5);
+    say('<b>Thunk.</b> ' + r.set.length + ' tube' + (r.set.length > 1 ? 's' : '') + ' in, cut to length. They lean: <b>press on a top and drag</b> it plumb.', 5);
+  }
+  function plumbFrame(a, job) {
+    const p = HW.plumb;
+    if (!p) return;
+    const x = a.gx ?? a.x, z = a.gz ?? a.z, dx = (x - p.x) * 0.5, dz = (z - p.z) * 0.5;
+    if (Math.hypot(dx, dz) < 0.004) return;
+    p.x = x; p.z = z;
+    const r = cmd('plumb', { jobId: job.id, id: p.id, dx, dz });
+    if (!r.ok) { say(r.reason); HW.plumb = null; return; }
+    const t = HW.tubes.get(p.id), hv = FR.hard(G.sim.state, job.id), h = hv.holes.find((q) => q.id === p.id);
+    if (t && h) placeTube(t, h);
+    if (r.plumb) {
+      HW.plumb = null; HW.sig = '';
+      G.juice.hitStop = 0.08; G.burst(h.x, h.topY + 0.05, h.z, 12, 0x9be29b, 1.2, 1.6, 0.04, 0.6); G.burst(h.x, surf(h.x, h.z) + 0.05, h.z, 8, 0x6b4f35, 0.8, 0.8, 0.05, 0.4);
+      say(r.step === 'pour' ? '<b>Plumb, and every tube is set.</b> Earth kicked in round them. Mix concrete in the <b>barrow</b> and fill them.' : '<b>Plumb.</b> Earth kicked in round it to hold it. ' + r.left + ' to go.', 5);
+      if (r.step === 'pour') setTimeout(() => { if (on) { H.setSlots(slotList()); H.hold && H.hold('barrow'); } }, 200);
+    }
+  }
+  function tipHard(a, job) {
+    const r = cmd('fill', { jobId: job.id, x: a.gx ?? a.x, z: a.gz ?? a.z });
+    if (!r.ok) return say(r.reason, 4);
+    G.juice.hitStop = 0.06; G.cam.shake = Math.min((G.cam.shake || 0) + 0.05, 0.25);
+    G.burst(a.x, surf(a.x, a.z) + 0.3, a.z, 12, CONC, 1.0, 0.8, 0.06, 0.5);
+    const what = r.kind === 'pier' ? 'tube' : r.kind === 'strip' ? 'footing' : 'wall';
+    say(r.full ? '<b>Full.</b> ' + (r.kind === 'pier' ? 'Set a <b>post bracket</b> in the wet top.' : r.kind === 'wall' ? 'Set the <b>anchor bolts</b> in its wet top.' : '') + ' ' + r.left + ' to go.' : r.rod ? 'Up to the top. Now <b>rod</b> it: the air comes up and the level drops.' : 'The ' + what + ' is <b>' + Math.round(r.level * 100) + '%</b> full. Mix the next batch.', 5);
+    if (r.rod && on) setTimeout(() => { H.hold && H.hold('rod'); }, 300);
+  }
+  function rodPress(a) { HW.rod = { lastY: a.dy || 0, dir: 0, acc: 0 }; }
+  function rodFrame(a, job) {
+    const d = HW.rod;
+    if (!d) return;
+    const dy = (a.dy || 0) - d.lastY; d.lastY = a.dy || 0;
+    const s = Math.sign(dy);
+    if (Math.abs(dy) > 2) { d.acc += Math.abs(dy); if (s && s !== d.dir && d.acc > 30) { d.dir = s; d.acc = 0; const r = cmd('rod', { jobId: job.id, x: a.gx ?? a.x, z: a.gz ?? a.z }); if (!r.ok) { say(r.reason); HW.rod = null; return; } for (let k = 0; k < 4; k++) G.burst(a.x + (Math.random() - 0.5) * 0.12, surf(a.x, a.z) + 0.2, a.z + (Math.random() - 0.5) * 0.12, 1, 0xeef4ff, 0.3, 0.5, 0.02, 0.4); say(r.full ? '<b>Rodded and full.</b>' : r.topUp ? 'The air is out: the level dropped ' + Math.round(r.dropM * 1000) + ' mm. <b>Top it up</b> from the barrow.' : 'Bubbles rise: the level drops ' + Math.round(r.dropM * 1000) + ' mm. Keep pumping.', 3); } }
+  }
+  function bracketPress(a, job, hv) {
+    const h = nearHole(hv, a, (q) => q.full && !q.bracket);
+    if (!h) return say(hv.holes.every((q) => q.bracket) ? 'Every bracket is in.' : 'Aim at the top of a full pier.');
+    const r = cmd('setBracket', { jobId: job.id, x: h.x, z: h.z, n: gestureN() });
+    if (!r.ok) return say(r.reason + (/post brackets/.test(r.reason) ? buyBtn('post_bracket', Math.max(1, hv.holes.filter((q) => !q.bracket).length), 'Buy them') : ''), 6);
+    G.juice.hitStop = 0.05; G.burst(h.x, h.topY + 0.05, h.z, 6, 0x9aa4ab, 0.8, 1.2, 0.03, 0.4);
+    say(r.left ? (r.retro ? 'Drilled and epoxied in (the top had set). ' : 'Pushed into the wet top. ') + r.left + ' to go.' : '<b>Every bracket is in.</b> The beams go on once the piers can carry them.', 4);
+  }
+  function panelPress(a, job, hv) {
+    const r0 = nearRun(hv.walls, a, (q) => q.panels < q.panelsNeed);
+    if (!r0) return say(hv.walls.every((q) => q.panels >= q.panelsNeed) ? 'Every panel is up. Tie them through with the <b>hammer</b>.' : 'Hold a panel near a footing: the pair snaps on.');
+    const r = cmd('setPanel', { jobId: job.id, run: r0.k, n: gestureN() });
+    if (!r.ok) return say(r.reason + (/form panels/.test(r.reason) ? buyBtn('wall_form_panel', 2 * gestureN(), 'Buy ' + 2 * gestureN()) : ''), 6);
+    const [x, z] = rPt(r0, r0.len / 2);
+    G.juice.hitStop = 0.06; G.cam.shake = Math.min((G.cam.shake || 0) + 0.05, 0.25); G.burst(x, r0.topY, z, 12, 0xc9a86e, 1.6, 1.4, 0.05, 0.6);
+    say(r.runDone ? 'That run is formed both sides. ' + (r.left ? r.left + ' pairs to go.' : 'Now tie them through: the <b>hammer</b> on each glowing column.') : r.set + ' pair' + (r.set > 1 ? 's' : '') + ' set.', 4);
+  }
+  function tiePress(a, job, hv) {
+    let best = null, bd = 0.5;
+    for (const d of HW.marks) if (d.userData.tie !== undefined) { const dd = Math.min(Math.hypot(d.position.x - a.x, d.position.z - a.z), a.gx != null ? Math.hypot(d.position.x - a.gx, d.position.z - a.gz) : Infinity); if (dd < bd) { bd = dd; best = d; } }
+    if (!best) return say(HW.marks.some((d) => d.userData.tie !== undefined) ? 'Aim at a glowing tie column on top of the forms.' : 'Every tie is through.');
+    const r = cmd('tie', { jobId: job.id, run: best.userData.tie, col: best.userData.col, n: gestureN() });
+    if (!r.ok) return say(r.reason + (/snap ties/.test(r.reason) ? buyBtn('form_tie', 20, 'Buy 20') : ''), 6);
+    G.juice.hitStop = 0.05; G.cam.shake = Math.min((G.cam.shake || 0) + 0.03, 0.2); G.burst(best.position.x, best.position.y, best.position.z, 6, 0x6d757c, 0.8, 1.2, 0.03, 0.4);
+    say(r.step === 'pour' ? '<b>Formed and tied.</b> Mix concrete in the <b>barrow</b> and fill the forms.' : r.tied.length + ' column' + (r.tied.length > 1 ? 's' : '') + ' tied (' + r.rows + ' ties each). ' + r.left + ' to go.', 4);
+  }
+  function wallBoltPress(a, job, hv) {
+    let best = null, bd = 0.6;
+    for (const b of hv.bolts) if (!b[2]) { const d = Math.min(Math.hypot(b[0] - a.x, b[1] - a.z), a.gx != null ? Math.hypot(b[0] - a.gx, b[1] - a.gz) : Infinity); if (d < bd) { bd = d; best = b; } }
+    if (!best) return say(hv.bolts.every((b) => b[2]) ? 'Every bolt is in.' : 'Aim at a glowing mark along the top of the wall.');
+    const r = cmd('setBolt', { jobId: job.id, x: best[0], z: best[1], n: gestureN() });
+    if (!r.ok) return say(r.reason + (/anchor bolts/.test(r.reason) ? buyBtn('anchor_bolt', 4, 'Buy 4') : ''), 6);
+    G.juice.hitStop = 0.05; G.burst(best[0], job.topY + 0.05, best[1], 5, 0x9aa2a8, 0.9, 1.4, 0.03, 0.4);
+    say(r.left ? (r.retro ? 'Drilled and epoxied one in. ' : 'Pushed ' + r.n + ' into the wet top. ') + r.left + ' to go.' : '<b>Every bolt is in.</b>', 4);
+  }
+  function wallStripPress(a, job, hv) {
+    const r0 = nearRun(hv.walls, a, (q) => q.panels - (q.stripped || 0) > 0, 2);
+    const r = cmd('strip', { jobId: job.id, ...(r0 ? { run: r0.k } : {}), n: gestureN() });
+    if (!r.ok) return say(r.reason, 5);
+    G.juice.hitStop = 0.07; G.cam.shake = Math.min((G.cam.shake || 0) + 0.05, 0.25);
+    if (r0) { const [x, z] = rPt(r0, r0.len / 2); G.burst(x, r0.topY, z, 14, 0xc9a86e, 1.8, 2, 0.05, 0.7); }
+    say(r.all ? '<b>Forms off.</b> The wall stands on its footing, panels back in your stock. Backfill against it once it is 70%.' : r.panels + ' panels off, the tie ends snapped. ' + r.left + ' pairs to go.', 5);
+  }
+  function beamPress(a, job, hv) {
+    const r = cmd('setBeam', { jobId: job.id, x: a.gx ?? a.x, z: a.gz ?? a.z, n: gestureN() });
+    if (!r.ok) return say(r.reason, 5);
+    if (!r.n) return say('The beams are on.');
+    G.juice.hitStop = 0.08; G.cam.shake = Math.min((G.cam.shake || 0) + 0.06, 0.25); G.burst(a.x, job.topY + 0.2, a.z, 12, 0xc8a36a, 1.6, 1.6, 0.05, 0.6);
+    const st = B.structs().find((q) => q.id === (job.owner && job.owner.structId)); if (st && CS().progress[st.id]) showBuilt(st, CS().progress[st.id]);
+    say(r.left ? r.n + ' set on the brackets. ' + r.left + ' to go.' : '<b>The beams are on.</b> The floor frame goes on them (construction, <kbd>L</kbd>).', 5);
+  }
+  const PDIG = 'post_hole_digger';
+  const HARD_IDS = ['digger', 'tube', 'rod', 'bracket', 'panel', 'tie', 'wbolt', 'wstrip', 'beam'];
+  function hardPress(a, job, id) {
+    const hv = hardOf(job);
+    if (!hv) return false;
+    act.kind = id;
+    if (id === 'digger') borePress(a, job, hv);
+    else if (id === 'tube') tubePress(a, job, hv);
+    else if (id === 'rod') rodPress(a);
+    else if (id === 'bracket') bracketPress(a, job, hv);
+    else if (id === 'panel') panelPress(a, job, hv);
+    else if (id === 'tie') tiePress(a, job, hv);
+    else if (id === 'wbolt') wallBoltPress(a, job, hv);
+    else if (id === 'wstrip') wallStripPress(a, job, hv);
+    else if (id === 'beam') beamPress(a, job, hv);
+    return true;
+  }
+  function hardFrame(a, dt, job) {
+    const k = act.kind;
+    if (k === 'digger') { lead(a); boreFrame(a, job); } else if (k === 'tube') plumbFrame(a, job); else if (k === 'rod') rodFrame(a, job);
+  }
+  function hardRelease() { HW.dig = null; HW.plumb = null; HW.rod = null; HW.sig = ''; }
+  function hardSlots(job, hv) {
+    const own = (id) => tools().includes(id), it = stockItems(), n = (id) => String(Math.floor(it[id] || 0)), step = hv.step;
+    const barrowS = () => { const c = FR.carry(G.sim.state); return { id: 'barrow', name: 'Barrow', icon: ICONS.barrow, item: barrow, dim: !own('wheelbarrow'), badge: c.vol ? Math.round(c.vol * 1000) + ' L' : null, meter: c.vol ? c.mixed : null, title: 'Barrow: drag up to slash bags in, hold the right button to run water, drag side to side to hoe, drag down at a tube or the forms to tip' }; };
+    const beamS = hv.timberLeft ? [{ id: 'beam', name: 'Beams', icon: ICONS.beam, item: beamItem, badge: String(hv.timberLeft), dim: !hv.gates.frame || hv.brackets, title: 'Beams: click along a row of brackets once the piers can carry them (half strength)' }] : [];
+    if (step === 'layout') return [{ id: 'kit', name: 'Layout', icon: ICONS.kit, item: kit, title: 'Layout kit: press a glowing corner to drive a stake, keep holding and pull to the next corner' }];
+    if (step === 'excavate') return [
+      ...(hv.walls.length && LS() ? [{ id: 'shovel', name: 'Shovel', icon: ICONS.shovel, item: LS().items.shovel, dim: !ownsTool('shovel') && !ownsTool('spade'), title: 'Shovel: dig the trench inside the white line until the amber is gone' }] : []),
+      ...(hv.holes.length ? [{ id: 'digger', name: 'Digger', icon: ICONS.digger, item: diggerItem, dim: !own(PDIG), meter: hv.holes.filter((h) => h.dugOk).length / hv.holes.length, title: 'Post-hole digger: press on a pier mark, twist side to side, lift: a plug of earth comes out' }] : []),
+    ];
+    if (step === 'footing') return [barrowS()];
+    if (step === 'forms') return [
+      ...(hv.walls.length ? [{ id: 'panel', name: 'Panels', icon: ICONS.panel, item: panelItem, badge: n('wall_form_panel'), title: 'Wall form panels: hold one near a footing, the pair snaps on; click sets ' + gestureN() }, { id: 'tie', name: 'Ties', icon: ICONS.hammer, item: kit, badge: n('form_tie'), title: 'Hammer and snap ties: click a glowing column on top of the forms' }] : []),
+      ...(hv.holes.length ? [{ id: 'tube', name: 'Tubes', icon: ICONS.tube, item: tubeItem, badge: n('tube_form'), title: 'Tube forms: click a hole to drop one in; press on a leaning top and drag it plumb' }] : []),
+    ];
+    if (step === 'pour') return [barrowS(), { id: 'rod', name: 'Rod', icon: ICONS.rod, item: rodItem, title: 'Rod: press in the wet concrete and pump up and down: the air comes out' },
+      ...(hv.holes.length ? [{ id: 'bracket', name: 'Brackets', icon: ICONS.bracket, item: bracketItem, badge: n('post_bracket'), title: 'Post brackets: click a full pier top while it is wet' }] : []),
+      ...(hv.bolts.length ? [{ id: 'wbolt', name: 'Bolts', icon: ICONS.bolt, item: boltItem, badge: n('anchor_bolt'), title: 'Anchor bolts: click a glowing mark on the wet top of the wall' }] : [])];
+    return [
+      ...(hv.holes.some((h) => !h.bracket) ? [{ id: 'bracket', name: 'Brackets', icon: ICONS.bracket, item: bracketItem, badge: n('post_bracket'), title: 'Post brackets: drilled and epoxied in once set' }] : []),
+      ...(hv.bolts.some((b) => !b[2]) ? [{ id: 'wbolt', name: 'Bolts', icon: ICONS.bolt, item: boltItem, title: 'Anchor bolts: drilled and epoxied once set' }] : []),
+      ...(hv.walls.length && !hv.stripped ? [{ id: 'wstrip', name: 'Strip', icon: ICONS.strip, item: barItem, dim: !hv.gates.strip, title: 'Strip the wall forms at a fifth strength: panels back to stock' }] : []),
+      ...beamS,
+    ];
+  }
+  function hardHint(job, id) {
+    const hv = hardOf(job), fr = hv.frost, frostCm = Math.round(fr.m * 100), name = { temperate: 'temperate', 'cold-continental': 'cold continental', 'mediterranean-coast': 'Mediterranean coast' }[fr.climate] || fr.climate;
+    const planCm = Math.max(0, ...hv.holes.map((h) => h.planCm || 0), ...hv.footings.map((r) => r.planCm || 0));
+    const pc = (x) => Math.round(x * 100) + '%';
+    if (hv.step === 'excavate') {
+      const dug = hv.holes.filter((h) => h.dugOk).length;
+      let h = (hv.holes.length ? 'Holes <b>' + dug + ' of ' + hv.holes.length + '</b> to the frost line. ' : '') + (hv.walls.length ? 'Trench <b>' + Math.round(FR.jobView(G.sim.state, job.id).dig * 100) + '%</b> to the line. ' : '');
+      if (id === 'digger') h += needTool(PDIG, 'a post-hole digger') || '<b>Press</b> on a pier mark, <b>twist</b> (drag side to side), <b>lift</b> (drag up): ' + gestureN() + ' hole' + (gestureN() > 1 ? 's' : '') + ' a bite. ';
+      else if (id === 'shovel') h += 'Dig inside the white line until the amber is gone; right-drag trims it to the line. ';
+      return h + '<br><small>' + CC_FROST(frostCm, name, planCm) + '</small>';
+    }
+    if (hv.step === 'footing') { const f = hv.footings, done = f.filter((r) => r.full).length; return 'Footing: <b>' + done + ' of ' + f.length + '</b> runs poured, into the trench to the grade stakes. ' + (needTool('wheelbarrow', 'a wheelbarrow') || '<b>Drag up</b>: bags in. <b>Hold right</b>: water. <b>Side to side</b>: hoe. <b>Drag down</b> at the trench: tip.') + mixMeter(); }
+    if (hv.step === 'forms') {
+      let h = '';
+      if (hv.walls.length) { const p = hv.walls.reduce((a, r) => a + r.panels, 0), pn = hv.walls.reduce((a, r) => a + r.panelsNeed, 0), t = hv.walls.reduce((a, r) => a + r.ties.filter(Boolean).length, 0), tn = hv.walls.reduce((a, r) => a + r.ties.length, 0), foot = Math.min(...hv.footings.map((r) => (r.cure ? r.cure.strength : 0))); h += 'Wall forms: <b>' + p + ' of ' + pn + '</b> pairs · ties <b>' + t + ' of ' + tn + '</b> columns. ' + (foot < 0.1 ? 'The footing is still soft (' + pc(foot) + ' of 10%): the panels wait. ' : ''); }
+      if (hv.holes.length) { const t = hv.holes.filter((q) => q.tube).length, pl = hv.holes.filter((q) => q.plumb).length; h += 'Tubes <b>' + t + ' of ' + hv.holes.length + '</b> in, <b>' + pl + '</b> plumb. '; }
+      if (id === 'tube') h += '<b>Click</b> a hole to drop a tube in (' + gestureN() + ' at a time). <b>Press on a leaning top and drag</b> it until the bubble centres.';
+      else if (id === 'panel') h += 'Hold a panel near a footing: the pair snaps on. <b>Click</b> to set ' + gestureN() + '.';
+      else if (id === 'tie') h += '<b>Click</b> a glowing column on top of the forms: a snap tie through each row.';
+      return h;
+    }
+    if (hv.step === 'pour') {
+      const els = [...hv.holes, ...hv.walls], full = els.filter((q) => q.full).length;
+      let h = (hv.holes.length ? 'Piers' : 'Wall') + ': <b>' + full + ' of ' + els.length + '</b> full. ';
+      if (id === 'barrow') h += (needTool('wheelbarrow', 'a wheelbarrow') || '<b>Drag up</b>: bags in. <b>Hold right</b>: water. <b>Side to side</b>: hoe. <b>Drag down</b> at a ' + (hv.holes.length ? 'tube' : 'form') + ': tip.') + mixMeter();
+      else if (id === 'rod') h += '<b>Press</b> in a wet top and <b>pump</b> up and down: the air comes out, the level drops. Then top it up.';
+      else if (id === 'bracket') h += '<b>Click</b> a full pier top while it is wet: the bracket goes in (' + gestureN() + ' at a time).';
+      else if (id === 'wbolt') h += '<b>Click</b> a glowing mark on the wet top of the wall.';
+      return h;
+    }
+    const st = Math.round((hv.gates.strength || 0) * 100);
+    let h = 'Curing <b>' + st + '%</b>. ';
+    if (hv.brackets) h += 'Set the <b>post brackets</b>: framing waits for them. ';
+    if (hv.bolts.some((b) => !b[2])) h += 'Set the <b>anchor bolts</b>: framing waits for them. ';
+    if (hv.walls.length && !hv.stripped) h += hv.gates.strip ? '<b>Strip</b> the forms: click a wall. ' : 'The forms stay on until it is a fifth strength. ';
+    if (hv.timberLeft) h += hv.gates.frame ? '<b>Set the beams</b> on the brackets: click along a row. ' : 'The beams go on at half strength. ';
+    if (hv.step === 'done' && !hv.timberLeft) h = 'The foundation is finished.';
+    return h;
+  }
+  function hardChip(job, hv) {
+    let html = '';
+    if (job && hv && ['pour', 'cure', 'strip'].includes(hv.step) && [...hv.holes, ...hv.walls, ...hv.footings].some((q) => q.cure)) {
+      const gt = hv.gates, all = [...hv.holes, ...hv.footings, ...hv.walls].filter((q) => q.cure), st = Math.round((hv.poured ? gt.strength : Math.min(...all.map((q) => q.cure.strength))) * 100), GATES = [['walk', 10, 'Walk'], ['strip', 20, 'Strip'], ['frame', 50, 'Frame']];
+      const marks = GATES.map(([k, pc]) => '<u style="left:' + Math.min(100, pc * 2) + '%"></u>').join(''), labs = GATES.map(([k, pc, nm]) => '<span class="' + (gt[k] ? 'ok' : '') + '">' + (gt[k] ? '✓ ' : '') + nm + ' ' + pc + '%</span>').join('');
+      const next = !hv.poured ? 'Still pouring: ' + [...hv.holes, ...hv.walls].filter((q) => !q.full).length + ' to fill' : hv.brackets ? 'Post brackets still to set' : hv.bolts.some((b) => !b[2]) ? 'Anchor bolts still to set' : !gt.frame ? 'Frame at 50%: still green' : hv.timberLeft ? 'Ready for the beams' : 'Ready for framing';
+      html = '<div class="gt">' + (job.type === 'piers' ? 'Piers ' : 'Wall ') + st + '%</div><span class="gb"><i style="width:' + Math.min(100, st * 2) + '%"></i>' + marks + '</span><div class="gl">' + labs + '</div><div class="gn">' + next + '</div>';
+    }
+    if (html !== chipHtml) { chipHtml = html; chip.innerHTML = html; chip.hidden = !html; }
+  }
+  const CC_FROST = (cm, name, planCm) => 'Frost reaches ' + cm + ' cm down here (' + name + '): footings sit below it, or the ground heaves them each winter.' + (planCm && planCm < cm ? ' The plan showed ' + planCm + ' cm, so they go deeper and take more concrete.' : '');
+
   /* ================= press, drag, let go ================= */
   const held = () => H.held;
   function press(a) {
     const job = site.job, id = held();
+    if (job && job.type !== 'slab' && HARD_IDS.includes(id) && hardPress(a, job, id)) return;
     if (job && FIN_IDS.includes(id)) return finPress(a, job, id);
     if (job && ['gravel', 'barrow', 'rake', 'tamper', 'board', 'hammer', 'screed'].includes(id)) {
       act.kind = id; b3.lx = a.x; b3.lz = a.z; b3.n = 0; b3.tipped = false; b3.warned = 0; b3.why = ''; b3.acc = 0; b4.rx = a.x; b4.rz = a.z; b4.leakSaid = 0;
-      const pour = job.step === 'pour';
+      const pour = wetStep(job);
       if (id === 'gravel') return gravelPress(a, job);
       if (id === 'barrow') return pour ? mixPress(a, job) : undefined;
       if (id === 'rake') { if (pour) { const r = cmd('rake', { jobId: job.id, x: a.x, z: a.z }); if (r.ok) pourDirty(a.x, a.z, 1.4); return; } return; }
@@ -1155,9 +1457,10 @@
   function frame(a, dt) {
     if (!a.down) return;
     const job = site.job, k0 = act.kind;
+    if (job && HARD_IDS.includes(k0)) return hardFrame(a, dt, job);
     if (job && FIN_IDS.includes(k0)) return finFrame(a, dt, job);
     if (job && k0 === 'gravel') return gravelFrame(a, job);
-    if (job && k0 === 'barrow') return job.step === 'pour' ? mixFrame(a, dt, job) : barrowTipBase(a);
+    if (job && k0 === 'barrow') return wetStep(job) ? mixFrame(a, dt, job) : barrowTipBase(a);
     if (job && k0 === 'rake') return job.step === 'pour' ? rakeConcreteFrame(a, job) : rakeBaseFrame(a, job);
     if (job && k0 === 'tamper') { lead(a); b3.acc += dt; if (b3.acc >= 0.3) { b3.acc = 0; thump(a); } return; }
     if (job && k0 === 'screed') return screedFrame(a, dt, job);
@@ -1175,7 +1478,8 @@
     act.kind = '';
     G.player.lead = null;
     if (FIN_IDS.includes(k)) { fin.last = null; return; }
-    if (k === 'barrow' && site.job && site.job.step !== 'pour') return barrowRelease(a);
+    if (HARD_IDS.includes(k)) return hardRelease();
+    if (k === 'barrow' && site.job && !wetStep(site.job)) return barrowRelease(a);
     if (k === 'barrow') { b4.hose = false; return; }
     if (k === 'screed') { b4.scr = null; screedMesh.visible = false; return; }
     if (k === 'gravel' && b3.n > 1) return say('Tipped ' + Math.round(b3.m3 * 1000) + ' L along your line. Rake it level to the strings, then tamp it twice.', 5);
@@ -1186,6 +1490,7 @@
   /* ================= taking up the site tools, and putting them away ================= */
   let on = false, lastHeld = 'kit';
   function slotList() {
+    if (site.job && site.job.type !== 'slab') { const hv = hardOf(site.job); if (hv) return hardSlots(site.job, hv); }
     const step = site.job ? site.job.step : 'layout', own = (id) => tools().includes(id);
     if (step === 'base') return [
       { id: 'gravel', name: 'Gravel', icon: ICONS.gravel, item: truckFlag, title: 'Gravel: press and drag along the pad; the truck tips as you guide it' },
@@ -1240,7 +1545,7 @@
   function enter() {
     on = true; document.body.classList.add('gardening'); bar.hidden = false;
     const j = site.job;
-    H.open({ bar: toolsEl, reach: 1.6, camDist: 8.5, camPitch: 0.95, camFree: true, pace: 0.55, tipPx: 90, liftPx: 70, slots: slotList(), held: j ? ({ excavate: 'shovel', base: 'gravel', forms: 'board', pour: 'barrow', finish: 'bfloat', cure: 'blanket', strip: 'strip' }[j.step] || lastHeld) : lastHeld, onHold, press, frame, release, alt: (cur) => !!cur && (cur.id === 'shovel' || (cur.id === 'barrow' && !!site.job && site.job.step === 'pour')) });
+    H.open({ bar: toolsEl, reach: 1.6, camDist: 8.5, camPitch: 0.95, camFree: true, pace: 0.55, tipPx: 90, liftPx: 70, slots: slotList(), held: j && j.type !== 'slab' ? ((slotList()[0] || {}).id || lastHeld) : j ? ({ excavate: 'shovel', base: 'gravel', forms: 'board', pour: 'barrow', finish: 'bfloat', cure: 'blanket', strip: 'strip' }[j.step] || lastHeld) : lastHeld, onHold, press, frame, release, alt: (cur) => !!cur && (cur.id === 'shovel' || (cur.id === 'barrow' && wetStep(site.job))) });
     onHold(held());
   }
   function leave() {
@@ -1249,7 +1554,7 @@
     on = false; bar.hidden = true; tape.visible = false; G.player.lead = null;
     if (!['garden', 'yard'].includes(G.player.tool)) document.body.classList.remove('gardening');
     if (H.isOpen && H.held && H.slots.some((s) => ['kit', 'gravel', 'board', 'screed', 'bfloat', 'blanket', 'strip'].includes(s.id))) H.close();
-    screedMesh.visible = false; if (fv.ghost) fv.ghost.visible = false;
+    screedMesh.visible = false; if (fv.ghost) fv.ghost.visible = false; if (HW.ghost) HW.ghost.visible = false; hardRelease();
   }
   function onHold() { sayT = 0; updateHint(true); }
   function updateHint(force) {
@@ -1257,6 +1562,7 @@
     const job = site.job, id = held();
     let h;
     if (!job) h = 'No foundation to lay out here. Put up a building with a <b>slab</b>, <b>stem wall</b> or <b>poured piers</b> in construction mode (<kbd>L</kbd>), then come back.';
+    else if (job.type !== 'slab' && job.step !== 'layout') h = hardHint(job, id);
     else if (job.step === 'layout') {
       const C = job.layout.corners, n = C.filter((c) => c[2]).length;
       h = id === 'kit' ? (n ? '<b>' + n + ' of ' + C.length + '</b> corners staked. Hold the button and pull to the next glowing corner: each corner your hand reaches gets its stake.' : '<b>Press</b> a glowing corner: a stake goes in. <b>Keep holding</b> and pull toward the next corner: you walk after your hand and the string pays out.') : 'Lay out the corners first: take up the <b>layout kit</b> (1).';
@@ -1313,7 +1619,7 @@
     if (h !== hintEl.innerHTML) hintEl.innerHTML = h;
   }
   const STEP_LINE = {
-    base: 'Dug to the line. The gravel base goes in next (slab foundations; stem walls and piers are poured with <b>__foundation.debugPour()</b> for now).',
+    base: 'Dug to the line. The gravel base goes in next.',
     done: 'The foundation is finished.',
   };
   addEventListener('keydown', (e) => {
@@ -1340,7 +1646,7 @@
     const dt = Math.min(0.1, (t - last) / 1000); last = t;
     const want = G.player.tool === 'site';
     if (want !== on) { if (want) enter(); else leave(); }
-    driveTick(dt); popTick(dt); b34Tick(dt, t); finTick(dt, t);
+    driveTick(dt); popTick(dt); b34Tick(dt, t); finTick(dt, t); hardTick(t);
     if (site.strings.visible) {
       if (on && held() === 'kit' && site.job && site.job.step === 'layout' && site.order.length) site.strings.hand(handPt()); else if (site.job && site.job.step === 'layout') site.strings.hand(null);
       site.strings.update(dt);
@@ -1349,7 +1655,7 @@
     if (on) tapeTick();
     if (sayT > 0) { sayT -= dt; if (sayT <= 0) updateHint(true); }
     syncT += dt;
-    if (syncT > 0.5) { syncT = 0; syncJobs(); }
+    if (syncT > 0.5) { syncT = 0; syncBuilt(); }
     slow += dt;
     if (slow > 0.2) {
       slow = 0;
@@ -1377,7 +1683,10 @@
           if (r.ok && r.advanced) { if (step0 === 'excavate') dugOut(fresh); else baseIn(fresh); }
         }
       }
-      b34Slow(fresh); finSlow(fresh);
+      const slab = !fresh || fresh.type === 'slab';
+      b34Slow(slab ? fresh : null); finSlow(slab ? fresh : null);
+      const hv = hardSlow(slab ? null : fresh);
+      if (!slab) hardChip(fresh, hv);
       if (on) { H.setSlots(slotList()); updateHint(); }
     }
     requestAnimationFrame(tick);
@@ -1394,12 +1703,13 @@
     G.juice.hitStop = 0.08;
     const C = job.layout.corners;
     for (const c of C) G.burst(c[0], surf(c[0], c[1]) + 0.2, c[1], 8, 0xfff2c4, 1.4, 2.2, 0.06, 0.8);
-    say('<b>Dug to the line.</b> Flat and down to firm ground. Now the gravel base: take up <b>gravel</b> and drag along the pad.', 7);
-    if (on) { setTimeout(() => { H.setSlots(slotList()); H.hold && H.hold('gravel'); }, 50); }
+    const fresh = FR.job(G.sim.state, job.id), next = fresh && fresh.type !== 'slab' ? (slotList()[0] || {}).id : 'gravel';
+    say(fresh && fresh.type === 'stemwall' && fresh.step === 'footing' ? '<b>Down to the frost line.</b> Pour the footing into the trench: mix concrete in the <b>barrow</b>.' : fresh && fresh.type !== 'slab' ? '<b>Dug.</b> Now the forms.' : '<b>Dug to the line.</b> Flat and down to firm ground. Now the gravel base: take up <b>gravel</b> and drag along the pad.', 7);
+    if (on) { setTimeout(() => { H.setSlots(slotList()); H.hold && H.hold(next); }, 50); }
     const st = B.structs().find((s) => s.id === (job.owner && job.owner.structId)), pr = st && CS().progress[st.id];
     if (st && pr) showBuilt(st, pr);
   }
-  G.sim.listen((type) => { if (type === 'loaded') { sent.clear(); site.sig = ''; site.ovSig = ''; site.order = []; site.drive = null; } });
+  G.sim.listen((type) => { if (type === 'loaded') { builtSig.clear(); site.sig = ''; site.ovSig = ''; site.order = []; site.drive = null; } });
   requestAnimationFrame(tick);
 
   window.__foundation = {
@@ -1411,7 +1721,13 @@
       if (!j) return null;
       if (j.step === 'layout') return 'Lay out the foundation: press <kbd>7</kbd> for the layout kit. Press a glowing corner and pull the string round the others.';
       if (j.step === 'excavate') return 'Dig to the strings: press <kbd>7</kbd> and dig where the ground is amber (' + Math.round(FR.jobView(G.sim.state, j.id).dig * 100) + '% down to the line).';
-      if (j.step === 'base') return j.type === 'slab' ? 'The gravel base: press <kbd>7</kbd>, tip gravel on the pad, rake it to the line and tamp it twice.' : 'Dug to the line. Stem walls and piers are not poured by hand yet: <code>__foundation.debugPour()</code> pours it for testing.';
+      if (j.type === 'piers' && j.step === 'excavate') return 'Bore the pier holes to the frost line: press <kbd>7</kbd>, take up the post-hole digger, press on a pier mark, twist and lift.';
+      if (j.type !== 'slab' && j.step === 'excavate') return 'Dig the trench to the strings: press <kbd>7</kbd> and dig where the ground is amber (' + Math.round(FR.jobView(G.sim.state, j.id).dig * 100) + '% down to the line).';
+      if (j.step === 'footing') return 'Pour the footing: press <kbd>7</kbd>, mix bags in the barrow and tip them into the trench.';
+      if (j.type !== 'slab' && j.step === 'forms') return j.type === 'piers' ? 'Set the tube forms: press <kbd>7</kbd>, drop a tube in each hole and drag it plumb.' : 'Set the wall forms: press <kbd>7</kbd>, panels in pairs on the footing, then tie them through.';
+      if (j.type !== 'slab' && j.step === 'pour') return 'Pour: press <kbd>7</kbd>, fill from the barrow, rod it, top it up' + (j.type === 'piers' ? ', and set a post bracket in each wet top.' : ', and set the anchor bolts in the wet top.');
+      if (j.type !== 'slab' && ['cure', 'strip', 'done'].includes(j.step)) { const hv = FR.hard(G.sim.state, j.id); return hv && hv.brackets ? 'Set the post brackets (press <kbd>7</kbd>): framing waits for them.' : hv && hv.walls.length && !hv.stripped ? 'Curing: strip the wall forms at a fifth strength (press <kbd>7</kbd>).' : hv && hv.timberLeft ? (hv.gates.frame ? 'Set the beams on the brackets: press <kbd>7</kbd>.' : 'Curing: the beams go on at half strength.') : null; }
+      if (j.step === 'base') return 'The gravel base: press <kbd>7</kbd>, tip gravel on the pad, rake it to the line and tamp it twice.';
       if (['forms', 'rebar', 'roughin'].includes(j.step)) return 'Set the forms: press <kbd>7</kbd>, snap form boards along the strings and stake them.';
       if (j.step === 'pour') return 'Pour the slab: press <kbd>7</kbd>, mix bags in the barrow, tip, rake and screed it off the forms.';
       if (j.step === 'finish') return 'Finish the slab: press <kbd>7</kbd>: float it, trowel or broom it once the sheen is gone, joints and anchor bolts.';
@@ -1422,7 +1738,7 @@
     redraw: () => { site.sig = ''; site.ovSig = ''; },
     tools: { kit },
     // for tests: what is drawn
-    drawn: () => ({ overlay: !!(site.ov && site.ov.visible), tinted: site.ov ? (() => { const c = site.ov.mesh.geometry.attributes.color.array; let n = 0; for (let i = 3; i < c.length; i += 16) if (c[i] > 0) n++; return n; })() : 0, strands: site.strings.visible ? site.strings.mesh.count : 0, boards: site.boards.filter(Boolean).length, stakes: site.stakes.filter(Boolean).length, ghosts: site.ghosts.filter(Boolean).length, boardsDrawn: fv.runs.reduce((a, r) => a + r.segs.length, 0), stakeMarks: fv.dots.length, pour: !!(pourMesh.fm && pourMesh.fm.visible), bags: fv.bags ? fv.bags.children.length : 0, boltMarks: fin.dots.length, finishMarks: fin.group ? fin.group.children.length : 0, cureTint: fin.ov ? (() => { const c = fin.ov.mesh.geometry.attributes.color.array; let n = 0; for (let i = 3; i < c.length; i += 16) if (c[i] > 0) n++; return n; })() : 0, cover: fin.cover ? fin.coverKind : null, chip: chip.hidden ? '' : chip.innerText }),
+    drawn: () => ({ overlay: !!(site.ov && site.ov.visible), tinted: site.ov ? (() => { const c = site.ov.mesh.geometry.attributes.color.array; let n = 0; for (let i = 3; i < c.length; i += 16) if (c[i] > 0) n++; return n; })() : 0, strands: site.strings.visible ? site.strings.mesh.count : 0, boards: site.boards.filter(Boolean).length, stakes: site.stakes.filter(Boolean).length, ghosts: site.ghosts.filter(Boolean).length, boardsDrawn: fv.runs.reduce((a, r) => a + r.segs.length, 0), stakeMarks: fv.dots.length, pour: !!(pourMesh.fm && pourMesh.fm.visible), bags: fv.bags ? fv.bags.children.length : 0, boltMarks: fin.dots.length, finishMarks: fin.group ? fin.group.children.length : 0, cureTint: fin.ov ? (() => { const c = fin.ov.mesh.geometry.attributes.color.array; let n = 0; for (let i = 3; i < c.length; i += 16) if (c[i] > 0) n++; return n; })() : 0, cover: fin.cover ? fin.coverKind : null, chip: chip.hidden ? '' : chip.innerText, hard: HW.group ? HW.group.children.length : 0, hardMarks: HW.marks.length, tubes: HW.tubes.size }),
     // testing: the nearest job (or a building's) is poured now and starts to cure
     debugPour(structId) {
       const j = structId === undefined ? site.job || nearJob() : jobFor(structId);
