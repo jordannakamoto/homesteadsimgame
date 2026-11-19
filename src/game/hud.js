@@ -45,7 +45,7 @@
   const tools = $('tools');
   function decorateTools() {
     if (!tools) return;
-    for (const b of tools.querySelectorAll(':scope > button[data-tool]')) {
+    for (const b of tools.querySelectorAll('button[data-tool]')) {
       const name = TOOL_ICON[b.dataset.tool];
       if (name && !b.querySelector(':scope > svg.ui-ic')) {
         const key = b.querySelector(':scope > .key');
@@ -55,8 +55,46 @@
       if (!b.title) { const n = b.querySelector('.name'), k = b.querySelector('.key'); if (n) b.title = n.textContent + (k ? ' (' + k.textContent + ')' : ''); }
     }
   }
+  // Terrain slot + flyout (Dig / Raise / Level). The three buttons stay inside #tools so the engine's selectors still reach them.
+  const tslot = $('tool-terrain'), fly = $('tools-fly');
+  const TERRAIN = ['dig', 'raise', 'level'];
+  U.icons.add({ sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9M4 12h3M11 12h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/><circle cx="9" cy="12" r="0.01"/>' });
+  const flyOpen = () => !!fly && !fly.hidden;
+  function setFly(on) {
+    if (!fly || !tslot) return;
+    if (on) {
+      const r = tslot.getBoundingClientRect();
+      fly.hidden = false;
+      const w = fly.offsetWidth;
+      fly.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + 'px';
+      fly.style.bottom = Math.round(innerHeight - r.top + 10) + 'px';
+    } else fly.hidden = true;
+    tslot.setAttribute('aria-expanded', String(!!on));
+  }
+  function syncTerrain() {
+    if (!tslot) return;
+    const act = TERRAIN.find((t) => { const b = fly.querySelector('[data-tool="' + t + '"]'); return b && b.getAttribute('aria-pressed') === 'true'; });
+    const want = act ? 'true' : 'false';
+    if (tslot.getAttribute('aria-pressed') !== want) tslot.setAttribute('aria-pressed', want);
+    const nm = tslot.querySelector('.name'), label = act ? act[0].toUpperCase() + act.slice(1) : 'Terrain';
+    if (nm && nm.textContent !== label) nm.textContent = label;
+    const icn = TOOL_ICON[act || 'dig'];
+    const cur = tslot.querySelector(':scope > svg.ui-ic');
+    if (!cur || !cur.classList.contains('ui-ic--' + icn)) setIcon(tslot, icn), tslot.querySelector(':scope > svg.ui-ic') && tslot.insertBefore(tslot.querySelector(':scope > svg.ui-ic'), tslot.querySelector('.name'));
+  }
+  if (tslot && fly) {
+    const watchFly = new MutationObserver(syncTerrain);
+    watchFly.observe(tslot, { attributes: true, attributeFilter: ['aria-pressed'] });
+    for (const b of fly.querySelectorAll('button')) watchFly.observe(b, { attributes: true, attributeFilter: ['aria-pressed'] });
+    tslot.addEventListener('click', (e) => { e.stopImmediatePropagation(); setFly(!flyOpen()); }, true);
+    fly.addEventListener('click', (e) => { if (e.target.closest('button[data-tool]')) setFly(false); });
+    document.addEventListener('pointerdown', (e) => { if (flyOpen() && !fly.contains(e.target) && !tslot.contains(e.target)) setFly(false); }, true);
+    document.addEventListener('keydown', (e) => { if (e.code === 'Escape' && flyOpen()) setFly(false); }, true);
+    window.addEventListener('resize', () => setFly(false));
+  }
   if (tools) {
     decorateTools();
+    syncTerrain();
     new MutationObserver(decorateTools).observe(tools, { childList: true });
     // capture: runs before the engine's own click handler on the button, which would just pick the mode again
     tools.addEventListener('click', (e) => {
@@ -135,7 +173,7 @@
   adopt('ut', { title: 'Home', icon: 'home' });
   adopt('cv', { title: 'Build', icon: 'hammer' });
   adopt('wxpanel', { title: 'Weather', icon: 'cloud' });
-  adopt('gfxsettings', { title: 'Graphics', icon: 'gear' });
+  adopt('gfxsettings', { title: 'Graphics', icon: 'sliders' });
   // views with an open flag of their own hear when the kit closes their panel (Esc, or another drawer opened)
   window.addEventListener('ui:panel', (e) => {
     const d = e.detail || {};
@@ -152,6 +190,15 @@
     gear.addEventListener('click', () => panels.status.toggle());
     const sync = () => gear.setAttribute('aria-pressed', panels.status.isOpen ? 'true' : 'false');
     window.addEventListener('ui:panel', (e) => { if (e.detail && e.detail.id === 'status') { sync(); if (e.detail.open) syncSkins(); } });
+    sync();
+  }
+  // graphics: one click from the top bar (the Graphics button inside the settings drawer still works too)
+  const gfx = $('hud-gfx');
+  if (gfx && panels.gfxsettings) {
+    gfx.innerHTML = ic('sliders');
+    gfx.addEventListener('click', () => { panels.gfxsettings.toggle(); if (panels.gfxsettings.isOpen && window.__gfxPanel) window.__gfxPanel.refresh(); });
+    const sync = () => gfx.setAttribute('aria-pressed', panels.gfxsettings.isOpen ? 'true' : 'false');
+    window.addEventListener('ui:panel', (e) => { if (e.detail && e.detail.id === 'gfxsettings') sync(); });
     sync();
   }
   // skin tiles

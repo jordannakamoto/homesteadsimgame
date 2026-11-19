@@ -248,17 +248,26 @@
       }
       return;
     }
-    let row = 0;
-    for (let y = c.y0; y < c.y1 - 0.05; y += CH, row++) {
-      const ya = y,
-        yb = Math.min(c.y1, y + CH);
-      for (const [xa, xb] of c.spans(ya, yb, row)) {
+    // courses go up a few at a time (docs/design/carpentry.md: pace): up to three neighbouring courses that run the same
+    // spans (clear of windows, under the rake) are one piece; a course that runs round a window, or steps up a gable, is its own.
+    // The siding shader draws each course of a piece (src/build.js makeLapMat counts them from its height)
+    const rowsS = [];
+    for (let y = c.y0; y < c.y1 - 0.05; y += CH) rowsS.push([y, Math.min(c.y1, y + CH)]);
+    const spanKey = (i) => JSON.stringify(c.spans(rowsS[i][0], rowsS[i][1], i).map((q) => q.map((v) => Math.round(v * 1000))));
+    for (let i = 0, row = 0; i < rowsS.length; row++) {
+      let k = 1;
+      const k0 = spanKey(i);
+      while (k < 3 && i + k < rowsS.length && rowsS[i + k][1] - rowsS[i + k][0] > CH - 1e-6 && spanKey(i + k) === k0) k++;
+      const ya = rowsS[i][0],
+        yb = rowsS[i + k - 1][1], i0 = i;
+      i += k;
+      for (const [xa, xb] of c.spans(ya, yb, i0)) {
         const tw = c.trim === false ? 0 : TRIM_W, sa = Math.max(xa, tw), sb = Math.min(xb, c.L - tw);
         if (sb - sa < 0.1) continue;
         const ym = (ya + yb) / 2;
         // a thin lapped board: it overlaps the course below by 25 mm and only its bottom edge stands off the wall, so the shadow line carries the look
-        const lap = row && c.spans(ya - LAP, ya, row - 1).some(([x0, x1]) => x0 <= sa + 1e-6 && x1 >= sb - 1e-6) ? LAP : 0;
-        M(out, id("cl"), "cladding", "boards", "cladding", c.parent, c.mat || "timber", 0.007, yb - ya + lap, c.at(sa, ym - lap / 2, c.off), c.at(sb, ym - lap / 2, c.off), upV, { ...common, area: r3((sb - sa) * (yb - ya)), row });
+        const lap = i0 && c.spans(ya - LAP, ya, i0 - 1).some(([x0, x1]) => x0 <= sa + 1e-6 && x1 >= sb - 1e-6) ? LAP : 0;
+        M(out, id("cl"), "cladding", "boards", "cladding", c.parent, c.mat || "timber", 0.007, yb - ya + lap, c.at(sa, ym - lap / 2, c.off), c.at(sb, ym - lap / 2, c.off), upV, { ...common, area: r3((sb - sa) * (yb - ya)), row, ...(k > 1 ? { courses: k } : {}) });
       }
     }
   }
@@ -461,7 +470,19 @@
           // inside corners: where this face meets the next wall (both ends of a partition, the start of an outside wall)
           for (const x of o ? [0.02] : [0.02, L - 0.02]) joint("corner", at(x, yb + 0.012, joff), at(x, yt, joff), [ux, 0, uz], yt - yb - 0.012);
         }
-        else { let row = 0; for (let y = yb + 0.01; y < yt - 0.03; y += 0.14, row++) lay(y, Math.min(yt, y + 0.14), row, 3.6, "boards"); }
+        else {
+          // boards go up four at a time, tongue into groove (a panel's worth), where four neighbouring rows run the same
+          // spans; rows that run round a window go up one at a time
+          const ys = [];
+          for (let y = yb + 0.01; y < yt - 0.03; y += 0.14) ys.push([y, Math.min(yt, y + 0.14)]);
+          const sig = (r) => JSON.stringify(bandFree(r[0], r[1]).map((q) => [q[0], q[1]].map((v) => Math.round(v * 1000))));
+          for (let i = 0, row = 0; i < ys.length; row++) {
+            let k = 1;
+            while (k < 4 && i + k < ys.length && ys[i + k][1] - ys[i + k][0] > 0.139 && sig(ys[i + k]) === sig(ys[i])) k++;
+            lay(ys[i][0], ys[i + k - 1][1], row, 3.6, "boards");
+            i += k;
+          }
+        }
         // trim carpentry (docs/design/carpentry.md): casings round the openings, then baseboard along the floor, each part
         // with the cut at its ends. The casing's inner edge stands JI in from the rough opening: the jamb, less the reveal
         if (spec.trimIn !== false) {

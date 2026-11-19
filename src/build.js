@@ -191,6 +191,8 @@
     gable: col(0x86663f),
   };
 
+  // inside a framed wall, between the studs: the back of the sheathing (src/build.js wall body, EK < 1)
+  const OSB_PAL = { name: "Sheathing", plank: col(0xc9a468), beam: col(0xb48f58), stone: col(0xb48f58) };
   const WALLS = {
     timber: { name: "Timber", plank: C.plank, beam: C.beam, stone: C.stone },
     stone: { name: "Stone", plank: col(0x8f8c84), beam: col(0x6d6a62), stone: col(0x77746c), courses: true },
@@ -1197,8 +1199,9 @@
         const L = Math.hypot(q.b[0] - q.a[0], q.b[1] - q.a[1]) || 1,
           nx = -(q.b[1] - q.a[1]) / L,
           nz = (q.b[0] - q.a[0]) / L,
-          gc = shade(C.gable, 0.95);
-        for (const off of [-0.07, 0.07]) {
+          gc = shade(C.gable, 0.95),
+          o7 = EK < 1 ? 0.04 : 0.07;        // a framed gable: in behind its sheathing and siding, which are the gable you see
+        for (const off of [-o7, o7]) {
           const V = q.outline.map((p) => [p[0] + nx * off, p[1], p[2] + nz * off]);
           for (let i = 1; i + 1 < V.length; i++) g.tri(V[0], V[i], V[i + 1], [nx * Math.sign(off), 0, nz * Math.sign(off)], gc);
         }
@@ -3336,7 +3339,8 @@
       const wm = (D.wmat && D.wmat.get(k)) || "timber";
       PAL = raised ? woodFoot(wm) : WALLS[wm];
       const cuts = type === "wall" ? freeCuts(D, i, j, d) : [];
-      EK = type === "wall" && stickWall("wall", wm) ? 0.7 : 1;
+      EK = type === "wall" && stickWall("wall", wm) ? 0.5 : 1;   // a framed wall: the old body stays in behind the stud faces, so studs and batts show while it is open
+      if (EK < 1) PAL = OSB_PAL;           // and what shows between the studs is the back of the sheathing
       if (cuts.length) holedWall(g, i, j, d, depth, cuts, PAL);
       else wallPieces(isLow(type) ? late : g, i, j, d, type, depth);
       EK = 1;
@@ -3359,17 +3363,21 @@
       else if (!(ds.length === 2 && ds[0] === ds[1])) { const h = stickWall("wall", vmat.get(k) || "timber") ? 0.042 : 0.12; g.abox(i - h, -depth, j - h, i + h, EAVE + 0.03, j + h, pb); }   // a sided corner hides its post inside the trim
     }
     rg.yo = (hs - 1) * EAVE;
+    // a framed building's gables are its sheathing and siding (drawn as members): the roof's own gable infill stays in behind them
+    EK = [...vmat.values()].some((m) => stickWall("wall", m)) ? 0.5 : 1;
     for (const r of D.roofs) {
       RPAL = roofCol(r);
       roofPieces(rg, r, full);
     }
+    EK = 1;
     const ends = new Set();
     (D.segs || []).forEach((sg, n) => {
       const low = isLow(sg[4]);
       if (D.id && inRings(D, (sg[0] + sg[2]) / 2, (sg[1] + sg[3]) / 2)) return;
       PAL = raised ? woodFoot(sg[5] || "timber") : WALLS[sg[5] || "timber"];
       const cuts = sg[4] === "wall" ? segCuts(D, sg) : null, clad = sg[4] === "wall" && stickWall("wall", sg[5] || "timber");
-      EK = clad ? 0.7 : 1;
+      EK = clad ? 0.5 : 1;
+      if (EK < 1) PAL = OSB_PAL;
       if (cuts && cuts.length) {
         // a plain angled wall with doors or windows in it: the same wall with their rough openings cut out
         const dx = sg[2] - sg[0],
@@ -3621,6 +3629,8 @@
       near: new T.Plane(new T.Vector3(0, 0, 1), 1e5),
       sideA: new T.Plane(new T.Vector3(1, 0, 0), -1e5),
       sideB: new T.Plane(new T.Vector3(-1, 0, 0), -1e5),
+      // the dollhouse caps: shown only where the walls are cut (near, sideA and sideB all clip), so these are those planes reversed
+      capPl: [new T.Plane(), new T.Plane(), new T.Plane()],
       cutH: 99,
       stairs: [],
       polyRoofs: [],
@@ -9195,7 +9205,7 @@
         opens.push({ id: q.id, stage: "openings", kind: q.kind, parent: w.id, a: [w.a[0] + ux * c, q.sill, w.a[1] + uz * c], b: [w.a[0] + ux * c, q.sill + q.height, w.a[1] + uz * c], n: [-uz, 0, ux], section: { b: q.width, d: q.kind === "door" ? 0.05 : 0.04 }, col: q.kind === "door" ? "timber" : "wrap" });
       }
     }
-    return (S.mem = { ver: S.ver, list, byParent, byId, polys, opens, roofs: desc.roofs, planes: new Map(desc.roofs.map((R) => [R.id, R.planes.map((p) => p.id)])) });
+    return (S.mem = { ver: S.ver, list, byParent, byId, polys, opens, walls: desc.walls, roofs: desc.roofs, planes: new Map(desc.roofs.map((R) => [R.id, R.planes.map((p) => p.id)])) });
   }
   // every id of a structure that can be planned or built on its own: members, doors and windows, and the pieces
   // that are not made of members (stone walls, round rooms, stairs, pillars)
@@ -9243,7 +9253,8 @@
     if (st.all) return st;
     const P = (id) => S.plan.has(id),
       kids = (id) => mem.byParent.get(id),
-      fin = (id, tail) => (kids(id) ? (tail === ".cl" ? !kids(id).some((m) => m.kind === "cladding" && P(m.id)) : !P(id + tail)) : !P(id)),
+      // a wall is closed in once its siding and its lining are on: until then its frame, and the batts going in, are what you see
+      fin = (id, tail) => (kids(id) ? (tail === ".cl" ? !kids(id).some((m) => (m.kind === "cladding" || m.kind === "lining") && P(m.id)) : !P(id + tail)) : !P(id)),
       bare = (id) => (kids(id) ? kids(id).every((m) => P(m.id)) : true),
       Db = { ...S, floors: new Set(), walls: new Map(), segs: [], polys: [], roofs: [], rings: [], stairs: [], pillars: [], free: [] },
       Ds = { ...Db, floors: new Set(), walls: new Map(), segs: [], polys: [], roofs: [], rings: [], stairs: [], pillars: [], decor: [], paths: [], polyRoofs: [], free: [] };
@@ -9357,16 +9368,30 @@
   // lap siding: each board is a flat box one course tall; on its face the material paints what the lap does in life. Under
   // the butt edge of the course above, a shadow line falls on the top of this board (darkest right under it, a soft fall
   // below); the board's own bottom edge, standing proud, catches the light. Only the face and back (local z) get it.
-  const makeLapMat = (planes) => {
+  // ch: the height of one course (m): a piece taller than that is several courses (siding goes up three at a time, boards four),
+  // counted from the instance's height. groove: tongue-and-groove boards inside (a fine V line) instead of lapped siding
+  const makeLapMat = (planes, ch = 0.18, groove = false) => {
   const lapMat = new T.MeshLambertMaterial({ color: 0xffffff, clippingPlanes: planes || null, clipIntersection: !!planes, clipShadows: !!planes });
   lapMat.onBeforeCompile = (sh) => {
-    sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nvarying vec2 vLapUv; varying float vLapF;").replace("#include <begin_vertex>", "#include <begin_vertex>\n vLapUv = uv; vLapF = step(0.5, abs(normal.z));");
-    sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nvarying vec2 vLapUv; varying float vLapF;").replace("#include <color_fragment>", "#include <color_fragment>\n { float y = vLapUv.y; float shade = 1.0 - 0.42 * smoothstep(0.86, 0.985, y) - 0.12 * smoothstep(0.6, 0.86, y); float lit = 1.0 + 0.12 * (1.0 - smoothstep(0.0, 0.07, y)); diffuseColor.rgb *= mix(1.0, shade * lit, vLapF); }");
+    sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nvarying vec2 vLapUv; varying float vLapF;").replace("#include <begin_vertex>", "#include <begin_vertex>\n vLapUv = uv; vLapF = step(0.5, abs(normal.z));\n #ifdef USE_INSTANCING\n vLapUv.y *= max(1.0, floor(length(instanceMatrix[1].xyz) / " + ch.toFixed(3) + " + 0.5));\n #endif");
+    sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nvarying vec2 vLapUv; varying float vLapF;").replace("#include <color_fragment>", "#include <color_fragment>\n { float y = fract(vLapUv.y); float row = floor(vLapUv.y); " + (groove ? "float shade = 1.0 - 0.32 * (1.0 - smoothstep(0.0, 0.035, y)) - 0.18 * smoothstep(0.975, 1.0, y) + 0.05 * (fract(sin(row * 12.9898) * 43758.5453) - 0.5); float lit = 1.0;" : "float shade = 1.0 - 0.42 * smoothstep(0.86, 0.985, y) - 0.12 * smoothstep(0.6, 0.86, y); float lit = 1.0 + 0.12 * (1.0 - smoothstep(0.0, 0.07, y));") + " diffuseColor.rgb *= mix(1.0, shade * lit, vLapF); }");
   };
-  lapMat.customProgramCacheKey = () => "lapSiding";
+  lapMat.customProgramCacheKey = () => (groove ? "grooveBoards" : "lapSiding") + ch;
   return lapMat;
   };
-  const lapMat = makeLapMat(null);
+  const lapMat = makeLapMat(null), grvMat = makeLapMat(null, 0.14, true);
+  // insulation batts: soft and fibrous, pillowed between the studs (darker where they press against the framing), with fine
+  // streaks of fibre along their length; the piece's own size sets the scale of the fibres
+  const makeBattMat = (planes) => {
+    const m = new T.MeshLambertMaterial({ color: 0xffffff, clippingPlanes: planes || null, clipIntersection: !!planes, clipShadows: !!planes });
+    m.onBeforeCompile = (sh) => {
+      sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nvarying vec2 vBUv; varying vec2 vBSz; varying float vBF;").replace("#include <begin_vertex>", "#include <begin_vertex>\n vBUv = uv; vBF = step(0.5, abs(normal.z)); vBSz = vec2(1.0);\n #ifdef USE_INSTANCING\n vBSz = vec2(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz));\n #endif");
+      sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nvarying vec2 vBUv; varying vec2 vBSz; varying float vBF;\nfloat bh(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }").replace("#include <color_fragment>", "#include <color_fragment>\n { vec2 q = vBUv * vBSz; float fib = 0.55 * bh(floor(vec2(q.x / 0.05, q.y / 0.004))) + 0.45 * bh(floor(vec2(q.x / 0.012, q.y / 0.002)) + 7.0); float px = sin(3.14159 * clamp(vBUv.x, 0.0, 1.0)), py = sin(3.14159 * clamp(vBUv.y, 0.0, 1.0)); float pillow = 0.72 + 0.28 * pow(px, 0.25) * pow(py, 0.6); diffuseColor.rgb *= mix(0.92 + 0.12 * fib, (0.88 + 0.18 * fib) * pillow, vBF); }");
+    };
+    m.customProgramCacheKey = () => "battFibre";
+    return m;
+  };
+  const battMat = makeBattMat(null);
   // a building's own copies of the member materials, cut by its dollhouse planes like its walls: the siding (drawn as
   // boards, the whole outside of a sided wall) opens with the wall when you are inside
   // where the cut opens a piece you look into the box from inside: its back faces are drawn as a flat dark section, so a
@@ -9378,7 +9403,7 @@
     m.customProgramCacheKey = () => (key || "") + "|capped";
     return m;
   };
-  const memberMats = (planes) => ({ mem: capped(Object.assign(memMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })), lap: capped(makeLapMat(planes)), wrap: capped(Object.assign(wrapMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })), shp: capped(Object.assign(memMat.clone(), { vertexColors: true, clippingPlanes: planes, clipIntersection: true, clipShadows: true })) });
+  const memberMats = (planes) => ({ mem: capped(Object.assign(memMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })), lap: capped(makeLapMat(planes)), grv: capped(makeLapMat(planes, 0.14, true)), bat: capped(makeBattMat(planes)), wrap: capped(Object.assign(wrapMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })), shp: capped(Object.assign(memMat.clone(), { vertexColors: true, clippingPlanes: planes, clipIntersection: true, clipShadows: true })) });
   // trim with mitered ends (docs/design/carpentry.md) is drawn as its real shape, not a box: each end cut at 45 degrees
   // across the face, the long point on the side away from the opening (m.long, along m.n). One small mesh per building
   const shpMat = new T.MeshLambertMaterial({ vertexColors: true });
@@ -9405,7 +9430,7 @@
     return g;
   }
   const isLap = (m) => /^siding/.test(m.col || "") && m.type === "boards";
-  const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), siding: col(0xb8beb1), sidingDark: col(0x5d4a3b), trim: col(0xefece4), gypsum: col(0xe3e3de), primer: col(0xf4f3ef), pine: col(0xd8b583), concrete: CONCRETE, gravel: col(0x8f8b82) };
+  const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf4b9a8), siding: col(0xb8beb1), sidingDark: col(0x5d4a3b), trim: col(0xefece4), gypsum: col(0xe3e3de), primer: col(0xf4f3ef), pine: col(0xd8b583), concrete: CONCRETE, gravel: col(0x8f8b82) };
   for (const [k, h] of Object.entries(FR.ROOF_COLORS || {})) MCOL[k] = col(h); // the roofing layers while they go on (src/framing.js)
   // a wall paint's colour, from its finish key ("sage_eggshell"; src/sim/content/decor.js)
   const FINCOL = new Map(),
@@ -9419,6 +9444,63 @@
     };
   const _m4 = new T.Matrix4(),
     _c = new T.Color();
+  // ---- dollhouse caps. Where the cut opens a framed wall, a flat cap at the cut height covers its whole thickness (lining to
+  // siding), as a cutaway drawing fills its sections: no studs, batts or hollows show. Only walls that are finished get one
+  // (one under construction is meant to be seen into); openings the cut passes through are left open
+  // the cap shows the wall in section, as one solid thing: the room's colour (lining, or its paint) on the inside, a pale
+  // timber core, the siding's colour on the outside
+  const capMat = (S) => S.capMat || (S.capMat = new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide, clippingPlanes: S.capPl, clipIntersection: false }));
+  const CAP_CORE = col(0xd9c6a3);
+  const CAP_SKIP = new Set(["casing", "base", "stool", "caulk", "paint", "prime", "joint", "batt", "wiring", "pipe", "box"]);
+  function capWalls(S) {
+    const on = S.cutH < 99 && S.mem && S.mem.walls && S.mem.walls.length;
+    if (!on) { if (S.capMesh) S.capMesh.visible = false; return; }
+    const h = S.cutH, opensAt = [];
+    for (const w of S.mem.walls) for (const q of w.openings || []) if (w.y0 + q.sill < h && w.y0 + q.sill + q.height > h) opensAt.push(q.id);
+    const key = S.mem.ver + "|" + S.plan.size + "|" + opensAt.join() + "|" + S.mem.walls.filter((w) => w.y0 + (w.h || 0) > h && w.y0 < h).length;
+    if (S.capKey !== key) {
+      S.capKey = key;
+      if (S.capMesh) (S.group.remove(S.capMesh), S.capMesh.geometry.dispose(), (S.capMesh = null));
+      const pos = [], cols = [];
+      for (const w of S.mem.walls) {
+        if (w.y0 + (w.h || 0) <= h || w.y0 >= h) continue;
+        const ms = (S.mem.byParent.get(w.id) || []).filter((m) => m.draw !== 0 && !CAP_SKIP.has(m.kind) && !(m.kind === "cladding" && m.type === "trim") && m.section && m.stage !== "foundation" && m.stage !== "floor-frame" && m.stage !== "subfloor");
+        if (!ms.length || ms.some((m) => S.plan.has(m.id))) continue;          // still being built: leave it open to see
+        const L = Math.hypot(w.b[0] - w.a[0], w.b[1] - w.a[1]) || 1, ux = (w.b[0] - w.a[0]) / L, uz = (w.b[1] - w.a[1]) / L, N = [-uz, 0, ux];
+        let lo = 1e9, hi = -1e9;
+        const strips = [];      // [from, to, colour] across the wall: the faces you see in the cut
+        const all = S.mem.byParent.get(w.id) || [], paintOf = (fc) => { const p2 = all.find((q) => q.kind === "paint" && q.surface === "walls" && q.face === fc && !S.plan.has(q.id)); return p2 ? finCol(p2.fin) : null; };
+        for (const m of ms) {
+          const ax = m.b[0] - m.a[0], ay = m.b[1] - m.a[1], az = m.b[2] - m.a[2], ml = Math.hypot(ax, ay, az) || 1, u = [ax / ml, ay / ml, az / ml], n = m.n;
+          const t = [u[1] * n[2] - u[2] * n[1], u[2] * n[0] - u[0] * n[2], u[0] * n[1] - u[1] * n[0]], dot = (v) => Math.abs(v[0] * N[0] + v[2] * N[2]);
+          const c = ((m.a[0] + m.b[0]) / 2 - w.a[0]) * N[0] + ((m.a[2] + m.b[2]) / 2 - w.a[1]) * N[2], half = (dot(t) * m.section.b + dot(n) * m.section.d + dot(u) * ml) / 2;
+          if (half > 0.4) continue;      // a piece lying across the wall is not the wall
+          lo = Math.min(lo, c - half); hi = Math.max(hi, c + half);
+          if (m.kind === "lining") strips.push([c - half, c + half, paintOf(m.face) || MCOL[m.col] || MCOL.gypsum]);
+          else if (m.kind === "cladding") strips.push([c - half, c + half, MCOL[m.col || "siding"] || MCOL.siding]);
+        }
+        if (!(hi > lo)) continue;
+        // along the wall, less the openings the cut passes through
+        const gaps = (w.openings || []).filter((q) => opensAt.includes(q.id)).map((q) => [q.offset, q.offset + q.width]).sort((p, q) => p[0] - q[0]);
+        let x = 0;
+        // the core across the whole thickness, then each face's strip a hair above it
+        const band = (xa, xb, o0, o1, y, c) => { const P = (s2, o) => [w.a[0] + ux * s2 + N[0] * o, y, w.a[1] + uz * s2 + N[2] * o]; for (const q of [P(xa, o0), P(xb, o0), P(xb, o1), P(xa, o0), P(xb, o1), P(xa, o1)]) (pos.push(...q), cols.push(c[0], c[1], c[2])); };
+        const quad = (xa, xb) => { band(xa, xb, lo, hi, 0, CAP_CORE); for (const [o0, o1, c] of strips) band(xa, xb, o0, o1, 0.002, c); };
+        for (const [ga, gb] of gaps) { if (ga - x > 0.01) quad(x, ga); x = Math.max(x, gb); }
+        if (L - x > 0.01) quad(x, L);
+      }
+      if (pos.length) {
+        const g = new T.BufferGeometry();
+        g.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+        g.setAttribute("color", new T.Float32BufferAttribute(cols, 3));
+        g.computeVertexNormals();
+        S.capMesh = new T.Mesh(g, capMat(S));
+        S.capMesh.receiveShadow = true;
+        S.group.add(S.capMesh);
+      }
+    }
+    if (S.capMesh) ((S.capMesh.visible = true), (S.capMesh.position.y = h - 0.0005));   // at the cut: nothing of the cut pieces shows above it
+  }
   function dropMembers(S) {
     for (const m of S.memMeshes) {
       S.group.remove(m);
@@ -9470,7 +9552,7 @@
       }
       if (m.draw === 0) continue;
       if (m.stage === "foundation" || m.stage === "floor-frame") sets[0].push(m);
-      else if (roofId) (st.all || st.finRoof.has(roofId)) || sets[1].push(m);
+      else if (roofId) ((st.all || st.finRoof.has(roofId)) && m.kind !== "cladding") || sets[1].push(m);     // the gable's siding stays drawn, like the walls'
       else if (m.stage === "subfloor" || m.type === "floor-batt") (st.all || st.finFloor.has(m.parent)) || sets[0].push(m);
       else if (m.kind === "cladding" || m.kind === "casing" || m.kind === "base" || (m.kind === "lining" && (m.type === "gypsum" || m.type === "boards"))) sets[0].push(m); // and the trim inside // siding outside and drywall or boards inside stay drawn, even once the wall is finished
       else (st.all || st.finRun.has(m.parent)) || sets[0].push(m);
@@ -9532,11 +9614,11 @@
     }
     sets.forEach((list, k) => {
       if (!list.length) return;
-      for (const wr of [0, 1, 2]) {      // 0 everything, 1 house wrap, 2 lap siding
-        const part = list.filter((m) => (m.col === "wrap" && m.kind === "membrane" ? 1 : isLap(m) ? 2 : 0) === wr);
+      for (const wr of [0, 1, 2, 3, 4]) {      // 0 everything, 1 house wrap, 2 lap siding, 3 board lining (tongue and groove), 4 insulation batts
+        const part = list.filter((m) => (m.col === "wrap" && m.kind === "membrane" ? 1 : isLap(m) ? 2 : m.kind === "lining" && m.type === "boards" ? 3 : m.kind === "insulation" ? 4 : 0) === wr);
         if (!part.length) continue;
-        const MM = S.memMats || { mem: memMat, lap: lapMat, wrap: wrapMat };
-        const mesh = new T.InstancedMesh(boxGeo, wr === 1 ? MM.wrap : wr === 2 ? MM.lap : MM.mem, part.length);
+        const MM = S.memMats || { mem: memMat, lap: lapMat, wrap: wrapMat, grv: grvMat, bat: battMat };
+        const mesh = new T.InstancedMesh(boxGeo, wr === 1 ? MM.wrap : wr === 2 ? MM.lap : wr === 3 ? MM.grv : wr === 4 ? MM.bat : MM.mem, part.length);
         place(mesh, part, k, true);
         mesh.instanceMatrix.needsUpdate = true;
         add(mesh, k === 1, true);
@@ -11011,6 +11093,8 @@
           S.sideA.constant = -rp - CUT_W;
           S.sideB.normal.set(fz, 0, -fx);
           S.sideB.constant = rp - CUT_W;
+          S.capPl[0].copy(S.near).negate(); S.capPl[1].copy(S.sideA).negate(); S.capPl[2].copy(S.sideB).negate();
+          capWalls(S);
           for (const dr of S.doors) {
             const [wx, wz] = toWorld(S, dr.mx, dr.mz);
             dr.mesh.visible = S.cutH > 2.2 || fx * (wx - P.x) + fz * (wz - P.z) > -0.15 || Math.abs(-fz * (wx - P.x) + fx * (wz - P.z)) > CUT_W;

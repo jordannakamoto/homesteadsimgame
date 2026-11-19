@@ -75,42 +75,49 @@ body.touch {
   --scrim: rgba(74, 53, 38, .28);
 }
 
-/* ---- minimal: crisp dark glass, flat, quick ---- */
+/* ---- minimal: premium PC strategy HUD (smoky ink, hairlines, square, one brass accent), quick and crisp ---- */
 :root[data-skin="minimal"] {
   color-scheme: dark;
-  --font-body: "Inter", "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", Roboto, system-ui, sans-serif;
+  --font-body: "Inter", "Segoe UI Variable Text", "Segoe UI", "SF Pro Text", Roboto, system-ui, sans-serif;
   --font-display: var(--font-body);
-  --fw-body: 500; --fw-strong: 650; --fw-display: 650;
-  --label-transform: uppercase; --label-track: .06em;
-  --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-slot: 12px;
+  /* drawer titles: a thin serif in tracked caps; any serif will do offline */
+  --font-title: "Cormorant SC", "Cinzel", "Trajan Pro", "Palatino Linotype", "Book Antiqua", Palatino, "Crimson Text", Georgia, serif;
+  --fw-body: 500; --fw-strong: 600; --fw-display: 600;
+  --label-transform: uppercase; --label-track: .14em;
+  --r-sm: 2px; --r-md: 2px; --r-lg: 2px; --r-slot: 2px; --r-pill: 2px;
   --border-w: 1px;
-  --surface-1: rgba(16, 19, 23, .62);
-  --surface-2: rgba(16, 19, 23, .90);
-  --surface-3: rgba(255, 255, 255, .08);
-  --surface-hover: rgba(255, 255, 255, .14);
-  --well: rgba(0, 0, 0, .35);
-  --edge: rgba(255, 255, 255, .12); --edge-strong: rgba(255, 255, 255, .28);
-  --ink: #f3f5f7; --ink-dim: #a3acb5; --ink-inv: #14181c;
-  --accent: #ffd166; --accent-ink: #1b1708; --accent-soft: rgba(255, 209, 102, .18); --accent-edge: #ffd166;
-  --select-bg: #f3f5f7; --select-ink: #14181c; --select-edge: transparent;
-  --good: #7ddc9a; --warn: #ffb84d; --danger: #ff7a66; --info: #7cc7ff; --money: #ffd166;
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, .35);
-  --shadow-2: 0 12px 32px rgba(0, 0, 0, .45);
+  --surface-1: rgba(12, 12, 11, .74);
+  --surface-2: rgba(11, 11, 10, .92);
+  --surface-3: rgba(255, 244, 222, .045);
+  --surface-hover: rgba(255, 240, 210, .09);
+  --well: rgba(0, 0, 0, .42);
+  --edge: rgba(236, 226, 204, .13); --edge-strong: rgba(236, 226, 204, .30);
+  --ink: #ece6da; --ink-dim: #a39d91; --ink-inv: #121110;
+  --accent: #c8a96a; --accent-ink: #15120b; --accent-soft: rgba(200, 169, 106, .14); --accent-edge: #c8a96a;
+  --select-bg: rgba(200, 169, 106, .10); --select-ink: #f3e7cb; --select-edge: #c8a96a;
+  --good: #93bd88; --warn: #d6a65e; --danger: #cf7462; --info: #8fb2c7; --money: #dcc28a;
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, .45);
+  --shadow-2: 0 20px 48px rgba(0, 0, 0, .55), 0 2px 6px rgba(0, 0, 0, .4);
   --lip: none; --lip-accent: none;
-  --press-y: 0; --press-scale: .97;
+  --press-y: 0; --press-scale: 1;
   --blur: blur(10px) saturate(1.2);
-  --ease: cubic-bezier(.2, .8, .2, 1); --t-fast: 80ms; --t: 140ms;
-  --icon-stroke: 1.75; --icon-fill: none;
-  --ic-outline: #e9eef2;
-  --ic-wood: #c9a36f; --ic-steel: #b7c0c8; --ic-stone: #9aa0a6;
-  --ic-leaf: #8fd16a; --ic-water: #7cc7ff; --ic-soil: #7a5a3c;
-  --ic-skin: #e9b88f; --ic-paper: #f2e8c8; --ic-warn: #ffb84d;
+  --ease: cubic-bezier(.2, .7, .2, 1); --t-fast: 90ms; --t: 160ms;
+  --icon-stroke: 1.5; --icon-fill: none;
+  /* material colours, desaturated toward the ink: icons read as near-monochrome strokes */
+  --ic-outline: #e6dfd2;
+  --ic-wood: #b8a084; --ic-steel: #b4b2ad; --ic-stone: #9c9890;
+  --ic-leaf: #a3b68e; --ic-water: #9cb3c2; --ic-soil: #85705c;
+  --ic-skin: #cdb39e; --ic-paper: #e2dccd; --ic-warn: #d6a65e;
   --lip-danger: none;
-  --pressed-ink: var(--accent);
-  --inner-hi: inset 0 1px 0 rgba(255, 255, 255, .06);
+  --pressed-ink: var(--select-ink);
+  --inner-hi: inset 0 1px 0 rgba(255, 240, 210, .05);
   --hover-y: 0px;
-  --lift-y: -6px;
-  --scrim: rgba(0, 0, 0, .35);
+  --lift-y: 0px;
+  --scrim: rgba(0, 0, 0, .45);
+  /* skin-only: hairlines and smoky fills used by 90-skin-minimal.css */
+  --m-rule: rgba(200, 169, 106, .42);
+  --m-smoke: rgba(9, 9, 8, .80);
+  --m-text-shadow: 0 1px 2px rgba(0, 0, 0, .85), 0 0 10px rgba(0, 0, 0, .35);
 }
 
 /* ---- legacy names: untouched rules in head.html and injected styles follow the skin ---- */
