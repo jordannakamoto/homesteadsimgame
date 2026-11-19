@@ -4,8 +4,8 @@
    Pure arithmetic: no DOM, no three.js. The page reads it as window.__framing; tests read globalThis.__framing. */
 (() => {
   // the order a building is raised in (docs/CONSTRUCTION.md)
-  const STAGES = ["site", "foundation", "floor-frame", "subfloor", "wall-frame", "top-plates", "roof-frame", "roof-deck", "dry-in", "roofing", "sheathing", "wrap", "openings", "cladding", "gutters", "rough-in", "insulation", "lining", "finish", "decorate", "trim-out", "services"];
-  const STAGE_NAME = { site: "Site", foundation: "Foundation", "floor-frame": "Floor frame", subfloor: "Subfloor", "wall-frame": "Wall frames", "top-plates": "Top plates", "roof-frame": "Roof frame", "roof-deck": "Roof deck", "dry-in": "Dry-in", roofing: "Roofing", sheathing: "Sheathing", wrap: "Wrap", openings: "Windows and doors", cladding: "Cladding", gutters: "Gutters", "rough-in": "Rough-in", insulation: "Insulation", lining: "Lining", finish: "Tape and mud", decorate: "Paint", "trim-out": "Trim-out", services: "Services" };
+  const STAGES = ["site", "foundation", "floor-frame", "subfloor", "wall-frame", "top-plates", "roof-frame", "roof-deck", "dry-in", "roofing", "sheathing", "wrap", "openings", "cladding", "gutters", "rough-in", "insulation", "lining", "finish", "carpentry", "decorate", "trim-out", "services"];
+  const STAGE_NAME = { site: "Site", foundation: "Foundation", "floor-frame": "Floor frame", subfloor: "Subfloor", "wall-frame": "Wall frames", "top-plates": "Top plates", "roof-frame": "Roof frame", "roof-deck": "Roof deck", "dry-in": "Dry-in", roofing: "Roofing", sheathing: "Sheathing", wrap: "Wrap", openings: "Windows and doors", cladding: "Cladding", gutters: "Gutters", "rough-in": "Rough-in", insulation: "Insulation", lining: "Lining", finish: "Tape and mud", carpentry: "Trim carpentry", decorate: "Paint", "trim-out": "Trim-out", services: "Services" };
   // actual (not nominal) sizes of North American lumber, metres: [breadth, depth]
   const LUMBER = { "2x4": [0.038, 0.089], "2x6": [0.038, 0.14], "2x8": [0.038, 0.184], "2x10": [0.038, 0.235], "2x12": [0.038, 0.286], glulam: [0.09, 0.225], "4x4": [0.089, 0.089], "6x6": [0.14, 0.14] };
   const SHEET = { w: 1.22, l: 2.44 };
@@ -462,6 +462,38 @@
           for (const x of o ? [0.02] : [0.02, L - 0.02]) joint("corner", at(x, yb + 0.012, joff), at(x, yt, joff), [ux, 0, uz], yt - yb - 0.012);
         }
         else { let row = 0; for (let y = yb + 0.01; y < yt - 0.03; y += 0.14, row++) lay(y, Math.min(yt, y + 0.14), row, 3.6, "boards"); }
+        // trim carpentry (docs/design/carpentry.md): casings round the openings, then baseboard along the floor, each part
+        // with the cut at its ends. The casing's inner edge stands JI in from the rough opening: the jamb, less the reveal
+        if (spec.trimIn !== false) {
+          const CW = 0.057, CT = 0.0175, BH = 0.083, BT = 0.014, JI = 0.03 - 0.005, MAXL = 4.8;
+          const offC = sg * (face + th + CT / 2), offB = sg * (face + th + BT / 2);
+          let kc = 0, kb = 0;
+          const cas = (a, b, n2, ends, q) => M(out, w.id + ".cs" + fc + "." + kc++, "casing", "colonial", "carpentry", w.id, "pine", CT, CW, a, b, n2, { face: fc, ends, opening: q.id, col: "trim", profile: "casing" });
+          const gaps = [];
+          for (const q of opens) {
+            const e1 = q.pocket || q.s1, xa = q.s0 + JI, xb = e1 - JI, top = q.y1 - JI, bot = q.door ? yb : q.y0 + JI;
+            if (xb - xa < 0.1) continue;
+            // the legs: to the floor at a door (square there), mitered where they meet the head (and the sill piece of a window)
+            for (const xc of [xa - CW / 2, xb + CW / 2]) cas(at(xc, q.door ? yb : bot - CW, offC), at(xc, top + CW, offC), [ux, 0, uz], q.door ? ["sq", "m45"] : ["m45", "m45"], q);
+            cas(at(xa - CW, top + CW / 2, offC), at(xb + CW, top + CW / 2, offC), UP, ["m45", "m45"], q);
+            if (!q.door) cas(at(xa - CW, bot - CW / 2, offC), at(xb + CW, bot - CW / 2, offC), UP, ["m45", "m45"], q);
+            if (bot - CW < yb + BH + 0.01) gaps.push([xa - CW, xb + CW]);      // the base stops at the casing
+          }
+          // the baseboard: corner to corner, stopping at door casings (square); into a corner square at one end and coped
+          // over the other at the other; a run longer than a stock length joined with a scarf
+          gaps.sort((p2, q2) => p2[0] - q2[0]);
+          const runs = [];
+          let x = 0, e0 = "cope";
+          for (const [ga, gb] of gaps) { if (ga - x > 0.05) runs.push([x, ga, e0, "sq"]); x = Math.max(x, gb); e0 = "sq"; }
+          if (L - x > 0.05) runs.push([x, L, e0, "sq"]);
+          for (const [ra, rb, ea, eb] of runs) {
+            const n3 = Math.ceil((rb - ra) / MAXL - 1e-9);
+            for (let i = 0; i < n3; i++) {
+              const xa = ra + ((rb - ra) * i) / n3, xb = ra + ((rb - ra) * (i + 1)) / n3;
+              M(out, w.id + ".bs" + fc + "." + kb++, "base", "colonial", "carpentry", w.id, "pine", BT, BH, at(xa, yb + BH / 2, offB), at(xb, yb + BH / 2, offB), UP, { face: fc, ends: [i ? "scarf" : ea, i < n3 - 1 ? "scarf" : eb], col: "trim", profile: "base" });
+            }
+          }
+        }
         // paint (docs/design/interior-finishes.md): over the lining, a coat of primer then the colour, worked a
         // rectangle at a time: the face clear of the openings in widths of 1.2 m (a roller's reach from one spot).
         // draw 0: the view draws each coat as a thin skin as it goes on
@@ -771,7 +803,7 @@
     if (surface === "walls") return (deco.faces && deco.faces[key]) || deco.walls || null;
     return (deco.items && deco.items[key]) || deco[surface] || null;
   }
-  const PAINTABLE = [{ surface: "trim", is: (m) => m.kind === "cladding" && m.type === "trim" }];
+  const PAINTABLE = [{ surface: "trim", is: (m) => (m.kind === "cladding" && m.type === "trim") || m.kind === "casing" || m.kind === "base" }];
   function paintOver(out, deco) {
     if (!deco) return;
     const n0 = out.length;
@@ -837,6 +869,8 @@
       const f = FLOOR_ITEM[m.material];
       return ["floor" + m.material, f ? f[0] : null, f ? f[1] : "m2", f && f[1] === "m" ? m.area / 0.14 : m.area, "Flooring", "The finished floor you walk on.", f ? undefined : "flooring: " + m.material];
     }
+    if (k === "casing") return ["casing", "trim_casing", "m", m.length, "Casing", "Moulding round the doors and windows, cut to fit with miters at the corners. It covers the gap between the wall and the frame."];
+    if (k === "base") return ["base", "trim_base", "m", m.length, "Baseboard", "Moulding along the foot of the walls, coped into the corners. It covers the gap at the floor and takes the knocks."];
     if (k === "prime") return ["primer", "primer_pva", "L", m.area / 10, "Primer", "A coat of primer on the new walls, so the paint goes on even."];
     if (k === "paint") return ["paint" + m.fin, "paint_" + m.fin, "L", (m.area * 2) / 12, "Paint", "Two coats of colour: rolled on the walls a section at a time, brushed on the trim board by board."];
     if (k === "joint") return ["mud", "joint_compound", "kg", (m.len || m.length) * 0.3, "Joint compound and tape", "Tape over every drywall seam and three coats of compound, sanded smooth, so the joints vanish."];
@@ -889,17 +923,18 @@
       let ln = lines.get(key);
       if (!ln) lines.set(key, (ln = { key, stage: m.stage, itemId: q[1], qty: 0, unit: q[2], label: q[4], why: q[5], count: 0, members: [] }));
       ln.members.push([m.id, r3(q[3])]);
-      if (q[2] === "m" && /^lumber_/.test(q[1] || "")) (ln.pieces || (ln.pieces = [])).push(...Array(m.plies || 1).fill(m.length));
+      if (q[2] === "m" && /^(lumber|trim)_/.test(q[1] || "")) (ln.pieces || (ln.pieces = [])).push(...Array(m.plies || 1).fill(m.length));
       if (q[6]) ln.missing = q[6];
       ln.qty += q[3];
       ln.count++;
       // fasteners: about 25 g of nails for each metre of framing, 60 g of screws for each square metre of sheet
       if (q[2] === "m" && /^lumber_/.test(q[1] || "")) nails.set(m.stage + "|nails_framing", (nails.get(m.stage + "|nails_framing") || 0) + m.length * 0.025);
+      else if (q[2] === "m" && /^trim_/.test(q[1] || "")) nails.set(m.stage + "|nails_finish", (nails.get(m.stage + "|nails_finish") || 0) + m.length * 0.008);
       else if (q[2] === "sheet") nails.set(m.stage + "|screws_wood", (nails.get(m.stage + "|screws_wood") || 0) + m.area * 0.06);
     }
     for (const [key, kg] of nails) {
       const [stage, item] = key.split("|");
-      lines.set(key, { key, members: [], stage, itemId: item, qty: kg, unit: "kg", label: item === "nails_framing" ? "Framing nails" : "Screws", why: item === "nails_framing" ? "Hold the frame together. Bought by weight and used up as you build." : "Fix the sheets down. Bought by weight and used up as you build.", count: 0 });
+      lines.set(key, { key, members: [], stage, itemId: item, qty: kg, unit: "kg", label: item === "nails_framing" ? "Framing nails" : item === "nails_finish" ? "Finish nails" : "Screws", why: item === "nails_framing" ? "Hold the frame together. Bought by weight and used up as you build." : item === "nails_finish" ? "Thin nails with small heads that hold the trim; the holes are filled and painted over." : "Fix the sheets down. Bought by weight and used up as you build.", count: 0 });
     }
     const out = [...lines.values()];
     for (const ln of out) {

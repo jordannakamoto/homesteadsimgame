@@ -49,7 +49,7 @@ THREE.ShaderChunk.opaque_fragment += '\nif ( isnan( gl_FragColor.r + gl_FragColo
 // default), 'fsr' (AMD FSR 1: made for smooth, photoreal, anti-aliased images; on pixel textures it smears texel
 // edges into brush strokes) or 'sharp' (area-weighted nearest: every render pixel stays a crisp block, only the
 // seams between blocks are blended, the usual way to scale pixel art by uneven amounts).
-const LOOK = { ao: false, hudBlur: true, lightBloom: false, compactHdr: false, grassShadows: true, tuftShadow: true, drawOrder: true, farGrass: 'normal', rootShade: 1, grassClumps: true, grassBacklight: true, skyShade: true, sunFog: true, grassSheen: true, farBlend: true, crownShade: true, camFx: false, upscaler: 'bicubic', toneMap: 'aces', taa: false, edgeBelts: true, riverWater: 'live', waterTexel: 'smooth', bedStyle: 'voxel', waterReflect: 'probe', skyModel: 'physical', skyClouds: 'volume', cloudRes: 'half', cloudStyle: 'soft', nightSky: 'real', farLand: true, openSea: true, haze: 'normal' };
+const LOOK = { ao: false, hudBlur: true, lightBloom: false, compactHdr: false, grassShadows: true, tuftShadow: true, drawOrder: true, farGrass: 'normal', rootShade: 1, grassClumps: true, grassBacklight: true, skyShade: true, sunFog: true, grassSheen: true, farBlend: true, crownShade: true, camFx: false, upscaler: 'bicubic', toneMap: 'aces', taa: false, edgeBelts: true, riverWater: 'live', waterTexel: 'smooth', bedStyle: 'voxel', waterReflect: 'probe', skyModel: 'physical', skyClouds: 'volume', cloudRes: 'half', cloudStyle: 'soft', starField: 'natural', nightSky: 'real', farLand: true, openSea: true, haze: 'normal' };
 const LOOK_KEY = 'homestead:look';
 try { const s = JSON.parse(localStorage.getItem(LOOK_KEY) || 'null'); if (s) for (const k in LOOK) if (typeof s[k] === typeof LOOK[k]) LOOK[k] = s[k]; } catch (e) { /* no storage */ }
 const saveLook = () => { try { localStorage.setItem(LOOK_KEY, JSON.stringify(LOOK)); } catch (e) { /* no storage */ } };
@@ -494,6 +494,19 @@ const aoScale = () => (LOOK.ao && msaaSamples() > 0 ? ({ ultra: 1, high: 0.5, me
 // One composer for the whole session, built at start-up even on Low (as before). Add-ons put their own passes into
 // it (fxpost.js and fx.js both claim it once, through composer.__fx), so it is never replaced: graphics settings
 // change it in place, and leave every pass they didn't add where it is.
+// The post passes' full-screen quads write depth by default, and the last of them can land in the buffer whose depth
+// is the scene's, wiping it before the stars (drawn after, hidden by that depth) read it. Their quads never need
+// depth, so every pass's materials are set to leave it alone (once per pass, including ones the add-ons insert later).
+function keepDepth() {
+  for (const p of composer.passes) {
+    if (p.__keepDepth) continue;
+    p.__keepDepth = true;
+    for (const v of Object.values(p)) {
+      const m = v && (v.isMaterial ? v : v.material && v.material.isMaterial ? v.material : null);
+      if (m) { m.depthWrite = false; m.depthTest = false; }
+    }
+  }
+}
 function buildComposer() {
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
   const samples = msaaSamples();
@@ -502,7 +515,7 @@ function buildComposer() {
   composer.msaa = samples;
   composer.addPass(new RenderPass(scene, camera));
   // notes which buffer holds this frame's scene depth, for TAAU's reprojection (draws nothing)
-  composer.addPass({ enabled: true, needsSwap: false, clear: false, renderToScreen: false, setSize() {}, dispose() {}, render(r, w, read) { taa.depth = read.depthTexture; } });
+  composer.addPass({ enabled: true, needsSwap: false, clear: false, renderToScreen: false, setSize() {}, dispose() {}, render(r, w, read) { taa.depth = read.depthTexture; keepDepth(); } });
   bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.3, 0.7, 0.92);
   // Lighter bloom (a switch): the glow chain starts from a quarter-resolution image instead of half
   const bloomSize = bloom.setSize.bind(bloom);
@@ -2806,13 +2819,25 @@ const skyDome = createSkyDome({ scene, camera, renderer, water: waterUniforms, U
 const farLand = createFarLand({ scene, baseHeight, forestAt, chunks: world.chunks, CS, SEA, PAL, smoothstep });
 skyDome.setHorizon(farLand.horizon);
 // the real stars (src/night-sky.js), and the sky's frame and moon for the date and hour
-const nightSky = createNightSky({ scene, camera, sky: skyDome });
-const SKYF = { eq: new THREE.Matrix3(), eqNow: new THREE.Matrix3(), eqInv: new THREE.Matrix3(), moon: new THREE.Vector4(0, -1, 0, 0), age: 0 };
+// drawn in a scene of their own after the frame is enlarged to the screen, at its full resolution (render())
+const skyOverlay = new THREE.Scene();
+const nightSky = createNightSky({ scene: skyOverlay, camera, sky: skyDome });
+const SKYF = { eq: new THREE.Matrix3(), eqNow: new THREE.Matrix3(), eqInv: new THREE.Matrix3(), moon: new THREE.Vector4(0, -1, 0, 0), age: 0, moonSize: 1, eclipse: 0, penumbra: 0, days: 0 };
+const _skyV2 = new THREE.Vector2();
+const MOONX = new THREE.Vector4(1, 0, 0, 0), MOONCOL = new THREE.Color(1, 0.97, 0.92), _mc = [0, 0, 0];
+// whether any of the sky is in the view (the default camera mostly looks down at the ground): the night sky's
+// layers are not drawn when none is
+const _skyV = new THREE.Vector3();
+function skyInView() {
+  let up = -1;
+  for (const x of [-1, 0, 1]) { _skyV.set(x, 1, 1).unproject(camera).sub(camera.position); up = Math.max(up, _skyV.normalize().y); }
+  return up > -0.01;
+}
 const HAZE = { light: 1.7, normal: 1, heavy: 0.5 };
 function applySkyLook() {
   skyDome.setOptions({ model: LOOK.skyModel, clouds: LOOK.skyClouds, night: LOOK.nightSky, cloudStyle: LOOK.cloudStyle });
   skyDome.setCloudScale(LOOK.cloudRes === 'full' ? 1 : LOOK.cloudRes === 'quarter' ? 0.25 : 0.5);
-  nightSky.setOn(LOOK.nightSky === 'real');
+  nightSky.setOn(LOOK.nightSky === 'real'); nightSky.setField(LOOK.starField);
   farLand.setOn(LOOK.farLand); farLand.setOpenSea(LOOK.openSea); farLand.setHaze(LOOK.haze === 'heavy' ? 0.55 : LOOK.haze === 'light' ? 0.12 : 0.3);
   skyDome.setHorizon(LOOK.farLand ? farLand.horizon : null);
 }
@@ -3203,7 +3228,12 @@ function updateSky() {
   SKYK.day = dayF; SKYK.night = nightF;
   // the real night: as dark as the moon allows (a moonless night is starlight only; a full moon lights the land)
   skyFrame(sim.calendarT(), site.latitudeDeg, SKYF, performance.now() / 1000);
-  const moonK = SKYF.moon.w * smoothstep(0.02, 0.2, SKYF.moon.y);
+  // (a supermoon lights a little more, an eclipsed moon hardly at all)
+  const moonK = SKYF.moon.w * smoothstep(0.02, 0.2, SKYF.moon.y) * SKYF.moonSize * SKYF.moonSize * (1 - 0.9 * SKYF.eclipse) * (1 - 0.3 * SKYF.penumbra);
+  // the moon's light through the air: orange as it rises, whitening as it climbs
+  sunColor([SKYF.moon.x, Math.max(SKYF.moon.y, -0.02), SKYF.moon.z], 0.25, _mc);
+  { const mx = Math.max(_mc[0], _mc[1], _mc[2], 1e-4); MOONCOL.setRGB(_mc[0] / mx, _mc[1] / mx, _mc[2] / mx); }
+  MOONX.set(SKYF.moonSize, SKYF.eclipse, SKYF.penumbra, 0);
   const nightDark = LOOK.nightSky === 'real' ? lerp(1, lerp(0.3, 1.05, moonK), nightF) : 1;
   const mix3 = (k) => SKY.day[k] * dayF + SKY.gold[k] * goldF + SKY.night[k] * nightF;
   const mixC = (out, k) => out.setRGB(
@@ -3251,9 +3281,9 @@ function updateSky() {
   skyDome.update({
     trueSun: ATM.sun, sunLo: ATM.lo, sunHi: ATM.hi, sunCi: ATM.ci, cloud, grey, night: nightF, day: dayF,
     windX: wx ? Math.sin(wx.windDirRad || 0) * (wx.windMs || 0) : 1, windZ: wx ? Math.cos(wx.windDirRad || 0) * (wx.windMs || 0) : 0,
-    fog: scene.fog, moon: SKYF.moon, eq: SKYF.eqInv,
+    fog: scene.fog, moon: SKYF.moon, eq: SKYF.eqInv, moonX: MOONX, moonCol: MOONCOL,
   }, lastDt);
-  nightSky.update(SKYF.eq, nightF, SKYF.moon, renderer.getPixelRatio());
+  nightSky.update(SKYF, nightF, renderer.getPixelRatio(), skyInView(), cloud, Math.min(lastDt, 0.1), (camera.fov * Math.PI / 180) / Math.max(1, renderer.getDrawingBufferSize(_skyV2).y));
   motes.material.opacity = (0.22 + 0.7 * nightF + 0.25 * goldF) * (1 - 0.8 * wet);
   motes.material.color.setHex(nightF > 0.5 ? 0xd9ff8a : 0xfff6c8);
   motes.material.size = 0.13 + 0.09 * nightF;
@@ -3419,7 +3449,7 @@ function setLook(key, value) {
   if (key === 'taa') { applyGfx(); resize(); }
   if (key === 'riverWater') riverLive.setMode(value === 'baked' ? 'bed' : value);
   if (key === 'waterReflect') { if (value === 'simple') { reflectProbe.setOn(false); reflectPlane.setOn(false); reflectPlane2.setOn(false); } reflectProbe.setDetail(value === 'full'); reflectPlane.setDetail(value === 'full'); reflectPlane2.setDetail(value === 'full'); }
-  if (['skyModel', 'skyClouds', 'cloudStyle', 'cloudRes', 'nightSky', 'farLand', 'openSea', 'haze'].includes(key)) applySkyLook();
+  if (['starField', 'skyModel', 'skyClouds', 'cloudStyle', 'cloudRes', 'nightSky', 'farLand', 'openSea', 'haze'].includes(key)) applySkyLook();
   if (key === 'bedStyle') U.bedVox.value = value === 'real' ? 0 : value === 'voxelFine' ? 2 : 1;
   if (key === 'waterTexel') { riverWater.uniforms.uTPM.value = value === 'ground' ? 6.4 : 25.6; riverWater.uniforms.uSnap.value = value === 'smooth' ? 0 : 1; }      // MSAA off or back on, and the resolve path
   if (key === 'toneMap') {
@@ -3564,6 +3594,8 @@ const gfxPanel = (() => {
       h('div', { className: 'hint', textContent: 'Soft: thinner clouds with wisps all round their edges, blending into the sky and the haze. Defined: denser heaps with clearer outlines.' }),
       seg('Cloud resolution', [['full', 'Full'], ['half', 'Half'], ['quarter', 'Quarter']], LOOK.cloudRes, (v) => setLook('cloudRes', v)),
       h('div', { className: 'hint', textContent: 'Volumetric clouds are worked out apart from the rest of the frame at this share of its resolution and enlarged smoothly: soft things lose little by it. Half costs a quarter of Full.' }),
+      seg('Star field', [['rich', 'Rich'], ['natural', 'Natural'], ['sparse', 'Sparse']], LOOK.starField, (v) => setLook('starField', v)),
+      h('div', { className: 'hint', textContent: 'How many stars on a dark night. Rich: all the eye can see from the darkest place on Earth (5000). Natural: as most dark country skies (about 2000). Sparse: the brighter few hundred.' }),
       seg('Night sky', [['real', 'Real stars'], ['simple', 'Simple'], ['off', 'Off']], LOOK.nightSky, (v) => setLook('nightSky', v)),
       h('div', { className: 'hint', textContent: 'Real: the 5000 stars the eye can see, in their true constellations for the date, hour and latitude, the Milky Way, and the moon in its true place and phase, which lights the night. Simple: made-up stars and a fixed moonlight.' }),
       seg('Distance haze', [['light', 'Light'], ['normal', 'Normal'], ['heavy', 'Heavy']], LOOK.haze, (v) => setLook('haze', v)),
@@ -4532,7 +4564,23 @@ function render() {
     composer.renderToScreen = !upscaler.on;            // when upscaling, the composer finishes into its own buffer
     composer.render();
     if (useTaa) { taa.end(); taa.resolve(composer.readBuffer); } else if (upscaler.on) upscaler.draw(composer.readBuffer);
-  } else renderer.render(scene, camera);
+    drawSkyOverlay(taa.depth || null);
+  } else { renderer.render(scene, camera); drawSkyOverlay(null); }
+}
+// the stars, planets and shooting stars, last, on the screen at its own resolution: sharp points rather than blobs
+// enlarged with the rest of the frame. Hidden behind the land by the frame's depth texture (or, drawn straight to
+// the screen, by its own depth)
+function drawSkyOverlay(depthTex) {
+  if (!skyOverlay.children.some((o) => o.visible)) return;
+  const sz = renderer.getDrawingBufferSize(_v2r);
+  nightSky.setTarget(depthTex, sz.x, sz.y);
+  const auto = renderer.autoClear;
+  renderer.autoClear = false; renderer.setRenderTarget(null);
+  // the screen's own depth, after the post passes, is only their full-screen quad's: start it clear, and let the
+  // scene's depth texture do the hiding
+  if (depthTex) renderer.clearDepth();
+  renderer.render(skyOverlay, camera);
+  renderer.autoClear = auto;
 }
 
 // ============================================================ GPU timing and benchmark
@@ -4761,10 +4809,18 @@ window.__game = {
     toneMap: (v) => { if (['aces', 'agxlook', 'agx', 'neutral'].includes(v)) setLook('toneMap', v); return LOOK.toneMap; },
     // the sky: __game.look.sky({ model: 'physical'|'painted', clouds: 'layered'|'heaped'|'off', night: 'real'|'simple'|'off',
     //   farLand: bool, openSea: bool, haze: 'light'|'normal'|'heavy' }); returns the current settings
-    sky: (o = {}) => { const map = { cloudStyle: 'cloudStyle', cloudRes: 'cloudRes', model: 'skyModel', clouds: 'skyClouds', night: 'nightSky', farLand: 'farLand', openSea: 'openSea', haze: 'haze' }; for (const k in o) if (map[k]) setLook(map[k], o[k]); return { model: LOOK.skyModel, clouds: LOOK.skyClouds, night: LOOK.nightSky, farLand: LOOK.farLand, openSea: LOOK.openSea, haze: LOOK.haze }; },
+    sky: (o = {}) => { const map = { starField: 'starField', cloudStyle: 'cloudStyle', cloudRes: 'cloudRes', model: 'skyModel', clouds: 'skyClouds', night: 'nightSky', farLand: 'farLand', openSea: 'openSea', haze: 'haze' }; for (const k in o) if (map[k]) setLook(map[k], o[k]); return { model: LOOK.skyModel, clouds: LOOK.skyClouds, night: LOOK.nightSky, farLand: LOOK.farLand, openSea: LOOK.openSea, haze: LOOK.haze }; },
     // stand the camera at [x, y, z] looking at [x, y, z] (6 numbers), or null to give it back
     debugView: (v) => { debugView = v && v.length === 6 ? v.slice() : null; },
-    skyFrame: () => ({ moon: SKYF.moon.toArray(), age: SKYF.age, eqInv: SKYF.eqInv.toArray() }),
+    // the sky's frame and moon for the present moment (worked out fresh, so a test can step the clock and read it)
+    skyFrame: () => {
+      const wx = sim.state.sys.weather, site = (wx && wx.site) || SKY.site;
+      const f = skyFrame(sim.calendarT(), site.latitudeDeg, { eq: new THREE.Matrix3(), eqNow: new THREE.Matrix3(), eqInv: new THREE.Matrix3(), moon: new THREE.Vector4() }, performance.now() / 1000);
+      return { moon: f.moon.toArray(), age: f.age, eqInv: f.eqInv.toArray(), moonSize: f.moonSize, eclipse: f.eclipse, days: f.days };
+    },
+    meteorNow: () => nightSky.meteorNow(SKYF),
+    // which of the night sky's layers (stars, planets, shooting stars) are showing
+    skyLayers: () => skyOverlay.children.map((o) => o.visible),
     streamReflections: (v) => { if (['probe', 'full', 'simple'].includes(v)) setLook('waterReflect', v); return LOOK.waterReflect; },
     waterStyle: (v) => { if (['smooth', 'fine', 'ground'].includes(v)) setLook('waterTexel', v); return LOOK.waterTexel; },
     farGrass: (v) => { if (['off', 'normal', 'aggressive'].includes(v)) setLook('farGrass', v); return LOOK.farGrass; },

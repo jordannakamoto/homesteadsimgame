@@ -900,6 +900,16 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - Console: `__build.setDeco(structId, { walls: 'sage_eggshell', trim: 'moss_semigloss' })`.
 - Weak: one colour for all the walls of a building (per face comes in slice 2); no clear oil for boards yet; sheen does not change the look yet; with "Work until done" the paint stage works like taping (waits on wet coats).
 
+## Trim carpentry: casings and baseboard (branch `finish-carpentry`, design in `docs/design/carpentry.md`)
+
+- New stage after taping, **Trim carpentry**: casings round every door and window (a door: two legs to the floor and a head; a window: a frame of four), set back a 5 mm reveal from the jamb, then baseboard along the floor from corner to corner, stopping at the door casings. Paint now comes after it, so walls and trim are painted together.
+- Every piece is cut to fit at the sawhorses from primed moulding in stock lengths: the prompt and the note say the cut ("miter both ends", "cope one end, square the other"), the stick on the horses is the moulding's size and white, and the saw swings to 45 degrees for a miter. A run longer than a stock length is joined with a scarf.
+- Set each piece and nail it: a finish nail about every 40 cm. The nail heads show until the room is painted (filled and painted over).
+- Trim takes the building's Trim colour, inside and out.
+- Drawing: the old wall body's foot (a dark band 30 cm tall) no longer stands in front of framed walls, inside or out, so the baseboard and siding meet the floor as built.
+- Ordered as Casing, Baseboard and Finish nails. The guide no longer asks to reorder when every stick has been cut into pieces still to set.
+- Weak: miters and copes are drawn as square ends; window trim is a picture frame (stool and apron later); no caulk yet; the aim can pick a neighbouring piece first at a corner.
+
 ## Trim-out by hand: outlets, switches, lights, breakers (branch `wave2-s1-trim`, slice S9b of `docs/design/services-roughin.md`)
 
 - Trim-out is real work and real stock now. The Build panel's Trim-out lines list an outlet and its plate, a switch and its plate, or a light for each box a cable comes to, and a breaker sized to the cable (15 A for 14/2) for each panel slot. Order them like any stage; they sit by the stacks. "Do it for me" still finishes the stage, but it draws all of it from the stacks and says what is missing if it is short.
