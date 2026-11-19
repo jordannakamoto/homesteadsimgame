@@ -133,8 +133,11 @@ export function createNightSky({ scene, camera, sky }) {
     const c = bvCol(bv); col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2];
   }
   const su = sky.uniforms;
+  // drawn after the frame is enlarged, at the screen's own resolution (crisp points, not blobs scaled up with the
+  // rest); hidden behind the land by the frame's depth (uDepth, the scene's depth texture, when there is one)
+  const occl = { uDepth: { value: null }, uScreenPx: { value: new THREE.Vector2(1, 1) }, uUseDepth: { value: 0 } };
   const shared = {
-    uLimit: { value: 6 }, uVis: { value: 0 }, uScale: { value: 1 },
+    ...occl, uLimit: { value: 6 }, uVis: { value: 0 }, uScale: { value: 1 },
     uTime: su.uTime, uCloud: su.uCloud, uWindOff: su.uWindOff, uOpt: su.uOpt, uCloudNoise: su.uCloudNoise, uNoise3: su.uNoise3,
   };
   const makeMat = (uEqW) => new THREE.ShaderMaterial({
@@ -172,13 +175,18 @@ export function createNightSky({ scene, camera, sky }) {
       }`,
     fragmentShader: SKY_NOISE_GLSL + /* glsl */ `
       uniform float uCloud; uniform vec2 uWindOff; uniform vec4 uOpt;
+      uniform sampler2D uDepth; uniform vec2 uScreenPx; uniform float uUseDepth, uScale;
       varying vec3 vCol; varying vec3 vDir; varying float vSize, vBright;
       void main() {
+        if (uUseDepth > 0.5 && texture2D(uDepth, gl_FragCoord.xy / uScreenPx).r < 0.9999) discard;
         vec2 q = gl_PointCoord - 0.5;
         float r = length(q) * 2.0;
         // a sharp point and, for the bright ones (their sprites are bigger), a soft glow round it, as the eye sees them
         float rp = r * 0.5 * vSize;                          // pixels from the centre
-        float a = exp(-rp * rp / (2.0 * 0.62 * 0.62)) + exp(-rp * rp / (2.0 * pow(0.2 * vSize, 2.0))) * 0.18 * vBright;
+        // a fine core (about half a point across on a sharp screen) and, for the bright, a soft glow
+        float sg = 0.3 + 0.35 * uScale;
+        float a = exp(-rp * rp / (2.0 * sg * sg)) * (0.62 * 0.62) / (sg * sg) * min(1.0, 0.45 + 0.55 / uScale * 1.6)
+                + exp(-rp * rp / (2.0 * pow(0.2 * vSize, 2.0))) * 0.18 * vBright;
         float hidden = cloudCover(normalize(vDir), clamp(uCloud, 0.0, 1.0), uWindOff, uOpt.y);
         gl_FragColor = vec4(vCol * a * (1.0 - hidden) * 1.6, 1.0);
         #include <tonemapping_fragment>
@@ -222,7 +230,7 @@ export function createNightSky({ scene, camera, sky }) {
   mGeo.setAttribute('mcol', new THREE.BufferAttribute(new Float32Array(NM * 4 * 4), 4));
   mGeo.setIndex(mIdx);
   const mMat = new THREE.ShaderMaterial({
-    uniforms: { uCloud: su.uCloud, uWindOff: su.uWindOff, uOpt: su.uOpt, uCloudNoise: su.uCloudNoise, uNoise3: su.uNoise3, uTime: su.uTime },
+    uniforms: { ...occl, uCloud: su.uCloud, uWindOff: su.uWindOff, uOpt: su.uOpt, uCloudNoise: su.uCloudNoise, uNoise3: su.uNoise3, uTime: su.uTime },
     transparent: true, depthWrite: false, depthTest: true, blending: THREE.AdditiveBlending, fog: false, side: THREE.DoubleSide,
     vertexShader: /* glsl */ `
       attribute vec4 mcol; varying vec4 vCol; varying vec2 vUv; varying vec3 vDir;
@@ -233,8 +241,10 @@ export function createNightSky({ scene, camera, sky }) {
       }`,
     fragmentShader: SKY_NOISE_GLSL + /* glsl */ `
       uniform float uCloud; uniform vec2 uWindOff; uniform vec4 uOpt;
+      uniform sampler2D uDepth; uniform vec2 uScreenPx; uniform float uUseDepth;
       varying vec4 vCol; varying vec2 vUv; varying vec3 vDir;
       void main() {
+        if (uUseDepth > 0.5 && texture2D(uDepth, gl_FragCoord.xy / uScreenPx).r < 0.9999) discard;
         // vUv.x: 0 at the tail .. 1 at the head; vUv.y across
         float along = pow(vUv.x, 2.2), across = exp(-vUv.y * vUv.y * 4.0);
         float head = exp(-pow((1.0 - vUv.x) * 9.0, 2.0)) * 1.5;
@@ -315,7 +325,7 @@ export function createNightSky({ scene, camera, sky }) {
   }
   const smoothstep01 = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
-  let on = true;
+  let on = true, limitMax = 5.2;
   return {
     points, planets, meteors,
     // frame: the skyFrame result; night: how dark the sky is (0 day .. 1 full night); skyOnScreen: whether any of
@@ -325,7 +335,7 @@ export function createNightSky({ scene, camera, sky }) {
       uStars.value.copy(frame.eq); uNow.value.copy(frame.eqNow);
       const moonUp = Math.max(0, Math.min(1, (moon.y + 0.05) / 0.25));
       // the faintest star to be seen: 6 on a dark night, brighter with a moon up, much brighter in twilight
-      shared.uLimit.value = 6.0 - 1.8 * moon.w * moonUp * (1 - frame.eclipse * 0.9) - 4.5 * (1 - night);
+      shared.uLimit.value = limitMax - 1.8 * moon.w * moonUp * (1 - frame.eclipse * 0.9) - 4.5 * (1 - night);
       shared.uVis.value = Math.min(1, night * 1.4);
       shared.uScale.value = pixelRatio;
       // nothing to draw by day, with no sky in view, or under a closed sky
@@ -341,6 +351,12 @@ export function createNightSky({ scene, camera, sky }) {
       updateMeteors(dt, night, cover, frame.eqNow, frame.days, pxAngle, show);
       if (!show) meteors.visible = false;
     },
+    // how many stars: 'rich' (all the eye can see on the darkest night, to magnitude 6), 'natural' (to about 5.2,
+    // as most dark country skies), 'sparse' (the brighter few hundred)
+    setField(k) { limitMax = k === 'rich' ? 6.0 : k === 'sparse' ? 4.4 : 5.2; },
+    // before drawing: the scene's depth texture (null when the frame is drawn straight to the screen, which leaves its
+    // own depth for the stars to test against) and the screen's size in pixels
+    setTarget(depthTex, w, h) { occl.uDepth.value = depthTex; occl.uUseDepth.value = depthTex ? 1 : 0; occl.uScreenPx.value.set(w, h); },
     setOn(v) { on = v; if (!v) { points.visible = planets.visible = meteors.visible = false; } },
     // for tests: start a shooting star now
     meteorNow(frame) { spawn(frame.eqNow, frame.days); },

@@ -614,7 +614,8 @@
     };
     const ob = (t0, t1, ya, yb, off, half, colr) => (d === 0 ? g.abox(i + t0, ya, j + off - half, i + t1, yb, j + off + half, colr) : g.abox(i + off - half, ya, j + t0, i + off + half, yb, j + t1, colr));
     const sc = PAL.courses ? PAL.plank : PAL.stone;
-    const foot = () => ebox(g, i, j, d, 0, 1, -depth, 0.3, 0.13, shade(PAL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
+    // the foot of the wall; behind a framed wall's lining and siding (EK < 1) it stays in, clear of the baseboard
+    const foot = () => ebox(g, i, j, d, 0, 1, -depth, 0.3, EK < 1 ? 0.075 : 0.13, shade(PAL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
     const cap = () => ebox(g, i, j, d, 0, 1, WALL_H, EAVE, 0.095, PAL.beam);
     if (type === "railgate") {
       ebox(g, i, j, d, 0, 1, -depth, 0.04, 0.1, PAL.stone);
@@ -665,7 +666,7 @@
       return;
     }
     if (type === "window2") {
-      ebox(g, i, j, d, 0, 1, -depth, 0.3, 0.13, shade(PAL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
+      ebox(g, i, j, d, 0, 1, -depth, 0.3, EK < 1 ? 0.075 : 0.13, shade(PAL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
       planks(0.3, 0.8);
       ebox(g, i, j, d, 0, 0.24, 0.8, WALL_H, 0.07, shade(PAL.plank, hs(0)));
       ebox(g, i, j, d, 0.76, 1, 0.8, WALL_H, 0.07, shade(PAL.plank, hs(3)));
@@ -706,7 +707,7 @@
       ebox(g, i, j, d, 0, 1, 2.04, 2.14, 0.1, PAL.beam);
       planks(2.14, WALL_H);
     } else {
-      ebox(g, i, j, d, 0, 1, -depth, 0.3, 0.13, shade(PAL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
+      ebox(g, i, j, d, 0, 1, -depth, 0.3, EK < 1 ? 0.075 : 0.13, shade(PAL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
       if (type === "window") {
         planks(0.3, 1.05);
         planks(1.95, WALL_H);
@@ -3273,13 +3274,13 @@
       const mid = (ta + tb) / 2,
         c = cuts.find((q) => mid > q.t0 && mid < q.t1);
       if (!c) {
-        ebox(g, i, j, d, ta, tb, -depth, 0.3, 0.13, shade(PL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
+        ebox(g, i, j, d, ta, tb, -depth, 0.3, EK < 1 ? 0.075 : 0.13, shade(PL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
         planks(ta, tb, 0.3, WALL_H, n);
         continue;
       }
-      if (c.y0 < 0.3) ebox(g, i, j, d, ta, tb, -depth, Math.max(0.02, c.y0), 0.13, shade(PL.stone, 0.92));
+      if (c.y0 < 0.3) ebox(g, i, j, d, ta, tb, -depth, Math.max(0.02, c.y0), EK < 1 ? 0.075 : 0.13, shade(PL.stone, 0.92));
       else {
-        ebox(g, i, j, d, ta, tb, -depth, 0.3, 0.13, shade(PL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
+        ebox(g, i, j, d, ta, tb, -depth, 0.3, EK < 1 ? 0.075 : 0.13, shade(PL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
         c.y0 > 0.31 && planks(ta, tb, 0.3, c.y0, n);
       }
       WALL_H - c.y1 > 0.01 && planks(ta, tb, c.y1, WALL_H, n + 5);
@@ -9039,7 +9040,7 @@
     FOUNDATIONS = FR.FOUNDATIONS,
     STAGES = FR.STAGES,
     CONCRETE = col(0xb5b2aa),
-    MEMBER_EXTRA = ["area", "thickness", "volume", "size", "plies", "roof", "opening", "height", "fin", "face", "surface"];
+    MEMBER_EXTRA = ["area", "thickness", "volume", "size", "plies", "roof", "opening", "height", "fin", "face", "surface", "ends", "profile"];
   const Lz = (material, thickness, role) => Object.freeze({ material, thickness, role });
   const footPal = new Map();
   function woodFoot(wm) {
@@ -9446,7 +9447,7 @@
       if (m.stage === "foundation" || m.stage === "floor-frame") sets[0].push(m);
       else if (roofId) (st.all || st.finRoof.has(roofId)) || sets[1].push(m);
       else if (m.stage === "subfloor" || m.type === "floor-batt") (st.all || st.finFloor.has(m.parent)) || sets[0].push(m);
-      else if (m.kind === "cladding" || (m.kind === "lining" && (m.type === "gypsum" || m.type === "boards"))) sets[0].push(m); // siding outside and drywall or boards inside stay drawn, even once the wall is finished
+      else if (m.kind === "cladding" || m.kind === "casing" || m.kind === "base" || (m.kind === "lining" && (m.type === "gypsum" || m.type === "boards"))) sets[0].push(m); // and the trim inside // siding outside and drywall or boards inside stay drawn, even once the wall is finished
       else (st.all || st.finRun.has(m.parent)) || sets[0].push(m);
     }
     for (const m of mem.opens) P(m.id) && ghostAdd(m, 0);

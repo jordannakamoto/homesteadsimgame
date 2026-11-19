@@ -140,6 +140,9 @@ add({ id: 'mortar_mix', name: 'Mortar mix (dry)', category: 'stone', unit: 'kg',
 for (const g of ITEMS_CONCRETE) add(g);
 
 // ---- fasteners, by weight
+add({ id: 'trim_casing', name: 'Colonial casing 57 x 17 (primed)', category: 'lumber', unit: 'm', material: 'pine_seasoned', dims: { widthM: 0.057, depthM: 0.0175 }, priceUsd: 2.6, blurb: 'Finger-jointed pine moulding, primed: trim round doors and windows' });
+add({ id: 'trim_base', name: 'Colonial base 83 x 14 (primed)', category: 'lumber', unit: 'm', material: 'pine_seasoned', dims: { widthM: 0.083, depthM: 0.014 }, priceUsd: 3.1, blurb: 'Finger-jointed pine moulding, primed: baseboard along the floor' });
+add({ id: 'nails_finish', name: 'Finish nails', category: 'fasteners', unit: 'kg', material: 'steel', priceUsd: 9 });
 add({ id: 'nails_framing', name: 'Framing nails (galvanised)', category: 'fasteners', unit: 'kg', material: 'steel', priceUsd: 6.2 });
 add({ id: 'screws_wood', name: 'Wood screws', category: 'fasteners', unit: 'kg', material: 'steel', priceUsd: 12.5 });
 add({ id: 'screws_structural', name: 'Structural screws', category: 'fasteners', unit: 'kg', material: 'steel', priceUsd: 22 });
@@ -197,9 +200,9 @@ const madeItem = (id) => {
     return (MADE[id] = Object.freeze({ id, name: 'Paint, ' + f.name + ' (' + SHEENS[f.sheen].name.toLowerCase() + ')', category: 'sheet', unit: 'L', massKgPerUnit: 1.3, priceUsd: 14, made: true, colorHex: f.hex }));
   }
   // pieces cut at the sawhorses: counted one by one, about 1.2 m each on average, never sold
-  if (id.startsWith('cut_lumber_') && BASE[id.slice(4)]) {
+  if (/^cut_(lumber|trim)_/.test(id) && BASE[id.slice(4)]) {
     const b = BASE[id.slice(4)];
-    return (MADE[id] = Object.freeze({ id, name: 'Cut pieces, ' + b.name.replace(' framing lumber', ''), category: b.category, unit: 'each', material: b.material,
+    return (MADE[id] = Object.freeze({ id, name: 'Cut pieces, ' + b.name.replace(' framing lumber', '').replace(/ \(primed\)$/, ''), category: b.category, unit: 'each', material: b.material,
       dims: { lengthM: 1.2, widthM: b.dims.widthM, depthM: b.dims.depthM }, massKgPerUnit: b.massKgPerUnit * 1.2, priceUsd: 0, made: true }));
   }
   if (!id.startsWith('op_')) return undefined;
