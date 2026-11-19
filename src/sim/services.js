@@ -25,6 +25,7 @@
 // Build panel's own. A run is covered when the lining of a wall or ceiling it passes inside is on.
 // Readers: overlayData(state), runInfo(state, runId), servicesGuard (the routes system's guard: covered runs refuse work).
 
+import { kept } from './core/keep.js';
 import { compileLinks } from './core/links.js';
 import { toNeutral, worldOf, runState, progress, pathLength } from './core/routes.js';
 import { SERVICE_CLASSES, SERVICE_SPECS, DEFAULT_SPEC, DEVICES, NODE_KINDS, SERVICE_TEXT, PRESETS_M, routeRule, boreCheck,
@@ -218,7 +219,7 @@ export function servicesSystem({ classes = SERVICE_CLASSES, routesName = 'routes
     for (const f of Object.keys(s.want)) {
       const pr = CN.progress[f], w = s.want[f];
       if (!pr) continue;
-      const have = pr.extLines && pr.extLines.services;
+      const have = (kept(pr, 'extLines') || {}).services;
       if (have && have.sig === w.sig) continue;
       const t = s.tally[f] || {};
       for (const st of [ROUGH, TRIM]) callAs(ctx, 'construction', 'construction.setExternal', { structId: f, stage: st, built: (t[st] || [0, 0])[0], total: (t[st] || [0, 0])[1] });

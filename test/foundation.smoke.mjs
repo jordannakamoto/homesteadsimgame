@@ -156,8 +156,8 @@ const sc = await G((sid) => {
   return { ok: r.ok, done: r.done, screed: r.screed, hollow: r.hollow, low: r.low, strokes, extra, leak: __foundation.job(sid).pour.leakM3, step: __foundation.job(sid).step };
 }, sid);
 check('screeded off the forms: the slab is poured, now finished by hand', sc.done && sc.step === 'finish', JSON.stringify(sc));
-await until((sid) => { const pr = __game.sim.state.sys.construction.progress[sid]; return pr.hold && Object.keys(pr.hold).length > 0; }, sid, 30000);
-const held = await G((sid) => { const pr = __game.sim.state.sys.construction.progress[sid]; return pr.hold ? Object.keys(pr.hold).length : 0; }, sid);
+await until((sid) => { const pr = __game.sim.state.sys.construction.progress[sid]; const h = pr.keep && pr.keep.hold; return !!h && Object.keys(h).length > 0; }, sid, 30000);
+const held = await G((sid) => { const pr = __game.sim.state.sys.construction.progress[sid]; return pr.keep && pr.keep.hold ? Object.keys(pr.keep.hold).length : 0; }, sid);
 check('the poured slab holds the stages on the concrete', held > 0, 'holds ' + held);
 
 // B5: finishing (float, wait for the sheen, broom, anchor bolts), cure (cover), strip the forms
@@ -209,7 +209,7 @@ await wait(900);
 const drawnS = await G(() => __foundation.drawn());
 check('forms stripped at a fifth strength: boards back to stock, none left standing', /still green/.test(strip.early) && strip.all && strip.boards === strip.want && strip.step === 'cure' && drawnS.boardsDrawn === 0 && drawnS.stakeMarks === 0, JSON.stringify({ strip, boardsDrawn: drawnS.boardsDrawn }));
 await G((sid) => { const j = __foundation.job(sid); for (const e of j.elements) e.cure.eqH = 24 * 6; __game.sim.runTicks(10); }, sid);
-const framed = await G((sid) => { const pr = __game.sim.state.sys.construction.progress[sid]; return pr.hold ? Object.keys(pr.hold).length : 0; }, sid);
+const framed = await G((sid) => { const pr = __game.sim.state.sys.construction.progress[sid]; return pr.keep && pr.keep.hold ? Object.keys(pr.keep.hold).length : 0; }, sid);
 check('at half strength with the bolts in, framing is let go', framed === 0, 'holds ' + framed);
 
 await page.keyboard.press('Escape');

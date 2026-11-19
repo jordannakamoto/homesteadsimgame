@@ -894,6 +894,10 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - Opening a wall to get at a run takes off every sheet or board of it, its taped seams and the batts; the hints say so.
 - The planned interior "trim" slice (casings, baseboard) is renamed finish carpentry, apart from services' Trim-out. See `docs/design/interior-walls.md` and the design README.
 
+## Wave 2 X2: one bag for what other systems keep on a building
+- Nothing new to see. What services (rough-in work and lines) and the foundation (holds on framing) keep on a building now lives under `progress[id].keep[source]`, and sending a building's plan again carries the whole bag over, so a new source cannot be dropped by accident. Try: pour a slab and watch framing stay held across a reload; order services lines and reload.
+- Older saves with `ext` / `extLines` / `hold` on the record are moved under `keep` when first read (no save version bump). Console: `__game.sim.state.sys.construction.progress[id].keep`.
+- Also fixed: `construction.settle` read an undefined `ctx` (the foundation smoke hit it).
 ## Paint: walls and trim (branch `paint`, design in `docs/design/interior-finishes.md`)
 
 - New last building stage, **Paint**: primer on every lined wall face, a rectangle (up to 1.2 m wide, clear of the openings) at a time, then two coats of colour, each on dry paint. The trim (corner boards and round doors and windows) takes two coats of its own colour; it comes primed.
