@@ -142,6 +142,9 @@ for (const g of ITEMS_CONCRETE) add(g);
 // ---- fasteners, by weight
 add({ id: 'trim_casing', name: 'Colonial casing 57 x 17 (primed)', category: 'lumber', unit: 'm', material: 'pine_seasoned', dims: { widthM: 0.057, depthM: 0.0175 }, priceUsd: 2.6, blurb: 'Finger-jointed pine moulding, primed: trim round doors and windows' });
 add({ id: 'trim_base', name: 'Colonial base 83 x 14 (primed)', category: 'lumber', unit: 'm', material: 'pine_seasoned', dims: { widthM: 0.083, depthM: 0.014 }, priceUsd: 3.1, blurb: 'Finger-jointed pine moulding, primed: baseboard along the floor' });
+add({ id: 'trim_stool', name: 'Window stool 95 x 22 (primed)', category: 'lumber', unit: 'm', material: 'pine_seasoned', dims: { widthM: 0.095, depthM: 0.022 }, priceUsd: 6.5, blurb: 'Bullnosed pine board, primed: the shelf under a window' });
+add({ id: 'caulk_acrylic', name: 'Acrylic caulk (paintable)', category: 'sheet', unit: 'L', massKg: 1.5, priceUsd: 15, blurb: 'In 300 ml tubes: a tube runs about 9 m of bead' });
+add({ id: 'miter_saw', name: 'Miter saw', category: 'tools_power', unit: 'each', massKg: 12, priceUsd: 180, powerW: 1500, blurb: 'Swings to any angle: clean miters on trim, fast' });
 add({ id: 'nails_finish', name: 'Finish nails', category: 'fasteners', unit: 'kg', material: 'steel', priceUsd: 9 });
 add({ id: 'nails_framing', name: 'Framing nails (galvanised)', category: 'fasteners', unit: 'kg', material: 'steel', priceUsd: 6.2 });
 add({ id: 'screws_wood', name: 'Wood screws', category: 'fasteners', unit: 'kg', material: 'steel', priceUsd: 12.5 });

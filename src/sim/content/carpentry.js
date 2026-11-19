@@ -14,6 +14,7 @@ export const ENDS = Object.freeze({
   m45: Object.freeze({ name: 'miter', angle: 45 }),
   cope: Object.freeze({ name: 'cope', angle: 45 }),
   scarf: Object.freeze({ name: 'scarf', angle: 45 }),
+  notch: Object.freeze({ name: 'notch' }),      // a window stool's ends, cut round the casing to make the horns
 });
 // how to say the cuts of a part: "miter both ends", "square one end, cope the other"
 export function cutWords(ends) {
