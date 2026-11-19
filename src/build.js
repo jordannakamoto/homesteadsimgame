@@ -2417,8 +2417,7 @@
 
   // ---- free doors and windows (docs/FRAMING.md): a wall module with holes cut for them, and the unit that fills each
   const FRAME_C = [0.91, 0.89, 0.83],
-    GLASS_C = [0.6, 0.76, 0.86],
-    LEAF_C = col(0x6f4d2c);
+    GLASS_C = [0.6, 0.76, 0.86];
   // a box in a free opening's own frame: u along the wall from the unit's left edge, y up, v across the wall
   // An opening's own frame: u along its wall from the unit's left edge, y up, v across. F is the opening record (or any
   // object with its fields): on a grid wall { d: 0 | 1, line, pos }, on an angled wall { d: "f", gx, gz, ux, uz, pos },
@@ -2507,18 +2506,14 @@
   const FIN_C = {};
   const finishCol = (id) => FIN_C[id] || (FIN_C[id] = col((OP.FINISHES[id] || OP.FINISHES.white).hex));
   // The unit of a free opening, closed, in the opening's own frame: F = { d, line, pos }; sp is OP.freeSpec(f); flip
-  // mirrors it along the wall; out is +1 when the outside of the wall is on the +v side. The frame goes to gF.
+  // mirrors it along the wall; out is +1 when the outside of the wall is on the +v side; opensOut (f.out) turns a
+  // door's swing (or a barn door's track, or a bifold's fold) to the outside. The frame goes to gF.
   // What moves (a leaf, a sash) goes by mode: "all" into gF too; "static" is left out; an array gets { geo, mv } for
-  // each moving part, mv saying how it moves (swing, slide, tilt, rise, roll) so that the page can animate it.
-  function unitGeo(gF, F, sp, flip, mode, out = 1) {
-    const { w, h, type: t } = sp,
-      door = t.kind === "door",
-      y0 = door ? 0.02 : sp.sill,
-      y1 = y0 + h,
-      fw = 0.05,
-      L = t.look;
-    if (sp.leaf && OP.designable(t)) return designedDoorGeo(gF, F, sp, flip, mode, out);
-    if (t.frame === "pocket") flip = false;
+  // each moving part, mv saying how it moves (swing, fold, slide, tilt, rise, roll) so that the page can animate it;
+  // an array with .plan set gets only { mv } (nothing is drawn: the swing arc reads it).
+  function unitGeo(gF, F, sp, flip, mode, out = 1, opensOut = false) {
+    const { w, h, type: t } = sp;
+    if (t.kind === "door") return sp.leaf && OP.designable(t) ? designedDoorGeo(gF, F, sp, flip, mode, out, opensOut) : otherDoorGeo(gF, F, sp, flip, mode, out, opensOut);
     const M = (a, b) => (flip ? [w - b, w - a] : [a, b]),
       mu = (u) => (flip ? w - u : u),
       // a drawer: (u0, u1, y0, y1, v0, v1, colour) draws a box; .seg draws a slanted bar, .poly a convex outline
@@ -2528,97 +2523,13 @@
         d.poly = (pts, va, vb, c) => g && lpoly(g, F, pts.map((q) => [mu(q[0]), q[1]]), va, vb, c);
         return d;
       },
-      fb = drawer(gF),
       mover = (mv) => {
         let g = null;
         if (mode === "all") g = gF;
-        else if (Array.isArray(mode)) mode.push({ geo: (g = new Geo()), mv }), (g.glass = new Geo());
+        else if (Array.isArray(mode)) mode.plan ? mode.push({ mv }) : (mode.push({ geo: (g = new Geo()), mv }), (g.glass = new Geo()));
         return drawer(g);
-      },
-      leafC = door ? LEAF_C : FRAME_C;
-    if (t.frame === "pocket") {
-      // a pocket door shows its jambs: the leaf slides into the wall
-      fb(0, fw, y0, y1, -0.07, 0.07, FRAME_C);
-      fb(w - fw, w, y0, y1, -0.07, 0.07, FRAME_C);
-      fb(0, w, y1 - fw, y1, -0.07, 0.07, FRAME_C);
-      const pb = mover({ k: "slide", du: w - 2 * fw });
-      pb(fw, w - fw, y0, y1 - fw, -0.02, 0.02, leafC);
-      pb(w - 0.2, w - 0.17, y0 + 0.9, y0 + 1.1, 0.02, 0.035, [0.7, 0.62, 0.3]);
-      return;
-    }
-    if (t.frame === "beam") {
-      // a garage door: sectional panels with grooves, inside a plain trim
-      fb(0, fw, y0, y1, -0.07, 0.07, FRAME_C);
-      fb(w - fw, w, y0, y1, -0.07, 0.07, FRAME_C);
-      fb(0, w, y1 - fw, y1, -0.07, 0.07, FRAME_C);
-      const pb = mover({ k: "roll", top: y1 - fw, h: y1 - fw - y0 }),
-        n = Math.max(2, L.grid[1]);
-      for (let k = 0; k < n; k++) pb(fw, w - fw, y0 + ((y1 - fw - y0) * k) / n + 0.01, y0 + ((y1 - fw - y0) * (k + 1)) / n - 0.01, -0.03, 0.03, shade(FRAME_C, 0.96 - 0.04 * (k % 2)));
-      return;
-    }
-    if (!door) return windowUnit(sp, w, y0, y1, flip, out, fb, mover);
-    // the frame: jambs, head and (windows) sill
-    fb(0, fw, y0, y1, -0.07, 0.07, FRAME_C);
-    fb(w - fw, w, y0, y1, -0.07, 0.07, FRAME_C);
-    fb(fw, w - fw, y1 - fw, y1, -0.07, 0.07, FRAME_C);
-    if (!door) fb(fw, w - fw, y0, y0 + fw, -0.07, 0.07, FRAME_C);
-    if (t.surface) {
-      // a barn door hangs outside the wall on a track, over the opening, and slides along it
-      const v0 = out > 0 ? 0.08 : -0.12,
-        v1 = out > 0 ? 0.12 : -0.08,
-        pb = mover({ k: "slide", du: (flip ? -1 : 1) * (w + 2 * t.leafOver + 0.05) });
-      fb(-0.1, 2 * w + 0.2, y1 + 0.12, y1 + 0.16, out > 0 ? 0.07 : -0.1, out > 0 ? 0.1 : -0.07, [0.2, 0.2, 0.22]);
-      pb(-t.leafOver, w + t.leafOver, y0, y1 + 0.06, v0, v1, leafC);
-      pb(-t.leafOver, w + t.leafOver, y0 + (y1 - y0) * 0.5 - 0.04, y0 + (y1 - y0) * 0.5 + 0.04, out > 0 ? 0.12 : -0.135, out > 0 ? 0.135 : -0.12, shade(LEAF_C, 0.8));
-      return;
-    }
-    const x0 = fw,
-      x1 = w - fw,
-      by = door ? y0 : y0 + fw,
-      ty = y1 - fw,
-      pn = t.id === "door_dutch" || t.op === "double_hung" ? 1 : Math.max(1, L.panels),
-      grid = L.grid,
-      rim = 0.04,
-      dh = t.op === "double_hung";
-    // one glazed or solid panel, drawn through pb (a moving part's drawer, or the frame's)
-    const panel = (pb, a, b, ya, yb, zOff, solid) => {
-      if (solid) {
-        pb(a, b, ya, yb, zOff - 0.025, zOff + 0.025, leafC);
-        pb(a + rim, b - rim, ya + (yb - ya) * 0.62, yb - rim, zOff - 0.03, zOff + 0.03, GLASS_C);
-        return;
-      }
-      pb(a, a + rim, ya, yb, zOff - 0.025, zOff + 0.025, leafC);
-      pb(b - rim, b, ya, yb, zOff - 0.025, zOff + 0.025, leafC);
-      pb(a + rim, b - rim, ya, ya + rim, zOff - 0.025, zOff + 0.025, leafC);
-      pb(a + rim, b - rim, yb - rim, yb, zOff - 0.025, zOff + 0.025, leafC);
-      pb(a + rim, b - rim, ya + rim, yb - rim, zOff - 0.008, zOff + 0.008, GLASS_C);
-      const gx = dh ? grid[0] : grid[0],
-        gy = dh ? Math.max(1, Math.round(grid[1] / 2)) : grid[1];
-      for (let k = 1; k < gx; k++) pb(a + ((b - a) * k) / gx - 0.008, a + ((b - a) * k) / gx + 0.008, ya + rim, yb - rim, zOff - 0.02, zOff + 0.02, leafC);
-      for (let k = 1; k < gy; k++) pb(a + rim, b - rim, ya + ((yb - ya) * k) / gy - 0.008, ya + ((yb - ya) * k) / gy + 0.008, zOff - 0.02, zOff + 0.02, leafC);
-    };
-    if (dh) {
-      // two sashes one over the other: the lower one rises
-      const mid = (by + ty) / 2;
-      panel(fb, x0, x1, mid - 0.02, ty, -0.035, false);
-      panel(mover({ k: "rise", dy: (ty - by) * 0.42 }), x0, x1, by, mid + 0.02, 0.035, false);
-      return;
-    }
-    const sdoor = door && t.id !== "door_french" && t.id !== "door_patio";
-    for (let p = 0; p < pn; p++) {
-      const a = x0 + ((x1 - x0) * p) / pn + (p ? 0.01 : 0),
-        b = x0 + ((x1 - x0) * (p + 1)) / pn - (p < pn - 1 ? 0.01 : 0),
-        zOff = t.op === "slide" ? (p % 2 ? 0.035 : -0.035) : 0;
-      let mv = null;
-      if (t.op === "swing" || t.op === "dutch") mv = { k: "swing", pu: mu(pn === 2 ? (p ? w : 0) : 0), s: pn === 2 ? (p ? -1 : 1) * (flip ? -1 : 1) : flip ? -1 : 1, ang: 1.5, side: -out };
-      else if (t.op === "casement") mv = { k: "swing", pu: mu(0), s: flip ? -1 : 1, ang: 1.15, side: out };
-      else if (t.op === "slide" && p === 1) mv = { k: "slide", du: -(b - a) * (flip ? -1 : 1) };
-      else if (t.op === "awning") mv = { k: "tilt", py: ty, e: -1, ang: 0.85, side: out };
-      else if (t.op === "tilt_in") mv = { k: "tilt", py: by, e: 1, ang: 0.6, side: -out };
-      panel(mv ? mover(mv) : fb, a, b, by, ty, zOff, sdoor);
-      if (sdoor && p === 0) (mv ? mover(mv) : fb)(w - 0.16, w - 0.12, y0 + 0.95, y0 + 1.05, -0.06, 0.06, [0.7, 0.62, 0.3]);
-    }
-    if (L.arch) fb(x0, x1, ty - 0.01, ty, -0.03, 0.03, FRAME_C);
+      };
+    return windowUnit(sp, w, sp.sill, sp.sill + h, flip, out, drawer(gF), mover);
   }
   // ---- a window as the window designer sets it (src/sim/content/openings.js: look, finish): the frame round its
   // outline (a rectangle, a round top, a pointed arch, a half or a whole circle), panes between mullions, the sashes that
@@ -2828,6 +2739,45 @@
       }
     }
   }
+  // a door's drawers: the frame's (fb) and one per moving part (mover(mv)), in the unit's own frame (u along the wall
+  // from the left, y up, v across), mirrored when flipped. d.at(v) is the same drawer moved v across the wall.
+  function doorKit(gF, F, w, flip, mode) {
+    const mu = (u) => (flip ? w - u : u);
+    const drawer = (g, dv = 0) => {
+      const d = (a, b, ya, yb, va, vb, c) => g && b - a > 1e-4 && yb - ya > 1e-4 && lbox(g, F, flip ? w - b : a, flip ? w - a : b, ya, yb, va + dv, vb + dv, c);
+      // a brace from (ua, ya) to (ub, yb), th wide, between va and vb across the wall
+      d.diag = (ua, ya, ub, yb, th, va, vb, c) => g && lseg(g, F, mu(ua), ya, mu(ub), yb, th, va + dv, vb + dv, c);
+      d.poly = (pts, va, vb, c) => g && lpoly(g, F, pts.map((q) => [mu(q[0]), q[1]]), va + dv, vb + dv, c);
+      d.at = (v) => drawer(g, dv + v);
+      return d;
+    };
+    const mover = (mv) => {
+      let g = null;
+      if (mode === "all") g = gF;
+      else if (Array.isArray(mode)) mode.plan ? mode.push({ mv }) : (mode.push({ geo: (g = new Geo()), mv }), (g.glass = new Geo()));
+      return drawer(g);
+    };
+    return { fb: drawer(gF), mover, mu };
+  }
+  // flat casing round a cased opening on the wall's faces (sides: [-1, 1] or one of them): legs on plinth blocks, a
+  // head board and a cap. a, b, top: the opening's edges; it reaches out over the rough gap onto the wall. (A door's
+  // own casing comes with the wall's trim.)
+  function casing(fb, a, b, y0, top, sides, c) {
+    const cw = 0.075,
+      ct = 0.017,
+      rv = 0.006,
+      hh = 0.1,
+      WT = 0.07;
+    for (const s of sides) {
+      const V = (p, q) => (s > 0 ? [WT + p, WT + q] : [-WT - q, -WT - p]);
+      fb(a - cw + rv, a + rv, y0 + 0.17, top - rv, ...V(0, ct), c);
+      fb(b - rv, b + cw - rv, y0 + 0.17, top - rv, ...V(0, ct), c);
+      fb(a - cw + rv - 0.004, a + rv + 0.002, y0 - 0.02, y0 + 0.17, ...V(0, ct + 0.006), shade(c, 0.97));
+      fb(b - rv - 0.002, b + cw - rv + 0.004, y0 - 0.02, y0 + 0.17, ...V(0, ct + 0.006), shade(c, 0.97));
+      fb(a - cw + rv - 0.008, b + cw - rv + 0.008, top - rv, top - rv + hh, ...V(0, ct + 0.003), c);
+      fb(a - cw + rv - 0.02, b + cw - rv + 0.02, top - rv + hh, top - rv + hh + 0.022, ...V(0, ct + 0.016), shade(c, 1.03));
+    }
+  }
   // ---- the door designer's doors (OP.designable): frame, sidelights, transom, and leaves with their faces. Cheap
   // geometry: rails and stiles at full thickness, recessed or raised panels as thinner boxes a shade darker, plank
   // and groove lines as thin dark strips, glass as GLASS_C boxes with muntins. Each leaf is one mover (one mesh).
@@ -2836,7 +2786,7 @@
     finishC = (k) => (OP.FINISHES[k] ? finishCol(k) : col(0x6f4d2c));
   // panel rows from the top: [height weight, panels across]
   const FACE_ROWS = { shaker: [[1, 1]], p2: [[0.58, 1], [0.42, 1]], p3: [[1, 3]], p5: [[1, 1], [1, 1], [1, 1], [1, 1], [1, 1]], p6: [[0.2, 2], [0.42, 2], [0.38, 2]] };
-  function designedDoorGeo(gF, F, sp, flip, mode, out) {
+  function designedDoorGeo(gF, F, sp, flip, mode, out, opensOut) {
     const { w, type: t, look: K, leaf } = sp,
       y0 = 0.02,
       y1 = y0 + sp.h,
@@ -2848,29 +2798,15 @@
       lum = 0.3 * fin[0] + 0.59 * fin[1] + 0.11 * fin[2],
       frameC = lum < 0.12 || t.op === "pivot" ? shade(fin, 1.04) : FRAME_C,
       metal = metalC(K.metal),
-      inSide = -out;
-    const mu = (u) => (flip ? w - u : u);
-    // a drawer in the unit's own frame (u along the wall from the left, y up, v across), flipped as the unit is
-    const drawer = (g) => {
-      const d = (a, b, ya, yb, va, vb, c) => g && b - a > 1e-4 && yb - ya > 1e-4 && lbox(g, F, flip ? w - b : a, flip ? w - a : b, ya, yb, va, vb, c);
-      // a brace from (ua, ya) to (ub, yb), th wide, between va and vb across the wall
-      d.diag = (ua, ya, ub, yb, th, va, vb, c) => g && lseg(g, F, mu(ua), ya, mu(ub), yb, th, va, vb, c);
-      return d;
-    };
-    const fb = drawer(gF);
-    const mover = (mv) => {
-      let g = null;
-      if (mode === "all") g = gF;
-      else if (Array.isArray(mode)) (mode.push({ geo: (g = new Geo()), mv }), (g.glass = new Geo()));
-      return drawer(g);
-    };
+      inSide = -out,
+      sd = opensOut ? out : -out; // the side the leaves swing to
+    const { fb, mover, mu } = doorKit(gF, F, w, flip, mode);
     // glass with optional muntins: a pane across [a,b] x [ya,yb], bars cols x rows
     const pane = (d, a, b, ya, yb, cols, rows, barC) => {
       d(a, b, ya, yb, -0.006, 0.006, GLASS_C);
       for (let k = 1; k < cols; k++) d(a + ((b - a) * k) / cols - 0.011, a + ((b - a) * k) / cols + 0.011, ya, yb, -0.014, 0.014, barC);
       for (let k = 1; k < rows; k++) d(a, b, ya + ((yb - ya) * k) / rows - 0.011, ya + ((yb - ya) * k) / rows + 0.011, -0.014, 0.014, barC);
     };
-    const bars = (a, b, ya, yb) => (K.bars ? [Math.max(1, Math.round((b - a) / 0.27)), Math.max(1, Math.round((yb - ya) / 0.3))] : [1, 1]);
     // ---- the frame: outer jambs and head, mullions beside sidelights, a transom bar, a threshold outside
     const la = leaf.a,
       lb = leaf.b,
@@ -2882,6 +2818,14 @@
     if (lb < w - 1e-6) fb(lb - fw, lb, y0, ySide, -0.07, 0.07, frameC);
     if (K.transom) fb(fw, w - fw, yD - fw, yD, -0.07, 0.07, frameC);
     if (!thin) fb(fw, w - fw, y0 - 0.02, y0 + 0.006, -0.07, 0.07, [0.42, 0.38, 0.32]);
+    // the stops the leaves close against, on the far side from the swing
+    if (t.op !== "pivot") {
+      const V = sd > 0 ? [-T2 - 0.014, -T2] : [T2, T2 + 0.014],
+        sc = shade(frameC, 0.96);
+      fb(la + fw, la + fw + 0.014, y0, ySide, ...V, sc);
+      fb(lb - fw - 0.014, lb - fw, y0, ySide, ...V, sc);
+      fb(la + fw, lb - fw, ySide - 0.014, ySide, ...V, sc);
+    }
     // sidelights: a kick panel, then glass up to the head (horizontal bars when the door has bars)
     const sideLite = (s0, s1) => {
       const kick = Math.min(0.6, Math.max(0.24, K.glass === "half" || K.glass === "three" ? 0.24 : 0.3));
@@ -2926,25 +2870,277 @@
           [(x0 + x1) / 2 + 0.002, x1 - 0.003, x1, -1],
         ]
       : [[x0 + 0.003, x1 - 0.003, pivot ? x0 + Math.min(0.26, (x1 - x0) * 0.2) : x0, 1]];
+    // three butt hinges on the hinge edge, their knuckles on the side the leaf swings to
+    const hinges = (d, hu, s, ya, yb) => {
+      const V = sd > 0 ? [T2 - 0.006, T2 + 0.012] : [-T2 - 0.012, -T2 + 0.006],
+        ua = s > 0 ? hu - 0.011 : hu - 0.007,
+        ub = s > 0 ? hu + 0.007 : hu + 0.011;
+      for (const y of [ya + 0.23, (ya + yb) / 2 + 0.1, yb - 0.18]) d(ua, ub, y - 0.05, y + 0.05, ...V, metal);
+    };
     for (let n = 0; n < leaves.length; n++) {
       const [a, b, hinge, s] = leaves[n],
-        mv = { k: "swing", pu: mu(hinge), s: s * (flip ? -1 : 1), ang: pivot ? 1.45 : 1.5, side: -out };
+        mv = { k: "swing", pu: mu(hinge), s: s * (flip ? -1 : 1), ang: pivot ? 1.45 : 1.5, side: sd, len: pivot ? b - hinge : b - a, back: pivot ? hinge - a : 0 };
       if (t.op === "dutch") {
         // the bottom and top halves: two meshes on the same hinge
         const cut = y0 + 1.07,
           lo = mover(mv),
-          hi = mover({ ...mv });
+          hi = mover({ ...mv, twin: true });
         const half = FACE_ROWS[K.face] && K.face !== "p3" ? "shaker" : K.face;
         leafFace(lo, a, b, ly0, cut - 0.003, { ...K, face: half, glass: "none" }, fin, T2, inSide, false);
         leafFace(hi, a, b, cut + 0.003, ly1, { ...K, face: half, glass: K.glass === "none" ? "none" : K.glass === "slot" ? "slot" : "full" }, fin, T2, inSide, true);
         hardware(lo, a, b, ly0, false, K, metal, T2, thin);
         lo(a + 0.02, b - 0.02, cut - 0.03, cut - 0.003, -T2 - 0.035, T2 + 0.035, shade(fin, 1.02));
+        hinges(lo, a, 1, ly0, cut);
+        hinges(hi, a, 1, cut, ly1);
         continue;
       }
       const d = mover(mv);
       leafFace(d, a, b, ly0, ly1, K, fin, T2, inSide, false);
       hardware(d, a, b, ly0, n === 1, K, metal, T2, thin, ly1);
+      if (pivot) {
+        // the pivot pins: a plate at the foot and the head of the leaf
+        for (const [ya, yb] of [[ly0, ly0 + 0.012], [ly1 - 0.012, ly1]]) d(hinge - 0.03, hinge + 0.03, ya, yb, -T2 - 0.002, T2 + 0.002, metal);
+      } else hinges(d, s > 0 ? a : b, s, ly0, ly1);
+      // a pair: the standing leaf carries the astragal over the meeting stiles, on the face away from the swing
+      if (pair && n === 1) d(a - 0.016, a + 0.022, ly0 + 0.01, ly1 - 0.01, ...(sd > 0 ? [-T2 - 0.01, -T2] : [T2, T2 + 0.01]), shade(fin, 0.97));
     }
+  }
+  // ---- the other doors: a patio slider, a barn door on its track, a pocket door, a bifold, a roll-up garage door and
+  // a cased opening (no leaf). Leaves go through leafFace so the designer's panels, glass, bars and colour apply.
+  function otherDoorGeo(gF, F, sp, flip, mode, out, opensOut) {
+    // the wall's framing leaves a pocket door's pocket on the +u side (src/framing.js), so it always slides that way
+    if (sp.type.op === "pocket" || sp.type.frame === "pocket") flip = false;
+    const { w, type: t } = sp,
+      K = sp.look || {},
+      op = t.op,
+      y0 = 0.02,
+      y1 = y0 + sp.h,
+      fw = 0.05,
+      fin = finishC(sp.finish),
+      lum = 0.3 * fin[0] + 0.59 * fin[1] + 0.11 * fin[2],
+      frameC = lum < 0.12 ? shade(fin, 1.04) : FRAME_C,
+      inSide = -out,
+      sd = opensOut ? out : -out, // the side a bifold folds to, or a barn door hangs on
+      dirU = flip ? -1 : 1, // a slide along +u in the unit's own layout, along the wall
+      face = (def) => ({ ...K, face: K.face || def.face, glass: K.glass || def.glass, bars: K.bars === undefined ? !!def.bars : !!K.bars }),
+      { fb, mover, mu } = doorKit(gF, F, w, flip, mode),
+      frame = (c = frameC) => (fb(0, fw, y0, y1, -0.07, 0.07, c), fb(w - fw, w, y0, y1, -0.07, 0.07, c), fb(fw, w - fw, y1 - fw, y1, -0.07, 0.07, c)),
+      // a vertical bar pull on both faces of a leaf, standing off it
+      pull = (d, u, ya, yb, T2, mc) => {
+        for (const s of [-1, 1]) {
+          const V = (p, q) => (s > 0 ? [T2 + p, T2 + q] : [-T2 - q, -T2 - p]);
+          d(u - 0.011, u + 0.011, ya, yb, ...V(0.032, 0.048), mc);
+          d(u - 0.007, u + 0.007, ya + 0.03, ya + 0.055, ...V(0, 0.032), mc);
+          d(u - 0.007, u + 0.007, yb - 0.055, yb - 0.03, ...V(0, 0.032), mc);
+        }
+      };
+    if (op === "open") {
+      // a cased opening: jamb liners through the wall, casing round both faces on plinth blocks, no leaf
+      fb(0, 0.02, y0 - 0.02, y1, -0.07, 0.07, fin);
+      fb(w - 0.02, w, y0 - 0.02, y1, -0.07, 0.07, fin);
+      fb(0, w, y1 - 0.02, y1, -0.07, 0.07, fin);
+      casing(fb, 0, w, y0, y1, [-1, 1], fin);
+      return;
+    }
+    if (op === "slide") {
+      // a patio slider: an aluminium sill with its tracks, the frame, and panels on two tracks. The fixed ones run
+      // on the outside track; the ones that slide run inside. 2: fixed, slides; 3: fixed, fixed, slides; 4: OXXO.
+      frame();
+        const al = [0.55, 0.56, 0.57],
+        x0 = fw,
+        x1 = w - fw,
+        n = Math.max(2, Math.min(4, K.leaves || K.panels || 2)),
+        T2 = 0.021,
+        tv = 0.026,
+        moves = n === 4 ? [0, -1, 1, 0] : Array.from({ length: n }, (_, p) => (p === n - 1 ? -1 : 0)),
+        vOf = (p) => (moves[p] ? inSide : out) * tv,
+        pw = (x1 - x0) / n,
+        K2 = face({ face: "flush", glass: "full" });
+      fb(fw, w - fw, y0 - 0.02, y0 + 0.004, -0.07, 0.07, al);
+      for (const v of [-tv, tv]) fb(fw, w - fw, y0 + 0.004, y0 + 0.016, v - 0.004, v + 0.004, shade(al, 0.8));
+      fb(fw, w - fw, y1 - fw - 0.02, y1 - fw, -0.05, 0.05, shade(al, 0.9));
+      for (let p = 0; p < n; p++) {
+        // panels on different tracks overlap at their meeting stiles; on the same track they meet
+        const ov = (k) => (k > 0 && k < n && moves[k - 1] !== moves[k] && (!moves[k - 1] || !moves[k]) ? 0.025 : -0.002),
+          a = x0 + p * pw - (p ? ov(p) : -0.003),
+          b = x0 + (p + 1) * pw + (p < n - 1 ? ov(p + 1) : -0.003),
+          m = moves[p],
+          mv = m ? { k: "slide", du: m * (b - a - 0.05) * dirU, pc: mu((a + b) / 2), pv: inSide * 0.35 } : null,
+          d = (mv ? mover(mv) : fb).at(vOf(p));
+        leafFace(d, a, b, y0 + 0.016, y1 - fw - 0.022, K2, fin, T2, inSide, false);
+        // the latch stile's handle, away from the way it slides; a weather strip on the fixed panels' meeting edges
+        if (m) pull(d, m < 0 ? b - 0.03 : a + 0.03, y0 + 0.86, y0 + 1.2, T2, metalC(K.metal || "steel"));
+      }
+      return;
+    }
+    if (t.surface || op === "barn") {
+      // a barn door hangs on a flat steel track over the opening on one face of the wall, on two strap hangers, and
+      // rolls along it past the opening. Classic: boards, three rails, stiles and braces on its outer face.
+      frame();
+        const lo = t.leafOver === undefined ? 0.1 : t.leafOver,
+        a = -lo,
+        b = w + lo,
+        top = y1 + 0.06,
+        steel = [0.16, 0.16, 0.17],
+        S_ = (p, q) => (sd > 0 ? [p, q] : [-q, -p]),
+        T2 = 0.02,
+        vc = sd * 0.128,
+        run = w + 2 * lo + 0.05,
+        tY = y1 + 0.17;
+      // the header board, the track on its standoffs, the stops at its ends
+      fb(-0.2, w + run + lo + 0.2, y1 + 0.075, y1 + 0.25, ...S_(0.07, 0.09), shade(fin, 0.8));
+      fb(-0.16, w + run + lo + 0.16, tY - 0.04, tY, ...S_(0.096, 0.104), steel);
+      for (let u = -0.1; u < w + run + lo + 0.15; u += 0.45) fb(u - 0.015, u + 0.015, tY - 0.035, tY - 0.005, ...S_(0.09, 0.096), steel);
+      for (const u of [-0.16, w + run + lo + 0.12]) fb(u, u + 0.04, tY - 0.06, tY + 0.02, ...S_(0.09, 0.112), steel);
+      // a floor guide beside the opening keeps the foot in line
+      fb(w + 0.04, w + 0.1, y0 - 0.02, y0 + 0.04, ...S_(0.07, 0.15), steel);
+      const mv = { k: "slide", du: run * dirU, pc: mu(w / 2), pv: sd * 0.4 },
+        dm = mover(mv),
+        d = dm.at(vc);
+      if (K.face) leafFace(d, a, b, y0, top, face({}), fin, T2, sd, false);
+      else {
+        const nb = Math.max(4, Math.round((b - a) / 0.15)),
+          bw = (b - a) / nb,
+          rw = 0.13,
+          sw = 0.12,
+          rails = [y0 + 0.1, (y0 + top) / 2, top - 0.1],
+          ft = (p, q) => (sd > 0 ? [T2 + p, T2 + q] : [-T2 - q, -T2 - p]),
+          bc = shade(fin, 1.04);
+        for (let k = 0; k < nb; k++) {
+          d(a + k * bw + 0.002, a + (k + 1) * bw - 0.002, y0, top, -T2, T2, shade(fin, 0.9 + 0.16 * hash(k, 3, Math.round(w * 100))));
+          k && d(a + k * bw - 0.003, a + k * bw + 0.003, y0, top, -T2 + 0.004, T2 - 0.004, shade(fin, 0.55));
+        }
+        // stiles and rails on the outer face, the braces between them
+        d(a, a + sw, y0, top, ...ft(0, 0.022), bc);
+        d(b - sw, b, y0, top, ...ft(0, 0.022), bc);
+        for (const r of rails) d(a + sw, b - sw, r - rw / 2, r + rw / 2, ...ft(0, 0.022), bc);
+        for (let k = 0; k < 2; k++) {
+          const ya = rails[k] + rw / 2,
+            yb = rails[k + 1] - rw / 2;
+          d.diag(a + sw + 0.05, ya + 0.04, b - sw - 0.05, yb - 0.04, 0.11, ...ft(0.002, 0.02), bc);
+        }
+        // the inner face gets two plain ledges
+        for (const r of [rails[0], rails[2]]) d(a + 0.05, b - 0.05, r - 0.06, r + 0.06, ...(sd > 0 ? [-T2 - 0.018, -T2] : [T2, T2 + 0.018]), shade(fin, 0.95));
+      }
+      // the hangers: straps up the leaf to wheels riding on the track, bolts through the leaf
+      for (const u of [a + 0.2, b - 0.2]) {
+        dm(u - 0.022, u + 0.022, top - 0.2, tY + 0.05, ...S_(0.104, 0.11), steel);
+        dm(u - 0.022, u + 0.022, top - 0.2, top - 0.01, ...S_(0.148, 0.154), steel);
+        for (const y of [top - 0.16, top - 0.06]) dm(u - 0.009, u + 0.009, y - 0.009, y + 0.009, ...S_(0.154, 0.16), steel);
+        const r = 0.05,
+          pts = [];
+        for (let k = 0; k < 10; k++) pts.push([u + r * Math.cos((Math.PI * 2 * k) / 10), tY + r + r * Math.sin((Math.PI * 2 * k) / 10)]);
+        dm.poly(pts, ...S_(0.098, 0.106), shade(steel, 1.3));
+        dm(u - 0.012, u + 0.012, tY + r - 0.012, tY + r + 0.012, ...S_(0.106, 0.112), steel);
+      }
+      pull(d, a + 0.2, y0 + 0.85, y0 + 1.25, T2, steel);
+      return;
+    }
+    if (op === "pocket" || t.frame === "pocket") {
+      // a pocket door: the jamb on the pocket side is split, the leaf slides into the wall through it
+      fb(0, fw, y0, y1, -0.07, 0.07, frameC);
+      fb(w - fw, w, y0, y1, -0.07, -0.024, frameC);
+      fb(w - fw, w, y0, y1, 0.024, 0.07, frameC);
+      fb(fw, w - fw, y1 - fw, y1, -0.07, 0.07, frameC);
+        const T2 = 0.0175,
+        a = fw + 0.004,
+        b = w - 0.01,
+        ly1 = y1 - fw - 0.004,
+        mv = { k: "slide", du: (w - 2 * fw - 0.07) * dirU, pc: mu((a + b) / 2), pv: inSide * 0.35 },
+        d = mover(mv),
+        mc = metalC(K.metal || "steel");
+      leafFace(d, a, b, y0 + 0.01, ly1, face({ face: "flush", glass: "none" }), fin, T2, inSide, false);
+      // flush cups near the leading edge and an edge pull in it
+      for (const s of [-1, 1]) {
+        const V = s > 0 ? [T2 - 0.002, T2 + 0.003] : [-T2 - 0.003, -T2 + 0.002];
+        d(a + 0.05, a + 0.1, y0 + 0.92, y0 + 1.1, ...V, mc);
+        d(a + 0.058, a + 0.092, y0 + 0.93, y0 + 1.09, ...(s > 0 ? [T2 - 0.004, T2 + 0.004] : [-T2 - 0.004, -T2 + 0.004]), shade(mc, 0.45));
+      }
+      d(a - 0.004, a + 0.002, y0 + 0.96, y0 + 1.06, -0.008, 0.008, mc);
+      return;
+    }
+    if (op === "fold") {
+      // a bifold: leaves hinged in pairs on a track at the head. Up to two leaves fold to one jamb; four or more fold
+      // to both. Each leaf turns about the joint nearest its jamb (even leaves) or its far joint (odd leaves), and
+      // the joints slide in along the track as it folds.
+      frame();
+        fb(fw, w - fw, y1 - fw - 0.025, y1 - fw, -0.016, 0.016, [0.5, 0.5, 0.52]);
+      const n = Math.max(2, (K.leaves || (w > 1.1 ? 4 : 2)) & ~1),
+        stacks = n >= 4 ? 2 : 1,
+        m = n / stacks,
+        x0 = fw,
+        x1 = w - fw,
+        l = (x1 - x0) / n,
+        T2 = 0.016,
+        K2 = face({ face: "shaker", glass: "none" }),
+        mc = metalC(K.metal || "brass");
+      for (let st = 0; st < stacks; st++) {
+        const jamb = st ? x1 : x0,
+          dir = st ? -1 : 1;
+        for (let k = 0; k < m; k++) {
+          const j0 = jamb + dir * k * l,
+            j1 = jamb + dir * (k + 1) * l,
+            [a, b] = dir > 0 ? [j0 + 0.003, j1 - 0.003] : [j1 + 0.003, j0 - 0.003],
+            odd = k % 2 === 1,
+            pivot = odd ? j1 : j0,
+            mv = { k: "fold", pu: mu(pivot), s: (odd ? -dir : dir) * dirU, side: sd, ang: 1.35, tu: dir * (odd ? k + 1 : k) * l * dirU, len: l },
+            d = mover(mv);
+          leafFace(d, a, b, y0 + 0.012, y1 - fw - 0.03, K2, fin, T2, inSide, false);
+          // the knob near the joint where the pair meets, on both faces
+          if (odd) {
+            const u = j1 - dir * 0.05;
+            for (const s of [-1, 1]) {
+              const V = (p, q) => (s > 0 ? [T2 + p, T2 + q] : [-T2 - q, -T2 - p]);
+              d(u - 0.008, u + 0.008, y0 + 0.992, y0 + 1.008, ...V(0, 0.03), mc);
+              d(u - 0.02, u + 0.02, y0 + 0.98, y0 + 1.02, ...V(0.03, 0.05), mc);
+            }
+          }
+        }
+      }
+      return;
+    }
+    if (op === "roll") {
+      // a sectional garage door: trim round the opening outside, sections with raised panels behind the opening, a
+      // lift handle, and the steel tracks up the jambs inside. The sections roll up together.
+      frame();
+      const n = Math.max(2, K.leaves || (K.grid && K.grid[1]) || 4),
+        cols = Math.max(2, Math.round(w / 0.62)),
+        top = y1 - fw,
+        sh = (top - y0) / n,
+        T2 = 0.02,
+        vc = inSide * 0.03,
+        steel = [0.42, 0.43, 0.45],
+        mv = { k: "roll", top, h: top - y0 },
+        d = mover(mv).at(vc),
+        F_ = (p, q) => (out > 0 ? [T2 + p, T2 + q] : [-T2 - q, -T2 - p]),
+        ins = Math.min(0.09, sh * 0.2),
+        cw = (w - 2 * fw) / cols;
+      for (let k = 0; k < n; k++) {
+        const p = y0 + k * sh,
+          q = p + sh;
+        d(fw, w - fw, p + 0.003, q - 0.003, -T2, T2, shade(fin, 0.97 + 0.03 * (k % 2)));
+        k && d(fw, w - fw, p - 0.004, p + 0.004, -T2 + 0.004, T2 - 0.004, shade(fin, 0.5));
+        for (let c = 0; c < cols; c++) {
+          const ua = fw + c * cw + ins,
+            ub = fw + (c + 1) * cw - ins;
+          d(ua, ub, p + ins, q - ins, ...F_(0, 0.006), shade(fin, 1.04));
+          d(ua + 0.02, ub - 0.02, p + ins + 0.02, q - ins - 0.02, ...F_(0.006, 0.01), shade(fin, 0.95));
+        }
+      }
+      d(w / 2 - 0.12, w / 2 + 0.12, y0 + 0.14, y0 + 0.165, ...F_(0.025, 0.04), steel);
+      for (const u of [w / 2 - 0.11, w / 2 + 0.11]) d(u - 0.01, u + 0.01, y0 + 0.14, y0 + 0.165, ...F_(0, 0.025), steel);
+      // the tracks inside: an angle up each jamb
+      const iv = (p, q) => (inSide > 0 ? [p, q] : [-q, -p]);
+      for (const [ua, ub, ea] of [[fw - 0.01, fw + 0.03, fw - 0.01], [w - fw - 0.03, w - fw + 0.01, w - fw + 0.002]]) {
+        fb(ua, ub, y0, top, ...iv(0.055, 0.062), steel);
+        fb(ea, ea + 0.008, y0, top, ...iv(0.03, 0.062), steel);
+      }
+      return;
+    }
+    // anything else: a frame and a plain leaf on hinges
+    frame();
+    const d = mover({ k: "swing", pu: mu(fw), s: dirU, ang: 1.5, side: sd, len: w - 2 * fw });
+    leafFace(d, fw + 0.003, w - fw - 0.003, y0 + 0.004, y1 - fw - 0.003, face({ face: "flush", glass: "none" }), fin, 0.0225, inSide, false);
   }
   // one leaf's face: rails, stiles, panels, glass, grooves or planks. d is the leaf's drawer; latch side is b.
   function leafFace(d, a, b, ya, yb, K, fin, T2, inSide, upper) {
@@ -3153,7 +3349,7 @@
     for (const o of S.fopen) {
       if (!st.all && S.plan.has(o.f.id)) continue;
       const parts = [];
-      unitGeo(null, fF(o.f), o.sp, !!o.f.flip, parts, o.f.oside || 1);
+      unitGeo(null, fF(o.f), o.sp, !!o.f.flip, parts, o.f.oside || 1, !!o.f.out);
       for (const p of parts) {
         const mesh = new T.Mesh(p.geo.build(), S.wallMat);
         mesh.castShadow = mesh.receiveShadow = true;
@@ -3173,7 +3369,8 @@
       }
     }
   }
-  // the leaf's matrix at openness t (0 closed, 1 open): slide, rise, roll, or a turn about a hinge line
+  // the leaf's matrix at openness t (0 closed, 1 open): slide, rise, roll, or a turn about a hinge line (a bifold
+  // leaf also slides along the wall as its joint runs in along the track)
   function setLeaf(L, t) {
     const f = L.o.f,
       mv = L.mv,
@@ -3185,7 +3382,7 @@
       const k = 1 - 0.94 * e;
       _lm.set(1, 0, 0, 0, 0, k, 0, mv.top * (1 - k), 0, 0, 1, 0, 0, 0, 0, 1);
     } else {
-      const sw = mv.k === "swing",
+      const sw = mv.k === "swing" || mv.k === "fold",
         e1 = sw ? [U[0] * mv.s, 0, U[2] * mv.s] : [0, mv.e, 0],
         e2 = [V[0] * mv.side, 0, V[2] * mv.side],
         P = sw ? [P0[0] + U[0] * mv.pu, 0, P0[2] + U[2] * mv.pu] : [P0[0] + U[0] * L.o.sp.w * 0.5, mv.py, P0[2] + U[2] * L.o.sp.w * 0.5],
@@ -3194,6 +3391,7 @@
         sn = Math.sin(ph),
         R = (i, j) => (i === j ? 1 : 0) + (c - 1) * (e1[i] * e1[j] + e2[i] * e2[j]) + sn * (e2[i] * e1[j] - e1[i] * e2[j]);
       _lm.set(R(0, 0), R(0, 1), R(0, 2), P[0] - (R(0, 0) * P[0] + R(0, 1) * P[1] + R(0, 2) * P[2]), R(1, 0), R(1, 1), R(1, 2), P[1] - (R(1, 0) * P[0] + R(1, 1) * P[1] + R(1, 2) * P[2]), R(2, 0), R(2, 1), R(2, 2), P[2] - (R(2, 0) * P[0] + R(2, 1) * P[1] + R(2, 2) * P[2]), 0, 0, 0, 1);
+      if (mv.tu) ((_lm.elements[12] += U[0] * mv.tu * (c - 1)), (_lm.elements[14] += U[2] * mv.tu * (c - 1)));
     }
     L.mesh.matrix.copy(_lm);
     L.mesh.matrixWorldNeedsUpdate = true;
@@ -3229,6 +3427,81 @@
     const r = G.sim.commandNow("construction.operate", open === undefined ? { id } : { id, open });
     for (const S of B.structs) for (const L of S.leaves || []) L.id === id && leafBusy.add(L);
     return r;
+  }
+  // ---- the swing arc: a faint plan on the floor of how the door under the pointer (the ghost) or the selected door
+  // opens: the leaf open and its arc, a bifold's folded leaves, an arrow for a slider. One line mesh, re-filled only
+  // when what it shows changes; it reads the same movers that animate the leaves, so it always agrees with them.
+  const arcLine = new T.LineSegments(new T.BufferGeometry(), new T.LineBasicMaterial({ color: 0xffe2a0, transparent: true, opacity: 0.55, depthWrite: false, fog: false }));
+  arcLine.frustumCulled = false;
+  arcLine.renderOrder = 18;
+  arcLine.visible = false;
+  let arcSrc = null,
+    arcVer = -1;
+  function arcPts(f, sp) {
+    const parts = [];
+    parts.plan = true;
+    unitGeo(null, fF(f), sp, !!f.flip, parts, f.oside || 1, !!f.out);
+    const { U, V, O } = frameOf(fF(f)),
+      y = FLOOR_T + 0.012,
+      P = (u, v) => [O[0] + U[0] * u + V[0] * v, y, O[2] + U[2] * u + V[2] * v],
+      pts = [],
+      seg = (a, b) => pts.push(...a, ...b);
+    for (const { mv } of parts) {
+      if (mv.twin) continue;
+      if (mv.k === "swing" || mv.k === "fold") {
+        // in (u, v): e1 along the closed leaf from its pivot, e2 the side it swings to
+        const at = (r, ph, tu) => P(mv.pu + tu + r * Math.cos(ph) * mv.s, r * Math.sin(ph) * mv.side),
+          tu = (ph) => (mv.tu ? mv.tu * (Math.cos(ph) - 1) : 0);
+        if (mv.k === "swing") {
+          const N = 14;
+          for (let k = 0; k < N; k++) seg(at(mv.len, (mv.ang * k) / N, 0), at(mv.len, (mv.ang * (k + 1)) / N, 0));
+          seg(at(0, 0, 0), at(mv.len, mv.ang, 0));
+          if (mv.back) for (let k = 0; k < 8; k++) seg(at(-mv.back, (mv.ang * k) / 8, 0), at(-mv.back, (mv.ang * (k + 1)) / 8, 0));
+        } else {
+          const ph = mv.ang * 0.8;
+          seg(at(0, ph, tu(ph)), at(mv.len, ph, tu(ph)));
+          if (!mv.tu) for (let k = 0; k < 8; k++) seg(at(mv.len, (ph * k) / 8, 0), at(mv.len, (ph * (k + 1)) / 8, 0));
+        }
+      } else if (mv.k === "slide" && mv.pc !== undefined) {
+        // an arrow from the leaf's middle the way it slides
+        const a = mv.pc,
+          b = mv.pc + mv.du * 0.75,
+          sg = Math.sign(mv.du) || 1,
+          v = mv.pv;
+        seg(P(a, v), P(b, v));
+        seg(P(b, v), P(b - sg * 0.12, v + 0.07));
+        seg(P(b, v), P(b - sg * 0.12, v - 0.07));
+      }
+    }
+    return pts;
+  }
+  function arcTick() {
+    let f = null,
+      par = null,
+      src = null,
+      ver = 0;
+    if (B.on && B.tool === "door") {
+      const op = B.op;
+      if (ghostGroup.visible && B.ghostIs === "op" && op && op.addFree && op.addFree.length && op.valid) {
+        f = op.addFree[0];
+        if (!f.id) f = { ...f, flip: !!B.oflip, ...(B.oout ? { out: true } : { out: false }) };
+        (par = ghostGroup), (src = op), (ver = (B.oout ? 2 : 0) + (B.oflip ? 1 : 0));
+      } else if (B.fsel) {
+        const q = fselOpen();
+        if (q) (f = q.f), (par = q.S.group), (src = q.f), (ver = q.S.ver);
+      }
+    }
+    if (src === arcSrc && ver === arcVer) return;
+    arcSrc = src;
+    arcVer = ver;
+    const sp = f && OP.freeSpec(f),
+      pts = sp && sp.type.kind === "door" ? arcPts(f, sp) : [];
+    if (!pts.length) return void (arcLine.visible = false);
+    arcLine.geometry.dispose();
+    arcLine.geometry = new T.BufferGeometry();
+    arcLine.geometry.setAttribute("position", new T.Float32BufferAttribute(pts, 3));
+    arcLine.parent !== par && par.add(arcLine);
+    arcLine.visible = true;
   }
   // which side of a free opening's wall is outdoors: +1 for the +v side (+z along x, +x along z), else -1
   function freeOut(S, f, w) {
@@ -3374,7 +3647,7 @@
     // the units of free openings that stand
     for (const f of D.free || []) {
       const sp = f.built === false ? null : OP.freeSpec(f);
-      sp && unitGeo(g, fF(f), sp, !!f.flip, f.ghost ? "all" : "static", f.oside || 1);
+      sp && unitGeo(g, fF(f), sp, !!f.flip, f.ghost ? "all" : "static", f.oside || 1, !!f.out);
     }
     for (const [k, ds] of verts) {
       const [i, j] = parse(k);
@@ -11578,6 +11851,7 @@
     update(dt) {
       ensureLoaded();
       leafBusy.size && leafTick(dt);
+      (arcSrc || (B.on && B.tool === "door")) && arcTick();
       if (B.on && (B.ohKey || (freeTool() && B.fsel))) ohTick();
       if (B.ores && B.ores.dirty && performance.now() - B.ores.t > 45) {
         const q = fselOpen();
