@@ -1908,6 +1908,7 @@
     const out = { k: pr.name + ' · ' + C.STAGE_ORDER.filter((q) => pl.view.stages.some((w) => w.id === q)).indexOf(v.id) + ' of ' + pl.view.stages.length + ' stages done', title: v.name, stage: v.id, what: v.what, why: v.why };
     out.k = pr.name + ' · stage ' + (pl.view.stages.indexOf(v) + 1) + ' of ' + pl.view.stages.length;
     { const fh = (v.id === 'site' || v.id === 'foundation') && window.__foundation && window.__foundation.owns(pr.id) ? window.__foundation.hint(pr.id) : null;
+      if (!fh && (v.id === 'site' || v.id === 'foundation') && C.STAGE[v.id].hint && st && ['slab', 'stemwall', 'piers'].includes(st.found)) return { ...out, line: C.STAGE[v.id].hint.replace(/\((\d)\)/, '(<kbd>$1</kbd>)'), target: at };   // signpost: the Site tool (7)
       if (fh) return { ...out, line: fh, target: at, btn: Object.values(pr.lines).every((l) => l.ordered <= 1e-9) && pl.view.toOrderUsd > 0 ? ['order:all', 'Order everything, ' + money(pl.view.toOrderUsd)] : null }; }
     if (Object.values(pr.lines).every((l) => l.ordered <= 1e-9) && pl.view.toOrderUsd > 0) return { ...out, line: 'Order the materials. While they are on their way, level the ground: stand on the plan and hold <kbd>E</kbd>.', btn: ['order:all', 'Order everything, ' + money(pl.view.toOrderUsd)], target: at };
     if (V.auto && V.auto.id === pr.id) return { ...out, line: (V.auto.guided ? 'Building. ' : 'Working until it is done. ') + '<kbd>E</kbd> stops.', target: at };

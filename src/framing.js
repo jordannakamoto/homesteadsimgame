@@ -863,8 +863,21 @@
     for (const f of desc.floors || []) floorMembers(out, f, desc.found || "plinth", spec);
     for (const w of desc.walls || []) wallMembers(out, w, spec);
     for (const r of desc.roofs || []) roofMembers(out, r, spec);
+    // building elements added by other files (decks, porches, lofts...): desc.extras, each { kind, id, ... } drawn by its kind
+    for (const x of desc.extras || []) {
+      const fn = EXTRA.get(x.kind);
+      fn && fn(out, x, desc, HELP);
+    }
     paintOver(out, spec.deco);
     return out;
+  }
+  // register(kind, fn(out, el, desc, h)): fn pushes the members of one desc.extras element of that kind; h holds the
+  // same helpers the walls, floors and roofs use (M makes a member, see above). See ARCHITECTURE.md "Adding to build mode".
+  const EXTRA = new Map(),
+    HELP = Object.freeze({ M, LUMBER, SHEET, FLOOR_T, splice, sheetRows, spans, STAGES });
+  function register(kind, fn) {
+    if (typeof fn !== "function") throw new Error("framing.register: " + kind + " needs a function");
+    EXTRA.set(kind, fn);
   }
 
   /* ---------- what to buy ---------- */
@@ -991,5 +1004,5 @@
     return out.sort((p, q) => STAGES.indexOf(p.stage) - STAGES.indexOf(q.stage) || (p.label < q.label ? -1 : 1));
   }
 
-  globalThis.__framing = { planeFrame, COVERING, coveringOf, ROOF_COLORS, packSheets, packSticks, STOCK, MAX_RUN, splice, STAGES, STAGE_NAME, LUMBER, SHEET, FOUNDATIONS, generate, materialsList, floorMembers, wallMembers, roofMembers, FLOOR_T };
+  globalThis.__framing = { planeFrame, COVERING, coveringOf, ROOF_COLORS, packSheets, packSticks, STOCK, MAX_RUN, splice, STAGES, STAGE_NAME, LUMBER, SHEET, FOUNDATIONS, generate, register, materialsList, floorMembers, wallMembers, roofMembers, FLOOR_T };
 })();

@@ -43,6 +43,9 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 #reticle.on { border-color: var(--danger); }
 #reticle[hidden] { display: none; }
 #help[hidden] { display: none; }
+#help { max-height: 80vh; overflow-y: auto; }
+#help h2 { font-size: 13px; margin: 10px 0 4px; color: var(--ink-dim); font-weight: 600; }
+.kc { display: inline-block; min-width: 1.3em; padding: 0 5px; margin: 0 1px; border: 1px solid var(--ink-dim); border-bottom-width: 2px; border-radius: 4px; font: 700 11px/1.5 system-ui, sans-serif; text-align: center; color: var(--ink); background: rgba(255, 255, 255, 0.08); }
 #help h1 { font-family: var(--font-display); font-weight: 400; font-size: 17px; margin: 0 0 8px; }
 #help dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
 #help dt { color: var(--accent); font-weight: 700; white-space: nowrap; }
@@ -542,22 +545,8 @@ body.cooking-active #cvnext, body.cooking-active #cvprompt { display: none; }
 </div>
 
 <div id="help" class="panel" hidden>
-  <div class="head"><h1>Controls</h1><button id="helpbtn" type="button" title="Hide controls (H shows them again)">Hide</button></div>
-  <dl>
-    <dt>Mouse</dt><dd>Turn the camera</dd>
-    <dt>W A S D</dt><dd>Move</dd>
-    <dt>Shift</dt><dd>Tap to roll, hold to sprint</dd>
-    <dt>Space</dt><dd>Jump, and once more in the air</dd>
-    <dt>Left click</dt><dd>Swing: fells trees and breaks rocks. Hold for a heavier swing</dd>
-    <dt class="cb">E</dt><dd class="cb">Parry a yellow attack just before it lands</dd>
-    <dt class="cb">Q</dt><dd class="cb">Kick: opens a shield, stuffs a quick attack</dd>
-    <dt class="cb">Hold right</dt><dd class="cb">Draw the bow and aim. Left click looses</dd>
-    <dt class="cb">Alt + tap</dt><dd class="cb">Dash strike, or triple shot while aiming</dd>
-    <dt>1 to 4</dt><dd>Axe or a terrain tool</dd>
-    <dt>F</dt><dd>Hands: pump, fit pipes, turn taps (hints appear on screen)</dd>
-    <dt>B</dt><dd>Build mode</dd>
-    <dt>Esc</dt><dd>Free the mouse</dd>
-  </dl>
+  <div class="head"><h1>Controls</h1><button id="helpbtn" type="button" title="Hide controls (? or F1 shows them again)">Hide</button></div>
+  <div id="helpbody"></div>
 </div>
 
 <div id="stance" class="panel" aria-label="Weapons and skills">

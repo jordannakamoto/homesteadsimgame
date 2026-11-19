@@ -183,7 +183,10 @@ function pushCmd(ctx, p = {}) {
   if (Math.hypot(v[2] - v[0], v[3] - v[1]) > 0.5) return fail('Too far in one push.');
   const pl = plantNear(s, v[2], v[3]);
   if (pl) return fail('The ' + PLANTS[pl.k].name.toLowerCase() + ' is in the way.');
-  const res = EW.push(s.grid, v[0], v[1], v[2], v[3], Number.isFinite(+p.level) ? +p.level : 0, { w: 0.45, t: hours(ctx) });
+  // a shovel's flat holds about two thirds of a scoop (the rest spills off its ends) and stops at firm ground
+  // standing 6 cm above it: it shapes what was dug, it does not dig
+  const res = EW.push(s.grid, v[0], v[1], v[2], v[3], Number.isFinite(+p.level) ? +p.level : 0, { w: 0.45, t: hours(ctx), cap: SCOOP_M3 * (s.scale || 1) * 0.65, stop: 0.06 });
+  if (res.blocked) return { ok: true, blocked: true, m3: 0, s: '' };
   reseat(s);
   return { ok: true, m3: res.m3, s: res.s };
 }
@@ -192,9 +195,17 @@ function patCmd(ctx, p = {}) {
   const s = ensure(ctx);
   if (!shovelOk(ctx)) return fail('You need a shovel.');
   if (!finite(p)) return fail('Where?');
-  const m3 = EW.pat(s.grid, +p.x, +p.z, 0.32, 0.85);
+  const m3 = EW.pat(s.grid, +p.x, +p.z, 0.5, 1, 0.35);
   if (!(m3 > 0)) return fail('Nothing there to pat down: it is turf, or already smooth.');
   reseat(s);
+  return { ok: true, m3 };
+}
+// A hoe worked through loose earth: the clods are broken and the lumps go, the shape stays (a fine tilth), loose.
+function tilthCmd(ctx, p = {}) {
+  const s = ensure(ctx);
+  if (!finite(p)) return fail('Where?');
+  const m3 = EW.pat(s.grid, +p.x, +p.z, 0.22, 0.6, 0, { firm: false });
+  if (m3 > 0) reseat(s);
   return { ok: true, m3 };
 }
 // Finish settling round (x, z) at once (a slope the grains have worked on long enough).
@@ -759,7 +770,7 @@ export const landscape = {
     'landscape.plant': plant, 'landscape.lift': lift, 'landscape.move': move, 'landscape.setScale': setScale,
     'landscape.load': load, 'landscape.tip': tip, 'landscape.water': water, 'landscape.line': line, 'landscape.hose': hose,
     'landscape.deliver': deliver, 'landscape.open': open, 'landscape.moveThing': moveThing,
-    'landscape.pour': pour, 'landscape.land': land, 'landscape.shed': shedAt, 'landscape.settle': settleAt, 'landscape.push': pushCmd, 'landscape.pat': patCmd,
+    'landscape.pour': pour, 'landscape.land': land, 'landscape.shed': shedAt, 'landscape.settle': settleAt, 'landscape.push': pushCmd, 'landscape.pat': patCmd, 'landscape.tilth': tilthCmd,
   },
 };
 

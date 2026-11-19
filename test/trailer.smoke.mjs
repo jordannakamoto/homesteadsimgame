@@ -1,22 +1,13 @@
 // Browser smoke test of the trailer: node test/trailer.smoke.mjs  (needs dist/index.html and Playwright)
 // A trailer comes with the starter ATV; backing the ball onto its tongue hitches it; it follows and swings behind;
-// X unhitches while seated; lumber loads onto its bed by holding at a pile, rides with it, the build can draw from it,
+// holding R unhitches while seated; lumber loads onto its bed by holding at a pile, rides with it, the build can draw from it,
 // and holding the left button tips the load off as a pile on the ground. The construction ledger balances throughout.
-import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
-const file = 'file://' + process.cwd() + '/dist/index.html';
-const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] });
-const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-const page = await ctx.newPage(); page.setDefaultTimeout(180000);
-const errors = [];
-page.on('console', (m) => { if (m.type() === 'error' && !/net::ERR_/.test(m.text())) errors.push(m.text().slice(0, 400)); });
-page.on('pageerror', (e) => errors.push('PAGEERROR ' + String(e.stack || e).slice(0, 600)));
-const fails = [];
-const check = (name, ok, info = '') => { console.log((ok ? 'ok   ' : 'FAIL ') + name + (info ? '  ' + info : '')); if (!ok) fails.push(name); };
-const G = (fn, arg) => page.evaluate(fn, arg);
+import { openPage } from './helpers/page.mjs';
+const T = await openPage();   // 640x360, Low quality locked, fonts blocked, errors collected
+const { page, browser, errors, fails, check, G } = T;
 const frames = async (n) => { const f0 = await G(() => __game.renderer.info.render.frame); for (let i = 0; i < 400; i++) { await page.waitForTimeout(100); if ((await G(() => __game.renderer.info.render.frame)) - f0 >= n) return; } throw new Error('page stopped rendering'); };
 
-await page.goto(file, { waitUntil: 'domcontentloaded', timeout: 120000 }); await page.waitForTimeout(8000);
-await G(() => { __game.lockQuality(); __game.setQuality('low'); });
+await T.load();   // waits for the game object, not a fixed 8 s
 await frames(40);
 const st = await G(() => { const u = __game.sim.state.sys.vehicles.units; return Object.values(u).map((q) => ({ id: q.id, kind: q.kind, x: q.x, z: q.z, yaw: q.yaw })); });
 const atv = st.find((q) => q.kind === 'atv'), tr = st.find((q) => q.kind === 'trailer_small');
@@ -94,8 +85,8 @@ await G(() => __vehicles.tip(true)); await frames(150); await G(() => __vehicles
 const tipped = await G(({ t }) => { const s = __game.sim.state.sys.construction; return { on: s.stacks.filter((q) => q.carrier === t).length, ground: s.stacks.filter((q) => q.itemId === 'lumber_2x4' && !q.carrier).map((q) => q.qty), bed: __vehicles.bed(t), imb: JSON.stringify(__game.sim.systems.find((q) => q.name === 'construction').api.imbalance(s)) }; }, { t: tr.id });
 check('holding the left button tips the load off as a pile', tipped.on === 0 && tipped.ground.length >= 1, JSON.stringify(tipped));
 check('the ledger balances after tipping', tipped.imb === pile.imb, tipped.imb);
-await page.keyboard.press('KeyX'); await frames(10);
-check('X unhitches while seated', await G(({ t }) => !__game.sim.state.sys.vehicles.units[t].towedBy, { t: tr.id }));
+await page.keyboard.down('KeyR'); await frames(60); await page.keyboard.up('KeyR'); await frames(10);
+check('holding R unhitches while seated', await G(({ t }) => !__game.sim.state.sys.vehicles.units[t].towedBy, { t: tr.id }));
 const cost = await G(() => __vehicles.stats());
 console.log('frame cost', JSON.stringify(cost));
 check('no page errors', errors.length === 0, errors.slice(0, 4).join(' | '));

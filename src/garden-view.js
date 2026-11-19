@@ -98,7 +98,7 @@
   const hash = (a, b) => { let h = (a * 374761393 + b * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
   const SOIL_DRY = new T.Color(0x8c7860), SOIL_WET = new T.Color(0x3a2c22), STRAW = new T.Color(0xcdb176), WEEDY = new T.Color(0x56703a), SOD = new T.Color(0x5d7a36), _c = new T.Color();
   const RAISE = 0.05;
-  const SUB = 2;   // each 30 cm cell is drawn as 2 x 2 little quads, so the tilth has clods and furrows
+  const SUB = 3;   // each 30 cm cell is drawn as 3 x 3 little quads (10 cm, as fine as the shaped ground), so the tilth has clods and furrows and follows a dug shape
   const dimOf = (b) => b.x0 + ':' + b.z0 + ':' + b.nx + ':' + b.nz;
   function buildBed(b) {
     const g = new T.Group();
@@ -150,7 +150,9 @@
           if (t <= 0) y -= 0.3;
           else if (tp(x - e, z - e) > 0 && tp(x + e, z - e) > 0 && tp(x - e, z + e) > 0 && tp(x + e, z + e) > 0) {
             const across = along ? z - b.z0 : x - b.x0, r = hash(Math.round(x * 60), Math.round(z * 60)) - 0.5;
-            y += t >= 1 ? RAISE + 0.02 * Math.cos((across / CELL) * Math.PI * 2) + r * 0.016 - dp : 0.025 + 0.02 * t + r * 0.07;
+            // on a shaped slope (a hill, the side of a hollow) the bed's own raise and furrows ease off: the shape is the bed
+            const sl = Math.hypot(rel(x + 0.1, z) - rel(x - 0.1, z), rel(x, z + 0.1) - rel(x, z - 0.1)) / 0.2, fl = clamp(1 - sl * 2.5, 0.25, 1);
+            y += t >= 1 ? (RAISE + 0.02 * Math.cos((across / CELL) * Math.PI * 2)) * fl + 0.012 + r * 0.016 - dp : 0.025 + 0.02 * t + r * 0.07 * fl;
           } else y += 0.006;
           pos[k++] = x; pos[k++] = y; pos[k++] = z;
         }
@@ -713,6 +715,15 @@
     if (res.broke) { G.burst(x1, y + 0.12, z1, 6, 0x5e8a3a, 1.6, 2.6, 0.07, 0.7); }             // torn sod
     if (res.clearedM2 > 0.004) G.burst(x1, y + 0.1, z1, 5, 0x6f9a3a, 1.2, 1.8, 0.05, 0.5);  // cut weeds
     if (res.worked) { G.burst(x1, y + 0.1, z1, 6, 0x3a2c22, 1.0, 1.6, 0.06, 0.5); tipEvent('bed'); }   // fine dark crumbs when the soil comes right
+    // ground the shovel has shaped: the hoe breaks its clods and smooths its lumps, keeping its shape (a hill stays a
+    // hill, a hollow a hollow), and leaves it loose: a seedbed made on the shape you dug
+    if (LS() && G.sim.handlers.has('landscape.tilth')) {
+      const lg = G.sim.state.sys.landscape.grid;
+      for (const [gx, gz] of batch) {
+        const x = (gx + 0.5) * CELL, z = (gz + 0.5) * CELL;
+        if (G.earthwork.sAt(lg, Math.round(x / lg.step), Math.round(z / lg.step))) cmd('landscape.tilth', { x, z });
+      }
+    }
     // hilling: the blade drawn past a potato pulls soil up round its stems from the free ground beside it
     if (LS()) for (const [gx, gz] of batch) {
       const p = plantAt((gx + 0.5) * CELL, (gz + 0.5) * CELL);

@@ -89,6 +89,9 @@ export const FIXTURES_WATER = frozen({
     dims: { w: 0.0159, d: 0.0159, h: 1 }, nominalMm: 12, innerMm: 12.3, outerMm: 15.9, hazenC: 150 },
   pipe_pex_20: { name: 'PEX pipe, 20 mm (metric 20 x 2.0)', category: 'pipe', ports: [], priceUsd: 1.2, priceUnit: 'm', massKg: 0.11,
     dims: { w: 0.02, d: 0.02, h: 1 }, nominalMm: 20, innerMm: 16.0, outerMm: 20, hazenC: 150 },
+  // 3/4 in PEX (ASTM F876, CTS): 22.2 mm outside, about 17.0 mm bore. The size of a house's main line to a manifold.
+  pipe_pex_34: { name: 'PEX pipe, 3/4 in (17 mm bore)', category: 'pipe', ports: [], priceUsd: 1.2, priceUnit: 'm', massKg: 0.1,
+    dims: { w: 0.0222, d: 0.0222, h: 1 }, nominalMm: 19, innerMm: 17.0, outerMm: 22.2, hazenC: 150 },
   pipe_poly_25: { name: 'Poly pipe, 25 mm PE100 SDR 11', category: 'pipe', ports: [], priceUsd: 1.3, priceUnit: 'm', massKg: 0.17,
     dims: { w: 0.025, d: 0.025, h: 1 }, nominalMm: 25, innerMm: 20.4, outerMm: 25, hazenC: 145 },
   pipe_poly_32: { name: 'Poly pipe, 32 mm PE100 SDR 11', category: 'pipe', ports: [], priceUsd: 1.9, priceUnit: 'm', massKg: 0.27,
@@ -108,6 +111,12 @@ export const FIXTURES_WATER = frozen({
   // US federal maximum for kitchen faucets: 2.2 gpm at 60 psi (8.3 L/min at 414 kPa).
   sink_kitchen: { name: 'Kitchen sink and faucet', category: 'outlet', ports: [P.in, P.hot, P.drain], priceUsd: 220, massKg: 12,
     dims: { w: 0.8, d: 0.55, h: 0.9 }, ratedLmin: 8.3, ratedKPa: 414, outletHeightM: 1.0, waste: 'grey' },
+  // WaterSense lavatory faucet maximum 1.5 gpm at 60 psi (5.7 L/min at 414 kPa).
+  sink_bath: { name: 'Bathroom sink and faucet', category: 'outlet', ports: [P.in, P.hot, P.drain], priceUsd: 140, massKg: 14,
+    dims: { w: 0.55, d: 0.45, h: 0.85 }, ratedLmin: 5.7, ratedKPa: 414, outletHeightM: 0.95, waste: 'grey' },
+  // A tub/shower valve and a WaterSense head: 2.0 gpm at 80 psi (7.6 L/min at 552 kPa), head at 2.0 m. Indoors it drains to a floor drain.
+  shower_indoor: { name: 'Shower valve and head', category: 'outlet', ports: [P.in, P.hot, P.drain], priceUsd: 160, massKg: 5,
+    dims: { w: 0.9, d: 0.9, h: 2.1 }, ratedLmin: 7.6, ratedKPa: 552, outletHeightM: 2.0, defaultTempC: 38, waste: 'grey' },
   // WaterSense toilet, 1.28 gpf (4.8 L per flush); a fill valve passes ~11 L/min at 50 psi and needs ~20 psi.
   toilet_flush: { name: 'Flush toilet, 4.8 L (1.28 gpf)', category: 'outlet', ports: [P.in, P.drain], priceUsd: 260, massKg: 40,
     dims: { w: 0.38, d: 0.7, h: 0.75 }, ratedLmin: 11, ratedKPa: 345, outletHeightM: 0.6, flushL: 4.8, waste: 'black' },

@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSim, createGameSim, TICK, DAY, START_T, makeSave, readSave, f32ToBase64, base64ToF32, hashState, clockText } from '../src/sim/index.js';
+import { BENCH, benchOnly } from './helpers/bench.mjs';
 
 // A small system with real state, randomness, a cadence and a command, used to exercise the core.
 const tank = () => ({
@@ -101,7 +102,7 @@ test('the game simulation builds, runs a year, and is deterministic', () => {
   const t0 = performance.now(); a.runDays(365); const ms = performance.now() - t0;
   b.runDays(365);
   assert.equal(a.hash(), b.hash());
-  assert.ok(ms < 20000, 'a simulated year should run headlessly in seconds, took ' + ms.toFixed(0) + ' ms');
+  if (BENCH) assert.ok(ms < 20000, 'a simulated year should run headlessly in seconds, took ' + ms.toFixed(0) + ' ms');
 });
 
 test('an immediate command can replace system state with zero elapsed time', () => {

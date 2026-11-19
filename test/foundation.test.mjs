@@ -46,7 +46,7 @@ test('a slab building becomes a foundation job; a pier-block shed does not', () 
   assert.equal(again.jobId, r.jobId);
   assert.equal(foundationRead.job(sim.state, r.jobId).elements[0].dig.frac, 0.5);
   // nothing is held before the pour
-  assert.ok(!pr(sim).hold || !Object.keys(pr(sim).hold).length);
+  assert.ok(!(pr(sim).keep || {}).hold || !Object.keys((pr(sim).keep || {}).hold).length);
 
   const piers = createGameSim(3);
   assert.ok(piers.commandNow('construction.setPlan', K.planFromPieces(SID, shed.pieces, shed.materialsList, { x: 40, z: 40, r: 2 })).ok);
@@ -89,7 +89,7 @@ test('a sandbox pour finishes the foundation stage, then framing waits for the f
   assert.equal(v.held, null);
   assert.equal(K.blocked(pr(sim), joist), null);
   assert.ok(K.stageOpen(pr(sim), 'floor-frame'));
-  assert.ok(!Object.keys(pr(sim).hold).length);
+  assert.ok(!Object.keys((pr(sim).keep || {}).hold).length);
 
   // the cure is followed until 28 days equivalent, then the job is done and nothing is stepped
   sim.runDays(3);
@@ -108,7 +108,7 @@ test('forget releases the holds; saves and replays carry the cure', () => {
   assert.equal(copy.hash(), sim.hash());
   assert.ok(sim.commandNow('foundation.forget', { structId: SID }).ok);
   assert.equal(foundationRead.jobFor(sim.state, SID), null);
-  assert.ok(!Object.keys(pr(sim).hold).length);
+  assert.ok(!Object.keys((pr(sim).keep || {}).hold).length);
   assert.equal(sim.commandNow('construction.setHold', { structId: SID, stage: 'nope', reason: 'x' }).reason, 'unknown stage');
   assert.equal(sim.commandNow('construction.setHold', { structId: 999, stage: 'roofing', reason: 'x' }).reason, 'unknown building');
 });

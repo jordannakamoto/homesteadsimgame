@@ -2684,23 +2684,29 @@ control.guards.push(() => player.tool === 'build' ? 'build mode' : window.__game
   : player.climbY != null ? 'climbing' : player.standY != null ? 'standing on something' : window.__reach?.on || window.__hands?.isOpen ? 'hands busy'
   : sim.state.sys.construction?.carried ? 'arms full' : null);
 const cursor = { x: 0, y: 0, z: 0, valid: false };
+const SANDBOX_TERRAIN = (() => { try { return localStorage.getItem('sandbox') === '1'; } catch (e) { return false; } })();
+if (!SANDBOX_TERRAIN) for (const b of document.querySelectorAll('#tools button[data-tool="dig"], #tools button[data-tool="raise"], #tools button[data-tool="level"]')) b.hidden = true;
 window.addEventListener('keydown', (e) => {
   if (e.target && e.target.tagName === 'INPUT') return;
   keys[e.code] = true;
   if (!(window.__build && window.__build.key(e))) {          // build mode gets first refusal on every key
     if (e.code === 'Digit1') setTool('axe');
-    if (e.code === 'Digit2') setTool('dig');
-    if (e.code === 'Digit3') setTool('raise');
-    if (e.code === 'Digit4') setTool('level');
+    if (SANDBOX_TERRAIN) {                                   // the magic terrain brush: sandbox only (localStorage.sandbox = '1')
+      if (e.code === 'Digit2') setTool('dig');
+      if (e.code === 'Digit3') setTool('raise');
+      if (e.code === 'Digit4') setTool('level');
+    }
   }
+  if (e.code === 'Escape' && player.tool !== 'build' && (player.tool === 'dig' || player.tool === 'raise' || player.tool === 'level')) setTool('axe');
   if (player.tool !== 'build') {                             // build mode uses these keys itself; its speed buttons still work
     if (e.code === 'Semicolon') stepSpeed(-1);
     if (e.code === 'Quote') stepSpeed(1);
     if (e.code === 'Backquote') setSpeed(simCtl.speed ? 0 : 1);
   }
   if (e.code === 'KeyG') cycleQuality();
+  // the controls sheet: ? or F1 (H is the Hens'); src/game/keymap.js renders it
+  if ((e.code === 'F1' || (e.code === 'Slash' && e.shiftKey)) && !e.repeat && player.tool !== 'build') { e.preventDefault(); const h = document.getElementById('help'); if (h.hidden && window.__keymap) window.__keymap.render(); h.hidden = !h.hidden; }
   if (e.code === 'KeyV' && !e.repeat && player.tool !== 'build') camView('next');
-  if (e.code === 'KeyH') { const h = document.getElementById('help'); h.hidden = !h.hidden; }
   if (e.altKey || ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'AltLeft', 'AltRight'].includes(e.code)) e.preventDefault();
 });
 window.addEventListener('keyup', (e) => { keys[e.code] = false; if (e.code === 'AltLeft' || e.code === 'AltRight') e.preventDefault(); });
@@ -4879,6 +4885,8 @@ window.__game = {
     do: (name, payload) => { const r = runStockCommand(sim, name, payload); hudDirty = true; return r; },
   },
   saveGame, saveData: () => saveData(), setSpeed,
+  // test hook: advance n fixed-length frames (update + one draw) synchronously, no wall-clock wait; smokes use it instead of sleeps
+  stepFrames: (n = 1, dt = 1 / 60) => { for (let i = 0; i < n; i++) step(dt); render(); return n; },
   // what a save costs: bytes as stored (earthwork grids packed) and as plain JSON
   saveSize: () => { const d = saveData(true); return { bytes: stringifySave(d).length, plainBytes: JSON.stringify(d).length }; }, get speed() { return simCtl.speed; },
   enemies, spawnEnemy, arrows, fireArrow, MOVES, startMove, juice, updateHud, waveHeight, depthState, lockQuality: () => { autoDropped = true; }, world, player, cam, keys, mouse, cursor, step, render, heightAt, fellTree, applyBrush, setQuality, renderer, THREE,

@@ -9,6 +9,7 @@
   const canvas = G.renderer.domElement;
 
   const OP = window.__openings;
+  const EXT = window.__buildExt; // the extension point (src/build-ext.js): decks, porches, lofts... in files of their own
   const WALL_H = 2.7,
     FLOOR_T = 0.12,
     EAVE = 2.84,
@@ -4846,6 +4847,7 @@
     if (S.lining !== "boards") data.lining = S.lining;
     if (S.deco) data.deco = JSON.parse(JSON.stringify(S.deco));
     if (S.plan.size) data.plan = [...S.plan].sort();
+    if (S.ext && Object.keys(S.ext).length) data.ext = JSON.parse(JSON.stringify(S.ext)); // extensions' own data (src/build-ext.js)
     S.ser = { ver: S.ver, data };
     return data;
   }
@@ -4878,6 +4880,7 @@
     S.ins = d.ins || null;
     S.lining = d.lining === undefined ? "boards" : d.lining;
     S.deco = d.deco ? JSON.parse(JSON.stringify(d.deco)) : null;
+    S.ext = d.ext ? JSON.parse(JSON.stringify(d.ext)) : {};
     // a copy is a new plan: unbuilt where plans start unbuilt, built otherwise
     S.plan = new Set(fresh ? [] : d.plan || []);
     S.known = fresh ? new Set() : null;
@@ -6914,6 +6917,7 @@
     }
     if (B.tool === "copy") return copyPreview(h);
     if (B.tool === "equip") return fxPreview();
+    if (EXT.isTool(B.tool)) return void ((ghostGroup.visible = gridGroup.visible = false), (B.op = null), EXT.hover(B.tool, h), hint());
     const F = h.F,
       d = B.drag,
       ty = B.typed;
@@ -7193,6 +7197,7 @@
     }
     updateHover();
     const h = B.hover;
+    if (EXT.isTool(B.tool)) return void (h && EXT.down(B.tool, h, e)); // an extension's tool acts on its own
     if (B.tapMode === "paint") {
       B.painting = { fresh: true };
       return paint(B.painting);
@@ -7827,9 +7832,10 @@
         g.push(G_.act("mclear", "Clear all", "bin"));
       }
     } else if (t === "copy") g.push(G_.act("turn", "Turn", "turn", "Shift wheel"));
+    EXT.view(t, g, G_); // an extension's tool options, or its inspector
     const busy = B.move ? "move" : B.drag && B.drag.mode === "click" ? "chain" : B.tapMode ? B.tapMode : B.measA ? "measure" : t === "copy" ? "copy" : "";
     const oneRoof = t === "select" && B.sel.length === 1 && (selRefs()[0] || {}).kind === "roof";
-    return { designTitle: (t === "window" || t === "door") && freeTool() ? (B.fsel ? "Editing the selected " + t : "Designing the next " + t) : t === "roof" ? "Planning the next roof" : oneRoof ? "The selected roof" : "", tool: t, top: t === "tower" ? "room" : t === "copy" ? "select" : t, tools: TOOLS, groups: g, hint: B.hintText, undo: B.undo.length, redo: B.redo.length, snap: B.snap, free: B.free, level: B.level, levelName: LEVEL_NAME(B.level), busy, sel: B.sel.length, fold: B.fold, sched: B.sched ? schedule() : null };
+    return { designTitle: (t === "window" || t === "door") && freeTool() ? (B.fsel ? "Editing the selected " + t : "Designing the next " + t) : t === "roof" ? "Planning the next roof" : oneRoof ? "The selected roof" : "", tool: t, top: t === "tower" ? "room" : t === "copy" ? "select" : t, tools: TOOLS.concat(EXT.tools()), groups: g, hint: B.hintText, undo: B.undo.length, redo: B.redo.length, snap: B.snap, free: B.free, level: B.level, levelName: LEVEL_NAME(B.level), busy, sel: B.sel.length, fold: B.fold, sched: B.sched ? schedule() : null };
   }
   // ---- a door or window in the view: the gaps either side of it, its sizes, and handles on its edges to resize it
   // the clear gaps from a unit to what stands either side of it along its wall (or the wall's end), as live sizes
@@ -8376,6 +8382,7 @@
     });
   }
   function choose(id, v) {
+    if (EXT.choose(id, v)) return touchUi(); // "x:<tool>:<key>": an extension's option
     if (id === "shape") return setTool(v);
     if (id === "roofall") return roofBuilding();
     if (/^(s:)?(rshape|rturn|pitch|pitchn|eave|rake|gutters|rcolor)$/.test(id)) return roofChoose(id, v);
@@ -9144,6 +9151,7 @@
         desc.roofs.push(R);
       }
     }
+    EXT.describe(S, desc, { H, yo, up, groundY, toWorld: (x, z) => toWorld(S, x, z) }); // extensions add to desc (desc.extras)
     const list = FR.generate(desc),
       byParent = new Map(),
       byId = new Map();
@@ -9746,6 +9754,8 @@
       S.group.add(mesh, rm);
       S.memMeshes.push(mesh, rm);
     }
+    // extensions draw what is not plain members (a deck's boards as one surface...); each mesh's geometry is its own, disposed on redraw
+    EXT.draw(S, (mesh, roof) => ((mesh.userData.own = true), (mesh.userData.roof = !!roof), S.group.add(mesh), S.memMeshes.push(mesh), mesh), mem, st);
   }
   // what a framed wall is made of right now, from the outside in: only the layers that are built
   function builtWallLayers(S, id, mat, kids) {
@@ -10767,6 +10777,7 @@
         c = W2(it[0], it[1]);
       out.push({ ...head(it[5], "fixture", it[2], "mixed"), name: def.name, a: c, b: c, y0: y0 + y, y1: y0 + y + bb.h, height: bb.h, width: bb.w, depth: bb.d, rotationRad: S.yaw + ((it[3] || 0) * Math.PI) / 4, colour: DYES[it[4] || 0][0], light: !!def.light, cosy: def.cosy || 0 });
     }
+    EXT.pieces(S, out, { head, W2, loop, y0, H, up }); // extensions' own pieces (src/build-ext.js), before members are attached
     // every member of the construction, as a piece of its own; what it belongs to lists it and is built when they all are
     for (const p of out) {
       const k = kids(p.id);
@@ -10846,6 +10857,27 @@
     }
     return false;
   }
+  // the extension point (src/build-ext.js): S.ext[id] is an extension's own data on a structure, plain JSON, saved and
+  // undone with it. null removes it.
+  function setExt(structId, id, data) {
+    const S = B.structs.find((O) => O.id === structId);
+    if (!S || !EXT.get(id)) return false;
+    pushUndo();
+    S.ext || (S.ext = {});
+    if (data === null || data === undefined) delete S.ext[id];
+    else S.ext[id] = JSON.parse(JSON.stringify(data));
+    S.ver++;
+    S.pc = null;
+    rebuild(S);
+    touchUi();
+    return true;
+  }
+  EXT.bind({ hints: HINTS, tools: TOOLS, touch: touchUi, selecting: () => B.sel.length > 0,
+    refresh() {
+      for (const S of B.structs) ((S.ver++), (S.pc = null), B.dirty.add(S));
+      B.version++;
+      touchUi();
+    } });
   const changeFns = [];
   let changeV = 0;
   window.__build = {
@@ -10868,6 +10900,14 @@
     restore: restoreAll,
     ensureLoaded,
     setLayers,
+    // the extension point (ARCHITECTURE.md, "Adding to build mode"): extend(spec), setExt(structId, id, data), getExt(structId, id)
+    extend: EXT.extend,
+    setExt,
+    getExt(structId, id) {
+      const S = B.structs.find((O) => O.id === structId);
+      return S && S.ext && S.ext[id] !== undefined ? JSON.parse(JSON.stringify(S.ext[id])) : null;
+    },
+    extSelect: EXT.select,
     // construction (docs/CONSTRUCTION.md): stages, built state, the shopping list and ready-made plans
     STAGES,
     FOUNDATIONS,
