@@ -37,13 +37,14 @@ import { compileLinks } from './core/links.js';
 import { toNeutral, worldOf, runState, progress, pathLength } from './core/routes.js';
 import { SERVICE_CLASSES, SERVICE_SPECS, DEFAULT_SPEC, DEVICES, NODE_KINDS, SERVICE_TEXT, PRESETS_M, routeRule, boreCheck,
   SERVICE_LINES, FIXINGS, workCost, runCostLeft, runCostAll, nodeCost, stapleMarks,
-  DEVICE_ITEM, DEFAULT_DEVICE, PRESET_DEVICE, TRIM_STEPS, TRIM_TEXT, trimCost, deviceIsLight } from './content/services.js';
+  DEVICE_ITEM, DEFAULT_DEVICE, PRESET_DEVICE, TRIM_STEPS, TRIM_TEXT, trimCost, deviceIsLight,
+  WATER_DEVICE, WATER_TRIM_STEPS, WATER_PRESET_DEVICE, WATER_TRIM_TEXT, WATER_TEST, MATE_M, waterTrimCost, capCost } from './content/services.js';
 import { FIXTURES_ELECTRICAL } from './fixtures-electrical.js';
 import { FIXTURES_WATER } from './fixtures-water.js';
 
 const STATE_V = 1;
 const fresh = () => ({ v: STATE_V, routesV: -1, version: 0, pieces: [], powerPieces: [], waterPieces: [], sig: '[[],[]]', links: {},
-  tally: {}, covered: {}, issues: [], checks: {}, deferred: {}, notes: {}, want: {}, mains: {} });
+  tally: {}, covered: {}, issues: [], checks: {}, deferred: {}, notes: {}, want: {}, mains: {}, valves: {} });
 const specFor = (run) => SERVICE_SPECS[run.spec] || SERVICE_SPECS[DEFAULT_SPEC[run.cls]] || {};
 const r3 = (x) => Math.round(x * 1000) / 1000;
 const deviceOf = (n) => (n && n.state === 'trimmed' && n.set && n.set.device ? DEVICES[n.set.device] || null : null);
@@ -102,7 +103,22 @@ function compilePower(R, g, out, opts = {}) {
   return [...fx.values(), ...wires];
 }
 
-function compileWater(R, g, kind, out, fxSeen) {
+// narrowest pipe of a set of runs, and the extra length that stands for the roomier ones (Hazen-Williams: K goes as 1 / d^4.87),
+// so a 3/4 in main feeding a 1/2 in branch is one pipe of the branch's size, shortened where it is wide
+const hwK = (f) => 10.67 / (Math.pow(f.hazenC || 140, 1.852) * Math.pow(f.innerMm / 1000, 4.8704));
+function narrowest(R, runs) {
+  let ref = null;
+  const fx = runs.map((id) => { const sp = R.runs[id] ? specFor(R.runs[id]) : {}; return sp.material && FIXTURES_WATER[sp.material] || null; });
+  if (!fx.length || fx.some((f) => !f)) return null;
+  for (const f of fx) if (!ref || f.innerMm < ref.innerMm) ref = f;
+  let eq = 0;
+  runs.forEach((id, i) => { eq += (R.runs[id].lengthM || 0) * (hwK(fx[i]) / hwK(ref) - 1); });
+  return { material: ref.id, equivM: Math.abs(eq) > 1e-9 ? r3(eq) : 0 };
+}
+const closedRun = (opts, id) => !!(opts.valves && opts.valves['r:' + id] === false);
+const closedNode = (opts, id) => !!(opts.valves && opts.valves['n:' + id] === false);
+
+function compileWater(R, g, kind, out, fxSeen, opts = {}) {
   const pieces = [], terminals = [], refs = {};
   for (const id of Object.keys(g.joints).sort()) {
     const j = g.joints[id], n = !j.loose && R.nodes[id];
@@ -112,18 +128,26 @@ function compileWater(R, g, kind, out, fxSeen) {
     if (!wdef) continue;
     const pid = 'sv:' + id;
     if (!fxSeen.has(pid)) { fxSeen.add(pid); pieces.push(fixturePiece(R, n, pid, dev.water, dev.stubM || 0)); }
-    const hot = g.edges.some((e) => (e.a === id || e.b === id) && (SERVICE_SPECS[e.spec] || {}).hot);
+    const mate = kind !== 'drain' && n.set && n.set.mate && R.nodes[n.set.mate] && g.joints[n.set.mate] ? n.set.mate : null;
+    const hot = !mate && g.edges.some((e) => (e.a === id || e.b === id) && (SERVICE_SPECS[e.spec] || {}).hot);
     const port = kind === 'drain' ? 'drain' : hot && wdef.ports.some((p) => p.id === 'hot') ? 'hot' : 'in';
     refs[id] = { piece: pid, port }; terminals.push({ id, ref: refs[id] });
+    if (mate) { refs[mate] = { piece: pid, port: 'hot' }; terminals.push({ id: mate, ref: refs[mate] }); }   // the hot stub of the same fixture
   }
   const res = compileLinks({ terminals, edges: g.edges, joints: g.joints, openEnds: g.openEnds }, { start: () => [], sum: (acc, st) => acc.concat(st.edge.run) });
-  const material = (runs) => { const sp = specFor(R.runs[runs[0]] || {}); return sp.material ? { material: sp.material } : { diameterMm: sp.diameterMm || 50 }; };
+  const material = (runs) => {
+    const sp = specFor(R.runs[runs[0]] || {});
+    if (!sp.material) return { diameterMm: sp.diameterMm || 50 };
+    const nw = narrowest(R, runs);
+    return nw ? { material: nw.material, ...(nw.equivM ? { equivM: nw.equivM } : {}) } : { material: sp.material };
+  };
   for (const r of res.links) {
     const A = refs[r.a], B = refs[r.b];
     if (!A || !B || !r.acc.length) continue;
     const runs = r.acc, first = R.runs[runs[0]], props = (first && first.props) || {};
     const id = 'sv:p:' + r.a + '>' + r.b;
-    pieces.push({ id, kind: 'pipe', from: A, to: B, lengthM: r3(Math.max(0.05, r.lengthM)), ...material(runs), shut: r.blocked.length > 0,
+    const shut = r.blocked.length > 0 || runs.some((x) => closedRun(opts, x)) || closedNode(opts, r.a) || closedNode(opts, r.b);   // the main, a line's stop, a fixture's stop
+    pieces.push({ id, kind: 'pipe', from: A, to: B, lengthM: r3(Math.max(0.05, r.lengthM)), ...material(runs), shut,
       indoor: props.indoor ?? runs.every((x) => R.runs[x] && R.runs[x].frame != null), insulationMm: +props.insulationMm || 0, buriedDepthM: +props.buriedDepthM || 0,
       runs, services: true });
     out.links[id] = runs;
@@ -131,6 +155,7 @@ function compileWater(R, g, kind, out, fxSeen) {
   for (const o of res.open) {
     const from = refs[o.from];
     if (!from || from.port !== 'out' || !o.acc.length) continue;               // only a source spills
+    if (o.acc.some((x) => closedRun(opts, x))) continue;                       // a line stopped at the manifold is dry beyond
     const e = o.end, run = e.run ? R.runs[e.run] : null, n = R.nodes[e.node || o.at];
     const w = run ? endWorld(R, run, e.end) : n ? worldOf(R, n.frame, n.at) : [0, 0, 0];
     const id = 'sv:leak:' + o.at;
@@ -141,17 +166,32 @@ function compileWater(R, g, kind, out, fxSeen) {
   return pieces;
 }
 
+// What a node is to the water walk. A stub-out is an open end unless it is capped or has a fixture on it: a stub that is
+// strapped up and not capped is open (capped === false is the same by name); one not yet strapped, or an older save's
+// (capped true), is not. The hot stub of a fixture (set.of) is the fixture's, never open. A manifold is a hub; closing its
+// main blocks everything past it.
+export function jointRule(opts = {}) {
+  return (n) => {
+    const set = n.set || {}, stub = (n.kind === 'stub_supply' || n.kind === 'stub_drain') && !n.ref && !deviceOf(n) && !set.of;
+    const open = stub && (set.capped === false || (n.kind === 'stub_supply' && set.capped === undefined && n.state === 'set'));
+    return { open, ...(n.kind === 'manifold' && closedNode(opts, n.id) ? { blocked: true } : {}) };
+  };
+}
+
 // Pure: routes state -> { powerPieces, waterPieces, links, issues }
 export function compileServices(R, classes = SERVICE_CLASSES, opts = {}) {
   const out = { links: {} };
-  const graphs = toNeutral(R, classes, {
-    joint: (n) => ({ open: (n.kind === 'stub_supply' || n.kind === 'stub_drain') && !n.ref && !deviceOf(n) && !!n.set && n.set.capped === false }),
-  });
+  const graphs = toNeutral(R, classes, { joint: jointRule(opts) });
   const powerPieces = graphs.power ? compilePower(R, graphs.power, out, { ...opts, classes }) : [];
   const fxSeen = new Set(), waterPieces = [];
-  for (const k of ['water', 'drain']) if (graphs[k]) waterPieces.push(...compileWater(R, graphs[k], k, out, fxSeen));
+  for (const k of ['water', 'drain']) if (graphs[k]) waterPieces.push(...compileWater(R, graphs[k], k, out, fxSeen, opts));
   const issues = [];
   for (const run of Object.values(R.runs)) if (run.stray) issues.push({ runId: run.id, severity: 'warning', reason: SERVICE_TEXT.stray, fix: 'Take the run out, or put back what it was fixed to.' });
+  for (const n of Object.values(R.nodes)) {                                  // a 6-port manifold has six lines, one of which may be the main
+    if (n.kind !== 'manifold' || n.stray) continue;
+    const k = Object.values(R.runs).filter((r) => (r.a === n.id || r.b === n.id) && !r.stray).length;
+    if (k > MANIFOLD_PORTS + 1) issues.push({ pieceId: n.id, severity: 'warning', reason: 'A 6-port manifold has six lines (and its main): this one has ' + (k - 1) + '.', fix: 'Take a line off, or plan another manifold.' });
+  }
   return { powerPieces, waterPieces, links: out.links, issues };
 }
 
@@ -164,6 +204,8 @@ function tallyOf(R, s, classes) {
 }
 
 const ROUGH = 'rough-in', TRIM = 'trim-out';
+const WATER_TEST_TEXT = WATER_TRIM_TEXT.faults;
+const MANIFOLD_PORTS = 6;
 const addTo = (o, more) => { for (const [k, q] of Object.entries(more)) o[k] = Math.round(((o[k] || 0) + q) * 1e6) / 1e6; return o; };
 // the shopping lines of one building: what every run and box planned there takes (deferred ones left out)
 function linesOf(R, s, frame, classes) {
@@ -178,7 +220,7 @@ function linesOf(R, s, frame, classes) {
   for (const id of Object.keys(R.nodes).sort()) {
     const n = R.nodes[id];
     if (n.frame !== frame || n.stray || s.deferred[id]) continue;
-    const c = nodeCost(n);
+    const c = { ...nodeCost(n), ...capCost(n) };
     addTo(tot, c); addTo(count, c);
   }
   // trim-out: a device (and its plate) for each box a cable comes to, a breaker for each slot. A node trimmed before
@@ -186,9 +228,9 @@ function linesOf(R, s, frame, classes) {
   const trimTot = {};
   for (const id of Object.keys(R.nodes).sort()) {
     const n = R.nodes[id];
-    if (n.frame !== frame || n.stray || s.deferred[id] || !CABLE_TRIM.has(n.kind) || (n.state === 'trimmed' && !(n.set && n.set.trim))) continue;
-    if (!cableRunsAt(R, id, classes, s.deferred).length) continue;
-    addTo(trimTot, fullTrimCost(R, n, classes));
+    if (n.frame !== frame || n.stray || s.deferred[id] || !(CABLE_TRIM.has(n.kind) || n.kind === 'stub_supply') || (n.state === 'trimmed' && !(n.set && n.set.trim))) continue;
+    if (!(n.kind === 'stub_supply' ? supplyRunsAt(R, id, classes, s.deferred) : cableRunsAt(R, id, classes, s.deferred)).length) continue;
+    addTo(trimTot, fullTrimCost(R, n, classes, s.deferred));
   }
   const line = (stage, tot, cnt) => (itemId) => ({ key: stage + '|services:' + itemId, stage, itemId, qty: tot[itemId], label: (SERVICE_LINES[itemId] || {}).label || itemId, why: (SERVICE_LINES[itemId] || {}).why || '', count: cnt ? cnt[itemId] || 0 : Math.round(tot[itemId]) });
   return [...Object.keys(tot).sort().map(line(ROUGH, tot, count)), ...Object.keys(trimTot).sort().map(line(TRIM, trimTot, null))];
@@ -204,6 +246,61 @@ function cableRunsAt(R, id, classes = SERVICE_CLASSES, deferred = {}) {
   for (const k of Object.keys(R.runs).sort()) { const r = R.runs[k]; if ((r.a === id || r.b === id) && isPower(classes, r) && !r.stray && !deferred[r.id]) out.push(r); }
   return out;
 }
+const isSupply = (classes, r) => !!classes[r.cls] && classes[r.cls].linkKind === 'water';
+function supplyRunsAt(R, id, classes = SERVICE_CLASSES, deferred = {}) {
+  const out = [];
+  for (const k of Object.keys(R.runs).sort()) { const r = R.runs[k]; if ((r.a === id || r.b === id) && isSupply(classes, r) && !r.stray && !deferred[r.id]) out.push(r); }
+  return out;
+}
+const hotRuns = (rs) => rs.length > 0 && rs.every((r) => specFor(r).hot);
+const dist3 = (a, b) => Math.hypot(a.at[0] - b.at[0], a.at[1] - b.at[1], a.at[2] - b.at[2]);
+// the stub that carries hot for the fixture on stub n: the nearest other stub-out within MATE_M with hot pipe, not already taken.
+// A stub with only hot pipe, and a cold one beside it, is the hot side (set.of) and gives way to it.
+export function mateOf(R, n, classes = SERVICE_CLASSES, deferred = {}) {
+  if (!n || n.kind !== 'stub_supply') return null;
+  if (n.set && n.set.mate && R.nodes[n.set.mate]) return R.nodes[n.set.mate];
+  if (hotRuns(supplyRunsAt(R, n.id, classes, deferred))) return null;
+  let best = null, bd = MATE_M;
+  for (const id of Object.keys(R.nodes).sort()) {
+    const o = R.nodes[id];
+    if (o === n || o.kind !== 'stub_supply' || o.frame !== n.frame || o.stray || o.ref || (o.set && (o.set.device || (o.set.of && o.set.of !== n.id)))) continue;
+    if (!hotRuns(supplyRunsAt(R, id, classes, deferred))) continue;
+    const d = dist3(n, o);
+    if (d < bd) { bd = d; best = o; }
+  }
+  return best;
+}
+// the cold stub a hot stub belongs to, or null
+export function primaryOf(R, n, classes = SERVICE_CLASSES, deferred = {}) {
+  if (!n || n.kind !== 'stub_supply') return null;
+  if (n.set && n.set.of && R.nodes[n.set.of]) return R.nodes[n.set.of];
+  if (!hotRuns(supplyRunsAt(R, n.id, classes, deferred))) return null;
+  for (const id of Object.keys(R.nodes).sort()) {
+    const o = R.nodes[id];
+    if (o === n || o.kind !== 'stub_supply' || o.frame !== n.frame || o.stray || o.ref || (o.set && (o.set.device || o.set.of))) continue;
+    if (supplyRunsAt(R, id, classes, deferred).length && !hotRuns(supplyRunsAt(R, id, classes, deferred)) && dist3(n, o) <= MATE_M && mateOf(R, o, classes, deferred) === n) return o;
+  }
+  return null;
+}
+// the fixture a stub-out gets: chosen, or what it was planned as (sink, bath, toilet, shower), or a kitchen sink
+export const waterDeviceFor = (n) => (n && n.set && (n.set.device || WATER_PRESET_DEVICE[n.set.preset])) || 'sink_kitchen';
+// Where a stub-out's trim stands, like trimInfo for a box: steps fix, stop, line. units: one fixture, and a stop and a line
+// for each supply it takes (cold, and hot when it has a hot stub beside it). The hot stub is trimmed with the cold one.
+export function waterTrimInfo(R, n, classes = SERVICE_CLASSES, deferred = {}) {
+  if (!n || n.kind !== 'stub_supply') return null;
+  const runs = supplyRunsAt(R, n.id, classes, deferred), N = WATER_TRIM_TEXT.notReady, trimmed = n.state === 'trimmed';
+  const prim = primaryOf(R, n, classes, deferred), mate = prim ? null : mateOf(R, n, classes, deferred), dev = waterDeviceFor(prim || n), d = WATER_DEVICE[dev] || { ports: ['in'] };
+  const P = 1 + (mate && d.ports.includes('hot') ? 1 : 0), units = { fix: 1, stop: P, line: P };
+  const t = (n.set && n.set.trim) || {}, done = {};
+  for (const st of WATER_TRIM_STEPS) done[st] = trimmed ? units[st] : Math.min(units[st], +t[st] || 0);
+  let next = null;
+  if (!trimmed) for (const st of WATER_TRIM_STEPS) if (done[st] < units[st]) { next = st; break; }
+  const mateRuns = mate ? supplyRunsAt(R, mate.id, classes, deferred) : [];
+  const incomplete = (rs) => rs.some((r) => !runState(r, classes[r.cls]).complete);
+  const reason = n.stray ? N.stray : prim ? N.mate : !runs.length ? N.none : n.state === 'planned' ? N.planned : incomplete(runs) || incomplete(mateRuns) ? N.runs : null;
+  return { node: n.id, kind: 'stub_supply', water: true, steps: WATER_TRIM_STEPS, units, done, next, ready: !reason, reason, trimmed, ends: runs.map((r) => ({ run: r.id, end: r.a === n.id ? 'a' : 'b' })),
+    device: dev, mate: mate ? mate.id : null, hotOf: prim ? prim.id : null, ports: d.ports, capped: !!(n.set && n.set.capped === true) };
+}
 // the device a box gets: chosen, or what it was planned as, or by its kind (an outlet in a wall box, a light in a ceiling box)
 export const deviceFor = (n) => (n && n.set && (n.set.device || PRESET_DEVICE[n.set.preset])) || (n ? DEFAULT_DEVICE[n.kind] : null) || null;
 // the breaker a slot takes: the thinnest cable leaving it sets it (NEC 240.4(D))
@@ -214,6 +311,7 @@ export function breakerFor(R, slotId, classes = SERVICE_CLASSES) {
 }
 // Where a node's trim-out stands: { steps, units, done, next, ready, reason, ends, device, breaker, trimmed } or null
 export function trimInfo(R, n, classes = SERVICE_CLASSES, deferred = {}) {
+  if (n && n.kind === 'stub_supply') return waterTrimInfo(R, n, classes, deferred);
   if (!n || !CABLE_TRIM.has(n.kind)) return null;
   const steps = TRIM_STEPS[n.kind], runs = cableRunsAt(R, n.id, classes, deferred), E = runs.length;
   const units = n.kind === 'slot' ? { press: 1 } : { strip: E, land: E, fold: 1, plate: 1 };
@@ -231,6 +329,7 @@ function fullTrimCost(R, n, classes, deferred) {
   const ti = trimInfo(R, n, classes, deferred), out = {};
   if (!ti) return out;
   const done = { ...ti.done };
+  if (ti.water) { for (const st of ti.steps) { addTo(out, waterTrimCost(ti.device, st, ti.units[st] - done[st], done)); done[st] = ti.units[st]; } return ti.hotOf ? {} : out; }
   for (const st of ti.steps) { addTo(out, trimCost(n.kind, ti.device, st, ti.units[st] - done[st], done, ti.breaker)); done[st] = ti.units[st]; }
   return out;
 }
@@ -320,11 +419,11 @@ function callAs(ctx, sysName, name, payload) {
 const builtLining = (pr, host) => !!pr && Object.keys(pr.members).some((id) => { const m = pr.members[id]; return m.kind === 'lining' && m.parent === host && m.built; }) || !!(pr && pr.members[host + '.ln'] && pr.members[host + '.ln'].built);
 
 export function servicesSystem({ classes = SERVICE_CLASSES, routesName = 'routes' } = {}) {
-  const ensure = (ctx) => { if (!ctx.s || ctx.s.v !== STATE_V) ctx.s = fresh(); if (!ctx.s.want) { ctx.s.want = {}; ctx.s.routesV = -1; } if (!ctx.s.mains) ctx.s.mains = {}; return ctx.s; };   // a save from before S8: work the lines out again
+  const ensure = (ctx) => { if (!ctx.s || ctx.s.v !== STATE_V) ctx.s = fresh(); if (!ctx.s.want) { ctx.s.want = {}; ctx.s.routesV = -1; } if (!ctx.s.mains) ctx.s.mains = {}; if (!ctx.s.valves) ctx.s.valves = {}; return ctx.s; };   // a save from before S8: work the lines out again
   const compile = (ctx) => {
     const s = ensure(ctx), R = ctx.get(routesName);
     if (!R || R.version === s.routesV) return s;
-    const c = compileServices(R, classes, { mains: s.mains });
+    const c = compileServices(R, classes, { mains: s.mains, valves: s.valves });
     const sig = JSON.stringify([c.powerPieces, c.waterPieces]);
     if (sig !== s.sig) {                                                     // same arrays (so the same networks) when nothing changed
       s.powerPieces = c.powerPieces; s.waterPieces = c.waterPieces; s.pieces = c.powerPieces.concat(c.waterPieces);
@@ -383,6 +482,7 @@ export function servicesSystem({ classes = SERVICE_CLASSES, routesName = 'routes
     if (!n) return { ok: false, reason: 'no such box' };
     const ti = trimInfo(R, n, classes, s.deferred);
     if (!ti) return { ok: false, reason: 'nothing to fit there' };
+    if (ti.water) return trimWater(ctx, n, ti, p);
     if (ti.trimmed) return { ok: true, done: 0, trimmed: true, node: n.id };
     if (!ti.ready) return { ok: false, reason: ti.reason };
     const step = p.step || ti.next, want = Math.max(1, p.n | 0 || 1);
@@ -414,6 +514,70 @@ export function servicesSystem({ classes = SERVICE_CLASSES, routesName = 'routes
     recount(ctx);
     ctx.emit('services.trim', { node: n.id, step, trimmed: fin });
     return { ok: true, node: n.id, step, did: work.map(([st, k]) => ({ step: st, n: k })), trimmed: fin, pressed, used: need, next: fin ? null : trimInfo(R, n, classes, s.deferred).next };
+  }
+  // A stub-out at trim-out, one gesture: { node, step?, n? } steps fix (the fixture goes on its stubs), stop (an angle stop on
+  // each supply), line (a supply line from each stop); n stops or lines per gesture. The first fixture shuts the manifold's
+  // main (you work with the water off); the hot stub of a sink or shower is trimmed with its cold one.
+  function trimWater(ctx, n, ti, p) {
+    const s = ensure(ctx), R = ctx.get(routesName);
+    if (ti.trimmed) return { ok: true, done: 0, trimmed: true, node: n.id };
+    if (!ti.ready) return { ok: false, reason: ti.reason };
+    const step = p.step || ti.next, want = Math.max(1, p.n | 0 || 1);
+    if (step !== ti.next) return { ok: false, reason: 'First ' + WATER_TRIM_TEXT.steps[ti.next] + '.', need: ti.next };
+    const k = Math.min(want, ti.units[step] - ti.done[step]), need = waterTrimCost(ti.device, step, k, ti.done);
+    const miss = lack(ctx, n.frame, need);
+    if (miss) return miss;
+    const done = { ...ti.done }; done[step] += k;
+    const fin = ti.steps.every((st) => done[st] >= ti.units[st]);
+    let closed = [];
+    if (step === 'fix') {
+      if (!(n.set && n.set.device)) routes(ctx, 'setNode', { id: n.id, key: 'device', value: ti.device });
+      if (ti.mate) { routes(ctx, 'setNode', { id: n.id, key: 'mate', value: ti.mate }); routes(ctx, 'setNode', { id: ti.mate, key: 'of', value: n.id }); }
+      for (const m of Object.values(R.nodes)) if (m.kind === 'manifold' && m.frame === n.frame && !m.stray && s.valves['n:' + m.id] === undefined) { s.valves['n:' + m.id] = false; closed.push(m.id); }
+    }
+    routes(ctx, 'setNode', { id: n.id, key: 'trim', value: done });
+    if (fin) for (const id of [n.id, ti.mate]) if (id) routes(ctx, 'setNode', { id, state: 'trimmed' });
+    useAll(ctx, n.frame, need);
+    recount(ctx);
+    ctx.emit('services.trim', { node: n.id, step, trimmed: fin });
+    return { ok: true, node: n.id, step, did: [{ step, n: k }], trimmed: fin, used: need, mate: ti.mate, mainClosed: closed, next: fin ? null : trimInfo(R, n, classes, s.deferred).next };
+  }
+  // cap or uncap a stub-out: { node, on? }. The first cap takes one from the stacks; a cap taken off and put back is the same cap.
+  function cap(ctx, p = {}) {
+    const s = ensure(ctx), R = ctx.get(routesName), n = R && R.nodes[p.node];
+    if (!n || n.kind !== 'stub_supply') return { ok: false, reason: 'no stub-out there' };
+    if (n.state === 'planned') return { ok: false, reason: WATER_TRIM_TEXT.notReady.planned };
+    if (n.state === 'trimmed') return { ok: false, reason: 'A fixture is on it.' };
+    const on = p.on === undefined ? !(n.set && n.set.capped === true) : !!p.on;
+    if (on && !(n.set && n.set.capUsed)) {
+      const need = { pex_cap_12: 1 }, miss = lack(ctx, n.frame, need);
+      if (miss) return miss;
+      useAll(ctx, n.frame, need);
+      routes(ctx, 'setNode', { id: n.id, key: 'capUsed', value: true });
+    }
+    routes(ctx, 'setNode', { id: n.id, key: 'capped', value: on });
+    recount(ctx);
+    return { ok: true, capped: on, node: n.id };
+  }
+  // a valve by hand: { node | run, on? }. A manifold node is its main; a run is the stop on its line; a stub-out with its
+  // fixture on is the angle stop. Opening the main on dry pipe sends the knock back (page: shake, sputtering taps).
+  function valve(ctx, p = {}) {
+    const s = ensure(ctx), R = ctx.get(routesName);
+    let key = null, what = null;
+    if (p.run != null && R.runs[p.run]) { key = 'r:' + p.run; what = 'line'; }
+    else if (p.node != null && R.nodes[p.node]) {
+      const n = R.nodes[p.node];
+      if (n.kind === 'manifold') { key = 'n:' + n.id; what = 'main'; }
+      else if (n.kind === 'stub_supply' && n.state === 'trimmed' && n.set && n.set.device) { key = 'n:' + n.id; what = 'stop'; }
+      else if (n.kind === 'stub_supply' && n.set && n.set.of && n.state === 'trimmed') { key = 'n:' + n.id; what = 'stop'; }
+      else return { ok: false, reason: n.kind === 'stub_supply' ? 'No stop on this stub-out yet.' : 'No valve there.' };
+    } else return { ok: false, reason: 'no valve there' };
+    const was = s.valves[key] !== false, on = p.on === undefined ? !was : !!p.on;
+    if (on) delete s.valves[key]; else s.valves[key] = false;
+    recount(ctx);
+    const first = on && !was && what === 'main' && !s.notes['water:first-flow'];
+    ctx.emit('services.valve', { key, what, on });
+    return { ok: true, what, on, changed: on !== was, knock: on && !was && what === 'main', first };
   }
   // choose what goes in a box, until the first wire is on it: { node, device }
   function device(ctx, p = {}) {
@@ -464,7 +628,8 @@ export function servicesSystem({ classes = SERVICE_CLASSES, routesName = 'routes
   function check(ctx, p = {}) {
     const s = ensure(ctx), R = ctx.get(routesName), f = p.structId != null ? String(p.structId) : null;
     if (!R || f == null) return { ok: false, reason: 'unknown building' };
-    if ((p.kind || 'power') !== 'power') return { ok: false, reason: 'only power can be tested yet' };
+    if (p.kind === 'water') return waterCheck(ctx, f);
+    if ((p.kind || 'power') !== 'power') return { ok: false, reason: 'only power and water can be tested' };
     const slots = Object.keys(R.nodes).sort().filter((id) => R.nodes[id].frame === f && R.nodes[id].kind === 'slot' && !R.nodes[id].stray && cableRunsAt(R, id, classes).length);
     if (!slots.length) return { ok: false, reason: 'No circuit starts at a panel in this building.' };
     const circuits = slots.map((slot) => ({ slot, hops: circuitWalk(R, slot, classes) })), reached = new Set(slots), faults = [];
@@ -480,6 +645,34 @@ export function servicesSystem({ classes = SERVICE_CLASSES, routesName = 'routes
     return { ok: true, ...res };
   }
 
+  // The pressure test: the lines are shut off from the supply and a test pump and gauge are put on at the manifold; pumped to
+  // WATER_TEST.kPa, the needle holds for WATER_TEST.holdMin minutes or sags. Anything open sprays: an uncapped stub-out, an end
+  // not crimped; a run not yet pulled through is named too. Judged from the pipes themselves (the water network is not
+  // touched), so it can be done with the main closed, tank empty, or nothing connected yet.
+  function waterCheck(ctx, f) {
+    const s = ensure(ctx), R = ctx.get(routesName);
+    const runs = Object.keys(R.runs).sort().map((id) => R.runs[id]).filter((r) => r.frame === f && isSupply(classes, r) && !r.stray && !r.legacy && !s.deferred[r.id]);
+    if (!runs.length) return { ok: false, reason: 'No supply pipe in this building to test.' };
+    const faults = [], leaks = [];
+    for (const r of runs) {
+      const rs = runState(r, classes[r.cls]);
+      if (!rs.complete && rs.next !== 'join') faults.push({ run: r.id, node: r.b, why: WATER_TRIM_TEXT.faults[rs.next] || rs.next, w: endWorld(R, r, 'b') });
+    }
+    const g = toNeutral(R, classes, { joint: jointRule({ valves: {} }) }).water || { edges: [], openEnds: [] };
+    const wired = new Set(); for (const e of g.edges) { wired.add(e.a); wired.add(e.b); }
+    for (const o of g.openEnds) {
+      if (o.run) { const r = R.runs[o.run]; if (!r || r.frame !== f || s.deferred[r.id]) continue; leaks.push({ run: o.run, end: o.end, node: o.node, why: WATER_TEST_TEXT.join, w: endWorld(R, r, o.end) }); continue; }
+      const n = R.nodes[o.node || o.at];
+      if (!n || n.frame !== f || !wired.has(n.id) || s.deferred[n.id]) continue;
+      leaks.push({ node: n.id, why: WATER_TEST_TEXT.cap, w: worldOf(R, n.frame, n.at) });
+    }
+    const man = Object.keys(R.nodes).sort().find((id) => R.nodes[id].kind === 'manifold' && R.nodes[id].frame === f) || null;
+    const res = { pass: !faults.length && !leaks.length, t: ctx.state.t, testKPa: WATER_TEST.kPa, holdMin: WATER_TEST.holdMin, at: man, lines: runs.length, leaks, faults,
+      holds: !leaks.length && !faults.length, peakKPa: leaks.length ? 25 : WATER_TEST.kPa };
+    s.checks[f] = { ...(s.checks[f] || {}), water: res };
+    ctx.emit('services.checked', { structId: f, kind: 'water', pass: res.pass });
+    return { ok: true, ...res };
+  }
   // "Close up anyway": what is not roughed in on this building leaves the tally and stays as plan lines
   function defer(ctx, p = {}) {
     const s = ensure(ctx), R = ctx.get(routesName), f = p.structId != null ? String(p.structId) : null;
@@ -510,10 +703,12 @@ export function servicesSystem({ classes = SERVICE_CLASSES, routesName = 'routes
       const open = runs.filter((r) => !s.covered[r.id]);
       const kinds = new Set(Object.values(classes).flatMap((c) => (c.phases && c.phases.rough) || []));
       const nodes = ids(R.nodes).map((id) => R.nodes[id]).filter((n) => n.frame === f && !n.stray && n.state === 'planned' && kinds.has(n.kind) && !s.deferred[n.id]);
-      if (!open.length && !nodes.length) return { ok: false, reason: runs.length ? SERVICE_TEXT.covered : 'nothing to rough in', covered: runs.length };
+      const caps = ids(R.nodes).map((id) => R.nodes[id]).filter((n) => n.frame === f && n.kind === 'stub_supply' && !n.stray && !s.deferred[n.id] && n.state !== 'trimmed' && !(n.set && n.set.capped === true));
+      if (!open.length && !nodes.length && !caps.length) return { ok: false, reason: runs.length ? SERVICE_TEXT.covered : 'nothing to rough in', covered: runs.length };
       const need = {};
       for (const r of open) addTo(need, runCostLeft(r));
       for (const n of nodes) addTo(need, nodeCost(n));
+      for (const n of caps) addTo(need, capCost(n));
       for (const [itemId, qty] of Object.entries(need)) {
         const c = callAs(ctx, 'construction', 'construction.use', { structId: f, itemId, qty, from: 'stacks', check: true });
         if (c && !c.ok) return { ok: false, reason: c.reason, itemId, need: qty, have: c.have };
@@ -525,9 +720,10 @@ export function servicesSystem({ classes = SERVICE_CLASSES, routesName = 'routes
         else if (st === 'join') routes(ctx, 'work', { id: r.id, what: 'join', n: 2 });
       }
       for (const n of nodes) routes(ctx, 'setNode', { id: n.id, state: 'set' });
+      for (const n of caps) { routes(ctx, 'setNode', { id: n.id, key: 'capUsed', value: true }); routes(ctx, 'setNode', { id: n.id, key: 'capped', value: true }); }
       for (const [itemId, qty] of Object.entries(need)) callAs(ctx, 'construction', 'construction.use', { structId: f, itemId, qty, from: 'stacks' });
       recount(ctx);
-      return { ok: true, runs: open.length, nodes: nodes.length, covered: runs.length - open.length, used: need };
+      return { ok: true, runs: open.length, nodes: nodes.length, capped: caps.length, covered: runs.length - open.length, used: need };
     }
     if (stage === TRIM) {
       const kinds = new Set(Object.values(classes).flatMap((c) => (c.phases && c.phases.trim) || []));
@@ -550,14 +746,16 @@ export function servicesSystem({ classes = SERVICE_CLASSES, routesName = 'routes
       for (const n of todo) {
         const ti = trimInfo(R, n, classes, s.deferred);
         if (ti) {
-          if (ti.device && !(n.set && n.set.device)) routes(ctx, 'setNode', { id: n.id, key: 'device', value: ti.device });
-          if (n.kind !== 'slot') routes(ctx, 'setNode', { id: n.id, key: 'trim', value: { ...ti.units } });
+          if (ti.device && !ti.hotOf && !(n.set && n.set.device)) routes(ctx, 'setNode', { id: n.id, key: 'device', value: ti.device });
+          if (ti.mate) { routes(ctx, 'setNode', { id: n.id, key: 'mate', value: ti.mate }); routes(ctx, 'setNode', { id: ti.mate, key: 'of', value: n.id }); }
+          if (n.kind !== 'slot' && !ti.hotOf) routes(ctx, 'setNode', { id: n.id, key: 'trim', value: { ...ti.units } });
           if (n.kind === 'slot') panels.add(panelKey(n));
         }
         routes(ctx, 'setNode', { id: n.id, state: 'trimmed' });
       }
       useAll(ctx, f, need);
       for (const k of panels) s.mains[k] = true;                             // and the main thrown: it is all done
+      for (const m of Object.values(R.nodes)) if (m.kind === 'manifold' && m.frame === f) delete s.valves['n:' + m.id];      // and the water main opened
       recount(ctx);
       return { ok: true, nodes: todo.length, waiting, used: need };
     }
@@ -591,12 +789,14 @@ export function servicesSystem({ classes = SERVICE_CLASSES, routesName = 'routes
       'services.breaker': breaker,
       'services.flip': flip,
       'services.check': check,
+      'services.cap': cap,
+      'services.valve': valve,
     },
     // for page add-ons (global scripts cannot import): the content tables and the pure read-outs
     api: { classes, specs: SERVICE_SPECS, devices: DEVICES, nodeKinds: NODE_KINDS, compileServices: (R) => compileServices(R, classes), overlayData, runInfo,
       presets: PRESETS_M, routeRule, boreCheck, workCost, runCostLeft, nodeCost, stapleMarks, fixings: FIXINGS, coveredHosts,
       trimInfo: (R, n, deferred) => trimInfo(R, n, classes, deferred), switchControls: (R, id) => switchControls(R, id, classes), circuitWalk: (R, slot) => circuitWalk(R, slot, classes),
-      deviceFor, panelKey, breakerFor: (R, id) => breakerFor(R, id, classes), deviceItems: DEVICE_ITEM, trimText: TRIM_TEXT, isLight: deviceIsLight },
+      deviceFor, panelKey, waterTrimInfo: (R, n, deferred) => waterTrimInfo(R, n, classes, deferred), mateOf: (R, n) => mateOf(R, n, classes), primaryOf: (R, n) => primaryOf(R, n, classes), waterDeviceFor, waterDevices: WATER_DEVICE, waterTrimText: WATER_TRIM_TEXT, waterTest: WATER_TEST, breakerFor: (R, id) => breakerFor(R, id, classes), deviceItems: DEVICE_ITEM, trimText: TRIM_TEXT, isLight: deviceIsLight },
   };
 }
 export const services = servicesSystem();

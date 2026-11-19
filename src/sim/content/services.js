@@ -10,7 +10,7 @@
 // rough-in (rough) and finished at trim-out (trim).
 export const SERVICE_CLASSES = Object.freeze({
   cable: { id: 'cable', linkKind: 'power', steps: ['bore', 'pull', 'join'], phases: { rough: ['box', 'box_ceiling'], trim: ['box', 'box_ceiling', 'slot'] }, name: 'Cable', colour: '#e8c440' },
-  supply: { id: 'supply', linkKind: 'water', steps: ['bore', 'pull', 'join'], phases: { rough: ['stub_supply'], trim: ['stub_supply'] }, name: 'Supply', colour: '#3a7bd5' },
+  supply: { id: 'supply', linkKind: 'water', steps: ['bore', 'pull', 'join'], phases: { rough: ['stub_supply', 'manifold'], trim: ['stub_supply'] }, name: 'Supply', colour: '#3a7bd5' },
   drain: { id: 'drain', linkKind: 'drain', steps: ['seg', 'join'], phases: { rough: ['stub_drain', 'cleanout'], trim: ['stub_drain'] }, name: 'Waste', colour: '#7a5230' },
   vent: { id: 'vent', linkKind: 'vent', steps: ['seg', 'join'], phases: { rough: ['vent_term'], trim: [] }, name: 'Vent', colour: '#8a8a80' },
 });
@@ -24,6 +24,7 @@ export const SERVICE_SPECS = Object.freeze({
   cable_nm_10_3: { id: 'cable_nm_10_3', holeMm: 22, cls: 'cable', name: '10/3 cable', gauge: 10, ratingA: 30, breaker: 'breaker_30a', radiusM: 0.009, colour: '#e89040' },
   pex_12_blue: { id: 'pex_12_blue', holeMm: 22, cls: 'supply', name: '1/2 in PEX (cold)', material: 'pipe_pex_12', hot: false, radiusM: 0.008, colour: '#3a7bd5' },
   pex_12_red: { id: 'pex_12_red', holeMm: 22, cls: 'supply', name: '1/2 in PEX (hot)', material: 'pipe_pex_12', hot: true, radiusM: 0.008, colour: '#d04030' },
+  pex_34: { id: 'pex_34', holeMm: 29, cls: 'supply', name: '3/4 in PEX (main)', material: 'pipe_pex_34', hot: false, radiusM: 0.0115, colour: '#3a7bd5' },
   pex_20: { id: 'pex_20', holeMm: 25, cls: 'supply', name: '20 mm PEX', material: 'pipe_pex_20', hot: false, radiusM: 0.01, colour: '#3a7bd5' },
   dwv_40: { id: 'dwv_40', holeMm: 51, cls: 'drain', name: '1-1/2 in drain', diameterMm: 40, radiusM: 0.024, colour: '#ece8e0' },
   dwv_50: { id: 'dwv_50', holeMm: 64, cls: 'drain', name: '2 in drain', diameterMm: 50, radiusM: 0.03, colour: '#ece8e0' },
@@ -40,13 +41,14 @@ export const NODE_KINDS = Object.freeze({
   box: { id: 'box', name: 'wall box', noun: 'box', presetM: 0.4 },
   box_ceiling: { id: 'box_ceiling', name: 'ceiling box', noun: 'box' },
   stub_supply: { id: 'stub_supply', name: 'supply stub-out', noun: 'stub', presetM: 0.5 },   // capped until trim
+  manifold: { id: 'manifold', name: 'PEX manifold', noun: 'manifold', presetM: 1.2 },         // the water twin of the panel: one line per fixture
   stub_drain: { id: 'stub_drain', name: 'drain stub-out', noun: 'stub', presetM: 0.45 },
   cleanout: { id: 'cleanout', name: 'cleanout', noun: 'cleanout' },
   vent_term: { id: 'vent_term', name: 'vent through the roof', noun: 'vent' },
   exit: { id: 'exit', name: 'where it leaves the building', noun: 'exit' },
   port: { id: 'port', name: 'equipment connection', noun: 'connection' },                  // bound to a piece's port (ref)
 });
-export const PRESETS_M = Object.freeze({ outlet: 0.4, switch: 1.2, counter: 1.1, sink: 0.5, toilet: 0.2, shower: 1.2 });
+export const PRESETS_M = Object.freeze({ outlet: 0.4, switch: 1.2, counter: 1.1, sink: 0.5, bath: 0.5, toilet: 0.2, shower: 1.2, manifold: 1.2 });
 
 // Devices fitted at trim-out (node.set.device on a trimmed node). `elec`: the electrical catalog entry it
 // stands for in the solve; `water`: the water catalog entry; `switch`: a pass-through that controls others;
@@ -59,6 +61,8 @@ export const DEVICES = Object.freeze({
   tap_hose_bib: { id: 'tap_hose_bib', name: 'Hose bib', water: 'tap_hose_bib', stubM: 0 },
   sink_kitchen: { id: 'sink_kitchen', name: 'Kitchen sink', water: 'sink_kitchen', stubM: 0.5 },
   toilet_flush: { id: 'toilet_flush', name: 'Toilet', water: 'toilet_flush', stubM: 0.2 },
+  sink_bath: { id: 'sink_bath', name: 'Bathroom sink', water: 'sink_bath', stubM: 0.5 },
+  shower_indoor: { id: 'shower_indoor', name: 'Shower', water: 'shower_indoor', stubM: 1.2 },
 });
 
 // Catalog entries for the store and the equipment list (merged in src/sim/fixtures.js). No dims: they are
@@ -170,6 +174,7 @@ export const ITEMS_SERVICES = Object.freeze([
   { id: 'nm_cable_10_3', name: '10/3 NM cable with ground', category: 'electrical', unit: 'm', massKg: 0.2, priceUsd: 6, blurb: 'For 30 A, 240 V loads: a dryer, a water heater' },
   { id: 'pex_coil_12_blue', name: '1/2 in PEX, blue (cold)', category: 'plumbing', unit: 'm', massKg: 0.06, priceUsd: 0.75, blurb: 'Flexible water pipe, pulled through the studs like cable. Comes in a 30 m (100 ft) coil' },
   { id: 'pex_coil_12_red', name: '1/2 in PEX, red (hot)', category: 'plumbing', unit: 'm', massKg: 0.06, priceUsd: 0.75, blurb: 'The same pipe in red, so hot is never mistaken for cold' },
+  { id: 'pex_coil_34', name: '3/4 in PEX, blue', category: 'plumbing', unit: 'm', massKg: 0.1, priceUsd: 1.4, blurb: 'The main line from the tank or pump to the manifold: a size up from the branches' },
   { id: 'pex_coil_20', name: '20 mm PEX', category: 'plumbing', unit: 'm', massKg: 0.11, priceUsd: 1.2, blurb: 'A size up, for a main line' },
   { id: 'elec_box_wall', name: 'Nail-on wall box, single', category: 'electrical', unit: 'each', massKg: 0.06, priceUsd: 0.75, blurb: 'Nailed to the side of a stud; an outlet or a switch goes in it at trim-out' },
   { id: 'elec_box_ceiling', name: 'Nail-on ceiling box, round', category: 'electrical', unit: 'each', massKg: 0.12, priceUsd: 2.5, blurb: 'Holds a ceiling light' },
@@ -177,7 +182,17 @@ export const ITEMS_SERVICES = Object.freeze([
   { id: 'pex_staple', name: 'PEX staples', category: 'fasteners', unit: 'each', massKg: 0.003, priceUsd: 0.08, blurb: 'Plastic straps that hold PEX to a stud or joist' },
   { id: 'nail_plate', name: 'Steel nail plate', category: 'fasteners', unit: 'each', massKg: 0.03, priceUsd: 0.6, blurb: 'Over a hole near the face of a stud, so a drywall screw cannot reach the cable or pipe' },
   { id: 'crimp_ring_12', name: 'Copper crimp rings, 1/2 in', category: 'plumbing', unit: 'each', massKg: 0.004, priceUsd: 0.25, blurb: 'Squeezed over PEX on a fitting with the crimp tool' },
-  { id: 'crimp_ring_20', name: 'Copper crimp rings, 20 mm', category: 'plumbing', unit: 'each', massKg: 0.006, priceUsd: 0.35, blurb: 'The same for 20 mm PEX' },
+  { id: 'crimp_ring_34', name: 'Copper crimp rings, 3/4 in', category: 'plumbing', unit: 'each', massKg: 0.007, priceUsd: 0.4, blurb: 'The same for the 3/4 in main' },
+  { id: 'manifold_pex_6', name: 'PEX manifold, 6 ports with stop valves', category: 'plumbing', unit: 'each', massKg: 2.4, priceUsd: 115, blurb: 'One line to each fixture, so there are no joints hidden in the walls; a quarter-turn stop on every line and a main on the way in' },
+  { id: 'pex_cap_12', name: 'PEX stub-out cap, 1/2 in', category: 'plumbing', unit: 'each', massKg: 0.01, priceUsd: 1.1, blurb: 'Seals a stub-out so the pipes can be pressure tested before the walls close' },
+  { id: 'stop_valve_12', name: 'Angle stop, 1/2 in PEX x 3/8 in', category: 'plumbing', unit: 'each', massKg: 0.15, priceUsd: 8, blurb: 'A quarter-turn valve on the stub-out under a fixture, to shut it off alone' },
+  { id: 'supply_line_12', name: 'Braided supply line, 3/8 in, 30 cm', category: 'plumbing', unit: 'each', massKg: 0.1, priceUsd: 6, blurb: 'Joins the angle stop to the faucet or the toilet' },
+  { id: 'fx_sink_kitchen', name: 'Kitchen sink and faucet', category: 'plumbing', unit: 'each', massKg: 12, priceUsd: 220, blurb: 'A double-bowl sink with a 2.2 gpm faucet' },
+  { id: 'fx_sink_bath', name: 'Bathroom sink and faucet', category: 'plumbing', unit: 'each', massKg: 14, priceUsd: 140, blurb: 'A basin with a 1.5 gpm faucet' },
+  { id: 'fx_toilet', name: 'Toilet, 1.28 gpf', category: 'plumbing', unit: 'each', massKg: 40, priceUsd: 260, blurb: 'A bowl and tank; sits on the drain, fed by a stop on the stub-out' },
+  { id: 'fx_shower', name: 'Shower valve and head', category: 'plumbing', unit: 'each', massKg: 5, priceUsd: 160, blurb: 'A mixing valve on hot and cold, and a 2.0 gpm head' },
+  { id: 'fx_hose_bib', name: 'Hose bib, 1/2 in', category: 'plumbing', unit: 'each', massKg: 0.4, priceUsd: 18, blurb: 'An outdoor tap through the wall' },
+  { id: 'pex_coil_20', name: 'Copper crimp rings, 20 mm', category: 'plumbing', unit: 'each', massKg: 0.006, priceUsd: 0.35, blurb: 'The same for 20 mm PEX' },
   // trim-out (S9b): what goes into the boxes and the panel once the walls are finished
   { id: 'elec_receptacle', name: 'Duplex outlet, 15 A', category: 'electrical', unit: 'each', massKg: 0.09, priceUsd: 1.8, blurb: 'Two sockets; the wires land on its screws, then it folds into the box' },
   { id: 'elec_switch', name: 'Wall switch, single pole, 15 A', category: 'electrical', unit: 'each', massKg: 0.07, priceUsd: 1.6, blurb: 'Breaks the hot wire to the lights after it' },
@@ -192,11 +207,13 @@ export const ITEMS_SERVICES = Object.freeze([
 // the trim-out items: small, boxed, kept by the stacks (never carried one by one)
 export const TRIM_SUPPLY = Object.freeze(['elec_receptacle', 'elec_switch', 'elec_light_ceiling', 'elec_light_wall', 'elec_plate_outlet', 'elec_plate_switch', 'elec_breaker_15', 'elec_breaker_20', 'elec_breaker_30']);
 // used up by the stacks, never carried
-export const SERVICE_SUPPLY = Object.freeze(['cable_staple', 'pex_staple', 'nail_plate', 'crimp_ring_12', 'crimp_ring_20', ...TRIM_SUPPLY]);
+// plumbing trim-out (S10): the fixtures and the little parts that connect them, kept by the stacks too
+export const WATER_TRIM_SUPPLY = Object.freeze(['pex_cap_12', 'stop_valve_12', 'supply_line_12', 'fx_sink_kitchen', 'fx_sink_bath', 'fx_toilet', 'fx_shower', 'fx_hose_bib']);
+export const SERVICE_SUPPLY = Object.freeze(['cable_staple', 'pex_staple', 'nail_plate', 'crimp_ring_12', 'crimp_ring_20', 'crimp_ring_34', ...TRIM_SUPPLY, ...WATER_TRIM_SUPPLY]);
 // what a run of each spec is bought as, and the ring that closes each end of it
-export const SPEC_ITEM = Object.freeze({ cable_nm_14_2: 'nm_cable_14_2', cable_nm_12_2: 'nm_cable_12_2', cable_nm_10_3: 'nm_cable_10_3', pex_12_blue: 'pex_coil_12_blue', pex_12_red: 'pex_coil_12_red', pex_20: 'pex_coil_20' });
-export const SPEC_RING = Object.freeze({ pex_12_blue: 'crimp_ring_12', pex_12_red: 'crimp_ring_12', pex_20: 'crimp_ring_20' });
-export const NODE_ITEM = Object.freeze({ box: 'elec_box_wall', box_ceiling: 'elec_box_ceiling' });
+export const SPEC_ITEM = Object.freeze({ cable_nm_14_2: 'nm_cable_14_2', cable_nm_12_2: 'nm_cable_12_2', cable_nm_10_3: 'nm_cable_10_3', pex_12_blue: 'pex_coil_12_blue', pex_12_red: 'pex_coil_12_red', pex_34: 'pex_coil_34', pex_20: 'pex_coil_20' });
+export const SPEC_RING = Object.freeze({ pex_12_blue: 'crimp_ring_12', pex_12_red: 'crimp_ring_12', pex_34: 'crimp_ring_34', pex_20: 'crimp_ring_20' });
+export const NODE_ITEM = Object.freeze({ box: 'elec_box_wall', box_ceiling: 'elec_box_ceiling', manifold: 'manifold_pex_6' });
 // Fastening (NEC 334.30: NM cable stapled within 12 in of a box and every 4-1/2 ft; IRC table P2605.1: PEX supported
 // every 32 in run horizontally). A hole through a stud holds the run, so no staple right beside one. Each end leaves
 // some over to work with (NEC 300.14: at least 6 in of free conductor at a box), so a run takes a little more than its
@@ -210,6 +227,17 @@ export const SERVICE_LINES = Object.freeze({
   pex_coil_12_blue: { label: 'Blue PEX', why: 'Cold water from the supply to each stub-out.' },
   pex_coil_12_red: { label: 'Red PEX', why: 'Hot water from the heater to each stub-out.' },
   pex_coil_20: { label: '20 mm PEX', why: 'The main water line.' },
+  pex_coil_34: { label: '3/4 in PEX', why: 'The main line from the supply to the manifold.' },
+  crimp_ring_34: { label: 'Crimp rings, 3/4 in', why: 'One at each end of a 3/4 in run.' },
+  manifold_pex_6: { label: 'Manifold', why: 'One line from here to each fixture, with a stop valve on every line.' },
+  pex_cap_12: { label: 'Stub caps', why: 'One on each stub-out until its fixture goes on, so the pipes can be tested.' },
+  stop_valve_12: { label: 'Angle stops', why: 'One on each stub-out under a fixture.' },
+  supply_line_12: { label: 'Supply lines', why: 'One from each stop to its fixture.' },
+  fx_sink_kitchen: { label: 'Kitchen sinks', why: 'Set on its stub-outs at trim-out.' },
+  fx_sink_bath: { label: 'Bathroom sinks', why: 'Set on its stub-outs at trim-out.' },
+  fx_toilet: { label: 'Toilets', why: 'Set on its stub-out at trim-out.' },
+  fx_shower: { label: 'Shower valves', why: 'Set on its stub-outs at trim-out.' },
+  fx_hose_bib: { label: 'Hose bibs', why: 'Set on its stub-out at trim-out.' },
   elec_box_wall: { label: 'Wall boxes', why: 'An outlet or switch goes in each one at trim-out.' },
   elec_box_ceiling: { label: 'Ceiling boxes', why: 'A light hangs from each one.' },
   cable_staple: { label: 'Cable staples', why: 'Hold the cable to the studs.' },
@@ -308,3 +336,38 @@ export function runCostLeft(run) {
 }
 export const runCostAll = (run) => runCostLeft({ ...run, pulled: 0, joined: { a: 0, b: 0 } });
 export const nodeCost = (node) => (NODE_ITEM[node.kind] ? { [NODE_ITEM[node.kind]]: 1 } : {});
+
+// ------------------------------------------------------------------------------------------- supply plumbing (S10)
+// Stub-outs: a PEX stub is capped when the stubs are set (a cap each), so the lines can be pressure tested before the
+// walls close; the cap comes off when its fixture goes on. Trim-out of a stub: set the fixture on it, then a stop on each
+// supply it takes, then a supply line from each stop. A sink or shower takes cold and hot: its hot stub is the nearest
+// other stub within MATE_M that carries hot pipe, and is trimmed with it.
+// Numbers: WaterSense and EPA/IPC fixture flows are in fixtures-water.js; test pressure: IRC P2503.7 asks for the system's
+// working pressure at least, held 15 minutes; many authorities ask 100 psi (690 kPa), which is what the gauge reads here.
+export const WATER_TEST = Object.freeze({ kPa: 690, holdMin: 15, strokes: 24 });
+export const MATE_M = 0.6;
+export const WATER_DEVICE = Object.freeze({
+  sink_kitchen: { item: 'fx_sink_kitchen', ports: ['in', 'hot'] },
+  sink_bath: { item: 'fx_sink_bath', ports: ['in', 'hot'] },
+  toilet_flush: { item: 'fx_toilet', ports: ['in'] },
+  shower_indoor: { item: 'fx_shower', ports: ['in', 'hot'] },
+  tap_hose_bib: { item: 'fx_hose_bib', ports: ['in'] },
+});
+export const WATER_TRIM_STEPS = Object.freeze(['fix', 'stop', 'line']);
+export const WATER_PRESET_DEVICE = Object.freeze({ sink: 'sink_kitchen', bath: 'sink_bath', toilet: 'toilet_flush', shower: 'shower_indoor', tap: 'tap_hose_bib' });
+export const WATER_TRIM_TEXT = Object.freeze({
+  steps: { fix: 'set the fixture on its stub-out', stop: 'screw an angle stop onto each stub', line: 'connect a supply line from each stop' },
+  notReady: { planned: 'Strap the stub-out to the stud first.', runs: 'The pipe to this stub-out is not roughed in yet.', none: 'No pipe comes to this stub-out.', stray: 'What it was fixed to is gone.', mate: 'This is the hot side of a fixture: trim its cold stub.' },
+  faults: { bore: 'holes not drilled through to here', pull: 'pipe not pulled through to here', join: 'end not crimped: it sprays', cap: 'stub-out not capped: it sprays', unset: 'stub-out not strapped to the stud' },
+});
+// what one step at a stub takes: { [itemId]: qty }
+export function waterTrimCost(dev, step, units, done = {}) {
+  const out = {}, d = WATER_DEVICE[dev];
+  if (!d || !(units > 0)) return out;
+  if (step === 'fix' && !(done.fix > 0)) out[d.item] = 1;
+  if (step === 'stop') out.stop_valve_12 = units;
+  if (step === 'line') out.supply_line_12 = units;
+  return out;
+}
+// the cap a stub-out asks for, until it is capped (a node planned before caps existed, already capped, asks for none)
+export const capCost = (node) => (node.kind === 'stub_supply' && !(node.set && node.set.capped === true && !node.set.capUsed) ? { pex_cap_12: 1 } : {});
