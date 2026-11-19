@@ -46,6 +46,19 @@ check('a drive substep costs well under 0.1 ms', us < 100 && cost.msPerFrame / M
 const synced = await G((id) => __game.sim.state.sys.vehicles.units[id], id);
 check('the pose reaches the sim while driving', Math.hypot(synced.x - b0.x, synced.z - b0.z) > 1, JSON.stringify(synced).slice(0, 120));
 
+// car keys are vehicle-relative: with the camera turned square across the nose, W still goes straight ahead and D turns it right
+await G((id) => { __game.cam.yaw = __vehicles.body(id).yaw + Math.PI / 2; }, id);
+const c0 = await G((id) => __vehicles.body(id), id);
+await page.keyboard.down('KeyW'); await frames(12);
+const c1 = await G((id) => __vehicles.body(id), id);
+await page.keyboard.down('KeyD'); await frames(12);
+const c2 = await G((id) => __vehicles.body(id), id);       // sampled with D held: the wheels are over to the right
+await page.keyboard.up('KeyD'); await page.keyboard.up('KeyW');
+const wr = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+check('with the camera across the nose, W still drives straight ahead', Math.abs(wr(c1.yaw - c0.yaw)) < 0.1, wr(c1.yaw - c0.yaw).toFixed(3));
+check('D steers the vehicle right whatever the camera sees', c2.steer > 0.05, 'steer ' + c2.steer.toFixed(3) + ' at ' + c2.speed.toFixed(1) + ' m/s');
+await page.keyboard.down('Space'); await frames(90); await page.keyboard.up('Space');
+
 // E: brakes, then steps off
 await page.keyboard.press('KeyE'); await frames(150);
 const off = await G((id) => ({ top: __game.control.top().id, u: __game.sim.state.sys.vehicles.units[id], b: __vehicles.body(id), P: { x: __game.player.x, z: __game.player.z } }), id);

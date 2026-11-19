@@ -9,7 +9,7 @@ import { createSim, stockSystem, makeSave, readSave, hashState } from '../src/si
 const KART = Object.freeze({
   id: 'kart', name: 'Go-kart', drive: 'wheeled', dims: { l: 1.8, w: 1.2, h: 0.6 }, massKg: 150, cgH: 0.3,
   wheelbase: 1.05, track: 0.95, wheelR: 0.14,
-  axles: [{ z: 0.525, steer: true, driven: false }, { z: -0.525, steer: false, driven: true }],
+  axles: [{ z: 0.525, steer: true, driven: false }, { z: -0.525, steer: false, driven: true, diff: 'open' }],   // open: see the solid-axle test
   powerW: 6000, topMps: 12, reverseMps: 2, brakeG: 0.8,
   steerMaxRad: 0.5, steerRate: 3, steerSpeedFalloff: 0.5,
   grip: { mu: 1.0, lateral: 10, rolling: 0.02 }, susp: { travel: 0.05, hz: 3, damp: 0.6 },
@@ -137,12 +137,16 @@ test('drive: towing makes the tow unit slower to speed up and longer to stop', (
   assert.ok(k.u < solo.u * 0.8, `loaded ${k.u} vs solo ${solo.u}`);
 });
 
+// Updated for the per-wheel tyre model (wave 2, G-3): the old inputs (0.8 throttle, 0.7 steer on the bowl's walls) now
+// spin the rear-driven kart round, as power past the rear tyres' grip does; a slide at the limit is chaotic, so the
+// convergence check drives within grip and the sliding run only checks determinism.
 test('drive: same inputs give the same state; halving the substep changes the end pose by under 2 percent', () => {
-  const drive = (dt) => {
+  const drive = (dt, thr = 0.4, amp = 0.35) => {
     const b = createBody(KART, { x: -8, z: -3 }, BOWL);
-    run(b, KART, (q, t) => ({ throttle: t < 4 ? 0.8 : 0.3, steer: Math.sin(t * 0.9) * 0.7, brake: t > 7 ? 0.5 : 0 }), BOWL, 9, dt);
+    run(b, KART, (q, t) => ({ throttle: t < 4 ? thr : 0.3, steer: Math.sin(t * 0.9) * amp, brake: t > 7 ? 0.5 : 0 }), BOWL, 9, dt);
     return b;
   };
+  assert.equal(hashState(drive(SUB, 0.8, 0.7)), hashState(drive(SUB, 0.8, 0.7)), 'sliding: deterministic');
   const a = drive(SUB), b = drive(SUB);
   assert.equal(hashState(a), hashState(b));
   const h = drive(SUB / 2);

@@ -97,12 +97,14 @@ function dig(ctx, p = {}) {
   if (add) { const what = EW.lAt(g, i, j) > 0.002 ? g.codes[EW.sAt(g, i, j)] : 'soil'; if (what !== s.carry.s) return fail(''); }
   const want = Math.min(cap - (add ? s.carry.m3 : 0), Number.isFinite(+p.m3) && +p.m3 > 0 ? +p.m3 : cap);
   if (!(want > 1e-6)) return fail('');
-  const res = EW.cut(g, x, z, want, { r: 0.34, t: hours(ctx), clearF: FLAG.TAMP1 | FLAG.TAMP2, looseStays: true });
+  // `r`: how wide the bite is (each stamp of a boot on the blade opens it out)
+  const br = Number.isFinite(+p.r) ? Math.max(0.2, Math.min(0.6, +p.r)) : 0.34;
+  const res = EW.cut(g, x, z, want, { r: br, t: hours(ctx), clearF: FLAG.TAMP1 | FLAG.TAMP2, looseStays: true });
   // a heap dug into at its foot is left over-steep: it slides (the view rolls it down grain by grain; else within the hour)
   (s.unsettled ||= []).push([r3(x), r3(z)]); if (s.unsettled.length > 64) s.unsettled.shift();
   if (!(res.m3 > 1e-6)) return fail('That is as deep as a shovel will go here.');
   // the blade tears the turf at the lip of the hole: a narrow rim of bare earth (the walls themselves stand firm)
-  EW.paint(g, x, z, 0.37, { surface: 'soil', t: hours(ctx), ok: (q) => q.s === EW.UNTOUCHED });
+  EW.paint(g, x, z, br + 0.03, { surface: 'soil', t: hours(ctx), ok: (q) => q.s === EW.UNTOUCHED });
   const cutLiner = unline(ctx, s, x, z, 0.2);
   if (f0 & FLAG.FABRIC) EW.paint(g, x, z, 0.16, { clearF: FLAG.FABRIC });
   reseat(s);

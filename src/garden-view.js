@@ -168,6 +168,9 @@
     const lr = LS() ? LS().rev : 0;
     if (v.lrev !== lr) { v.lrev = lr; reshaped = true; }
     if (reshaped) { shapeBed(v); hideGrass(true); v.sig.fill(-1); }
+    // squares the shovel has broken are earth, never turf, however far the hoe has got
+    const lg = LS() && G.sim.state.sys.landscape && G.sim.state.sys.landscape.grid, dug = [];
+    if (lg) for (let i = 0; i < b.cells.length; i++) { const x = b.x0 + ((i % b.nx) + 0.5) * CELL, z = b.z0 + (Math.floor(i / b.nx) + 0.5) * CELL; dug[i] = !!G.earthwork.sAt(lg, Math.round(x / lg.step), Math.round(z / lg.step)); }
     for (let i = 0; i < b.cells.length; i++) {
       const till = tillOf(b.cells[i]);
       if (till <= 0) continue;
@@ -178,7 +181,7 @@
       _c.copy(SOIL_DRY).lerp(SOIL_WET, Math.pow(wet, 0.8) * (till < 1 ? 0.55 : 1)).lerp(STRAW, ci.mulch * 0.85).lerp(WEEDY, ci.weed * 0.35);
       for (let k = 0; k < v.per; k++) {
         const o = i * v.per + k, n = v.noise[o];
-        if (till < 1 && hash(o, 91) < (1 - till) * 0.75) { v.col[o * 3] = SOD.r * n; v.col[o * 3 + 1] = SOD.g * n; v.col[o * 3 + 2] = SOD.b * n; }   // turned sod: grass still showing between the clods
+        if (till < 1 && !dug[i] && hash(o, 91) < (1 - till) * 0.75) { v.col[o * 3] = SOD.r * n; v.col[o * 3 + 1] = SOD.g * n; v.col[o * 3 + 2] = SOD.b * n; }   // turned sod: grass still showing between the clods
         else { const dk = v.dip ? 1 - v.dip[o] * 6 : 1; v.col[o * 3] = _c.r * n * dk; v.col[o * 3 + 1] = _c.g * n * dk; v.col[o * 3 + 2] = _c.b * n * dk; }   // an open drill or hole: dark, damp soil
       }
     }

@@ -40,7 +40,7 @@
       R('Esc', 'Back to walking, from any of these'),
     ] },
     { id: 'tools', title: 'In Site, Yard, Garden and Hands', rows: [
-      R(['1', '–', '9'], 'Pick the tool or item in the bar (or turn the wheel)'),
+      R(['1', '–', '9'], 'Pick the tool or item in the bar (or turn the wheel; in the Yard the wheel zooms)'),
       R('Click, drag', 'Use it where the marker is, inside your reach circle'),
       R('R', 'Turn what you hold (a part, a box, a stone); Shift+R turns back in the Yard'),
       R('C', 'Hands, holding a pipe or cable: cut it to fit. [ ] or the wheel set the length'),
@@ -49,6 +49,10 @@
       R('F', 'Garden: look closer at a plant'),
       R('N', 'Garden: the almanac'),
       R('Q E', 'Turn the view (Hands, where the camera is free); turn a part you are placing'),
+      R('Wheel', 'Yard: zoom the view; Shift and the wheel tilt it. Middle drag turns and tilts it'),
+      R('Click, hold', 'Yard, shovel: put the blade in; drag the load where it goes and let go'),
+      R('Right click', 'Yard, shovel, left button held: a boot on the blade (deeper and wider); left button up: pat the ground down'),
+      R('Right drag', 'Yard, shovel: push loose earth with the flat of the blade'),
     ] },
     { id: 'build', title: 'Build mode (B)', rows: [
       R(['V', '1'], 'Select'),
@@ -79,7 +83,9 @@
       R(['?', 'F1'], 'This sheet'),
     ] },
     { id: 'vehicle', title: 'On a vehicle', rows: [
-      R(['W', 'A', 'S', 'D'], 'Drive'),
+      R('W', 'Throttle (hold to build speed)'),
+      R('S', 'Brake; held once stopped, reverse'),
+      R(['A', 'D'], 'Steer left and right, relative to the vehicle'),
       R('Space', 'Brake'),
       R('Shift', 'Gentle throttle'),
       R('E', 'Get off'),

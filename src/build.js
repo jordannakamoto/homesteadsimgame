@@ -9497,7 +9497,7 @@
         if (!(hi > lo)) continue;
         (S.capWallsData || (S.capWallsData = [])).push({ w, L, ux, uz, N, lo, hi, strips, top: w.y0 + (w.h || 0) });
         // along the wall, less the openings the cut passes through
-        const gaps = (w.openings || []).filter((q) => opensAt.includes(q.id)).map((q) => [q.offset, q.offset + q.width]).sort((p, q) => p[0] - q[0]);
+        const gaps = (w.openings || []).filter((q) => opensAt.includes(q.id)).map((q) => [q.offset + 0.02, q.offset + q.width - 0.02]).sort((p, q) => p[0] - q[0]);    // over the jambs too
         let x = 0;
         // the core across the whole thickness, then each face's strip a hair above it
         const band = (xa, xb, o0, o1, y, c) => { const P = (s2, o) => [w.a[0] + ux * s2 + N[0] * o, y, w.a[1] + uz * s2 + N[2] * o]; for (const q of [P(xa, o0), P(xb, o0), P(xb, o1), P(xa, o0), P(xb, o1), P(xa, o1)]) (pos.push(...q), cols.push(c[0], c[1], c[2])); };
@@ -9515,7 +9515,7 @@
         S.group.add(S.capMesh);
       }
     }
-    if (S.capMesh) ((S.capMesh.visible = true), (S.capMesh.position.y = h - 0.0005));   // at the cut: nothing of the cut pieces shows above it
+    if (S.capMesh) ((S.capMesh.visible = true), (S.capMesh.position.y = h + 0.0015));   // a hair above the cut: the cut ends of the studs and plates stay under it, so the top reads level   // at the cut: nothing of the cut pieces shows above it
     capSides(S, h);
   }
   // the cut's sides: where the near plane and the two side planes of the cut pass through a finished wall, a vertical cap in
@@ -9553,7 +9553,8 @@
         if (_pl.some((q, k) => k !== i && val(q, cx, cz) >= 0)) continue;       // the cut does not reach here
         // up from the cut to the top of the wall, less an opening the plane passes through
         let ys = [[h, top]];
-        for (const q of w.openings || []) if (tc > q.offset && tc < q.offset + q.width) ys = ys.flatMap(([y0, y1]) => [[y0, Math.min(y1, w.y0 + q.sill)], [Math.max(y0, w.y0 + q.sill + q.height), y1]].filter(([p0, p1]) => p1 - p0 > 0.01));
+        // (only the clear opening between the jambs: the jambs and the wall round them are capped like the wall)
+        for (const q of w.openings || []) if (tc > q.offset + 0.02 && tc < q.offset + q.width - 0.02) ys = ys.flatMap(([y0, y1]) => [[y0, Math.min(y1, w.y0 + q.sill + (q.kind === "door" ? 0 : 0.02))], [Math.max(y0, w.y0 + q.sill + q.height - 0.02), y1]].filter(([p0, p1]) => p1 - p0 > 0.01));
         const nr = [pl.normal.x, 0, pl.normal.z], sh = -0.0015;      // a hair toward the cut side, off the clipped faces
         const pt = (o, y) => { const t = at(o); return [w.a[0] + ux * t + N[0] * o + nr[0] * sh, y, w.a[1] + uz * t + N[2] * o + nr[2] * sh]; };
         const quad = (o0, o1, y0, y1, col, e = 0) => { const a = pt(o0, y0), b = pt(o1, y0), c = pt(o1, y1), dd = pt(o0, y1); for (const q of [a, b, c, dd]) ((q[0] -= nr[0] * e), (q[2] -= nr[2] * e)); tri(a, b, c, nr, col); tri(a, c, dd, nr, col); };
@@ -9563,6 +9564,57 @@
     g.setDrawRange(0, n);
     g.attributes.position.needsUpdate = g.attributes.normal.needsUpdate = g.attributes.color.needsUpdate = true;
     S.capSide.visible = n > 0;
+  }
+  // ---- the openings of a finished wall, lined (docs/design/carpentry.md): a jamb board up each side and across the head, and a
+  // sill board under a window, across the wall's whole thickness, so an opening shows finished wood, not the inside of the wall,
+  // from any side and in the dollhouse cut. Primed white, or the building's trim colour
+  function wallThick(S, w) {
+    const ms = (S.mem.byParent.get(w.id) || []).filter((m) => m.draw !== 0 && !CAP_SKIP.has(m.kind) && !(m.kind === "cladding" && m.type === "trim") && m.section && m.stage !== "foundation" && m.stage !== "floor-frame" && m.stage !== "subfloor");
+    if (!ms.length || ms.some((m) => S.plan.has(m.id))) return null;
+    const L = Math.hypot(w.b[0] - w.a[0], w.b[1] - w.a[1]) || 1, ux = (w.b[0] - w.a[0]) / L, uz = (w.b[1] - w.a[1]) / L, N = [-uz, 0, ux];
+    let lo = 1e9, hi = -1e9;
+    for (const m of ms) {
+      const ax = m.b[0] - m.a[0], ay = m.b[1] - m.a[1], az = m.b[2] - m.a[2], ml = Math.hypot(ax, ay, az) || 1, u = [ax / ml, ay / ml, az / ml], n = m.n;
+      const t = [u[1] * n[2] - u[2] * n[1], u[2] * n[0] - u[0] * n[2], u[0] * n[1] - u[1] * n[0]], dot = (v) => Math.abs(v[0] * N[0] + v[2] * N[2]);
+      const c = ((m.a[0] + m.b[0]) / 2 - w.a[0]) * N[0] + ((m.a[2] + m.b[2]) / 2 - w.a[1]) * N[2], half = (dot(t) * m.section.b + dot(n) * m.section.d + dot(u) * ml) / 2;
+      if (half > 0.4) continue;
+      lo = Math.min(lo, c - half); hi = Math.max(hi, c + half);
+    }
+    return hi > lo ? { L, ux, uz, N, lo, hi } : null;
+  }
+  function jambGeo(S) {
+    if (!S.mem.walls) return null;
+    const pos = [], cols = [], JB = 0.019, IN = 0.02, c = S.deco && S.deco.trim ? finCol(S.deco.trim) : MCOL.trim;
+    // a box from its centre and three half-extent vectors
+    const box = (o, A, Bv, Cv) => {
+      const P = (i, j, k) => [o[0] + A[0] * i + Bv[0] * j + Cv[0] * k, o[1] + A[1] * i + Bv[1] * j + Cv[1] * k, o[2] + A[2] * i + Bv[2] * j + Cv[2] * k];
+      const q = (a, b, cc, d) => { for (const v of [a, b, cc, a, cc, d]) (pos.push(v[0], v[1], v[2]), cols.push(c[0], c[1], c[2])); };
+      q(P(-1, -1, 1), P(1, -1, 1), P(1, 1, 1), P(-1, 1, 1)); q(P(-1, -1, -1), P(-1, 1, -1), P(1, 1, -1), P(1, -1, -1));
+      q(P(1, -1, -1), P(1, 1, -1), P(1, 1, 1), P(1, -1, 1)); q(P(-1, -1, -1), P(-1, -1, 1), P(-1, 1, 1), P(-1, 1, -1));
+      q(P(-1, 1, -1), P(-1, 1, 1), P(1, 1, 1), P(1, 1, -1)); q(P(-1, -1, -1), P(1, -1, -1), P(1, -1, 1), P(-1, -1, 1));
+    };
+    for (const w of S.mem.walls) {
+      if (!(w.openings || []).length) continue;
+      const d = wallThick(S, w);
+      if (!d) continue;
+      const { ux, uz, N, lo, hi } = d, om = (lo + hi) / 2, oh = (hi - lo) / 2 + 0.001, yb = w.y0 + (w.foot === undefined ? FLOOR_T : w.foot);
+      const at = (sv, y) => [w.a[0] + ux * sv + N[0] * om, y, w.a[1] + uz * sv + N[2] * om];
+      const U = [ux, 0, uz], X = [N[0] * oh, 0, N[2] * oh];
+      for (const q of w.openings) {
+        const door = q.kind === "door", s0 = q.offset + IN, s1 = q.offset + q.width - IN, y0 = door ? yb : w.y0 + q.sill + IN, y1 = w.y0 + q.sill + q.height - IN;
+        if (s1 - s0 < 0.1 || y1 - y0 < 0.1) continue;
+        const hy = (y1 - y0) / 2, hs = (s1 - s0) / 2 + JB;
+        for (const sv of [s0 - JB / 2, s1 + JB / 2]) box(at(sv, (y0 + y1) / 2), X, [0, hy, 0], U.map((v) => (v * JB) / 2));
+        box(at((s0 + s1) / 2, y1 + JB / 2), X, [0, JB / 2, 0], U.map((v) => v * hs));
+        if (!door) box(at((s0 + s1) / 2, y0 - JB / 2), X, [0, JB / 2, 0], U.map((v) => v * hs));
+      }
+    }
+    if (!pos.length) return null;
+    const g = new T.BufferGeometry();
+    g.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+    g.setAttribute("color", new T.Float32BufferAttribute(cols, 3));
+    g.computeVertexNormals();
+    return g;
   }
   function dropMembers(S) {
     for (const m of S.memMeshes) {
@@ -9670,6 +9722,10 @@
     // mitered trim out of the boxes, into its own shaped mesh
     const shaped = [];
     for (let k = 0; k < sets.length; k++) if (sets[k].some(isShaped)) ((shaped.push(...sets[k].filter(isShaped))), (sets[k] = sets[k].filter((m) => !isShaped(m))));
+    {
+      const jg = jambGeo(S);
+      if (jg) { const mesh = new T.Mesh(jg, (S.memMats && S.memMats.shp) || shpMat); mesh.userData.own = true; add(mesh, false, true); }
+    }
     if (shaped.length) {
       const mesh = new T.Mesh(shapedGeo(shaped, (m) => (m.kind === "paint" ? finCol(m.fin) : MCOL[m.col || "timber"])), (S.memMats && S.memMats.shp) || shpMat);
       mesh.userData.own = true;
