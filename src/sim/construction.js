@@ -1122,7 +1122,7 @@ export const constructionSystem = () => ({
       const pr = c.s.progress[p && p.structId];
       if (!pr) return { ok: false, reason: 'unknown building' };
       const done = [];
-      for (const id of p.memberIds || []) { const m = pr.members[id]; if (!m || m.built || m.kind === 'site') continue; m.got = m.need; m.built = 1; m.builtAt = round6(ctx.state.t); pr.tally[m.stage][0]++; done.push(id); }
+      for (const id of p.memberIds || []) { const m = pr.members[id]; if (!m || m.built || m.kind === 'site') continue; m.got = m.need; m.built = 1; m.builtAt = round6(c.state.t); pr.tally[m.stage][0]++; done.push(id); }
       if (done.length) refresh(c, c.s, pr);
       return { ok: done.length > 0, settled: done };
     },

@@ -11042,6 +11042,7 @@
         }
       }
       fadeRB.value = homeY !== null ? 1e-4 : G.fadeR ? G.fadeR.value : 1;
+      const firstPerson = !!(G.camView && G.camView() === "first");
       for (const S of B.structs) {
         const [lx, lz] = toLocal(S, P.x, P.z);
         const sameHome = homeY !== null && Math.abs(S.y0 - homeY) < 0.4 && Math.hypot(P.x - S.cx, P.z - S.cz) < S.rad + 5;
@@ -11069,7 +11070,7 @@
           // open the building up while you stand in it, so rooms read like a floor plan
           const onFloor = sameHome;
           const full = EAVE * S.hs * S.rings.reduce((m, r) => Math.max(m, r.h), 1) + 0.4;
-          const cutT = onFloor ? 1.15 : inTower ? P.y - S.y0 + 1.05 : 0;
+          const cutT = firstPerson ? 0 : onFloor ? 1.15 : inTower ? P.y - S.y0 + 1.05 : 0; // first person: the rooms stay whole
           if (!B.on && cutT && !(P.dead > 0)) {
             const cur = Math.min(S.cutH, full);
             S.cutH = cur > cutT ? Math.max(cutT, cur - dt * 9) : Math.min(cutT, cur + dt * 9);
@@ -11106,7 +11107,7 @@
         const inRing = ri >= 0 && Math.abs(P.y - S.y0) < headroom;
         const underAny = under || inPoly || (inRing && S.rings[ri].roof) || inTower || (sameHome && homeUnder);
         if (inRing && S.rings[ri].roof && S.rings[ri].sides.every((t) => t) && Math.abs(P.y - (S.y0 + FLOOR_T)) < 0.5) ((sheltered = true), (cosy = Math.max(cosy, S.ringCosy[ri] || 0)));
-        const target = B.on ? (roofsShown() ? 1 : 0) : underAny ? 0 : 1;
+        const target = B.on ? (roofsShown() ? 1 : 0) : underAny && !firstPerson ? 0 : 1;
         if (S.roofOp !== target) {
           S.roofOp = clamp(S.roofOp + Math.sign(target - S.roofOp) * dt * 4, 0, 1);
           S.roofMat.opacity = S.roofOp;
