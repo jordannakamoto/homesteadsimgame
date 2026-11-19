@@ -177,7 +177,7 @@ Commands (all return `{ ok, reason? }`, all usable through `commandNow` so they 
 
 Conservation test: `fuelAddedL = sum(fuelL) + fuelBurnedL`.
 
-Why pose arrives by command: the sim tick is 60 world seconds (0.83 real seconds at 1x), far too coarse to integrate driving, and FOUNDATIONS.md step 4 says dynamic physics belongs on a fixed real-time step that fast-forward cannot multiply. `construction.barrowMove` (construction.js 923, sent every 0.2 s from construct-view.js 1116) is the precedent. Replays reproduce because the reported poses are in the command log.
+Why pose arrives by command: the sim tick is 60 world seconds (0.83 real seconds at 1x), far too coarse to integrate driving, and PLATFORM.md step 4 says dynamic physics belongs on a fixed real-time step that fast-forward cannot multiply. `construction.barrowMove` (construction.js 923, sent every 0.2 s from construct-view.js 1116) is the precedent. Replays reproduce because the reported poses are in the command log.
 
 ### 3.4 Save
 
@@ -227,7 +227,7 @@ Not touched: build.js, landscape-view.js, src/sim/landscape.js, sky/weather file
 | Ground | Needs colliders. The ground is three things today (chunk heights with 1 m deltas, the 10 cm earthwork relief, built floors via `__build.ground`), unified only as a function you sample. Colliders would have to be built per chunk as it streams and rebuilt on every dig, at 10 cm resolution near earthwork | Samples `G.groundAt(x, z, y)` directly; always agrees with what the player walks on |
 | Obstacles | Trees, rocks, walls need collider mirrors kept in step with felling and building | Reuses `pushOut` and `__build.collide`, the circles the player already uses |
 | Start-up | Async `R.init()`; the kitchen shows "physics is loading" | None |
-| Determinism | Same-machine only per FOUNDATIONS.md; cross-machine unproven | Plain float arithmetic on sampled heights; and it does not matter for truth, because pose enters the sim by command |
+| Determinism | Same-machine only per PLATFORM.md; cross-machine unproven | Plain float arithmetic on sampled heights; and it does not matter for truth, because pose enters the sim by command |
 | Cost | 0.09 ms per step at 32 bodies, plus transform reads and collider updates | A few microseconds |
 | Mobile | WASM heap plus heightfield colliders | Nothing extra |
 | Feel | Physically right, harder to tune toward "fun" | Every feel parameter is a record field |
@@ -426,7 +426,7 @@ Notes for that workstream: radii up to about 1.2 m and depths past the current 1
 
 | Risk | Mitigation |
 |---|---|
-| Chunk streaming hitches at 11 m/s (FOUNDATIONS.md notes a travel frame can pass the 5 ms budget; a chunk is crossed every 3 s) | Measure in V3 before tuning top speed; cap speed by measured hitching, not by taste; the look-ahead camera hides less than a walking camera so pop-in is more visible |
+| Chunk streaming hitches at 11 m/s (PLATFORM.md notes a travel frame can pass the 5 ms budget; a chunk is crossed every 3 s) | Measure in V3 before tuning top speed; cap speed by measured hitching, not by taste; the look-ahead camera hides less than a walking camera so pop-in is more visible |
 | engine.js edits collide with active sessions | Six small hunks in V0, none in the sky block; land V0 early and alone |
 | Legacy takeovers and the seat both think they own the player | `control.canTake` guard list until V11/V12; seat possession returns early from `updatePlayer`, so legacy `P.*` writes are simply ignored while seated |
 | Heading steer feels vague, or reversing a trailer is frustrating | Car scheme option from V6; Shift for gentle throttle; hitch guide line; the 75 degree clamp prevents a locked jackknife |
