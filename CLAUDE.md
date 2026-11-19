@@ -25,6 +25,11 @@ A browser homestead builder (Stardew-style direction) on a Valheim-style voxel w
   - `test/landscape.smoke.mjs`: the Yard (key 6), fast core: digging, right-drag push, paths, stone, reload. Run for any landscape change. `test/landscape.tail.smoke.mjs` is the long tail (bags, garden box, plant, barrow, pond, garden bar): run it only when `src/sim/core/earthwork.js`, `src/sim/content/landscape.js`, `src/sim/landscape.js` or `src/landscape-view.js` change.
   - `test/chickens.smoke.mjs`: the chickens view.
   - `test/physical-kitchen.smoke.mjs` (`test/cooking.smoke.mjs` runs the same): the kitchen.
+  - `test/foundation.smoke.mjs`: the Site tools (key 7): layout, dig, forms, pour, cure, piers, stem walls.
+  - `test/services.smoke.mjs`: plan, rough-in and trim-out of cable and pipe (Hands, F). `test/services-water.smoke.mjs`: supply plumbing, pressure test, fixtures.
+  - `test/vehicles.smoke.mjs`: the ATV (mount, drive, fuel). `test/trailer.smoke.mjs`: hitch, tow, haul lumber.
+  - `test/build-ext.smoke.mjs`: the build extension point (fixture extension through save and undo).
+  - `test/landscape.smoke.mjs` is the ~2 min core of the Yard; `test/landscape.tail.smoke.mjs` the long tail (run both if you touched `core/earthwork.js`). `test/ui.smoke.mjs`: the interface kit and skins.
   - `test/shed.e2e.mjs` builds the tutorial shed from bare ground and is the gate before publishing; `test/shed.clumsy.mjs` is the clumsy-player version.
 
 ## The live page
@@ -32,12 +37,18 @@ A browser homestead builder (Stardew-style direction) on a Valheim-style voxel w
 - Publish only a build of `main` that is already pushed. Read the artifact's live version first and publish over that.
 
 ## Code map
-- `ARCHITECTURE.md`: the layers, the simulation rules and the interfaces. `docs/V1_PLAN.md`: the plan and vision. `docs/PLAYTEST.md`: what each wave added.
+- `ARCHITECTURE.md`: the layers, the simulation rules and the interfaces. `docs/V1_PLAN.md`: the plan and vision. `docs/PLAYTEST.md`: what each wave added. `docs/STATUS.md`: where things stand. `docs/design/`: design docs and the save-version ledger. `docs/PLATFORM.md`: the Steam and co-op plan.
 - `src/sim/`: the simulation. All world truth that changes over time lives here: deterministic, fixed ticks, seeded randomness, no DOM or three.js. One system per file, registered in `src/sim/index.js`.
 - `src/engine.js`: world, terrain, trees, grass, water, player, tools, day and night. Ordinary source with real names; edit it directly.
 - `src/build.js`: build mode, furniture and the piece interface. `src/buildui.js`: build mode's bar, options strip and inspector. `src/touch.js`: touch controls. `src/nature.js`: ground cover, shrubs, insects, animals, soft foliage lighting.
 - Hands-on water (docs/FIRST_WATER.md): generic `src/sim/core/parts.js`, `src/engine/parts.js`, `src/engine/reach.js` (no water words in these); content `src/sim/content/plumbing-parts.js`, `src/sim/plumbing.js`, `src/water-hands.js`. After touching them run `node test/water.smoke.mjs`.
 - Digging and landscaping: generic `src/sim/core/earthwork.js` (a smooth heightfield, points 10 cm apart: round cut and fill, settling to the angle of repose, rake, flags), content `src/sim/content/landscape.js`, system `src/sim/landscape.js`, view `src/landscape-view.js` (Yard, key 6; the shaped-ground mesh and the terrain's dig mask). The garden reads the shape of the ground. After touching them run `node test/landscape.smoke.mjs`.
+- Ground: `src/sim/ground.js` (the one command API for moving earth: `ground.cut/fill/push/grade/tamp`) over generic `src/sim/core/ground.js` (base + 1 m macro + 10 cm fine). Machines, foundations, build-site prep and the shovel go through it; do not write `world.edits` or the fine grid directly. See ARCHITECTURE "One ground".
+- Foundations: `src/sim/foundation.js` (jobs: layout, dig, base, forms, rebar, pour, cure gates), `src/foundation-view.js` (Site tools, key 7), generic `src/sim/core/cure.js` and `core/batch.js`, content `src/sim/content/concrete.js` (frost depths, cure gates). After touching them run `node test/foundation.smoke.mjs`.
+- Services (cable, pipe, drain, vent in the frame): generic `src/sim/core/links.js`, `core/routes.js` and `core/routefind.js`, content `src/sim/content/services.js` and `frame-channels.js`, system `src/sim/services.js`, page `src/engine/routes.js`, `src/services-plan.js`, `services-hands.js`, `services-trim.js`, `services-water.js`, `services-view.js`. Kit parts above are the yard pipe model; routes are in-building. After touching them run `test/services.smoke.mjs` (and `services-water.smoke.mjs` for plumbing).
+- Vehicles: generic `src/engine/control.js` (possession stack: the seat is a possession, walking is the bottom), `src/engine/vehicles.js`, `src/sim/core/vehicles.js` + `vehicles-drive.js`; content `src/sim/content/vehicles.js` and `src/game/vehicles-atv.js`. Pose enters the sim by command (`vehicles.sync`), never by tick. Run `test/vehicles.smoke.mjs` and `test/trailer.smoke.mjs`.
+- Build extension point: new building elements (deck, porch, loft, skylight, chimney) go in their own file via `__build.extend`, `__build.setExt` and `__framing.register` (`src/build-ext.js`), not into `build.js`. What other systems keep on a building lives in `pr.keep[source]` (`src/sim/core/keep.js`); `construction.setPlan` carries it whole.
+- Keys: `src/game/keymap.js` is the one key table (draws the controls sheet on ? / F1 and the key chips). Move a key, move its row. X is overlays everywhere. Interface kit: `src/engine/ui.js` + `src/game/hud.js`, looks in `template/ui/*.css`.
 - `src/fxpost.js`: the one post pass (occlusion, depth of field, sun shafts, haze, grade). `src/fxhost.js` + `src/fx.js`: fires, smoke, tree variety, characters.
 - Add-ons reach the engine only through `window.__game`, `window.__build` and `window.__nature`. Add a name there rather than reaching into engine internals.
 
