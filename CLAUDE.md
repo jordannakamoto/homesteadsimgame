@@ -29,6 +29,7 @@ A browser homestead builder (Stardew-style direction) on a Valheim-style voxel w
   - `test/services.smoke.mjs`: plan, rough-in and trim-out of cable and pipe (Hands, F). `test/services-water.smoke.mjs`: supply plumbing, pressure test, fixtures.
   - `test/vehicles.smoke.mjs`: the ATV (mount, drive, fuel). `test/trailer.smoke.mjs`: hitch, tow, haul lumber.
   - `test/build-ext.smoke.mjs`: the build extension point (fixture extension through save and undo).
+  - `test/deck.smoke.mjs`: decks (`src/game/deck.js`): drawn against a wall and free-standing, refused spans, picked and deleted, walked on, reload.
   - `test/landscape.smoke.mjs` is the ~2 min core of the Yard; `test/landscape.tail.smoke.mjs` the long tail (run both if you touched `core/earthwork.js`). `test/ui.smoke.mjs`: the interface kit and skins.
   - `test/shed.e2e.mjs` builds the tutorial shed from bare ground and is the gate before publishing; `test/shed.clumsy.mjs` is the clumsy-player version.
 

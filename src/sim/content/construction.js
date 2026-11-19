@@ -5,6 +5,7 @@
 // stacks, carrying) and src/sim/construction.js (the system); the page's add-on reads it for its wording.
 
 import { SERVICE_SUPPLY } from './services.js';
+import { DECK_SUPPLY } from './deck.js';
 export { PAINTS, PAINT, SHEENS, SURFACES, finishOf, DECOR } from './decor.js';
 export { PROFILES, REVEAL_M, ENDS, cutWords, FINISH_NAILS_KG_PER_M } from './carpentry.js';
 
@@ -38,6 +39,10 @@ export const STAGES = Object.freeze([
   { id: 'carpentry', name: 'Trim carpentry', needs: ['lining', 'finish'], verb: 'Fit the trim', what: 'Casings round the doors and windows, then baseboard along the floor, each piece cut to fit at the sawhorses.', why: 'Covers the gaps where the walls meet the floor and the frames, and finishes the room.' },
   { id: 'decorate', name: 'Paint', needs: ['cladding', 'lining', 'finish', 'carpentry'], verb: 'Paint', what: 'A coat of primer on the new walls, then two coats of colour, each dry before the next; two coats on the trim, which comes primed.', why: 'Seals the drywall or boards and gives the room its colour.' },
   { id: 'trim-out', name: 'Trim-out', needs: ['lining', 'finish', 'decorate'], by: 'services', hint: 'Trim-out: Do it for me, in the Build panel (L)', verb: 'Fit the devices and fixtures', what: 'Outlets, switches and lights into their boxes; breakers into the panel; taps and fixtures onto their stubs.', why: 'The wall is finished now, so what you touch goes on its face.' },
+  // decks (src/sim/content/deck.js, src/game/deck.js): the piers, posts and beam are foundation members; the ledger bolts through
+  // the house's sheathing, so the frame waits for it (a free-standing deck has none: an empty stage counts as done)
+  { id: 'deck-frame', name: 'Deck frame', needs: ['foundation', 'sheathing'], verb: 'Frame the deck', what: 'Bolt the ledger to the house rim through the sheathing, flash it, hang the joists every 40 cm, close the ends with the rim.', why: 'The ledger and the beam carry the joists; the joists carry the boards.' },
+  { id: 'decking', name: 'Decking', needs: ['deck-frame'], verb: 'Lay the deck boards', what: 'Boards across the joists from the house out, a 5 mm gap between them, two screws at every joist. Hold and drag along a row once you have the knack.', why: 'The gaps let the rain through and the boards move with the weather.' },
 ]);
 // ---- taping drywall (docs/design/interior-walls.md). Each seam takes the tape and a first coat, then a fill coat and a
 // finish coat, each laid on dry compound, then a light sanding. Setting compound can take the next coat in about an hour
@@ -51,10 +56,11 @@ export const STAGE_ORDER = Object.freeze(STAGES.map((s) => s.id));
 export const SUPPORT = Object.freeze({
   pier: ['footing'], post: ['pier'], skid: ['footing'], slab: ['footing'], stemwall: ['footing'],
   beam: ['pier', 'post', 'footing', 'stemwall'], rafter: ['beam'],
+  joist: ['ledger'],   // a deck's joists hang on its ledger (a house floor has no ledger in its frame stage)
   // drying in and roofing, the order roofers lay them: each layer laps the one below
   membrane: ['drip'], rake: ['membrane'], ridgecap: ['roofing'], downspout: ['gutter'],
 });
-export const SUPPORT_SAYS = Object.freeze({ footing: 'Lay the footings', pier: 'Set the pier blocks', post: 'Set the posts', stemwall: 'Pour the stem wall', beam: 'Set the ridge beam', drip: 'Fit the drip edge along the eaves', membrane: 'Lay the underlayment', roofing: 'Lay every course', gutter: 'Hang the gutter' });
+export const SUPPORT_SAYS = Object.freeze({ ledger: 'Bolt the ledger on', footing: 'Lay the footings', pier: 'Set the pier blocks', post: 'Set the posts', stemwall: 'Pour the stem wall', beam: 'Set the ridge beam', drip: 'Fit the drip edge along the eaves', membrane: 'Lay the underlayment', roofing: 'Lay every course', gutter: 'Hang the gutter' });
 
 // ---- what a shopping line is bought as, where the plan's own item is missing or not what a builder buys.
 // Keyed by the line's name (the part of its key after the stage). `each`: one whole unit per member.
@@ -66,7 +72,7 @@ export const LINE_ITEM = Object.freeze({
   window: { itemId: 'window_shed', each: true, label: 'Window' },
 });
 // Lines that are not carried: they sit by the stacks and are used up as the work goes on.
-export const SITE_SUPPLY = Object.freeze(['nails_framing', 'screws_wood', 'screws_structural', ...SERVICE_SUPPLY]);
+export const SITE_SUPPLY = Object.freeze(['nails_framing', 'screws_wood', 'screws_structural', ...SERVICE_SUPPLY, ...DECK_SUPPLY]);
 
 // ---- items the main catalog lacks (the orchestrator merges these into src/sim/items.js). Real figures.
 export const ITEMS_CONSTRUCTION = Object.freeze({
@@ -105,8 +111,8 @@ export const ITEMS_SCAFFOLD = Object.freeze({
 // ---- learn once, then sweep: after nailing a few of a kind by hand, that kind is learned and is set and nailed as you sweep along its run
 export const LEARN = Object.freeze({
   needed: 2,
-  group: Object.freeze({ stud: 'stud', plate: 'plate', header: 'header', joist: 'joist', rafter: 'rafter', beam: 'beam', post: 'post', skid: 'skid', sheathing: 'sheet', membrane: 'sheet', roofing: 'course', lining: 'sheet', cladding: 'sheet', insulation: 'sheet', drip: 'flashing', rake: 'flashing', ridgecap: 'flashing', gutter: 'gutter', downspout: 'gutter' }),
-  says: Object.freeze({ stud: 'frame a stud wall', plate: 'lay wall plates', header: 'frame an opening', joist: 'frame a floor', rafter: 'set rafters', beam: 'set a beam', post: 'set posts', skid: 'lay skids', sheet: 'lay sheets', course: 'lay a roof course', flashing: 'fit drip edge and flashing', gutter: 'hang gutters' }),
+  group: Object.freeze({ stud: 'stud', plate: 'plate', header: 'header', joist: 'joist', rafter: 'rafter', beam: 'beam', post: 'post', skid: 'skid', sheathing: 'sheet', membrane: 'sheet', roofing: 'course', lining: 'sheet', cladding: 'sheet', insulation: 'sheet', drip: 'flashing', rake: 'flashing', ridgecap: 'flashing', gutter: 'gutter', downspout: 'gutter', decking: 'deckboard' }),
+  says: Object.freeze({ stud: 'frame a stud wall', plate: 'lay wall plates', header: 'frame an opening', joist: 'frame a floor', rafter: 'set rafters', beam: 'set a beam', post: 'set posts', skid: 'lay skids', sheet: 'lay sheets', course: 'lay a roof course', flashing: 'fit drip edge and flashing', gutter: 'hang gutters', deckboard: 'lay deck boards' }),
 });
 export const learnGroup = (kind) => LEARN.group[kind] || null;
 

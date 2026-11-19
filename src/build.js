@@ -3693,7 +3693,7 @@
     const i = B.structs.indexOf(S);
     i >= 0 && B.structs.splice(i, 1);
   }
-  const isEmpty = (S) => !S.floors.size && !S.walls.size && !S.roofs.length && !S.segs.length && !S.rings.length && !S.stairs.length && !S.pillars.length && !S.paths.length && !S.decor.length;
+  const isEmpty = (S) => !S.floors.size && !S.walls.size && !S.roofs.length && !S.segs.length && !S.rings.length && !S.stairs.length && !S.pillars.length && !S.paths.length && !S.decor.length && !(S.ext && Object.keys(S.ext).length);
   const ringAt = (S, lx, lz, pad = 0) => S.rings.findIndex((r) => Math.hypot(lx - r.cx, lz - r.cz) < ringInner(r) + pad);
   const covered = (S, i, j) => S.roofs.some((r) => i >= r.i0 && i <= r.i1 && j >= r.j0 && j <= r.j1);
 
@@ -3864,6 +3864,7 @@
         if (r.sides[k]) S.colSegs.push([a[0], a[1], b[0], b[1], r.sides[k]]);
       }
     }
+    for (const [x, z] of EXT.bounds(S)) (ext(Math.floor(x), Math.floor(z)), ext(Math.ceil(x), Math.ceil(z))); // extensions' extent (a deck)
     S.b = { i0, i1, j0, j1 };
     const [cx, cz] = toWorld(S, (i0 + i1) / 2, (j0 + j1) / 2);
     S.cx = cx;
@@ -5725,6 +5726,8 @@
           if (Math.hypot(lx - p[0] - dx * tt, lz - p[1] - dz * tt) < p[4] / 2 + 0.15) ((bt = t), (best = { S, kind: "path", idx, id: p[6] }));
         }
       }
+      const xp = S.ext && EXT.pick(S, R, bt, hitBox); // an extension's own piece (a deck) under the pointer
+      if (xp) ((bt = xp.t), (best = { S, kind: "ext", id: xp.id }));
     }
     return best;
   }
@@ -7212,6 +7215,7 @@
       const now = performance.now(),
         id = B.hoverId,
         hd = handleAt();
+      if (!hd && EXT.click(id)) return void selSet([]); // an extension's piece: its own inspector (src/build-ext.js)
       B.press = { x: e.clientX, y: e.clientY, id: hd ? B.sel[0] : id, hd, shift: e.shiftKey, o: ray.ray.origin.clone(), dir: ray.ray.direction.clone() };
       B.press.dbl = !!(id && !hd && B.lastClick && B.lastClick.id === id && now - B.lastClick.t < 380);
       B.lastClick = { id, t: now };
@@ -8534,6 +8538,7 @@
     if (freeTool() && e.code === "KeyF" && !e.repeat) return (flipFree(), true);
     if (freeTool() && B.fsel && (e.code === "Delete" || e.code === "Backspace") && !e.repeat) return (delFree(), true);
     if ((e.code === "Delete" || e.code === "Backspace") && !e.repeat && B.tool === "equip" && FX.sel) return (choose("fx:del"), true);
+    if ((e.code === "Delete" || e.code === "Backspace") && !e.repeat && B.tool === "select" && !B.sel.length && EXT.remove()) return true; // an extension's selected piece
     if ((e.code === "Delete" || e.code === "Backspace") && !e.repeat) return (B.tool === "select" && B.sel.length ? selDelete() : setTool("erase"), true);
     // E turns the view while it is held; a quick tap picks up the Equip tool
     if (e.code === "KeyE") return (e.repeat || (B.eDown = performance.now()), true);
@@ -9057,7 +9062,7 @@
     FOUNDATIONS = FR.FOUNDATIONS,
     STAGES = FR.STAGES,
     CONCRETE = col(0xb5b2aa),
-    MEMBER_EXTRA = ["area", "thickness", "volume", "size", "plies", "roof", "opening", "height", "fin", "face", "surface", "ends", "profile"];
+    MEMBER_EXTRA = ["area", "thickness", "volume", "size", "plies", "roof", "opening", "height", "fin", "face", "surface", "ends", "profile", "buy", "hw"];
   const Lz = (material, thickness, role) => Object.freeze({ material, thickness, role });
   const footPal = new Map();
   function woodFoot(wm) {
@@ -9442,7 +9447,8 @@
   }
   const isLap = (m) => /^siding/.test(m.col || "") && m.type === "boards";
   const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf4b9a8), siding: col(0xb8beb1), sidingDark: col(0x5d4a3b), trim: col(0xefece4), gypsum: col(0xe3e3de), primer: col(0xf4f3ef), pine: col(0xd8b583), concrete: CONCRETE, gravel: col(0x8f8b82) };
-  for (const [k, h] of Object.entries(FR.ROOF_COLORS || {})) MCOL[k] = col(h); // the roofing layers while they go on (src/framing.js)
+  for (const [k, h] of Object.entries(FR.ROOF_COLORS || {})) MCOL[k] = col(h);
+  ((MCOL.pt = col(0xb79e70)), (MCOL.ptboard = col(0xa98f66)), (MCOL.cedar = col(0xb27650))); // deck framing (treated pine) and boards // the roofing layers while they go on (src/framing.js)
   // a wall paint's colour, from its finish key ("sage_eggshell"; src/sim/content/decor.js)
   const FINCOL = new Map(),
     finCol = (fin) => {
@@ -10939,9 +10945,22 @@
     else S.ext[id] = JSON.parse(JSON.stringify(data));
     S.ver++;
     S.pc = null;
-    rebuild(S);
+    if (isEmpty(S)) ((disposeStruct(S)), B.version++); // nothing left (a free-standing deck removed)
+    else rebuild(S);
     touchUi();
     return true;
+  }
+  // a new structure that holds only an extension's data (a free-standing deck): F = { ox, oz, yaw, y0 } (y0 its datum)
+  function extCreate(F, id, data) {
+    if (!EXT.get(id) || !F || ![F.ox, F.oz, F.yaw, F.y0].every(Number.isFinite)) return null;
+    pushUndo();
+    const S = newStruct({ ox: F.ox, oz: F.oz, yaw: F.yaw, y0: F.y0, level: 0, fresh: true });
+    S.found = "piers";
+    S.ext = { [id]: JSON.parse(JSON.stringify(data)) };
+    rebuild(S);
+    B.version++;
+    touchUi();
+    return S.id;
   }
   EXT.bind({ hints: HINTS, tools: TOOLS, touch: touchUi, selecting: () => B.sel.length > 0,
     refresh() {
@@ -10974,6 +10993,7 @@
     // the extension point (ARCHITECTURE.md, "Adding to build mode"): extend(spec), setExt(structId, id, data), getExt(structId, id)
     extend: EXT.extend,
     setExt,
+    extCreate,
     getExt(structId, id) {
       const S = B.structs.find((O) => O.id === structId);
       return S && S.ext && S.ext[id] !== undefined ? JSON.parse(JSON.stringify(S.ext[id])) : null;
@@ -11145,6 +11165,8 @@
         }
         const sh = stairH(S, lx, lz);
         if (sh !== null && y >= S.y0 + sh - 0.65) g = Math.max(g, S.y0 + sh);
+        const xg = S.ext ? EXT.ground(S, lx, lz, y - S.y0) : null; // an extension's walking surface (a deck), in the structure's y
+        if (xg !== null && y >= S.y0 + xg - 0.65) g = Math.max(g, S.y0 + xg);
       }
       return g;
     },
