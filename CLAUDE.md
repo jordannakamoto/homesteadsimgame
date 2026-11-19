@@ -11,7 +11,9 @@ A browser homestead builder (Stardew-style direction) on a Valheim-style voxel w
 
 ## Build and test
 - `npm install && sh build.sh` writes `dist/index.html`, one self-contained page.
-- `npm test` runs the headless simulation tests and takes about 3 minutes now, not seconds. While iterating, run one file: `node --test test/<name>.test.mjs`.
+- `npm test` runs the headless simulation tests: about 45 s on a 2-core machine, less with more cores. While iterating, run one file: `node --test test/<name>.test.mjs`.
+- Keep it fast. A long run (years of game time) that checks one system which reads no other registers that system alone (`createSim({ seed, systems: [weather] })`, as the weather climate runs do) instead of the whole game; keep one full-game test for determinism and saves. Look at the timings (`node --test --test-reporter=spec`) when adding a test that runs more than a few game months.
+- A system's `ctx` is a class instance with `s` on its prototype: `{ ...ctx }` loses `s`. To change a field for a call, derive: `const c = Object.create(ctx); c.t = ...`.
 - Wall-clock budget asserts (chickens, electrical, garden.cost, sim, structure, thermal, water, weather) run only with `BENCH=1` (`BENCH=1 node --test test/water.test.mjs`); otherwise they are skipped so a loaded machine never fails a functional run. New timing asserts use `test/helpers/bench.mjs`.
 - Browser smokes should start from `test/helpers/page.mjs` (`openPage()`: Playwright launch, 640x360, Low quality locked, fonts blocked, page errors collected; `t.load()` waits for the game, not a sleep). `__game.stepFrames(n)` steps n fixed frames synchronously for checks that need game time without input timing; smokes that press and hold with the real clock (the yard, vehicles) keep real waits. Software GL is slow: a browser smoke is minutes, not seconds, and several at once slow each other down, so run them one at a time.
 - Browser smoke tests need the built page (`sh build.sh`) and Playwright. Run `node test/page.smoke.mjs` before pushing (the page loads with no errors, build mode opens, Low and High quality work, saves survive a reload). Then the one for what you touched:
