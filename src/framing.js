@@ -248,17 +248,26 @@
       }
       return;
     }
-    let row = 0;
-    for (let y = c.y0; y < c.y1 - 0.05; y += CH, row++) {
-      const ya = y,
-        yb = Math.min(c.y1, y + CH);
-      for (const [xa, xb] of c.spans(ya, yb, row)) {
+    // courses go up a few at a time (docs/design/carpentry.md: pace): up to three neighbouring courses that run the same
+    // spans (clear of windows, under the rake) are one piece; a course that runs round a window, or steps up a gable, is its own.
+    // The siding shader draws each course of a piece (src/build.js makeLapMat counts them from its height)
+    const rowsS = [];
+    for (let y = c.y0; y < c.y1 - 0.05; y += CH) rowsS.push([y, Math.min(c.y1, y + CH)]);
+    const spanKey = (i) => JSON.stringify(c.spans(rowsS[i][0], rowsS[i][1], i).map((q) => q.map((v) => Math.round(v * 1000))));
+    for (let i = 0, row = 0; i < rowsS.length; row++) {
+      let k = 1;
+      const k0 = spanKey(i);
+      while (k < 3 && i + k < rowsS.length && rowsS[i + k][1] - rowsS[i + k][0] > CH - 1e-6 && spanKey(i + k) === k0) k++;
+      const ya = rowsS[i][0],
+        yb = rowsS[i + k - 1][1], i0 = i;
+      i += k;
+      for (const [xa, xb] of c.spans(ya, yb, i0)) {
         const tw = c.trim === false ? 0 : TRIM_W, sa = Math.max(xa, tw), sb = Math.min(xb, c.L - tw);
         if (sb - sa < 0.1) continue;
         const ym = (ya + yb) / 2;
         // a thin lapped board: it overlaps the course below by 25 mm and only its bottom edge stands off the wall, so the shadow line carries the look
-        const lap = row && c.spans(ya - LAP, ya, row - 1).some(([x0, x1]) => x0 <= sa + 1e-6 && x1 >= sb - 1e-6) ? LAP : 0;
-        M(out, id("cl"), "cladding", "boards", "cladding", c.parent, c.mat || "timber", 0.007, yb - ya + lap, c.at(sa, ym - lap / 2, c.off), c.at(sb, ym - lap / 2, c.off), upV, { ...common, area: r3((sb - sa) * (yb - ya)), row });
+        const lap = i0 && c.spans(ya - LAP, ya, i0 - 1).some(([x0, x1]) => x0 <= sa + 1e-6 && x1 >= sb - 1e-6) ? LAP : 0;
+        M(out, id("cl"), "cladding", "boards", "cladding", c.parent, c.mat || "timber", 0.007, yb - ya + lap, c.at(sa, ym - lap / 2, c.off), c.at(sb, ym - lap / 2, c.off), upV, { ...common, area: r3((sb - sa) * (yb - ya)), row, ...(k > 1 ? { courses: k } : {}) });
       }
     }
   }
@@ -461,23 +470,47 @@
           // inside corners: where this face meets the next wall (both ends of a partition, the start of an outside wall)
           for (const x of o ? [0.02] : [0.02, L - 0.02]) joint("corner", at(x, yb + 0.012, joff), at(x, yt, joff), [ux, 0, uz], yt - yb - 0.012);
         }
-        else { let row = 0; for (let y = yb + 0.01; y < yt - 0.03; y += 0.14, row++) lay(y, Math.min(yt, y + 0.14), row, 3.6, "boards"); }
+        else {
+          // boards go up four at a time, tongue into groove (a panel's worth), where four neighbouring rows run the same
+          // spans; rows that run round a window go up one at a time
+          const ys = [];
+          for (let y = yb + 0.01; y < yt - 0.03; y += 0.14) ys.push([y, Math.min(yt, y + 0.14)]);
+          const sig = (r) => JSON.stringify(bandFree(r[0], r[1]).map((q) => [q[0], q[1]].map((v) => Math.round(v * 1000))));
+          for (let i = 0, row = 0; i < ys.length; row++) {
+            let k = 1;
+            while (k < 4 && i + k < ys.length && ys[i + k][1] - ys[i + k][0] > 0.139 && sig(ys[i + k]) === sig(ys[i])) k++;
+            lay(ys[i][0], ys[i + k - 1][1], row, 3.6, "boards");
+            i += k;
+          }
+        }
         // trim carpentry (docs/design/carpentry.md): casings round the openings, then baseboard along the floor, each part
         // with the cut at its ends. The casing's inner edge stands JI in from the rough opening: the jamb, less the reveal
         if (spec.trimIn !== false) {
           const CW = 0.057, CT = 0.0175, BH = 0.083, BT = 0.014, JI = 0.03 - 0.005, MAXL = 4.8;
           const offC = sg * (face + th + CT / 2), offB = sg * (face + th + BT / 2);
-          let kc = 0, kb = 0;
-          const cas = (a, b, n2, ends, q) => M(out, w.id + ".cs" + fc + "." + kc++, "casing", "colonial", "carpentry", w.id, "pine", CT, CW, a, b, n2, { face: fc, ends, opening: q.id, col: "trim", profile: "casing" });
-          const gaps = [];
+          let kc = 0, kb = 0, ks = 0;
+          const i0 = out.length;
+          // long: which side of a mitered piece is the long point, along its n (+1 or -1): the side away from the opening
+          const cas = (a, b, n2, ends, q, long, type = "colonial") => M(out, w.id + ".cs" + fc + "." + kc++, "casing", type, "carpentry", w.id, "pine", CT, CW, a, b, n2, { face: fc, ends, long, opening: q.id, col: "trim", profile: "casing" });
+          const gaps = [], frame = spec.winTrim === "frame";
           for (const q of opens) {
             const e1 = q.pocket || q.s1, xa = q.s0 + JI, xb = e1 - JI, top = q.y1 - JI, bot = q.door ? yb : q.y0 + JI;
             if (xb - xa < 0.1) continue;
-            // the legs: to the floor at a door (square there), mitered where they meet the head (and the sill piece of a window)
-            for (const xc of [xa - CW / 2, xb + CW / 2]) cas(at(xc, q.door ? yb : bot - CW, offC), at(xc, top + CW, offC), [ux, 0, uz], q.door ? ["sq", "m45"] : ["m45", "m45"], q);
-            cas(at(xa - CW, top + CW / 2, offC), at(xb + CW, top + CW / 2, offC), UP, ["m45", "m45"], q);
-            if (!q.door) cas(at(xa - CW, bot - CW / 2, offC), at(xb + CW, bot - CW / 2, offC), UP, ["m45", "m45"], q);
-            if (bot - CW < yb + BH + 0.01) gaps.push([xa - CW, xb + CW]);      // the base stops at the casing
+            // a window's stool and apron (unless it is cased as a picture frame): the stool a shelf on the sill, its horns
+            // past the casing, standing proud of the wall; the apron a length of casing under it
+            const stool = !q.door && !frame, ST = 0.022, HORN = 0.02;
+            if (stool) {
+              const o0 = sg * (face - 0.03), o1 = sg * (face + th + CT + 0.02), om = (o0 + o1) / 2, nIn = [nrm[0] * sg, 0, nrm[2] * sg];
+              M(out, w.id + ".st" + fc + "." + ks++, "stool", "stool", "carpentry", w.id, "pine", ST, Math.abs(o1 - o0), at(xa - CW - HORN, bot - ST / 2, om), at(xb + CW + HORN, bot - ST / 2, om), nIn, { face: fc, ends: ["notch", "notch"], opening: q.id, col: "trim", profile: "stool" });
+              cas(at(xa - CW, bot - ST - CW / 2, offC), at(xb + CW, bot - ST - CW / 2, offC), UP, ["sq", "sq"], q, 0, "apron");
+            }
+            // the legs: to the floor at a door and onto the stool at a window (square there), mitered where they meet the head
+            // (and the bottom piece of a picture frame)
+            for (const [xc, lg] of [[xa - CW / 2, -1], [xb + CW / 2, 1]]) cas(at(xc, q.door || stool ? bot : bot - CW, offC), at(xc, top + CW, offC), [ux, 0, uz], q.door || stool ? ["sq", "m45"] : ["m45", "m45"], q, lg);
+            cas(at(xa - CW, top + CW / 2, offC), at(xb + CW, top + CW / 2, offC), UP, ["m45", "m45"], q, 1);
+            if (!q.door && !stool) cas(at(xa - CW, bot - CW / 2, offC), at(xb + CW, bot - CW / 2, offC), UP, ["m45", "m45"], q, -1);
+            const low = stool ? bot - ST - CW : bot - CW;
+            if (low < yb + BH + 0.01) gaps.push([xa - CW - (stool ? HORN : 0), xb + CW + (stool ? HORN : 0)]);      // the base stops at the casing
           }
           // the baseboard: corner to corner, stopping at door casings (square); into a corner square at one end and coped
           // over the other at the other; a run longer than a stock length joined with a scarf
@@ -492,6 +525,15 @@
               const xa = ra + ((rb - ra) * i) / n3, xb = ra + ((rb - ra) * (i + 1)) / n3;
               M(out, w.id + ".bs" + fc + "." + kb++, "base", "colonial", "carpentry", w.id, "pine", BT, BH, at(xa, yb + BH / 2, offB), at(xb, yb + BH / 2, offB), UP, { face: fc, ends: [i ? "scarf" : ea, i < n3 - 1 ? "scarf" : eb], col: "trim", profile: "base" });
             }
+          }
+          // caulk: a bead where each piece meets the wall (the outer edge of a casing, the top of the base, under the
+          // apron), so the gap disappears under the paint. draw 0: the view draws it going on
+          if (spec.caulk !== false) for (const m of out.slice(i0)) {
+            if (m.kind !== "casing" && m.kind !== "base") continue;
+            const L2 = hyp(m.b[0] - m.a[0], m.b[1] - m.a[1], m.b[2] - m.a[2]), e = m.kind === "base" ? 1 : m.type === "apron" ? -1 : m.long || 0;
+            if (!e || L2 < 0.05) continue;
+            const sh = (p2) => p2.map((v, k) => v + m.n[k] * e * (m.section.d / 2));
+            M(out, m.id + ".ck", "caulk", "acrylic", "carpentry", w.id, "caulk", 0.004, 0.006, sh(m.a), sh(m.b), m.n, { draw: 0, face: fc, of: m.id });
           }
         }
         // paint (docs/design/interior-finishes.md): over the lining, a coat of primer then the colour, worked a
@@ -803,7 +845,7 @@
     if (surface === "walls") return (deco.faces && deco.faces[key]) || deco.walls || null;
     return (deco.items && deco.items[key]) || deco[surface] || null;
   }
-  const PAINTABLE = [{ surface: "trim", is: (m) => (m.kind === "cladding" && m.type === "trim") || m.kind === "casing" || m.kind === "base" }];
+  const PAINTABLE = [{ surface: "trim", is: (m) => (m.kind === "cladding" && m.type === "trim") || m.kind === "casing" || m.kind === "base" || m.kind === "stool" }];
   function paintOver(out, deco) {
     if (!deco) return;
     const n0 = out.length;
@@ -812,7 +854,7 @@
       if (!fin) continue;
       // the skin: 1 mm proud of every face, and 1 mm past each end
       const L = hyp(m.b[0] - m.a[0], m.b[1] - m.a[1], m.b[2] - m.a[2]) || 1, e = 0.001 / L, ext = (p, q) => p.map((v, k) => v + (v - q[k]) * e);
-      M(out, m.id + ".pt", "paint", "paint", "decorate", m.parent, "paint", m.section.b + 0.002, m.section.d + 0.002, ext(m.a, m.b), ext(m.b, m.a), m.n, { draw: 0, area: r3((m.area || m.length * m.section.d) * 1.2), fin, surface: P.surface, of: m.id, ...(m.roof ? { roof: m.roof } : {}) });
+      M(out, m.id + ".pt", "paint", "paint", "decorate", m.parent, "paint", m.section.b + 0.002, m.section.d + 0.002, ext(m.a, m.b), ext(m.b, m.a), m.n, { draw: 0, area: r3((m.area || m.length * m.section.d) * 1.2), fin, surface: P.surface, of: m.id, ...(m.roof ? { roof: m.roof } : {}), ...(m.ends ? { ends: m.ends, long: m.long } : {}) });
     }
   }
   function generate(desc) {
@@ -869,6 +911,8 @@
       const f = FLOOR_ITEM[m.material];
       return ["floor" + m.material, f ? f[0] : null, f ? f[1] : "m2", f && f[1] === "m" ? m.area / 0.14 : m.area, "Flooring", "The finished floor you walk on.", f ? undefined : "flooring: " + m.material];
     }
+    if (k === "stool") return ["stool", "trim_stool", "m", m.length, "Window stools", "A shelf of board under each window, notched round the casing at its ends. The casing legs stand on it."];
+    if (k === "caulk") return ["caulk", "caulk_acrylic", "L", (m.length * 0.3) / 9, "Caulk", "A bead of acrylic caulk where the trim meets the wall, smoothed with a finger, so the joint vanishes under the paint."];
     if (k === "casing") return ["casing", "trim_casing", "m", m.length, "Casing", "Moulding round the doors and windows, cut to fit with miters at the corners. It covers the gap between the wall and the frame."];
     if (k === "base") return ["base", "trim_base", "m", m.length, "Baseboard", "Moulding along the foot of the walls, coped into the corners. It covers the gap at the floor and takes the knocks."];
     if (k === "prime") return ["primer", "primer_pva", "L", m.area / 10, "Primer", "A coat of primer on the new walls, so the paint goes on even."];

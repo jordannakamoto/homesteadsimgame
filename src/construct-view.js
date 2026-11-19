@@ -340,6 +340,7 @@
   const bareHex = (m) => (m && m.type === 'knot' ? 0xd8b583 : 0xe3e3de);
   // the colour of a piece after a number of coats: bare lining, primer, the first coat over it, the colour
   function coatHex(pm, m, coat) {
+    if (pm.kind === 'caulk') return 0xf2f0ea;
     if (pm.kind === 'prime') return coat > 0 ? D.prime.hex : bareHex(m);
     if (coat <= 0) return D.prime.hex;
     if (coat >= D.paint.coats) return finHex(pm.fin || m.fin);
@@ -353,10 +354,10 @@
     const live = new Set();
     for (const pr of inProgress()) {
       const g = geom(pr.id), fresh = freshOf(pr.id), items = [];
-      if (!g || !api.stageOpen(pr, 'decorate')) continue;
+      if (!g || !(api.stageOpen(pr, 'decorate') || api.stageOpen(pr, 'carpentry'))) continue;
       for (const mid in pr.members) {
         const pm = pr.members[mid], m = g.byId.get(mid);
-        if (!m || (pm.kind !== 'prime' && pm.kind !== 'paint')) continue;
+        if (!m || (pm.kind !== 'prime' && pm.kind !== 'paint' && pm.kind !== 'caulk')) continue;
         const coat = pm.coat || 0, wipe = V.roll && V.roll.id === pr.id && V.roll.mid === mid ? Math.min(1, (now - V.roll.t0) / 600) : 1;
         if (pm.built ? !fresh.has(mid) && wipe >= 1 : coat === 0) continue;        // handed back: build mode draws it
         if (pm.kind === 'prime' && pr.members[mid.replace('.pr', '.pt')] && (pr.members[mid.replace('.pr', '.pt')].coat || 0) > 0 && wipe >= 1) continue;   // under the colour
@@ -364,6 +365,7 @@
         if (wet && (!V.paintNext || pm.dryAt < V.paintNext)) V.paintNext = pm.dryAt;
         let hex = coatHex(pm, m, coat);
         if (wet) hex = pcA.setHex(hex).multiplyScalar(D.wetK).getHex();
+        if (pm.kind === 'caulk') { items.push({ m, hex, k: wipe, z: 0, grow: true, from: V.roll ? V.roll.from : 0 }); continue; }   // the bead runs along from where the gun started
         items.push({ m, hex, k: 1, z: 0 });
         // the roller's stroke: what was there before, drawn over the new coat and drawn back from where the roller started
         if (wipe < 1) items.push({ m, hex: coatHex(pm, m, coat - 1), k: 1 - (1 - (1 - wipe) * (1 - wipe)), z: 1, from: V.roll.from });
@@ -388,7 +390,7 @@
         // the stroke goes on from one end: what is left of the old coat is the far part of the rectangle
         const L = len * it.k, c0 = it.from ? it.k / 2 : 1 - it.k / 2;
         mx4.makeBasis(mxu.clone().multiplyScalar(Math.max(1e-4, L)), mxn.clone().multiplyScalar(h), mxz.clone().multiplyScalar(th));
-        wM.lerpVectors(wA, wB, it.z ? c0 : 0.5); mx4.setPosition(wM);
+        wM.lerpVectors(wA, wB, it.grow ? (it.from ? 1 - it.k / 2 : it.k / 2) : it.z ? c0 : 0.5); mx4.setPosition(wM);
         mesh.setMatrixAt(i, mx4);
         mesh.setColorAt(i, mxc.setHex(it.hex));
       });
@@ -521,10 +523,10 @@
       out = [];
       if (m.kind === 'door') for (const side of [-1, 1]) for (const f of [0.12, 0.5, 0.88]) out.push(at(side * hx, y0 + (y1 - y0) * f));
       else { for (const side of [-1, 1]) for (const f of [0.1, 0.5, 0.9]) out.push(at(side * hx, y0 + (y1 - y0) * f)); out.push(at(0, y0 + 0.03), at(0, y1 - 0.03)); }
-    } else if (m && (m.kind === 'casing' || m.kind === 'base') && m.section) {     // trim: a finish nail every 40 cm or so on the face you see, into the studs and the jamb
+    } else if (m && (m.kind === 'casing' || m.kind === 'base' || m.kind === 'stool') && m.section) {     // trim: a finish nail every 40 cm or so on the face you see, into the studs and the jamb
       const ax = m.b[0] - m.a[0], ay = m.b[1] - m.a[1], az = m.b[2] - m.a[2], L = Math.hypot(ax, ay, az) || 1, u = [ax / L, ay / L, az / L], n = m.n;
       const t = [(ay * n[2] - az * n[1]) / L, (az * n[0] - ax * n[2]) / L, (ax * n[1] - ay * n[0]) / L], mx = (m.a[0] + m.b[0]) / 2, my = (m.a[1] + m.b[1]) / 2, mz = (m.a[2] + m.b[2]) / 2;
-      const sg = t[0] * (mx - g.cx) + t[2] * (mz - g.cz) >= 0 ? -1 : 1, off = sg * (m.section.b / 2 + 0.004), k = Math.max(2, Math.round(L / 0.4));
+      const sg = Math.abs(t[1]) > 0.5 ? Math.sign(t[1]) : t[0] * (mx - g.cx) + t[2] * (mz - g.cz) >= 0 ? -1 : 1, off = sg * (m.section.b / 2 + 0.004), k = Math.max(2, Math.round(L / 0.4));
       out = [];
       for (let i = 0; i < k; i++) { const ut = -L / 2 + 0.05 + ((L - 0.1) * i) / (k - 1); out.push([mx + u[0] * ut + t[0] * off, my + u[1] * ut + t[1] * off, mz + u[2] * ut + t[2] * off]); }
     } else if (m && m.draw !== 0 && m.section && (STICKS.has(m.kind) || SHEETS.has(m.kind))) {
@@ -873,11 +875,11 @@
       if (V.sawing.has(mid)) continue;
       const pm = pr.members[mid], ln = lineOf(pr, mid), m = g.byId.get(mid);
       if (m && courseOf(pm, m) && pm.need - pm.got > 1e-6 && m.row > low0.get(pm.parent + pm.kind)) continue;
-      if (pm.kind === 'prime' || pm.kind === 'paint') {     // a rectangle of wall to roll: primer, then the colour over dry primer
+      if (pm.kind === 'prime' || pm.kind === 'paint' || pm.kind === 'caulk') {     // a rectangle of wall to roll (primer, then the colour over dry primer), or a bead of caulk along a nailed piece of trim
         if (pm.built || !ln) continue;
-        const under = pm.kind === 'paint' && pr.members[mid.replace('.pt', '.pr')];
+        const under = pm.kind === 'paint' ? pr.members[mid.replace('.pt', '.pr')] : pm.kind === 'caulk' ? pr.members[mid.replace(/\.ck$/, '')] : null;
         if (under && !under.built) continue;
-        const dryAt = Math.max(pm.dryAt || 0, (under && under.dryAt) || 0);
+        const dryAt = Math.max(pm.dryAt || 0, (pm.kind === 'paint' && under && under.dryAt) || 0);
         if (dryAt && G.sim.state.t < dryAt) { if (!V.wetNext || dryAt < V.wetNext) V.wetNext = dryAt; V.wetWhat = 'paint'; continue; }
         if (!(holds(c, pr, mid) || stackWithin(ln.itemId, takeM()))) { want = want || mid; continue; }
         if (!m) continue;
@@ -887,7 +889,7 @@
         let score = segDist(reach.x, reach.z, wA, wB) * 100;
         if (reach.free) { score = 1e9; for (const t of [0.5, 0.15, 0.85]) { wM.lerpVectors(wA, wB, t).project(G.camera); score = Math.min(score, Math.hypot((wM.x * 0.5 + 0.5) * reach.w - reach.px, (-wM.y * 0.5 + 0.5) * reach.h - reach.py)); } }
         V.aimed.add(mid); q.push(mid);
-        if (score < bs) { bs = score; best = { mid, act: 'roll' }; }
+        if (score < bs) { bs = score; best = { mid, act: pm.kind === 'caulk' ? 'caulk' : 'roll' }; }
         continue;
       }
       if (pm.kind === 'joint') {       // a drywall seam: mud while there is compound in the arms or at hand, sand after the last coat; wet mud waits
@@ -940,6 +942,10 @@
   function finishInstall(id, mid, layer, kind, r) {
     V.idleT = 0;
     const pr = S().progress[id];
+    if (r.installed.length && kind === 'insulation') {      // a batt pressed into its bay: a little puff of fibres along it
+      const g = geom(id), m = g && g.byId.get(mid);
+      if (m) { worldPt(g, null, m.a, wA); worldPt(g, null, m.b, wB); for (let i = 0; i <= 5; i++) { wM.lerpVectors(wA, wB, i / 5); G.burst(wM.x, wM.y, wM.z, 2, 0xf4b9a8, 0.45, 0.25, 0.018, 0.7); } }
+    }
     if (r.installed.length) {
       if (layer === 'main') { freshOf(id).add(mid); B.hideGhost && B.hideGhost(id, r.installed); }
       if (kind === 'site' || kind === 'door' || kind === 'window' || freshOf(id).size >= 40) { flush(id); if (kind === 'site') V.terrainV = (V.terrainV || 0) + 1; }
@@ -1118,8 +1124,8 @@
     if (r.installed && r.installed.length) finishInstall(ctx.id, ctx.mid, 'main', pm.kind, r);
   }
   // ---- paint: one stroke of the roller fills a rectangle of wall with one coat, wiped on from the end nearer the hands
-  const PAINT_WORD = (pm) => (pm.kind === 'prime' ? 'Prime' : (pm.coat || 0) === 0 ? 'First coat' : 'Second coat');
-  const onWhat = (m) => (m && m.surface === 'trim' ? 'this trim board' : 'this part of the wall');
+  const PAINT_WORD = (pm) => (pm.kind === 'caulk' ? 'Caulk' : pm.kind === 'prime' ? 'Prime' : (pm.coat || 0) === 0 ? 'First coat' : 'Second coat');
+  const onWhat = (m) => (m && m.kind === 'caulk' ? 'this joint' : m && m.surface === 'trim' ? 'this trim board' : 'this part of the wall');
   function paintAct(ctx) {
     const s = S(), pr = s.progress[ctx.id], g = geom(ctx.id), pm = pr && pr.members[ctx.mid], m = g && g.byId.get(ctx.mid), P = G.player, ln = pm && lineOf(pr, ctx.mid);
     if (!pm || pm.built || !m || !ln) return;
@@ -1135,15 +1141,16 @@
     // a fine mist off the roller along the stroke
     const n = Math.max(3, Math.min(8, Math.round(wA.distanceTo(wB) / 0.3))), hex = coatHex(pm, m, pm.coat || 1);
     for (let i = 0; i <= n; i++) { wM.lerpVectors(wA, wB, i / n); G.burst(wM.x, wM.y + (Math.random() - 0.5) * 0.8, wM.z, 1, hex, 0.25, 0.2, 0.02, 0.25); }
-    V.rollT = 0.6; V.handT = 0; V.lastAct = 'roll'; V.paintHex = pm.kind === 'prime' ? D.prime.hex : finHex(pm.fin || m.fin);
-    const dry = pm.kind === 'prime' ? D.prime.dryS : D.paint.dryS, done = pm.built && pm.kind === 'paint';
-    flash(done ? 'Second coat on: ' + onWhat(m).replace('this ', 'the ') + ' is done' : word + (s.options.instant ? '' : '. Dry in about ' + Math.round(dry / 60) + ' min: roll the next part meanwhile'));
+    V.rollT = pm.kind === 'caulk' ? 0 : 0.6; V.handT = 0; V.lastAct = ctx.act; V.paintHex = pm.kind === 'prime' ? D.prime.hex : finHex(pm.fin || m.fin);
+    const dry = pm.kind === 'caulk' ? 1800 : pm.kind === 'prime' ? D.prime.dryS : D.paint.dryS, done = pm.built && pm.kind === 'paint';
+    if (pm.kind === 'caulk') { flash('A bead along the joint, smoothed with a finger' + (s.options.instant ? '' : '. Dry in about 30 min')); V.rollT = 0; V.poseT = 0.3; V.poseKind = 'lift'; }
+    else flash(done ? 'Second coat on: ' + onWhat(m).replace('this ', 'the ') + ' is done' : word + (s.options.instant ? '' : '. Dry in about ' + Math.round(dry / 60) + ' min: roll the next part meanwhile'));
     V.rev++; V.paintRev = -1;
     if (r.installed && r.installed.length) finishInstall(ctx.id, ctx.mid, 'main', pm.kind, r);
   }
   function handAct(ctx) {
     if (ctx.act === 'mud' || ctx.act === 'sand') { mudAct(ctx); return; }
-    if (ctx.act === 'roll') { paintAct(ctx); return; }
+    if (ctx.act === 'roll' || ctx.act === 'caulk') { paintAct(ctx); return; }
     V.lastAct = ctx.act;
     const pr = S().progress[ctx.id], g = geom(ctx.id), pm = pr.members[ctx.mid], m = g.byId.get(ctx.mid), P = G.player;
     const hw = m && C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null, layer = hw ? pm.parent : 'main';
@@ -1445,12 +1452,15 @@
     const h = S().horses, P = G.player, tools = G.sim.state.sys.stock.tools, power = tools.includes('circular_saw') && !!(G.powerAvailable && G.powerAvailable());
     const to = { x: h.x - Math.cos(h.yaw) * 0.45, y: G.heightAt(h.x, h.z) + 0.05, z: h.z + Math.sin(h.yaw) * 0.45 };   // onto the ground beside the horses
     V.cutBusy = 0.25; P.face = Math.atan2(h.x - P.x, h.z - P.z);
-    const gm = geom(ctx.id) && geom(ctx.id).byId.get(ctx.mid), trim = gm && gm.profile, ang = trim && gm.ends && gm.ends.some((x) => x !== 'sq') ? 45 : 0;
-    const look2 = trim ? { w: gm.section.d, d: gm.section.b, color: 0xefece4, angle: ang } : {};
+    const gm = geom(ctx.id) && geom(ctx.id).byId.get(ctx.mid), trim = gm && gm.profile, ang = trim && gm.ends && gm.ends.some((x) => x === 'm45' || x === 'cope' || x === 'scarf') ? 45 : 0;
+    // trim on the miter saw when there is one (and power): quick, clean, swung to the angle; else a hand saw in a miter box
+    const mitre = trim && tools.includes('miter_saw') && !!(G.powerAvailable && G.powerAvailable());
+    const look2 = trim ? { w: gm.section.d, d: gm.section.b, color: 0xefece4, angle: ang, power: mitre, slow: mitre ? 0.6 : 1.3 } : {};
+    if (mitre) V.cutBusy = 0.15;
     r.cut.pieces.forEach((pc, i) => CS.cut({ stockM: pc.stockM, lenM: pc.lenM, sawn: pc.sawn, keptM: pc.keptM, onHorses: true, x: h.x, z: h.z, yaw: h.yaw, to, power, slow: 1.5, ...look2 }, i === r.cut.pieces.length - 1 ? () => { V.rev++; } : null));
     const p = r.cut.pieces[0];
     const how = cutHow(ctx.id, ctx.mid);
-    flash(what + ' ' + mm(p.lenM) + (how ? ', ' + how : '') + (p.how === 'offcut' ? ' from an offcut' : ' from a ' + ftOf(p.stockM) + ' stick') + (r.next ? '' : '. All cut: set them in their places'));
+    flash(what + ' ' + mm(p.lenM) + (how ? ', ' + how : '') + (mitre ? ' on the miter saw' : '') + (p.how === 'offcut' ? ' from an offcut' : ' from a ' + ftOf(p.stockM) + ' stick') + (r.next ? '' : '. All cut: set them in their places'));
     V.rev++;
   }
   function context() { const x = contextRaw(); if (x && x.kind === 'hint' && !x.drop && S().carried && !(RW && RW.on())) return { ...x, drop: true }; return x; }
@@ -1827,7 +1837,7 @@
       const A = V.auto, w = V.working && workLabel(pr, V.working.memberId), v = plan(A.id).view.stages.find((q) => q.id === A.stage);
       setPrompt('E', 'Stop · ' + (V.raise ? 'raising the wall' : w ? low(w.text) : A.wait > 0 ? 'fetching more' : low(C.STAGE[A.stage].name)), v ? v.built + ' of ' + v.total : '', V.raise ? Math.min(1, V.raise.p) : W.job ? W.progress() : null);
     } else if (ctx.kind === 'raise') setPrompt('E', 'Hold and push up to raise the wall', '', V.raise ? Math.min(1, V.raise.p) : 0);
-    else if (ctx.kind === 'hands' && ctx.act === 'roll') { const pm = pr.members[ctx.mid], left = Object.values(pr.members).filter((m) => (m.kind === 'paint' || m.kind === 'prime') && !m.built).length; setPrompt('E', PAINT_WORD(pm) + ' on ' + onWhat(geom(ctx.id).byId.get(ctx.mid)), left + ' to paint · hold to keep going', null); }
+    else if (ctx.kind === 'hands' && (ctx.act === 'roll' || ctx.act === 'caulk')) { const pm = pr.members[ctx.mid], left = Object.values(pr.members).filter((m) => (ctx.act === 'caulk' ? m.kind === 'caulk' : m.kind === 'paint' || m.kind === 'prime') && !m.built).length; setPrompt('E', PAINT_WORD(pm) + ' on ' + onWhat(geom(ctx.id).byId.get(ctx.mid)), left + ' to paint · hold to keep going', null); }
     else if (ctx.kind === 'hands' && (ctx.act === 'mud' || ctx.act === 'sand')) { const pm = pr.members[ctx.mid], left = Object.values(pr.members).filter((m) => m.kind === 'joint' && !m.built).length; setPrompt('E', COAT_WORD[Math.min(3, pm.coat || 0)] + (ctx.act === 'mud' ? ' along this seam' : ''), left + ' seams to finish · hold to keep going', null); }
     else if (ctx.kind === 'hands') { const w = workLabel(pr, ctx.mid), pm = pr.members[ctx.mid], b = V.blows[ctx.mid], of = b ? b.of : nailCount(geom(ctx.id), pm, ctx.mid); setPrompt('E', ctx.act === 'set' ? (api.knows(S(), pm.kind) && sweepable(pr, ctx.mid, geom(ctx.id)) ? 'Hold and drag along the run: ' + low(w.text).replace(/s$/, '') : 'Set the ' + low(w.text)) + (pm.line && pr.lines[pm.line].sheet && !api.needsStock(S(), pr, ctx.mid) ? ' (from an offcut)' : '') : ctx.act === 'dig' ? 'Dig and level' : pm.kind === 'pier' ? 'Stamp it level: ' + (b ? b.n : 0) + ' of ' + of : 'Nail them: ' + (b ? b.n : 0) + ' of ' + of, ctx.act === 'set' ? w.count : '', ctx.act === 'set' ? null : (b ? b.n : 0) / of); }
     else if (ctx.kind === 'lean') setPrompt('E', 'Lean the ladder here', '', null);
@@ -1899,6 +1909,11 @@
     if (looseOne) return { ...out, line: 'A piece is set but loose. ' + (pr.members[looseOne].kind === 'pier' ? 'Point at it and click to stamp it level.' : 'Strike it once to drive all its nails, or hold and drag across the pieces.'), target: at };
     if (['top-plates', 'roof-frame', 'roof-deck', 'dry-in', 'roofing', 'gutters'].includes(v.id) && !s.ladder && !V.climb && !s.options.auto && pr.level !== 'guided' && ((s.carried && s.carried.itemId === LAD.itemId) || s.stacks.some((k) => k.itemId === LAD.itemId))) return { ...out, line: 'This is out of reach from the ground. Carry the ladder to a wall and click to lean it. Walk onto the ladder to climb.', target: at };
     const c = s.carried;
+    if (v.id === 'carpentry' && !s.options.auto) {   // the trim up: caulk every joint where it meets the wall, then it dries
+      const left = Object.values(pr.members).filter((m) => m.stage === 'carpentry' && !m.built), t = G.sim.state.t;
+      if (left.length && left.every((m) => m.kind === 'caulk'))
+        return { ...out, line: 'Caulk the trim: with the tube in your arms (or by the box), point at a joint where the trim meets the wall and press <kbd>E</kbd> to run a bead. Hold to go round the room. It dries in about half an hour; then the room is ready to paint.', target: at };
+    }
     if (v.id === 'decorate' && !s.options.auto) {    // paint: primer on every part of the wall, then two coats of colour, each dry first
       const ps = Object.values(pr.members).filter((m) => (m.kind === 'prime' || m.kind === 'paint') && !m.built), t = G.sim.state.t;
       const ready = ps.filter((m) => !(m.dryAt && t < m.dryAt));

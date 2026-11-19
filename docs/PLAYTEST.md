@@ -933,3 +933,18 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - Console: `__servicesWater.targets()`, `.where('cap' | 'fix' | 'tap' | 'stop' | 'main' | 'line' | 'pump')`; sim `services.cap { node, on }`, `services.valve { node | run, on }` (manifold node = the main, a run = its line stop, a stub with its fixture = the angle stop), `services.trim { node, n }` on a stub, `services.check { structId, kind: 'water' }`.
 - Old saves: stubs capped by older plans stay capped and free; nothing sprays and nothing asks for caps. `services.valves` is added on load.
 - Weak: fixtures are plain boxes; the test pump has no handle model and the gauge is a needle on a disc; no sound; drains and vents are not here (S11), so a sink empties nowhere yet; the test only judges ends (no weeping fittings); hot water needs a heater run from a hot manifold you plan yourself.
+## Trim slice 2: stool and apron, real miters, caulk, miter saw (branch `trim2`)
+
+- Windows get a **stool** (a shelf on the sill, its horns notched round the casing, standing proud of the wall) and an **apron** under it; the legs stand on the stool. The picture frame stays as an option (`spec.winTrim: 'frame'`).
+- Mitered casings are drawn with real 45 degree ends, the long point on the outside, in build mode (and their paint follows the same shape).
+- **Caulk**: after the trim is nailed, a bead where each casing and the base meet the wall (E with the caulk to hand); it dries in about half an hour, and the stage is done when it is all on. Bought in litres (300 ml tubes, about 9 m of bead each).
+- **Miter saw**: a power tool ($180, 1500 W). With it and power, trim is cut on it, quicker; without it, a hand saw in a miter box. The cut note says which.
+- Opening a wall for services takes its trim and caulk off too.
+
+## Cabin feedback: gables, pace, dollhouse, sawhorses, insulation (branch `cabin-feedback`)
+
+- **Gables**: a framed building's gables are its siding, like the walls below; the roof's own gable triangle (in the roof's colours) stays in behind.
+- **Pace**: siding goes up three courses at a time where the courses run the same (round a window or up a gable, one at a time), and board linings four boards at a time; the siding shader draws every course, the boards get a tongue-and-groove line. About a third of the pieces in those two stages.
+- **Dollhouse**: where the cut opens a finished wall, a cap at the cut height shows it in section as one solid thing (the room's colour inside, a pale timber core, the siding's colour outside); no studs, batts or hollows. Walls still being built stay open to see into.
+- **Sawhorses** come with the first lumber delivered for a building when they are away at an earlier site (left where you put them if they are close by).
+- **Insulation**: a wall shows its frame until both its siding and its lining are on, so the batts going in are seen; batts are drawn soft and fibrous, pillowed between the studs, and a batt pressed into its bay gives a puff of fibres. Between the studs, before a batt, the back of the sheathing shows.
