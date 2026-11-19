@@ -134,6 +134,15 @@ body.touch #ui-lane-bottom > #tools {
 body.touch #ui-lane-bottom > #tools::-webkit-scrollbar { display: none; }
 body.building #ui-lane-bottom > #tools { display: none; }
 #tools button .hud-back { display: none; }
+/* terrain flyout: Dig / Raise / Level above the Terrain slot. Fixed (placed by hud.js) so the phone's sideways scroller never clips it */
+#tools-fly {
+  position: fixed; z-index: 30; display: flex; gap: var(--sp-2); padding: 8px;
+  background: var(--surface-2); border: var(--border-w) solid var(--edge); border-radius: calc(var(--r-slot) + 6px);
+  box-shadow: var(--shadow-2); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+}
+#tools-fly[hidden] { display: none; }
+body.touch #ui-lane-bottom > #tools { -webkit-backdrop-filter: none; backdrop-filter: none; }
+#tool-terrain[aria-expanded="true"]:not([aria-pressed="true"]) { background: var(--surface-hover); }
 /* the mode chip: in a sub-mode only its own button stays, with a back arrow; a click on it returns to the axe */
 #tools:has(> button[aria-pressed="true"]:is([data-tool="garden"], [data-tool="yard"], [data-tool="site"], [data-tool="hands"])) > button[aria-pressed="false"] { display: none; }
 #tools:has(> button[aria-pressed="true"]:is([data-tool="garden"], [data-tool="yard"], [data-tool="site"], [data-tool="hands"])) > button[aria-pressed="true"] {

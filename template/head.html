@@ -521,6 +521,7 @@ body.cooking-active #cvnext, body.cooking-active #cvprompt { display: none; }
       <button type="button" data-speed="100" aria-pressed="false" aria-label="100 times" title="100&times;: a day takes 12 seconds"><span class="nm">100&times;</span></button>
       <button type="button" data-speed="1000" aria-pressed="false" aria-label="1000 times" title="1000&times;: a day takes about a second. ; slower, ' faster"><span class="nm">1000&times;</span></button>
     </div>
+    <button type="button" id="hud-gfx" class="panel ui-btn ui-btn--icon" aria-pressed="false" aria-controls="gfxsettings" aria-label="Graphics" title="Graphics"></button>
     <button type="button" id="hud-gear" class="panel ui-btn ui-btn--icon" aria-pressed="false" aria-controls="status" aria-label="Settings" title="Settings"></button>
   </div>
 </div>
@@ -586,9 +587,12 @@ body.cooking-active #cvnext, body.cooking-active #cvprompt { display: none; }
 
 <div id="tools" class="panel" role="group" aria-label="Tools">
   <button type="button" data-tool="axe" aria-pressed="true"><span class="key">1</span><span class="name">Axe</span></button>
-  <button type="button" data-tool="dig" aria-pressed="false"><span class="key">2</span><span class="name">Dig</span></button>
-  <button type="button" data-tool="raise" aria-pressed="false"><span class="key">3</span><span class="name">Raise</span></button>
-  <button type="button" data-tool="level" aria-pressed="false"><span class="key">4</span><span class="name">Level</span></button>
+  <button type="button" id="tool-terrain" aria-pressed="false" aria-haspopup="true" aria-expanded="false" aria-controls="tools-fly" title="Terrain: dig, raise, level (2 3 4)"><span class="key">2-4</span><span class="name">Terrain</span></button>
+  <div id="tools-fly" role="group" aria-label="Terrain tools" hidden>
+    <button type="button" data-tool="dig" aria-pressed="false"><span class="key">2</span><span class="name">Dig</span></button>
+    <button type="button" data-tool="raise" aria-pressed="false"><span class="key">3</span><span class="name">Raise</span></button>
+    <button type="button" data-tool="level" aria-pressed="false"><span class="key">4</span><span class="name">Level</span></button>
+  </div>
   <button type="button" data-tool="garden" aria-pressed="false"><span class="key">5</span><span class="name">Garden</span></button>
   <button type="button" data-tool="yard" aria-pressed="false"><span class="key">6</span><span class="name">Yard</span></button>
   <button type="button" data-tool="hands" aria-pressed="false"><span class="key">F</span><span class="name">Hands</span></button>
