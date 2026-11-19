@@ -1,6 +1,6 @@
 # Plan mode and the door and window designer: redesign
 
-Plan for the `ui-redesign` branch. Implementers: read this, `CLAUDE.md`, and sections 1, 2 and 4.2 of `docs/design/ui-redesign.md` (tokens, kit classes, `window.__ui`). Rules that bind every step: 144 fps (no per-frame JS added to the UI, no new full-screen pass), kit classes and tokens only (no literal colours; instruments keep `--cad`, `--cad-ink`, `--cad-bg` in both skins), `buildui.js` draws only what `__build.view()` describes and reports through `__build.choose()`, letter keys stay as they are, nothing in `src/sim/` changes except `src/sim/content/openings.js`.
+Plan for the `ui-redesign` branch. It also covers the stairs tool (section 3A). Implementers: read this, `CLAUDE.md`, and sections 1, 2 and 4.2 of `docs/design/ui-redesign.md` (tokens, kit classes, `window.__ui`). Rules that bind every step: 144 fps (no per-frame JS added to the UI, no new full-screen pass), kit classes and tokens only (no literal colours; instruments keep `--cad`, `--cad-ink`, `--cad-bg` in both skins), `buildui.js` draws only what `__build.view()` describes and reports through `__build.choose()`, letter keys stay as they are, nothing in `src/sim/` changes except `src/sim/content/openings.js` and the new `src/sim/content/stairs.js`.
 
 Screenshots of today's build mode (1440x900, Cozy, sandbox) are in `/tmp/FAB/shots/`; the script that made them is `/tmp/FAB/shots.mjs` (run from `/tmp/FAB`, same loader as `test/build.smoke.mjs`).
 
@@ -67,7 +67,8 @@ Bar height becomes about 150 px on every tool (bar 72 + tray 76), against 225-36
 | Floor | Surface | Level; Construction |
 | Roof | Shape (+ Turn), Roofing (one group, Classic then Modern), Roof the building | Pitch, Overhang, Finish, On a round room (as now) |
 | Door, Window | Recent, then family tabs with type cards (section 3.2) | The designer (section 3) |
-| Stairs / Pillar / Path | Turn / Kind, Material / Width, Surface | none |
+| Stairs | Type cards (Auto, Steps, Straight, L, U, Winder, Spiral, Ship's ladder), Material | Section 3A |
+| Pillar / Path | Kind, Material / Width, Surface | none |
 | Select, nothing selected | Info: "Everything built ..." | none |
 | Select, selection | Info (name, measures), Style or Material, Length (walls) | everything else `selGroups` emits today |
 
@@ -145,6 +146,70 @@ One designer for doors and windows, in the inspector drawer. Door and Window sta
 - **Which way it opens is drawn**, in the plan view and as a faint arc on the floor under the ghost and under the selected door.
 - **Glass** stays the engine's glass material (world art, not skinned). No shutters in the designer.
 
+## 3A. Stairs
+
+### 3A.1 Today
+
+- One stair: straight, always a whole storey high, one grid cell (1 m) wide, `stairLen(hs) = max(3, round(3 x hs))` metres long with four steps a metre. On a normal 2.84 m storey that is 12 risers of 237 mm on 250 mm treads: steeper than a house stair.
+- Saved as `{ id, i, j, dir }` in `S.stairs`. Drawn by `stairPieces` (`src/build.js` 2205-2231) as solid boxes from each step down to the floor, with a rail on three posts each side.
+- The floor above is opened automatically over it (`wellOver`, 2182), the player walks it as a ramp (`stairH`, 2193, used at 10904), and it is one piece of kind `stair`, type `straight`, material `timber` (10599-10605) that `src/sim/structure.js` loads onto the floor.
+- Round rooms at least 1.7 m inside get a spiral automatically (`climbLevels`, 1226); it cannot be placed anywhere else.
+- Nothing joins a split level, a raised floor, a porch or a cellar to the level beside it. The tool refuses to start anywhere but on a floor ("Stairs start on a floor"), and its only option is Turn.
+
+### 3A.2 Types
+
+| Type | What it is | Rule of thumb used |
+|---|---|---|
+| Steps | 1 to 3 risers for a small change of level: sunken room, raised nook, split level, threshold | Rise up to 0.6 m; no rail by default under 0.6 m |
+| Straight | One flight | Riser 150-190 mm (aim 178), tread 250-280 mm, 2R + T between 600 and 640 mm, at most 16 risers in a flight |
+| L | Two flights and a square landing, turning left or right | Landing as deep as the stair is wide; the turn can sit anywhere along the rise |
+| U | Two flights side by side and a half landing | Needs twice the width plus 0.1 m |
+| Winder | An L with three wedge treads in place of the landing | Saves about 0.9 m of run; treads 250 mm at the walking line |
+| Spiral | Treads round a centre post | Diameter 1.5 m or more, 30 degrees a tread, riser up to 220 mm, 2.0 m headroom under the tread above |
+| Ship's ladder | Very steep stair with handrails | 60-70 degrees, riser 230 mm, for lofts and cellars where nothing else fits |
+| Deck steps | Straight or Steps with open risers on cut stringers, foot on the ground | Same riser rule; the foot may stand on terrain |
+
+All take a width (0.8, 0.92, 1.07, 1.2 m or typed; Steps up to 3 m for a porch) and may start on the ground when the top lands on a floor's edge.
+
+### 3A.3 Placing: drag from low to high
+
+1. Press at the foot and drag to where the stair should arrive. The rise is the height between the two surfaces under the pointer: a floor and the storey above it, a floor and a raised or split-level floor beside it, the ground and a porch or deck, a cellar floor and the ground floor. Dragging across one floor means "up to the next storey".
+2. The run is the drag length, shortened by walls and floor edges in the way.
+3. With **Auto** in hand the tool picks the type and step count:
+   - rise up to 0.6 m: Steps;
+   - the run fits a comfortable straight flight: Straight;
+   - not enough run but room to the side: L (the side the pointer bends toward), or U when there is two widths of room;
+   - a clear square of 1.6 m or more and nothing longer: Spiral;
+   - otherwise Ship's ladder.
+   The ghost shows the stair, the opening it will cut in the floor above, and `--cad` chips for the rise, the run and "14 x 178 mm". A type picked in the tray overrides Auto until Auto is picked again; Shift wheel or the comma and full-stop keys step through the types that fit.
+4. Release to place. Typed numbers while dragging set the run, as for walls.
+
+Nothing is refused silently (the rule of 3.3). If the chosen type does not fit, the ghost is drawn as close as it can be and `view().fit` says why with fixes, for example: "Too steep: 12 risers of 237 mm in 3.0 m" `[Make it L-shaped]` `[Lengthen to 3.6 m]` `[Use a spiral]`; "Head hits the floor above: 1.74 m of headroom" `[Lengthen the opening]`; "Lands 0.4 m past the floor's edge" `[Shorten to 13 risers]`.
+
+A selected stair has handles at its foot and its head (drag to re-fit: the step count is solved again) and, for L, U and winder, one on the landing. The inspector shows a side view with riser and tread sizes.
+
+### 3A.4 Tray and inspector
+
+- Tray: Type cards (drawn by the stair module at thumb size, named), Material (Pine, Oak, Dark stain, Painted white with wood treads; Stone for Steps and Deck steps outdoors).
+- Inspector sections. **Size**: Width, Risers (stepper; shows riser and tread), Turn (left / right), Landing after riser N. **Railing**: Both, Left, Right, None, Against a wall (auto when a wall runs beside it); style Square balusters, Horizontal rails, Plain handrail. **Treads**: Closed or Open risers, Nosing on or off. **Under it**: Open or Boxed in (a closet under the stair; boxed is the look only).
+
+### 3A.5 Geometry: carpentry, cheap
+
+- Built as real parts, not stacked blocks: two cut stringers on the slope, treads 40 mm thick with a 25 mm nosing, risers 20 mm (or none), newel posts 90 mm at the foot, head and every turn, a sloped handrail at 0.9 m, balusters at 110 mm centres or three horizontal rails, landings as a framed platform on four posts. Spiral: a 100 mm centre post, treads as tapered boards (each two boxes, narrow and wide), a baluster at each tread's outer end and a handrail of short straight pieces along the helix.
+- Parts are returned as plain lists of boxes (`abox`) and slanted boxes (`obox`) and go into the building's merged mesh through the existing `g.abox` / `g.obox`, like every other piece. No new materials, no instancing needed, nothing per frame. A 14-riser straight stair with balusters is about 60 boxes; a spiral about 90.
+- Walking stays a height function: a ramp per flight, flat on landings, by angle on a spiral.
+
+### 3A.6 Data
+
+- A stair record gains optional fields; old `{ id, i, j, dir }` records load as a straight stair to the storey above, 0.92 m wide, and look like a proper stair straight away.
+  `{ id, type, x, z, dir, rise, run, width, n, turn, at, mat, rail, railStyle, open, nosing, boxed }`: `x`, `z` in the building's own metres (the foot's centre), `rise` in metres, `n` risers, `at` the riser the landing follows.
+- The piece keeps `kind: 'stair'`, `a`, `b`, `y0`, `y1`, `length`, `height`, `width`, `steps` (what `src/sim/structure.js` reads) and adds `type`, `riser`, `tread`, `footprint`.
+- `wellOver` opens the floor above wherever headroom under it is less than 2.0 m, from the layout's footprint.
+
+### 3A.7 Hands-on construction
+
+Not connected yet. A stair is still one piece that is not made of members (`src/build.js` near 9201): it appears with the shell stage, and nobody cuts stringers. This plan gives the piece the numbers a later construction step needs (stringer length, tread and riser counts, baluster count) and adds them to the Materials list as lines if `FR.materialsList` takes extra lines without change; cutting and setting a stair by hand is a follow-up, not in this plan.
+
 ## 4. What stays and what changes underneath
 
 Stays: every plan and save field, piece ids, `__build.pieces()`, `serialize`/`restore`, the schedule, `placePlan`, construction mode, snapping, undo, all letter keys, `#buildbar #bpieces #bopts #bdecor #bsnap #bsched #bschedp #bundo #bredo #bdone #bdesign #bover`, `.bchip .btile .bsw[title] .bdim .bhandle .bmeas .bport`, `data-piece`, `B.frameHook`.
@@ -155,6 +220,7 @@ Changes:
 - **New `choose` ids**: `insp` (toggle), `level:set` (a storey number), `o:anchor` (`sill|head|centre`), `o:y` (the anchored height), `o:pos` (distance from the run's left end), `o:align` (`centre|between|equal`), `o:hand` (`{ flip, out }`), `o:fix` (index into `fit.fixes`), `o:recent` (index).
 - **One new saved field**: a free opening may carry `out: true` (opens outward). Absent means inward, so old saves are unchanged. `freeToFraming` ignores it.
 - **`src/sim/content/openings.js`**: `family` on every type; `opts` on every door type (which designer groups apply: `face glass bars side transom hw metal finish leaves`); the new types of 3.2; pure helpers `anchorY(spec, anchor)`, `fromAnchor(type, h, anchor, y)`, and `fitReport({ type, w, h, sill, at, L, wallH, others })` returning `{ ok, issues: [{ code, by }], fixes: [{ code, patch }] }` with codes `tall wide end overlap range`.
+- **Stairs** (section 3A): new `src/sim/content/stairs.js` (types, rules, the solver `solve({ rise, run, side, clear, width, type })` returning `{ type, n, riser, tread, flights, landing, footprint, headroom, ok, issues, fixes }`, and `heightAt(layout, x, z)`; pure), new `src/stairs-geo.js` and `src/stairs-spiral.js` (`window.__stairsGeo.build(layout, look)` returns the box lists; `draw(layout, size)` returns the side-view and thumb SVG), the optional stair fields of 3A.6, and `choose` ids `st:type st:width st:n st:turn st:at st:rail st:railStyle st:open st:nosing st:boxed st:mat st:fix`.
 - **New `src/opening-preview.js`** (`window.__openingPreview`): string-building only, no DOM, no three.js, so it also runs under node. `draw(spec, { wall: { L, H, others }, at, size: 'stage'|'thumb', handles, hand })` returns SVG; `plan(spec, hand)` returns the door plan view. Stage handles are `<rect data-h="l|r|t|b|move">`. The window drawing moves here from `buildui.js` `winPreview`; its literal colours become `var(--cad)` and `currentColor`.
 
 Test edits (all in `test/build.smoke.mjs`, made by the step that breaks them):
@@ -201,6 +267,11 @@ Shared rules: start from the newest `ui-redesign`; one commit per step saying wh
 - `selDims`: gaps and sill only while `B.ores` or a grab is active (2.5).
 - Done: `node test/build.smoke.mjs`; in the page, `__build.choose('otype','gothic'); __build.choose('w:h', 2.4)` on a placed window leaves it placed with a lowered sill and a `fit` text.
 
+**S1 - Stair rules and solver** (opus). Owns new `src/sim/content/stairs.js`, new `test/stairs.test.mjs`, `src/openings-global.js` (one line: also set `window.__stairs`).
+- The types and rules of 3A.2, `solve` and `heightAt` as in section 4, Auto's choice as in 3A.3. Every fix returned must itself solve `ok`.
+- Tests: 2.84 m rise with 4.5 m of run gives a straight stair of 16 risers near 178 mm; 0.45 m rise gives Steps with 3 risers; 3.0 m of run gives "too steep" with an L fix; a 1.6 m square gives a spiral with at least 2.0 m headroom; `heightAt` rises monotonically along each type and is flat on landings; an old `{ i, j, dir }` record converts.
+- Done: `node --test test/stairs.test.mjs`.
+
 ### Wave 3 (parallel)
 
 **P6 - Door meshes** (opus). Owns `src/build.js` lines 2560-3130 (the opening meshes).
@@ -213,15 +284,31 @@ Shared rules: start from the newest `ui-redesign`; one commit per step saying wh
 - `test/designer.smoke.mjs` (loader from `build.smoke.mjs`): place a window, open it from Select, resize from the stage, type a width, change anchor to Head and grow the height (sill moves), force a misfit and press the fix, hang a door and set it to open out, place a patio door and change its colour; panel content height fits the drawer without scrolling on Size & place at 1440x900; no page errors; save `dist/designer-<skin>.png`.
 - Done: `node test/designer.smoke.mjs`, `node test/build.smoke.mjs`.
 
+**S2 - Stair carpentry** (opus). Owns new `src/stairs-geo.js`, a stub `src/stairs-spiral.js`, `build.sh` (add `stairs-geo` and `stairs-spiral` after `opening-preview` in both lists).
+- `build(layout, look)` for Steps, Straight, L, U, Winder, Ship's ladder and Deck steps as in 3A.5, every railing style and tread option; `draw(layout, size)` for the side view and the tray thumbs. Spiral is dispatched to `__stairsGeo.kinds.spiral`, which the stub leaves empty.
+- Check by eye: a node script writes the box lists to a small three.js page under `/tmp/FAB/` and screenshots each type from two angles.
+- Done: those screenshots read as carpentry (stringers, nosings, newels, balusters); `node test/page.smoke.mjs`.
+
 ### Wave 4 (parallel)
 
 **P8 - Phone** (opus). Owns `src/touch.js`, `template/ui/60-touch.css`, the phone part of `test/build.smoke.mjs` (lines 280-298), and in `src/buildui.js` only the `B.barH` lines of `frame()`.
 - 2.8: scrolling bar with pinned Undo and Done, the `...` sheet, bottom-sheet inspector with peek and full, sheet below the top HUD, 44 px handles, both orientations.
 - Done: `node test/build.smoke.mjs`, `node test/ui.smoke.mjs`, `node test/designer.smoke.mjs`; screenshots at 390x844 and 844x390.
 
+**S3 - Spiral stair** (opus). Owns `src/stairs-spiral.js`.
+- `kinds.spiral(layout, look)`: centre post, tapered treads, balusters, helical handrail in straight pieces, a landing board at the top that meets the floor's edge; clockwise or anticlockwise; its `draw` thumb and plan view. Headroom and diameter come from the solver.
+- Done: screenshots as in S2 from above and from the side; walking it in the page after S4 lands.
+
+**S4 - Stairs in build mode** (opus). Owns `src/build.js`: `stairLen` through `stairPieces` (2179-2231), the stairs branch of placement (4422-4436), the stairs lines of bounds (3867), picking (5678-5685), save and load (4827, 4851), moving (6325), the pieces list (10599-10605), walking (10904), and the `stairs` branches of `HINTS`, `cycleStyle`, `selGroups`, `view()` and `choose()`. It is the only step editing `src/build.js` in this wave.
+- Replace the fixed stair with solver layouts and `__stairsGeo.build`; the drag of 3A.3 including a foot on the ground and a head on a raised or split-level floor; Auto and the type override; `view().fit` with `st:fix`; tray and inspector groups of 3A.4 (a `stage` group with the side view); foot, head and landing handles; `wellOver` from headroom; old records converted on load.
+- Extend `test/build.smoke.mjs` after the roof part: drag a stair in the house and check its piece (`type`, `steps`, riser between 150 and 190 mm), that the floor above is opened, and that the walking height (the hook near line 10904) climbs along it; place Steps between a floor and one raised 0.5 m.
+- Done: `node test/build.smoke.mjs`, `node test/plan-unbuilt.smoke.mjs`, `node test/shed.e2e.mjs`.
+
+### Wave 5
+
 **P9 - Sweep and docs** (sonnet). Owns `CLAUDE.md`, `ARCHITECTURE.md`, `docs/PLAYTEST.md`.
-- `CLAUDE.md`: add `test/designer.smoke.mjs` to the smoke list and `src/opening-preview.js` to the code map. `ARCHITECTURE.md`: the view contract additions and the `out` field. `docs/PLAYTEST.md`: what to try (plan a two-room house with a great hall, an arched window, a French door opening out, on desktop and phone, in both skins).
-- Run the gates: `node test/page.smoke.mjs`, `build.smoke`, `plan-unbuilt.smoke`, `construction-tools.smoke`, `designer.smoke`, `ui.smoke`, `shed.e2e`. Report failures to the owning step; fix nothing in `src/`.
+- `CLAUDE.md`: add `test/designer.smoke.mjs` to the smoke list and `src/opening-preview.js`, `src/sim/content/stairs.js`, `src/stairs-geo.js`, `src/stairs-spiral.js` to the code map. `ARCHITECTURE.md`: the view contract additions and the `out` field. `docs/PLAYTEST.md`: what to try (plan a two-room house with a great hall, an arched window, a French door opening out, three steps down into a sunken room, an L stair to a loft, a spiral, porch steps from the ground, on desktop and phone, in both skins).
+- Run the gates: `node test/page.smoke.mjs`, `build.smoke`, `plan-unbuilt.smoke`, `construction-tools.smoke`, `designer.smoke`, `ui.smoke`, `shed.e2e`, and `node --test test/stairs.test.mjs test/openings.test.mjs`. Report failures to the owning step; fix nothing in `src/`.
 - Then the owner playtests.
 
 | Step | Model | Wave | Title | Files |
@@ -231,11 +318,15 @@ Shared rules: start from the newest `ui-redesign`; one commit per step saying wh
 | P3 | opus | 1 | The preview drawing | new `src/opening-preview.js`, `build.sh` |
 | P4 | opus | 2 | Bar, tray and inspector shell | `src/buildui.js`, `template/ui/50-build.css`, `test/build.smoke.mjs` |
 | P5 | opus | 2 | Opening rules | `src/build.js` (placement 4594-4680, openings 7826-8250) |
+| S1 | opus | 2 | Stair rules and solver | new `src/sim/content/stairs.js`, new `test/stairs.test.mjs`, `src/openings-global.js` |
 | P6 | opus | 3 | Door meshes | `src/build.js` (2560-3130) |
 | P7 | opus | 3 | The designer panel | `src/buildui.js` (inspector), `50-build.css` (designer block), new `test/designer.smoke.mjs` |
+| S2 | opus | 3 | Stair carpentry | new `src/stairs-geo.js`, stub `src/stairs-spiral.js`, `build.sh` |
 | P8 | opus | 4 | Phone | `src/touch.js`, `template/ui/60-touch.css`, `test/build.smoke.mjs` (phone part) |
-| P9 | sonnet | 4 | Sweep and docs | `CLAUDE.md`, `ARCHITECTURE.md`, `docs/PLAYTEST.md` |
+| S3 | opus | 4 | Spiral stair | `src/stairs-spiral.js` |
+| S4 | opus | 4 | Stairs in build mode | `src/build.js` (stairs: 2179-2231, 4422-4436, 10599-10605, 10904 and the stairs branches), `test/build.smoke.mjs` (stairs part) |
+| P9 | sonnet | 5 | Sweep and docs | `CLAUDE.md`, `ARCHITECTURE.md`, `docs/PLAYTEST.md` |
 
-Merge risk: P1, P5 and P6 all edit `src/build.js`, in different waves and different ranges; `choose()` is shared by P1 (wave 1) and P5 (wave 2), so P5 must start from P1's commit. P4 and P7 both edit `src/buildui.js` and `50-build.css` in consecutive waves, never the same one.
+Merge risk: P1 (wave 1), P5 (wave 2), P6 (wave 3) and S4 (wave 4) all edit `src/build.js`, one per wave, in different ranges; S4 edits the `stairs` branches inside functions P1 reshaped, so it starts from the merged wave 3. In wave 4, P8 and S4 both edit `test/build.smoke.mjs` (P8 lines 280-298, S4 inserts after the roof part near line 92): merge S4 first. `choose()` is shared by P1 (wave 1) and P5 (wave 2), so P5 must start from P1's commit. P4 and P7 both edit `src/buildui.js` and `50-build.css` in consecutive waves, never the same one.
 
-Not in this plan: balconies, curved walls, free openings in angled or round walls (rustic pieces remain the answer there), new roof shapes, any change to construction or the plan book.
+Not in this plan: building a stair by hand (3A.7), balconies, curved walls, free openings in angled or round walls (rustic pieces remain the answer there), new roof shapes, any change to construction or the plan book.
