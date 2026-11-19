@@ -6,6 +6,7 @@ Three workstreams toward "the full home building experience". Each doc has a sum
 - `services-roughin.md`: plumbing and electrical as part of construction: one generic run mechanism through the frame, rough-in before insulation, trim-out after lining, two-click routing, drilling and pulling gestures, power reaching tools.
 - `interior-walls.md` (added later the same day): drywall hung sheet by sheet or pine boards course by course, both faces of partitions, tape and mud with drying and sanding (stage `finish`), then trim. Painting is a later decorating step.
 - `interior-finishes.md`: paint by surface (walls, a wall face, trim, a single piece; cabinets and furniture join through `PAINTABLE`), primer and two coats by hand with drying (stage `decorate`, "Paint"), then wallpaper. Slice 1 shipped: walls and trim.
+- `carpentry.md`: the shared carpentry core (stock, parts with end cuts, joints, finishes) for trim, cabinets and furniture; parts are real members at millimetre precision. Slice 1 shipped: casings and baseboard (stage `carpentry`, before paint). Next: stool and apron, blocking and a workbench, cabinets, a furniture designer that retires the old furniture.
 - `vehicles.md`: a controller stack for whatever the player is driving, a generic vehicle core (records, drive model, implements), the ATV and its trailer first, later machines as content.
 
 ## Coordination between workstreams

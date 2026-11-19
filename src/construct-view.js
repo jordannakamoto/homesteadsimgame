@@ -508,7 +508,7 @@
   const STICKS = new Set(['post', 'beam', 'skid', 'joist', 'plate', 'stud', 'header', 'rafter', 'drip', 'rake', 'ridgecap', 'gutter', 'downspout']);
   const SHEETS = new Set(['sheathing', 'membrane', 'roofing', 'lining', 'insulation', 'cladding']);
   // the layer that hides a stage's nail heads once it is complete
-  const COVER = { 'floor-frame': 'subfloor', subfloor: 'lining', 'wall-frame': 'lining', 'top-plates': 'lining', 'roof-frame': 'roof-deck', 'roof-deck': 'dry-in', 'dry-in': 'roofing', sheathing: 'wrap', wrap: 'cladding' };
+  const COVER = { 'floor-frame': 'subfloor', subfloor: 'lining', 'wall-frame': 'lining', 'top-plates': 'lining', 'roof-frame': 'roof-deck', 'roof-deck': 'dry-in', 'dry-in': 'roofing', sheathing: 'wrap', wrap: 'cladding', carpentry: 'decorate' };   // trim: the nail holes are filled and painted over
   // a member's nail points in its own frame, or null when it is fastened with plain blows (piers, the site, doors)
   function nailLocal(g, mid) {
     const nm = g.nails || (g.nails = new Map());
@@ -521,6 +521,12 @@
       out = [];
       if (m.kind === 'door') for (const side of [-1, 1]) for (const f of [0.12, 0.5, 0.88]) out.push(at(side * hx, y0 + (y1 - y0) * f));
       else { for (const side of [-1, 1]) for (const f of [0.1, 0.5, 0.9]) out.push(at(side * hx, y0 + (y1 - y0) * f)); out.push(at(0, y0 + 0.03), at(0, y1 - 0.03)); }
+    } else if (m && (m.kind === 'casing' || m.kind === 'base') && m.section) {     // trim: a finish nail every 40 cm or so on the face you see, into the studs and the jamb
+      const ax = m.b[0] - m.a[0], ay = m.b[1] - m.a[1], az = m.b[2] - m.a[2], L = Math.hypot(ax, ay, az) || 1, u = [ax / L, ay / L, az / L], n = m.n;
+      const t = [(ay * n[2] - az * n[1]) / L, (az * n[0] - ax * n[2]) / L, (ax * n[1] - ay * n[0]) / L], mx = (m.a[0] + m.b[0]) / 2, my = (m.a[1] + m.b[1]) / 2, mz = (m.a[2] + m.b[2]) / 2;
+      const sg = t[0] * (mx - g.cx) + t[2] * (mz - g.cz) >= 0 ? -1 : 1, off = sg * (m.section.b / 2 + 0.004), k = Math.max(2, Math.round(L / 0.4));
+      out = [];
+      for (let i = 0; i < k; i++) { const ut = -L / 2 + 0.05 + ((L - 0.1) * i) / (k - 1); out.push([mx + u[0] * ut + t[0] * off, my + u[1] * ut + t[1] * off, mz + u[2] * ut + t[2] * off]); }
     } else if (m && m.draw !== 0 && m.section && (STICKS.has(m.kind) || SHEETS.has(m.kind))) {
       const ax = m.b[0] - m.a[0], ay = m.b[1] - m.a[1], az = m.b[2] - m.a[2], L = Math.hypot(ax, ay, az);
       if (L > 0.05) {
@@ -1418,7 +1424,10 @@
   // whatever is in the arms can always be put down: a hint with nothing to press gets that
   // ---- cutting at the sawhorses: pointing at them with a piece to cut makes the next cut. Blocking, cripples and rafters
   // are cut here, one press each; the piece goes into the arms (an armful) or onto the horses
-  const cutLabel = (pr, mid) => { const pm = pr.members[mid], k = pm.kind === 'stud' || pm.kind === 'jack' ? 'cripple' : pm.kind === 'block' ? 'blocking' : pm.kind; return k.charAt(0).toUpperCase() + k.slice(1); };
+  const cutLabel = (pr, mid) => { const pm = pr.members[mid], k = pm.kind === 'stud' || pm.kind === 'jack' ? 'cripple' : pm.kind === 'block' ? 'blocking' : pm.kind === 'base' ? 'baseboard' : pm.kind; return k.charAt(0).toUpperCase() + k.slice(1); };
+  // trim (docs/design/carpentry.md): the cut at each end of a piece, in words, and how the saw is set for it
+  const endsOf = (id, mid) => { const g = geom(id), m = g && g.byId.get(mid); return m && m.ends; };
+  const cutHow = (id, mid) => { const e = endsOf(id, mid); return e && e.some((x) => x !== 'sq') ? C.cutWords(e) : ''; };
   function cutCtx() {
     const P = G.player, s = S(), h = s.horses, c = s.carried;
     if (!CS || !h || V.horsesHeld || (s.barrow && s.barrow.held)) return null;
@@ -1436,9 +1445,12 @@
     const h = S().horses, P = G.player, tools = G.sim.state.sys.stock.tools, power = tools.includes('circular_saw') && !!(G.powerAvailable && G.powerAvailable());
     const to = { x: h.x - Math.cos(h.yaw) * 0.45, y: G.heightAt(h.x, h.z) + 0.05, z: h.z + Math.sin(h.yaw) * 0.45 };   // onto the ground beside the horses
     V.cutBusy = 0.25; P.face = Math.atan2(h.x - P.x, h.z - P.z);
-    r.cut.pieces.forEach((pc, i) => CS.cut({ stockM: pc.stockM, lenM: pc.lenM, sawn: pc.sawn, keptM: pc.keptM, onHorses: true, x: h.x, z: h.z, yaw: h.yaw, to, power, slow: 1.5 }, i === r.cut.pieces.length - 1 ? () => { V.rev++; } : null));
+    const gm = geom(ctx.id) && geom(ctx.id).byId.get(ctx.mid), trim = gm && gm.profile, ang = trim && gm.ends && gm.ends.some((x) => x !== 'sq') ? 45 : 0;
+    const look2 = trim ? { w: gm.section.d, d: gm.section.b, color: 0xefece4, angle: ang } : {};
+    r.cut.pieces.forEach((pc, i) => CS.cut({ stockM: pc.stockM, lenM: pc.lenM, sawn: pc.sawn, keptM: pc.keptM, onHorses: true, x: h.x, z: h.z, yaw: h.yaw, to, power, slow: 1.5, ...look2 }, i === r.cut.pieces.length - 1 ? () => { V.rev++; } : null));
     const p = r.cut.pieces[0];
-    flash(what + ' ' + mm(p.lenM) + (p.how === 'offcut' ? ' from an offcut' : ' from a ' + ftOf(p.stockM) + ' stick') + (r.next ? '' : '. All cut: set them in their places'));
+    const how = cutHow(ctx.id, ctx.mid);
+    flash(what + ' ' + mm(p.lenM) + (how ? ', ' + how : '') + (p.how === 'offcut' ? ' from an offcut' : ' from a ' + ftOf(p.stockM) + ' stick') + (r.next ? '' : '. All cut: set them in their places'));
     V.rev++;
   }
   function context() { const x = contextRaw(); if (x && x.kind === 'hint' && !x.drop && S().carried && !(RW && RW.on())) return { ...x, drop: true }; return x; }
@@ -1829,7 +1841,7 @@
     else if (ctx.kind === 'bgrab') { const k = ctx.load && s.stacks.find((q) => q.id === ctx.load); if (k) setPrompt('', 'Click: take ' + low(stackName(k.itemId)) + ', ' + describe(k.itemId, k.qty).n + ' left · Hold: take the handles', 'E also takes the handles', V.bHold ? Math.min(1, V.bHold.t / 0.4) : null); else setPrompt('E', 'Take the wheelbarrow handles', 'empty', null); }
     else if (ctx.kind === 'bload') setPrompt('E', 'Load the wheelbarrow with ' + stackName(ctx.stack.itemId), '', null);
     else if (ctx.kind === 'bdown') setPrompt('E', 'Set the wheelbarrow down', '', null);
-    else if (ctx.kind === 'cut') setPrompt('E', 'Cut ' + low(cutLabel(S().progress[ctx.id], ctx.mid)) + ' (' + mm(S().progress[ctx.id].members[ctx.mid].len) + ')', ctx.left + ' to cut · hold to keep cutting', null);
+    else if (ctx.kind === 'cut') setPrompt('E', 'Cut ' + low(cutLabel(S().progress[ctx.id], ctx.mid)) + ' (' + mm(S().progress[ctx.id].members[ctx.mid].len) + (cutHow(ctx.id, ctx.mid) ? ', ' + cutHow(ctx.id, ctx.mid) : '') + ')', ctx.left + ' to cut · hold to keep cutting', null);
     else if (ctx.kind === 'hgrab') setPrompt('E', 'Pick up the sawhorses', 'the cut station', null);
     else if (ctx.kind === 'sgrab') setPrompt('E', 'Take the scaffold bundle', '', null);
     else if (ctx.kind === 'sset') setPrompt('E', ctx.spot.free ? 'Set up a scaffold tower here, under the roof frame' : 'Set up the scaffold along this wall', '', null);
@@ -1872,7 +1884,7 @@
     }
     const first = pl.inst.find((id) => pr.members[id].stage === v.id) || pl.inst[0], ln = first ? lineOf(pr, first) : null;
     const have = (itemId) => s.stacks.some((k) => k.itemId === itemId) || (s.carried && s.carried.itemId === itemId);
-    if (ln && !have(ln.itemId)) {
+    if (ln && !have(ln.itemId) && !pr.members[first].prep && pr.members[first].got < pr.members[first].need - 1e-6) {     // (a piece cut and waiting, or set and waiting for its nails, needs no stock)
       if (v.pending || s.deliveries.some((d) => d.lines.some((l) => l.itemId === ln.itemId))) { const d = s.deliveries[0], mins = Math.max(1, Math.ceil((d.dueT - G.sim.state.t) / 60)); return { ...out, line: 'Your delivery arrives in about ' + mins + ' min of game time.' + (G.speed === 0 ? ' Time is paused.' : ''), wait: true }; }
       return { ...out, line: 'Order the materials for this stage.', btn: ['order:' + v.id, 'Order this stage, ' + money(v.toOrderUsd || v.costUsd)], btn2: pl.view.toOrderUsd > (v.toOrderUsd || 0) + 1 ? ['order:all', 'Order everything, ' + money(pl.view.toOrderUsd)] : null };
     }

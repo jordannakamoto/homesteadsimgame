@@ -904,6 +904,16 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - Console: `__build.setDeco(structId, { walls: 'sage_eggshell', trim: 'moss_semigloss' })`.
 - Weak: one colour for all the walls of a building (per face comes in slice 2); no clear oil for boards yet; sheen does not change the look yet; with "Work until done" the paint stage works like taping (waits on wet coats).
 
+## Trim carpentry: casings and baseboard (branch `finish-carpentry`, design in `docs/design/carpentry.md`)
+
+- New stage after taping, **Trim carpentry**: casings round every door and window (a door: two legs to the floor and a head; a window: a frame of four), set back a 5 mm reveal from the jamb, then baseboard along the floor from corner to corner, stopping at the door casings. Paint now comes after it, so walls and trim are painted together.
+- Every piece is cut to fit at the sawhorses from primed moulding in stock lengths: the prompt and the note say the cut ("miter both ends", "cope one end, square the other"), the stick on the horses is the moulding's size and white, and the saw swings to 45 degrees for a miter. A run longer than a stock length is joined with a scarf.
+- Set each piece and nail it: a finish nail about every 40 cm. The nail heads show until the room is painted (filled and painted over).
+- Trim takes the building's Trim colour, inside and out.
+- Drawing: the old wall body's foot (a dark band 30 cm tall) no longer stands in front of framed walls, inside or out, so the baseboard and siding meet the floor as built.
+- Ordered as Casing, Baseboard and Finish nails. The guide no longer asks to reorder when every stick has been cut into pieces still to set.
+- Weak: miters and copes are drawn as square ends; window trim is a picture frame (stool and apron later); no caulk yet; the aim can pick a neighbouring piece first at a corner.
+
 ## Wave 2 B-1: poured piers and stem walls by hand (branch `wave2-b1-piers`, design `ground-foundations.md` B8)
 - The foundation job is made by the simulation, not the page: build mode's foundation members carry their shape (`geo`) into `construction.setPlan`, which calls `foundation.followPlan`; the job, its corners, trenches and holes are worked out there (a headless test builds piers with no page). Removing a building or changing it to a foundation that is not poured drops the job. Sandbox builds and older saves dug the old way get none, as before.
 - Frost: footings go to the frost line of the site's climate (`FROST_DEPTH_M`: temperate 1.2 m (Vermont's 48 in), cold continental 1.35 m, Mediterranean 0.45 m), or the plan's depth if deeper. The Site bar says so, and that the holes take more concrete than the plan showed. A trench is not taken deeper than a shovel throws earth (1.2 m) at its high end.
