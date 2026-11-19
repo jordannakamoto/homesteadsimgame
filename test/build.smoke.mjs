@@ -37,7 +37,21 @@ async function open(opts) {
   const { ctx, page, G, step, draw } = await open({ viewport: { width: 1280, height: 720 } });
   await page.keyboard.press('KeyB'); await step(70);
   check('build mode opens on Select, the home tool', await G(() => __game.player.tool === 'build' && !document.getElementById('buildbar').hidden && __build.view().tool === 'select'));
-  check('fourteen tools, each with a letter', await G(() => { const b = [...document.querySelectorAll('#bpieces button')]; return b.length === 14 && b.every((x) => x.querySelector('.key').textContent.length === 1 && x.querySelector('svg')); }));
+  check('nine slots, each with a letter', await G(() => { const b = [...document.querySelectorAll('#bpieces button')]; return b.length === 9 && b.every((x) => x.querySelector('.key').textContent.length === 1 && x.querySelector('svg')); }));
+  {
+    const miss = [];
+    for (const t of await G(() => __build.view().tools.map((t) => [t.id, t.letter]))) { await page.keyboard.press('Key' + t[1]); await step(2); if ((await G(() => __build.view().top)) !== t[0]) miss.push(t.join(':')); }
+    await page.keyboard.press('KeyV'); await step(2);
+    check('every tool is reachable by its letter', miss.length === 0 && (await G(() => __build.view().top)) === 'select', miss.join(' '));
+  }
+  check('a group slot lists its tools in a flyout and picks one', await G(async () => {
+    const s = document.querySelector('#bpieces [data-group="more"]'); s.click(); await new Promise((r) => setTimeout(r, 30));
+    const picked = __build.view().top === s.dataset.cur && s.getAttribute('aria-pressed') === 'true';
+    s.click(); const fly = document.getElementById('bfly'), open = !fly.hidden && fly.querySelectorAll('[data-piece]').length === 5;
+    fly.querySelector('[data-piece="stairs"]').click(); await new Promise((r) => setTimeout(r, 30));
+    const ok = picked && open && fly.hidden && __build.view().top === 'stairs' && s.dataset.cur === 'stairs';
+    __build.setTool('select'); return ok;
+  }));
 
   // screen position of a point given in a frame's own metres (the building's grid), at a height above its base
   const at = (lx, lz, up = 0.12) => G(([lx, lz, up]) => {
@@ -282,8 +296,14 @@ async function open(opts) {
   await G(() => window.__touch.enable());
   await page.tap('#tools button[data-tool="build"]'); await step(70);
   const sizes = await G(() => [...document.querySelectorAll('#bpieces button, #bsnap, #bdone, #bundo, #bredo')].map((b) => { const r = b.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; }));
-  check('phone: tools, undo, redo and snap are at least 40 px', sizes.length >= 17 && sizes.every((s) => s[0] >= 40 && s[1] >= 40), JSON.stringify(sizes.slice(0, 3)));
-  for (const id of ['room', 'roof', 'decor', 'erase']) { await G((id) => document.querySelector('#bpieces button[data-piece="' + id + '"]').scrollIntoView({ inline: 'center' }), id); await page.tap('#bpieces button[data-piece="' + id + '"]'); await step(2); check('phone: ' + id + ' can be reached and picked', (await G(() => __build.view().top)) === id); }
+  check('phone: tools, undo, redo and snap are at least 40 px', sizes.length >= 13 && sizes.every((s) => s[0] >= 40 && s[1] >= 40), JSON.stringify(sizes.slice(0, 3)));
+  for (const id of ['room', 'roof', 'decor', 'erase']) {
+    if (id === 'decor') {   // Furnish lives in the Inside group slot: a tap picks the last used, a second tap lists them
+      await G(() => document.querySelector('#bpieces [data-group="inside"]').scrollIntoView({ inline: 'center' }));
+      await page.tap('#bpieces [data-group="inside"]'); await step(2); await page.tap('#bpieces [data-group="inside"]'); await step(2); await page.tap('#bfly [data-piece="decor"]'); await step(2);
+    } else { await G((id) => document.querySelector('#bpieces button[data-piece="' + id + '"]').scrollIntoView({ inline: 'center' }), id); await page.tap('#bpieces button[data-piece="' + id + '"]'); await step(2); }
+    check('phone: ' + id + ' can be reached and picked', (await G(() => __build.view().top)) === id);
+  }
   await G(() => document.querySelector('#bpieces button[data-piece="wall"]').scrollIntoView({ inline: 'center' })); await page.tap('#bpieces button[data-piece="wall"]'); await step(2);
   const strip = await G(() => { const o = document.getElementById('bopts'), items = [...o.querySelectorAll('button')].map((b) => { const r = b.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; }); return { scrolls: o.scrollWidth > o.clientWidth, wraps: o.scrollHeight > o.clientHeight + 4, items }; });
   check('phone: the options strip scrolls sideways and its targets are at least 40 px', strip.scrolls && !strip.wraps && strip.items.every((s) => s[0] >= 40 && s[1] >= 40), JSON.stringify(strip.items.slice(0, 4)));

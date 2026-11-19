@@ -1,11 +1,13 @@
-/* ui: build mode. The bar reads like a game's build menu: a hint pill, the options as a card above, then one row of
-   chunky piece slots with the aids (snap, storey, list, free, undo, redo, done) at its right end. The schedule and the
-   window/door designer are side drawers. The instruments drawn over the view (dimensions, snap marks, handles,
+/* ui: build mode (plan mode). Three surfaces, each with one job (docs/design/plan-mode-redesign.md section 2):
+   the bar (#bmain: which tool, nine slots and the aids), the tray above it (#bopts: one row, what kind of thing the next
+   click draws, as named cards and swatches) and the inspector (#bdesign: a drawer on the right with every property and
+   its exact number). A slim hint row (#bhead) sits on top: first-run chips, one sentence, the selection's actions.
+   Materials (#bschedp) is a second drawer. The instruments drawn over the view (dimensions, snap marks, handles,
    measurements, ports) keep the --cad look in both skins.
    Selectors mirror head.html's legacy build rules where they override them, so source order decides on desktop and
-   head.html's body.touch rules keep winning on a phone (S10 deletes the legacy rules later). */
+   head.html's body.touch rules keep winning on a phone (P8 owns the phone frame). */
 
-#buildbar { --slot-size: 56px; --bb-r: calc(var(--r-slot) + 8px); }
+#buildbar { --slot-size: 56px; --tray-h: 76px; --bb-r: calc(var(--r-slot) + 8px); }
 
 /* ---------- the build bar replaces the hotbar row (20-hud.css hides the dock, quest card and vitals) ---------- */
 body.building #ui-lane-bottom > #tools, body.building #tools { display: none; }
@@ -23,53 +25,103 @@ body.building #ui-lane-bottom > #tools, body.building #tools { display: none; }
 #buildbar > * { pointer-events: auto; max-width: 100%; box-sizing: border-box; }
 #buildbar button:disabled { opacity: .4; }
 
-/* ---------- hint pill: what the tool does, what can be done to the selection, fold ---------- */
+/* ---------- hint row: first-run chips, one sentence, what can be done to the selection ---------- */
 #bhead {
-  min-height: 40px; gap: var(--sp-2);
+  min-height: 40px; gap: var(--sp-2); flex-wrap: nowrap;
   padding: 4px 5px 4px 16px;
   background: var(--surface-2); color: var(--ink);
   border: var(--border-w) solid var(--edge); border-radius: var(--r-pill);
   box-shadow: var(--shadow-1);
+  max-width: min(1248px, 100%);
 }
-#bhead { max-width: min(920px, 100%); }
-/* long hints wrap to a second line instead of running the pill across the screen */
+#bhead:has(> #bcoach:not([hidden])) { padding-left: 5px; }
 #bhint {
-  font-size: var(--fs-sm); font-weight: var(--fw-strong); line-height: 1.3; color: var(--ink); padding-left: 0;
-  white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+  flex: 0 1 auto; min-width: 0; padding-left: 0;
+  font-size: var(--fs-sm); font-weight: var(--fw-strong); line-height: 1.3; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 #bhead .grow { flex: 1 1 0; min-width: 0; }
-#bacts { gap: 4px; }
+#bacts { gap: 4px; flex: none; }
 #bacts .bchip, #bstop {
-  min-height: 30px; padding: 0 12px 0 9px; gap: 6px;
+  min-height: 30px; padding: 0 12px 0 9px; gap: 6px; flex: none;
   font-size: var(--fs-sm); border-radius: var(--r-pill);
 }
 #bacts .bchip svg, #bstop svg { width: 16px; height: 16px; }
 #bacts .danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 55%, var(--edge)); }
 #bstop { background: var(--accent); color: var(--accent-ink); border-color: var(--accent-edge); box-shadow: var(--lip-accent); }
 #bstop kbd { background: transparent; color: inherit; border-color: currentColor; opacity: .8; }
-#bfold {
-  min-height: 30px; padding: 0 8px 0 12px; gap: 4px;
-  font-size: var(--fs-xs); font-weight: var(--fw-strong); color: var(--ink-dim);
-  text-transform: var(--label-transform); letter-spacing: var(--label-track);
-  background: transparent; border-color: transparent; box-shadow: none; border-radius: var(--r-pill);
-}
-#bfold:hover { background: var(--surface-hover); color: var(--ink); }
-#bfold svg { width: 16px; height: 16px; transition: transform var(--t) var(--ease); }
 
-/* ---------- options: a card above the bar (second row: a second card) ---------- */
+/* coach chips: until the first house has a room, a door and a roof. Done ones tick; the next one rings. */
+#bcoach {
+  display: flex; align-items: center; gap: 4px; flex: none;
+  padding-right: 10px; margin-right: 2px; border-right: 1px solid var(--edge);
+}
+.bcoach {
+  position: relative; display: inline-flex; align-items: center; gap: 6px;
+  min-height: 30px; padding: 0 11px 0 4px;
+  font-size: var(--fs-sm); font-weight: var(--fw-strong); color: var(--ink-dim);
+  background: var(--surface-3); border: 1px solid var(--edge); border-radius: var(--r-pill); box-shadow: none;
+}
+.bcoach > b {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: var(--r-pill);
+  font: var(--fw-display) var(--fs-xs) var(--font-display); font-variant-numeric: tabular-nums;
+  color: var(--ink-dim); background: var(--well);
+}
+.bcoach > b svg { width: 13px; height: 13px; stroke-width: 2.6; }
+.bcoach.done { background: transparent; border-color: transparent; }
+.bcoach.done > b { color: var(--accent-ink); background: var(--good); }
+.bcoach.next { color: var(--select-ink); background: var(--accent-soft); border-color: var(--select-edge); }
+.bcoach.next > b { color: var(--accent-ink); background: var(--accent); }
+.bcoach.next::after {
+  content: ""; position: absolute; inset: -4px; pointer-events: none;
+  border: 2px solid var(--accent-edge); border-radius: inherit;
+  opacity: 0; animation: bcoach-ring 1.8s ease-out infinite;
+}
+@keyframes bcoach-ring { 0% { opacity: .75; transform: scale(.94); } 70%, 100% { opacity: 0; transform: scale(1.1); } }
+
+/* ---------- the tray: one row of named cards and swatches above the bar; never wraps, scrolls sideways if it must ---------- */
 #bopts, #bdecor {
-  gap: 10px 18px; align-items: flex-end;
-  padding: 10px 16px 12px;
-  max-width: min(1248px, 100%);
+  display: flex; flex-wrap: nowrap; align-items: flex-end; gap: 0 20px;
+  padding: 8px 14px 9px;
+  max-width: 100%; margin: 0; border-top: 0;
+  overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin;
   color: var(--ink); background: var(--surface-2);
   border: var(--border-w) solid var(--edge); border-radius: var(--r-lg);
   box-shadow: var(--shadow-2);
 }
-#bdecor { margin-top: 0; padding-top: 10px; align-items: stretch; }
-.bgroup { gap: 5px; }
+#bopts { height: var(--tray-h); padding-right: 0; align-items: flex-start; }
+#bopts .bfield { min-height: 40px; margin-top: 2px; }
+#bdecor { align-items: center; }
+:is(#bopts, #bdecor) > .bgroup { flex: none; }
+/* Paint, Pick and More stay at the tray's right end while the rest scrolls under them */
+.btrayend {
+  position: sticky; right: 0; z-index: 1; flex: none;
+  display: flex; align-items: flex-end; gap: 4px; align-self: stretch;
+  margin-left: auto; padding: 0 12px 2px 14px;
+  background: inherit; border-left: 1px solid var(--edge);
+}
+.btrayend .sep { width: 1px; height: 28px; align-self: auto; margin: 0 4px 6px; background: var(--edge); }
+.btool {
+  width: 40px; min-width: 40px; height: 40px; min-height: 40px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--r-sm); color: var(--ink-dim);
+}
+.btool svg { width: 20px; height: 20px; }
+.btool:hover { color: var(--ink); }
+#bmore {
+  min-height: 40px; height: 40px; padding: 0 8px 0 11px; gap: 6px;
+  font: var(--fw-display) var(--fs-sm) var(--font-display); white-space: nowrap;
+  border-radius: var(--r-sm);
+}
+#bmore svg { width: 18px; height: 18px; flex: none; }
+#bmore svg:last-child { width: 14px; height: 14px; opacity: .6; transition: transform var(--t) var(--ease); }
+#bmore[aria-expanded="true"] svg:last-child { transform: scaleX(-1); }
+
+.bgroup { gap: 4px; }
 .blab {
   display: flex; align-items: center; gap: 4px;
-  height: 16px; line-height: 16px;
+  height: 16px; line-height: 16px; white-space: nowrap;
   font-size: var(--fs-xs); font-weight: var(--fw-strong);
   text-transform: var(--label-transform); letter-spacing: var(--label-track);
   color: var(--ink-dim);
@@ -80,11 +132,41 @@ body.building #ui-lane-bottom > #tools, body.building #tools { display: none; }
   font: var(--fw-strong) 9px var(--font-body); color: var(--ink-dim);
   background: var(--well); border: 1px solid var(--edge); border-radius: 4px;
 }
-.bitems { gap: 4px; min-height: 36px; }
+.bitems { gap: 4px; min-height: 44px; align-items: center; }
+
+/* named cards: a picture over its name; the chosen one is washed and edged in the accent */
+.bcards { gap: 4px; }
+.bcard {
+  flex: none; flex-direction: column; justify-content: center; gap: 2px;
+  min-width: 54px; max-width: 86px; height: 44px; min-height: 44px; padding: 3px 7px 2px;
+  color: var(--ink); background: var(--surface-3);
+  border: var(--border-w) solid var(--edge); border-radius: var(--r-sm);
+  box-shadow: none;
+}
+.bcard > svg { width: 22px; height: 22px; flex: none; }
+.bcard .nm {
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: var(--fw-strong) 10.5px/1.15 var(--font-body); color: var(--ink-dim);
+}
+.bcard:hover .nm { color: var(--ink); }
+#buildbar .bcard[aria-pressed="true"], #bdesign .bcard[aria-pressed="true"] {
+  background: var(--accent-soft); border-color: var(--select-edge); color: var(--select-ink);
+  box-shadow: inset 0 0 0 1px var(--select-edge);
+}
+.bcard[aria-pressed="true"] .nm { color: var(--select-ink); }
+/* a catalogue by family: small text tabs in the label line, one row of cards under them */
+.btabl { gap: 2px; height: 16px; }
+.btabl > [role="tab"] {
+  min-height: 0; height: 16px; padding: 0 6px; margin: 0;
+  font: inherit; color: var(--ink-dim); background: transparent; border: 0; border-radius: var(--r-sm); box-shadow: none;
+}
+.btabl > [role="tab"]:first-child { padding-left: 0; }
+.btabl > [role="tab"]:hover { color: var(--ink); background: transparent; }
+.btabl > [role="tab"][aria-selected="true"] { color: var(--select-ink); text-decoration: underline 2px var(--select-edge); text-underline-offset: 3px; }
 
 /* material swatches: chunky rounded tiles; the chosen one lifts with a ring */
 .bsw {
-  width: 30px; height: 30px; min-height: 0; padding: 0;
+  width: 32px; height: 32px; min-height: 0; padding: 0; flex: none;
   border: var(--border-w) solid var(--edge); border-radius: calc(var(--r-sm) * .6);
   box-shadow: var(--shadow-1);
   overflow: hidden;
@@ -95,20 +177,19 @@ body.building #ui-lane-bottom > #tools, body.building #tools { display: none; }
   border-color: var(--surface-3); translate: 0 -2px;
 }
 
-/* tiles and chips that pick one of several sit in a .ui-seg well */
+/* chips that pick one of several sit in a .ui-seg well */
 .ui-seg > .btile, .ui-seg > .bchip {
-  flex: 0 0 auto; min-height: 32px; min-width: 36px; height: auto; padding: 0 10px; gap: 4px;
+  flex: 0 0 auto; min-height: 34px; min-width: 36px; height: auto; padding: 0 10px; gap: 4px;
   font-size: var(--fs-sm); white-space: nowrap;
 }
-.ui-seg > .btile svg { width: 20px; height: 20px; }
 .bitems.ui-seg { padding: 2px; gap: 2px; }
 
 /* lone tiles (toggles, actions) and chips: plain kit buttons */
-.btile { min-height: 36px; height: auto; min-width: 36px; padding: 0 12px; gap: 6px; font-size: var(--fs-sm); }
-.btile svg { width: 18px; height: 18px; }
+.btile { min-height: 40px; height: auto; min-width: 40px; padding: 0 12px; gap: 6px; font-size: var(--fs-sm); white-space: nowrap; }
+.btile svg { width: 18px; height: 18px; flex: none; }
 .bchip { min-height: 32px; padding: 0 10px; font-size: var(--fs-sm); }
 .btile.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 55%, var(--edge)); }
-.bitems:not(.ui-seg) > .btile[aria-pressed="true"], #bacts .bchip[aria-pressed="true"] {
+.bitems:not(.ui-seg) > .btile:not(.bcard)[aria-pressed="true"], #bacts .bchip[aria-pressed="true"], .btool[aria-pressed="true"] {
   background: var(--accent-soft); border-color: var(--accent-edge); color: var(--pressed-ink);
 }
 
@@ -141,35 +222,23 @@ body.building #ui-lane-bottom > #tools, body.building #tools { display: none; }
 }
 .bfield:focus-within { border-color: var(--accent-edge); }
 #buildbar .bfield input, #bdesign .bfield input {
-  width: 52px; min-height: 0; padding: 0 3px; margin: 0;
+  width: 56px; min-height: 0; padding: 0 3px; margin: 0;
   font: var(--fw-strong) var(--fs-sm) var(--font-body); font-variant-numeric: tabular-nums;
   text-align: right; color: var(--ink); background: transparent; border: 0; outline: none;
 }
 #buildbar .bfield select, #bdesign .bfield select {
-  min-height: 32px; padding: 0 4px; max-width: 170px;
+  min-height: 32px; padding: 0 4px; max-width: 200px;
   font: var(--fw-strong) var(--fs-sm) var(--font-body); color: var(--ink);
   background: transparent; border: 0; outline: none;
 }
 .bfield select option { background: var(--surface-2); color: var(--ink); }
 
-/* boxed sections (a group of options under one name) */
-.bsec.ui-card {
-  gap: 4px; padding: 6px 10px 8px;
-  background: var(--surface-3); border: var(--border-w) solid var(--edge); border-radius: var(--r-md);
-  box-shadow: none;
-}
-.bsech {
-  font: var(--fw-display) var(--fs-xs) var(--font-display);
-  text-transform: var(--label-transform); letter-spacing: var(--label-track);
-  color: var(--accent-edge); opacity: 1;
-}
-:root[data-skin="minimal"] .bsech { color: var(--accent); }
-.bsecb { gap: 6px 12px; }
-
 /* a piece's facts: title and a line, and its badges */
-.binfo { gap: 2px; padding-right: 6px; }
-.binfo .btitle { font: var(--fw-display) var(--fs-md) var(--font-display); color: var(--ink); }
-.binfo .bnum { font-size: var(--fs-sm); color: var(--ink-dim); }
+.binfo { gap: 2px; padding-right: 4px; max-width: 280px; align-self: center; }
+#bopts > .binfo { align-self: center; max-width: 220px; }
+.binfo .btitle { font: var(--fw-display) var(--fs-md) var(--font-display); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.binfo .bnum { font-size: var(--fs-xs); line-height: 1.3; color: var(--ink-dim); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+#bdesign .binfo { max-width: none; }
 .bbadges { gap: 4px; max-width: 360px; }
 .bbadge.ui-tag { font-size: var(--fs-xs); padding: 3px 9px; color: var(--tone, var(--ink-dim)); background: color-mix(in srgb, var(--tone, var(--ink-dim)) 13%, transparent); border: 1px solid color-mix(in srgb, var(--tone, var(--ink-dim)) 32%, transparent); }
 .bbadge.ui-tag.k-price { --tone: var(--money); }
@@ -177,18 +246,37 @@ body.building #ui-lane-bottom > #tools, body.building #tools { display: none; }
 .bbadge.ui-tag.k-std { --tone: var(--good); }
 .bbadge.ui-tag.k-bad { --tone: var(--danger); white-space: normal; }
 
-/* ---------- the bar: piece slots, then the aids ---------- */
+/* the fit line: one row under the inspector's head (or in the hint row while the inspector is closed) */
+#bdfit, #bfit { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: var(--fs-sm); font-weight: var(--fw-strong); color: var(--good); }
+#bdfit[hidden], #bfit[hidden] { display: none; }
+#bdfit { flex: none; padding: 8px 14px; border-bottom: 1px solid var(--edge); background: color-mix(in srgb, var(--good) 8%, transparent); }
+#bdfit.adj { color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+#bdfit.bad, #bfit { color: var(--danger); }
+#bdfit.bad { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.bfitt { display: inline-flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.bfitt svg { width: 15px; height: 15px; flex: none; }
+#bfit { flex: 0 1 auto; flex-wrap: nowrap; min-width: 0; white-space: nowrap; overflow: hidden; }
+:is(#bdfit, #bfit) .bchip { min-height: 28px; padding: 0 10px; font-size: var(--fs-xs); color: var(--ink); border-radius: var(--r-pill); }
+/* a door or window drawn on its wall (P7 makes it a stage with handles), and the drawer's foot */
+.bstage { align-items: center; gap: 6px; width: 100%; }
+.bstage > svg { display: block; width: 100%; height: auto; border-radius: var(--r-sm); background: var(--cad-bg); color: var(--cad-ink); }
+.bstage .bnote { align-self: flex-start; }
+#bdfoot { flex: none; display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px 12px; border-top: 1px solid var(--edge); }
+#bdfoot[hidden] { display: none; }
+#bdfoot .bgroup > .blab { display: none; }
+
+/* ---------- the bar: nine slots, then the aids (undo, redo, snap | storeys, roofs | materials, done) ---------- */
 #bmain {
-  gap: 10px; align-items: center; justify-content: center;
-  padding: 8px 10px;
+  display: flex; gap: 10px; align-items: center; justify-content: center;
+  padding: 8px 10px; border-top: 0;
   background: var(--surface-2);
   border: var(--border-w) solid var(--edge); border-radius: var(--bb-r);
   box-shadow: var(--shadow-2), var(--inner-hi);
 }
 /* cozy: room above the bar for the lifted slot's diamond */
 :root:not([data-skin="minimal"]) #bmain { margin-top: 12px; }
-#bpieces { gap: 5px; align-items: center; }
-#bpieces .sep { width: var(--border-w); align-self: stretch; margin: 10px 3px; background: var(--edge); border-radius: 1px; }
+#bpieces { display: flex; gap: 5px; align-items: center; }
+#bpieces .sep, #baids .sep { width: var(--border-w); align-self: stretch; margin: 10px 3px; background: var(--edge); border-radius: 1px; flex: none; }
 #bpieces button > svg, #baids .ui-slot > svg { width: 24px; height: 24px; }
 #bpieces button .name, #baids .ui-slot .name {
   font-family: var(--font-display); font-weight: var(--fw-display); font-size: 11.5px; line-height: 1.1;
@@ -197,7 +285,7 @@ body.building #ui-lane-bottom > #tools, body.building #tools { display: none; }
 }
 /* icon a little lower, clear of the keycap */
 #bpieces button, #baids .ui-slot { padding: 9px 2px 5px; }
-:root[data-skin="minimal"] :is(#bpieces button .name, #baids .ui-slot .name) { font-size: 9.5px; }
+:root[data-skin="minimal"] :is(#bpieces button .name, #baids .ui-slot .name) { font-size: 10.5px; }
 #buildbar .key {
   position: absolute; left: 2px; top: 2px; right: auto;
   min-width: 13px; height: 13px; padding: 0 2px; font-size: 8.5px; opacity: 1;
@@ -205,72 +293,152 @@ body.building #ui-lane-bottom > #tools, body.building #tools { display: none; }
   display: inline-flex; align-items: center; justify-content: center; line-height: 1;
 }
 #buildbar [aria-pressed="true"] > .key { color: currentColor; background: transparent; border-color: currentColor; }
+/* a group slot: a small corner caret says it holds more tools */
+#bpieces .caret {
+  position: absolute; right: 5px; top: 5px; width: 0; height: 0; pointer-events: none;
+  border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 5px solid currentColor;
+  opacity: .5;
+}
+#bpieces [aria-expanded="true"] .caret { transform: rotate(180deg); opacity: .9; }
 
-#baids { gap: 6px; align-items: center; padding-left: 12px; border-left: var(--border-w) solid var(--edge); }
-/* Snap, List and Done are slots too; Snap and List are toggles, so no lift and no marker when on */
+#baids { display: flex; gap: 6px; align-items: center; padding-left: 12px; border-left: var(--border-w) solid var(--edge); }
+#bundo, #bredo, #bsnap {
+  width: 36px; min-width: 36px; height: 36px; min-height: 36px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center; border-radius: var(--r-pill);
+}
+#bundo svg, #bredo svg, #bsnap svg { width: 18px; height: 18px; margin: 0; }
+#bsnap[aria-pressed="true"], #broofs[aria-pressed="true"], #bsched[aria-pressed="true"] {
+  background: var(--accent-soft); border-color: var(--accent-edge); color: var(--pressed-ink);
+}
+/* storeys: chips for the storeys that exist, the cellar (dim until dug) and an empty one above */
+#blevel.ui-seg {
+  display: inline-flex; align-items: stretch; min-width: 0; height: 40px; padding: 3px; gap: 2px;
+  font-size: var(--fs-sm); color: var(--ink); border: 0;
+}
+#blevel.ui-seg > button {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 32px; min-height: 0; padding: 0 10px; flex: none;
+  font: var(--fw-display) var(--fs-sm) var(--font-display);
+}
+#blevel.ui-seg > button svg { width: 14px; height: 14px; }
+#blevel.ui-seg > button.dim:not([aria-pressed="true"]) { opacity: .5; }
+#broofs { height: 36px; min-height: 36px; padding: 0 12px 0 9px; gap: 6px; font-size: var(--fs-sm); border-radius: var(--r-pill); }
+#broofs svg { width: 17px; height: 17px; }
+/* Materials: what the plan needs, with its cost when things are bought (sandbox off) */
+#bsched {
+  display: inline-flex; flex-direction: row; align-items: center; justify-items: initial; align-content: initial;
+  height: 40px; min-height: 40px; min-width: 0; padding: 0 12px 0 10px; gap: 7px;
+  border-radius: var(--r-pill);
+}
+#bsched svg { width: 18px; height: 18px; }
+#bsched .name { font: var(--fw-display) var(--fs-sm) var(--font-display); }
+#bsched .tot { font: var(--fw-strong) var(--fs-sm) var(--font-body); font-variant-numeric: tabular-nums; color: var(--money); }
+/* Done is a slot, the go colour */
 #baids .ui-slot {
   display: flex; flex-direction: column; justify-items: initial; align-content: initial;
   width: var(--slot-w); min-width: var(--slot-w); height: var(--slot-w); gap: 2px;
 }
-#baids .ui-slot[aria-pressed="true"] {
-  background: var(--accent-soft); border-color: var(--accent-edge); color: var(--pressed-ink);
-  translate: none; box-shadow: var(--shadow-1);
-}
-#baids .ui-slot[aria-pressed="true"]:active { translate: 0 var(--press-y); }
 #baids .ui-slot::after { display: none; }
 #baids #bdone { background: var(--accent); color: var(--accent-ink); border-color: var(--accent-edge); box-shadow: var(--lip-accent), var(--shadow-1); }
-#baids #bdone:hover { background: color-mix(in srgb, var(--accent) 88%, white); }
+#baids #bdone:hover { background: color-mix(in srgb, var(--accent) 88%, var(--accent-ink)); }
 #baids #bdone .key { color: inherit; background: transparent; border-color: currentColor; opacity: .75; }
 
-/* storey: a stepper pill (down, name, up) */
-#blevel {
-  align-items: center; gap: 2px; padding: 3px;
-  font-size: var(--fs-sm); color: var(--ink);
-  background: var(--well); border: 0; border-radius: var(--r-pill);
+/* ---------- the flyout of a group slot: large named tiles ---------- */
+#bfly {
+  position: fixed; z-index: 21; left: 0; bottom: 0;
+  display: flex; flex-direction: column; gap: 8px; padding: 10px 10px 12px;
+  color: var(--ink); background: var(--surface-2);
+  border: var(--border-w) solid var(--edge); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  animation: bfly-in var(--t) var(--ease) both;
 }
-#blevel button {
-  width: 30px; min-width: 30px; height: 30px; min-height: 30px; padding: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: var(--surface-3); border: var(--border-w) solid var(--edge); border-radius: var(--r-pill); box-shadow: var(--lip);
+#bfly .bfh {
+  padding: 0 4px; font: var(--fw-display) var(--fs-xs) var(--font-display); color: var(--ink-dim);
+  text-transform: var(--label-transform); letter-spacing: var(--label-track);
 }
-#blevel button:hover { background: var(--surface-hover); }
-#blevel button svg { width: 16px; height: 16px; }
-#blevel #blname { min-width: 58px; width: auto; padding: 0 4px; font: var(--fw-display) var(--fs-sm) var(--font-display); text-align: center; }
+#bfly .bfi { display: flex; gap: 6px; }
+#bfly button {
+  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  width: 78px; height: 74px; padding: 8px 4px 6px;
+  border-radius: var(--r-md);
+}
+#bfly button svg { width: 28px; height: 28px; }
+#bfly button .name { font: var(--fw-display) var(--fs-sm) var(--font-display); white-space: nowrap; }
+#bfly button .key { position: absolute; left: 4px; top: 4px; min-width: 15px; height: 15px; padding: 0 3px; font-size: 9px; border-radius: 4px; }
+#bfly button[aria-pressed="true"] { background: var(--select-bg); color: var(--select-ink); border-color: var(--select-edge); }
+@keyframes bfly-in { from { opacity: 0; transform: translateY(8px) scale(.96); } to { opacity: 1; transform: none; } }
 
-#bfree { align-self: center; min-height: 36px; padding: 0 12px; font-size: var(--fs-sm); border-radius: var(--r-pill); }
-#bundo, #bredo { width: 36px; min-width: 36px; height: 36px; padding: 0; border-radius: var(--r-pill); justify-content: center; }
-#bundo svg, #bredo svg { width: 18px; height: 18px; margin: 0; }
-
-/* ---------- side drawers: the schedule and the window/door designer ---------- */
+/* ---------- drawers: the inspector and Materials ---------- */
 /* buildui.js sets `bottom` inline (above the bar). With `top` under the HUD, a content height and a max-height that
    fills the space between the two insets, they hug short content and scroll long content without covering the bar. */
 #bschedp, #bdesign {
   top: calc(var(--hud-top-h) + var(--sa-t)); right: calc(var(--lane-edge) + var(--sa-r)); left: auto;
   height: fit-content; max-height: -webkit-fill-available; max-height: stretch;
-  padding: 0; overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 0;
+  padding: 0; overflow: hidden;
   z-index: 20;
 }
 #bschedp { width: 400px; font-size: var(--fs-sm); }
-#bdesign { width: 360px; gap: 10px; padding: 0 0 14px; }
-/* end both just above the whole bar, options card included (buildui.js's inline bottom is the fallback) */
+#bdesign { width: 380px; }
+/* end both just above the whole bar, tray included (buildui.js's inline bottom is the fallback) */
 @supports (anchor-name: --a) {
   #buildbar { anchor-name: --hs-buildbar; }
   #bschedp, #bdesign { bottom: calc(anchor(--hs-buildbar top) + var(--sp-2)) !important; }
 }
-/* both open: the schedule steps left of the designer */
-body:has(#bdesign:not([hidden])) #bschedp { right: calc(var(--lane-edge) + var(--sa-r) + 360px + var(--sp-3)); }
+/* both open: Materials steps left of the inspector */
+body:has(#bdesign:not([hidden])) #bschedp { right: calc(var(--lane-edge) + var(--sa-r) + 380px + var(--sp-3)); }
 
-#bschedp h2 {
-  position: sticky; top: 0; z-index: 1;
-  display: flex; align-items: baseline; gap: var(--sp-3); justify-content: space-between;
-  margin: 0; padding: 14px 16px 10px;
-  font: var(--fw-display) var(--fs-xl) var(--font-display); color: var(--ink);
-  background: var(--surface-2); border-bottom: 1px solid var(--edge);
+/* the kit head: icon, title over a subtitle, close */
+:is(#bdesign, #bschedp) > .ui-panel__head { gap: 10px; padding: 10px 8px 10px 14px; border-bottom: 1px solid var(--edge); }
+:is(#bdesign, #bschedp) > .ui-panel__head > :is(.bdic, svg) {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 36px; height: 36px; padding: 0; border-radius: var(--r-sm);
+  color: var(--accent-edge); background: var(--accent-soft);
 }
-:root[data-skin="minimal"] #bschedp h2 { font-size: var(--fs-lg); }
-#bschedp h2 small { font: var(--fw-body) var(--fs-xs) var(--font-body); color: var(--ink-dim); text-align: right; }
+#bschedp > .ui-panel__head > svg { padding: 6px; }
+.bdic svg { width: 22px; height: 22px; }
+.bph { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.bph h2 {
+  margin: 0; font: var(--fw-display) var(--fs-lg) var(--font-display); line-height: 1.2; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bph small { font-size: var(--fs-xs); color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bph small:empty { display: none; }
+
+/* the inspector's body: sections in the order view() gives them */
+#bdbody {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 12px 14px;
+}
+#bdbody > .bgroup { padding: 0 2px; }
+#bdesign .bsec {
+  display: flex; flex-direction: column; gap: 8px; flex: none;
+  padding: 10px 12px 12px;
+  background: var(--surface-3); border: var(--border-w) solid var(--edge); border-radius: var(--r-md);
+}
+#bdesign .bsech {
+  margin: 0; padding: 0;
+  font: var(--fw-display) var(--fs-xs) var(--font-display);
+  text-transform: var(--label-transform); letter-spacing: var(--label-track);
+  color: var(--accent-edge);
+}
+#bdesign .bsecb { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; }
+#bdesign .bitems { flex-wrap: wrap; min-height: 0; }
+#bdesign .bcard { min-width: 58px; max-width: 76px; }
+#bdesign .bwinprev { align-self: center; }
+#bdesign .bwinprev .bwp { width: 320px; }
+:root[data-skin="minimal"] #bdesign .bsec { padding: 0 2px 6px; background: transparent; border: 0; border-radius: 0; }
+:root[data-skin="minimal"] #bdesign .bsech { margin: 4px 0 0; padding: 0 0 6px; color: var(--ink-dim); }
+:root[data-skin="minimal"] :is(#bdesign, #bschedp) > .ui-panel__head { margin: 0; }
+:root[data-skin="minimal"] :is(#bdesign, #bschedp) > .ui-panel__head > :is(.bdic, svg) { width: 28px; height: 28px; color: var(--accent); background: transparent; }
+:root[data-skin="minimal"] #bschedp > .ui-panel__head > svg { padding: 3px; }
+
+/* Materials: stages and lines, the total and what happens next */
+.bschb { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 8px; }
 #bschedp section { margin: 8px 12px 0; padding: 8px 10px; background: var(--surface-3); border-radius: var(--r-md); }
 :root[data-skin="minimal"] #bschedp section { background: transparent; border-top: 1px solid var(--edge); border-radius: 0; margin: 0 16px; padding: 8px 0; }
+:root[data-skin="minimal"] #bschedp section:first-child { border-top: 0; }
 #bschedp h3 {
   margin: 0 0 4px; padding: 0; border: 0; gap: 8px;
   font: var(--fw-display) var(--fs-md) var(--font-display); color: var(--ink);
@@ -281,26 +449,13 @@ body:has(#bdesign:not([hidden])) #bschedp { right: calc(var(--lane-edge) + var(-
 #bschedp .ln:first-of-type { border-top: 0; }
 #bschedp .ln i { color: var(--ink-dim); }
 #bschedp .ln em { font-size: var(--fs-xs); color: var(--ink-dim); }
-#bschedp .tot {
-  position: sticky; bottom: 0;
-  margin: 10px 0 0; padding: 10px 16px 12px;
-  font: var(--fw-display) var(--fs-lg) var(--font-display);
-  background: var(--surface-2); border-top: 1px solid var(--edge);
-}
 #bschedp .none { margin: 12px 16px 16px; color: var(--ink-dim); }
-
-#bdesign .bdtitle {
-  position: sticky; top: 0; z-index: 1;
-  padding: 14px 16px 10px;
-  font: var(--fw-display) var(--fs-xl) var(--font-display); color: var(--ink);
-  background: var(--surface-2); border-bottom: 1px solid var(--edge);
-}
-:root[data-skin="minimal"] #bdesign .bdtitle { font-size: var(--fs-lg); }
-#bdesign > .bgroup, #bdesign > .bsec { margin: 0 14px; }
-#bdesign .bsec { padding: 8px 10px 10px; }
-#bdesign .bitems { flex-wrap: wrap; }
-#bdesign .bwinprev { align-self: center; }
-#bdesign .bwinprev .bwp { width: 320px; }
+.bschf { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 10px 16px 14px; border-top: 1px solid var(--edge); }
+.bschf:empty { display: none; }
+#bschedp .tot { margin: 0; padding: 0; border: 0; font: var(--fw-display) var(--fs-lg) var(--font-display); }
+.bschf .ui-btn--go { align-self: stretch; justify-content: center; min-height: 40px; gap: 8px; font: var(--fw-display) var(--fs-md) var(--font-display); }
+.bschf .ui-btn--go svg { width: 18px; height: 18px; }
+.bsbx { margin: 0; font-size: var(--fs-sm); color: var(--ink-dim); }
 
 /* ---------- instruments: the --cad look in both skins ---------- */
 #bover, .bwinprev .bwp { --cad-font: "Inter", "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", Roboto, system-ui, sans-serif; }
@@ -309,7 +464,7 @@ body:has(#bdesign:not([hidden])) #bschedp { right: calc(var(--lane-edge) + var(-
 .bdim { font-family: var(--cad-font); border-radius: 6px; }
 #bover .bdim input {
   display: none; width: 46px; min-height: 0; padding: 0 2px; margin: 0;
-  font: inherit; color: #fff; text-align: right;
+  font: inherit; color: var(--cad-ink); text-align: right;
   background: color-mix(in srgb, var(--cad) 14%, transparent);
   border: 0; border-bottom: 1px dashed var(--cad); border-radius: 3px 3px 0 0; outline: none;
 }
@@ -329,15 +484,25 @@ body:has(#bdesign:not([hidden])) #bschedp { right: calc(var(--lane-edge) + var(-
 #blabel { font-family: var(--font-body); color: var(--ink); background: var(--surface-2); border: var(--border-w) solid var(--edge); border-radius: var(--r-sm); box-shadow: var(--shadow-1); }
 #blabel.bad { color: var(--danger); border-color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--surface-2)); }
 
-/* ---------- phone: one row each, scrolled sideways (S9 owns the rest of the touch frame) ---------- */
+/* ---------- reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .bcoach.next::after { animation: none; opacity: .6; transform: none; }
+  #bfly { animation-name: ui-fade; }
+}
+
+/* ---------- phone: one row each, scrolled sideways (P8 owns the phone frame and refines this) ---------- */
 body.touch #buildbar { align-items: stretch; gap: 4px; padding: 0; }
-body.touch #bhead { border-radius: var(--r-md); padding: 4px 6px 4px 12px; max-width: none; }
-/* hint first, the fold beside it; selection actions wrap under */
-body.touch #bhint { order: 0; flex: 1 1 180px; font-size: var(--fs-xs); }
+body.touch #bhead { border-radius: var(--r-md); padding: 4px 6px 4px 12px; max-width: none; flex-wrap: wrap; }
+body.touch #bhint { order: 0; flex: 1 1 180px; font-size: var(--fs-xs); white-space: normal; }
 body.touch #bhead .grow { display: none; }
-body.touch #bfold { order: 1; }
+body.touch #bcoach { order: -1; gap: 2px; padding-right: 6px; margin-right: 0; }
+body.touch .bcoach { min-height: 30px; padding: 0 4px; }
+body.touch .bcoach.next { padding-right: 9px; }
+body.touch .bcoach:not(.next) > span { display: none; }
 body.touch #bacts, body.touch #bstop { order: 2; }
-body.touch #bopts, body.touch #bdecor { padding: 6px 8px; border-radius: var(--r-md); }
+body.touch #bopts, body.touch #bdecor { padding: 6px 8px; padding-right: 0; border-radius: var(--r-md); }
+body.touch #bopts { height: auto; }
+body.touch .btabl > [role="tab"] { min-height: 0; }
 body.touch #bmain { margin-top: 0; padding: 6px; border-radius: var(--r-md); }
 /* the scrolling row would clip a lifted slot and its marker: show the choice by colour only */
 body.touch #bpieces button[aria-pressed="true"] { translate: none; }
