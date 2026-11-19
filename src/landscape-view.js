@@ -795,7 +795,7 @@
   // a bite of earth onto the blade: the first one with the stamp (`m3`), then more as it is pushed further in (`add`)
   function lever(m3, add) {
     const x = dig.x, z = dig.z;
-    const res = cmd('landscape.dig', { x, z, m3, add });
+    const res = cmd('landscape.dig', { x, z, m3, add, r: dig.r });
     if (!res.ok) { if (!add) { dig.fail = true; sayS(res.reason); } return null; }
     dig.load = res.load; dig.cap = res.cap;
     if (add) {
@@ -878,6 +878,7 @@
             // the boot comes down: the blade goes in, a stop, crumbs
             G.juice.hitStop = 0.02 + 0.05 * HARD;
             const turf = HARD >= 1;
+            dig.r = Math.min(0.58, dig.r + 0.08);          // and the bite opens out: each stamp digs wider as well as deeper
             if (!lever(dig.cap * (0.34 - 0.18 * HARD), true)) dig.load = dig.cap;
             G.burst(dig.x, surfaceAt(dig.x, dig.z) + 0.05, dig.z, 3 + Math.round(5 * HARD), turf ? 0x5e8a3a : 0x4c3726, 1.0, 1.4, 0.045, 0.4);
           }
@@ -1053,7 +1054,7 @@
       Object.assign(dig, { t: 0, held: true, fail: false, done: false, bit: false, levered: false, let: null, bag: null });
       if (onBlade()) { dig.ph = 'carry'; dig.x = a.x; dig.z = a.z; return; }   // already loaded: carry it
       dig.ph = 'in'; dig.x = bag ? bag.x : a.x; dig.z = bag ? bag.z : a.z; dig.bag = bag ? bag.id : null;
-      HARD = bag ? 0.2 : hardness(dig.x, dig.z); T_BITE = 0.07 + 0.11 * HARD; dig.load = 0; dig.cap = SCOOP_M3 * (L().scale || 1);
+      HARD = bag ? 0.2 : hardness(dig.x, dig.z); T_BITE = 0.07 + 0.11 * HARD; dig.load = 0; dig.cap = SCOOP_M3 * (L().scale || 1); dig.r = 0.34;
     },
     frame(a, dt) { if (push.on) pushFrame(a, dt); },
     release() {
@@ -1095,7 +1096,7 @@
     const carrying = dig.ph === 'carry' || dig.ph === 'tip';
     if (carrying) { tx = dig.tx; tz = dig.tz; size = 1.15; col = 0xffe08a; op = 0.9; }
     else if (push.on) { tx = push.x; tz = push.z; size = 1.0; col = 0xd8c8a8; op = 0.6; }
-    else if (dig.ph === 'in' || dig.ph === 'sink' || dig.ph === 'lift') { tx = dig.x; tz = dig.z; size = 1.35; col = 0xffffff; op = 0.5; }
+    else if (dig.ph === 'in' || dig.ph === 'sink' || dig.ph === 'lift') { tx = dig.x; tz = dig.z; size = (dig.r || 0.34) / 0.25; col = 0xffffff; op = 0.5; }   // the ring is the bite, widening with each stamp
     else {
       const bag = bagAt(a.x, a.z);
       if (bag) { tx = bag.x; tz = bag.z; size = 1.5; col = 0xffb35c; op = 0.9; }              // the blade will rip this
