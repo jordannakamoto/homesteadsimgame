@@ -79,7 +79,9 @@
       R(['?', 'F1'], 'This sheet'),
     ] },
     { id: 'vehicle', title: 'On a vehicle', rows: [
-      R(['W', 'A', 'S', 'D'], 'Drive'),
+      R('W', 'Throttle (hold to build speed)'),
+      R('S', 'Brake; held once stopped, reverse'),
+      R(['A', 'D'], 'Steer left and right, relative to the vehicle'),
       R('Space', 'Brake'),
       R('Shift', 'Gentle throttle'),
       R('E', 'Get off'),

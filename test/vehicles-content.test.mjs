@@ -124,3 +124,18 @@ test('ATV: heading steer backs up when pushed behind, then stops and drives off 
   drive(b, (q) => headingControl(q, ATV, 0, 0), env, 12);
   assert.ok(b.u === 0, 'coasted down and held: ' + b.u);
 });
+
+// Published turning radius: Honda FourTrax Rancher TRX420 (wheelbase 51.0 in) lists 11.5 ft = 3.51 m (the base model, 50 in
+// wheelbase, 9.2 ft); Honda measures it to the outside front tyre. Driven at a walking pace on full lock, ours must agree.
+test('the ATV turning circle at walking pace matches the published 11.5 ft within 10%', () => {
+  const env = on('dirt'), b = ridden(env), pts = [];
+  for (let i = 0, t = 0; i < 14 / SUB; i++, t += SUB) {
+    stepBody(b, ATV, { throttle: b.u < 1.5 ? 0.3 : 0, steer: 1, brake: b.u > 1.8 ? 0.2 : 0 }, env);
+    if (t > 6) {   // left of the nose is the outside of a right turn: outer front tyre
+      const f = ATV.axles[0].z, hw = ATV.track / 2;
+      pts.push([b.x + Math.sin(b.yaw) * f - Math.cos(b.yaw) * hw, b.z + Math.cos(b.yaw) * f + Math.sin(b.yaw) * hw]);
+    }
+  }
+  const R = Math.max(Math.max(...pts.map((p) => p[0])) - Math.min(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1])) - Math.min(...pts.map((p) => p[1])));
+  assert.ok(Math.abs(R / 2 - 3.51) < 0.351, `outer-tyre turning radius ${(R / 2).toFixed(2)} m vs published 3.51 m`);
+});
