@@ -1017,3 +1017,9 @@ Nothing new to see yet: this is the plumbing decks, porches, lofts, skylights an
 - **Select** a deck by clicking it: the strip is its inspector (Height, Joists, Boards, Delete); Delete key works; undo brings it back.
 - Console: `__deck.plan(d, { attached, found, groundY })`, `__build.getExt(id, 'deck')`.
 - **Weak:** rectangles only (the data takes a polygon, the framing does not yet); no stairs or rails (B-3); a deck added to a building still under construction reopens its foundation stage, so the house's later stages wait for the deck piers; a deck on a slab house's wall is refused (no rim) rather than given its own beam; a house with pier blocks still building its foundation and an attached deck gets a pier job that only knows the deck's poured piers; beam sizing is a conservative rule (doubled 2x8 / 2x10 / 2x12 by joist span, posts at most 6 ft apart), not the full IRC beam table; no selection highlight for a picked deck; the Deck tool has no keyboard letter.
+
+## Dollhouse cut on buildings still in progress; windows and doors in section (branch `open-fills2`)
+
+- A wall counts as closed in once its shell is on (frame, sheathing, wrap, siding, lining): the cut's caps and the jamb boards in its openings appear then, not only once everything (trim, paint, wiring, plumbing) is done. Before, a building built by hand with later stages to go showed none of it.
+- Where the cut passes through a window, it shows the window in section: a solid white frame across the wall with a pale line for the glass, instead of a notch; through a door, its frame posts are solid and the doorway stays open.
+- Nails: a closed-in wall shows no nail heads; the nail marks are cut by the dollhouse like the pieces they are in (none float above a cut wall); driven nails are drawn small.

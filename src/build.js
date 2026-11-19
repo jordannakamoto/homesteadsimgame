@@ -9464,7 +9464,10 @@
   // the cap shows the wall in section, as one solid thing: the room's colour (lining, or its paint) on the inside, a pale
   // timber core, the siding's colour on the outside
   const capMat = (S) => S.capMat || (S.capMat = new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide, clippingPlanes: S.capPl, clipIntersection: false }));
-  const CAP_CORE = col(0xd9c6a3);
+  const CAP_CORE = col(0xd9c6a3), CAP_GLASS = col(0xa9c4cc);
+  // a wall is closed in once its shell is on: frame, sheathing, wrap, siding and lining. Later work (insulation is inside it;
+  // taping, trim, paint, wiring and plumbing come after) does not change its section, so it does not hold back the caps or jambs
+  const WALL_SHELL = new Set(["wall-frame", "top-plates", "sheathing", "wrap", "cladding", "lining"]);
   const CAP_SKIP = new Set(["casing", "base", "stool", "caulk", "paint", "prime", "joint", "batt", "wiring", "pipe", "box"]);
   function capWalls(S) {
     const on = S.cutH < 99 && S.mem && S.mem.walls && S.mem.walls.length;
@@ -9479,7 +9482,7 @@
       const pos = [], cols = [];
       for (const w of S.mem.walls) {
         if (w.y0 + (w.h || 0) <= h || w.y0 >= h) continue;
-        const ms = (S.mem.byParent.get(w.id) || []).filter((m) => m.draw !== 0 && !CAP_SKIP.has(m.kind) && !(m.kind === "cladding" && m.type === "trim") && m.section && m.stage !== "foundation" && m.stage !== "floor-frame" && m.stage !== "subfloor");
+        const ms = (S.mem.byParent.get(w.id) || []).filter((m) => m.draw !== 0 && WALL_SHELL.has(m.stage) && !(m.kind === "cladding" && m.type === "trim") && m.section);
         if (!ms.length || ms.some((m) => S.plan.has(m.id))) continue;          // still being built: leave it open to see
         const L = Math.hypot(w.b[0] - w.a[0], w.b[1] - w.a[1]) || 1, ux = (w.b[0] - w.a[0]) / L, uz = (w.b[1] - w.a[1]) / L, N = [-uz, 0, ux];
         let lo = 1e9, hi = -1e9;
@@ -9504,6 +9507,14 @@
         const quad = (xa, xb) => { band(xa, xb, lo, hi, 0, CAP_CORE); for (const [o0, o1, c] of strips) band(xa, xb, o0, o1, 0.002, c); };
         for (const [ga, gb] of gaps) { if (ga - x > 0.01) quad(x, ga); x = Math.max(x, gb); }
         if (L - x > 0.01) quad(x, L);
+        // a door or window the cut passes through: its frame posts are solid in section too (white, across the unit's depth), and
+        // a window's sash across the middle; a doorway stays open between its posts
+        for (const q of w.openings || []) {
+          if (!opensAt.includes(q.id)) continue;
+          const e = q.offset + q.width, fw = 0.05, FR = MCOL.trim;
+          if (q.kind === "door") { band(q.offset, q.offset + fw + 0.02, lo, hi, 0.003, FR); band(e - fw - 0.02, e, lo, hi, 0.003, FR); }
+          else { band(q.offset, e, lo, hi, 0.003, FR); band(q.offset + fw, e - fw, -0.004, 0.004, 0.0045, CAP_GLASS); }     // and the glass, a pale line
+        }
       }
       if (pos.length) {
         const g = new T.BufferGeometry();
@@ -9569,7 +9580,7 @@
   // sill board under a window, across the wall's whole thickness, so an opening shows finished wood, not the inside of the wall,
   // from any side and in the dollhouse cut. Primed white, or the building's trim colour
   function wallThick(S, w) {
-    const ms = (S.mem.byParent.get(w.id) || []).filter((m) => m.draw !== 0 && !CAP_SKIP.has(m.kind) && !(m.kind === "cladding" && m.type === "trim") && m.section && m.stage !== "foundation" && m.stage !== "floor-frame" && m.stage !== "subfloor");
+    const ms = (S.mem.byParent.get(w.id) || []).filter((m) => m.draw !== 0 && WALL_SHELL.has(m.stage) && !(m.kind === "cladding" && m.type === "trim") && m.section);
     if (!ms.length || ms.some((m) => S.plan.has(m.id))) return null;
     const L = Math.hypot(w.b[0] - w.a[0], w.b[1] - w.a[1]) || 1, ux = (w.b[0] - w.a[0]) / L, uz = (w.b[1] - w.a[1]) / L, N = [-uz, 0, ux];
     let lo = 1e9, hi = -1e9;

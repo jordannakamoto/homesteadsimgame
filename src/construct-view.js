@@ -559,9 +559,14 @@
     const pr = S().progress[id], g = geom(id);
     if (!pr || !g || pr.done) return;
     const by = new Map();
+    // a wall closed in (its frame, sheathing, siding and lining all on): its nails are behind the faces, or filled; none shows
+    const open = new Set(), SHELL = /^(wall-frame|top-plates|sheathing|wrap|cladding|lining)$/;
+    for (const mid in pr.members) { const pm = pr.members[mid]; if (pm.parent && SHELL.test(pm.stage) && !pm.built) open.add(pm.parent); }
+    const closed = (pm) => pm.parent && g.walls.has(pm.parent) && !open.has(pm.parent);
     for (const mid in pr.members) {
       const pm = pr.members[mid];
       if ((!pm.built && !(pm.need > 0 && pm.got >= pm.need - 1e-6)) || V.sawing.has(mid) || V.flights.has(mid)) continue;
+      if (pm.built && SHELL.test(pm.stage) && closed(pm)) continue;
       if (pm.kind === 'joint' || pm.kind === 'prime' || pm.kind === 'paint') continue;     // spread on, not nailed
       if (pm.built && pm.kind === 'cladding') continue;          // siding is blind-nailed: the next course covers the nails
       if (pm.built && pm.kind === 'lining' && (pm.stage !== 'lining' || !geom(id).byId.get(mid) || geom(id).byId.get(mid).type !== 'gypsum' || api.stageComplete(pr, 'finish'))) continue;   // boards are blind-nailed; drywall screws are mudded over
