@@ -121,15 +121,24 @@ test('towing: a loaded trailer slows the pull-away and lengthens the stop; the t
   // from the same speed the stop is longer: compare braking from each run's speed by deceleration
   const decel = (r) => (r.v5 * r.v5) / (2 * r.stop);
   assert.ok(decel(full) < decel(solo) * 0.75, 'an unbraked load pushes: ' + decel(solo).toFixed(2) + ' vs ' + decel(full).toFixed(2) + ' m/s2');
-  assert.ok(full.sF0 < 0.5 && solo.sF0 === 0.5, 'the tongue lifts the front: ' + full.sF0);
+  // G-3: the rider sits behind the middle, so the solo static front share is under a half; the tongue takes more off it
+  assert.ok(solo.sF0 > 0.44 && solo.sF0 < 0.5 && full.sF0 < solo.sF0 - 0.015, 'the tongue lifts the front: ' + solo.sF0 + ' ' + full.sF0);
 });
 
+// G-3: the stop is a joint limit in a dynamic rig, not a clamp that zeroes the speed. Held in reverse against it, the
+// ATV shoves the light trailer's tyres sideways (they scrub); the rider (headingControl) stops when it binds.
 test('backing a trailer: past its stop the rig binds instead of folding through', () => {
   const FLAT = { ground: () => 0 };
   const b = VC.createBody(ATV, { fuelL: 10 }, FLAT), t = { body: VC.createBody(TR, VC.hitchPose(b, ATV, TR, 0.3), FLAT), kind: TR };
   t.body.artic = 0.3;
-  let jack = false;
-  for (let i = 0; i < 12 / VC.SUB; i++) { VC.stepBody(b, ATV, { throttle: -0.6, steer: -1 }, FLAT, VC.SUB, t); jack = jack || b.jack; }
-  assert.ok(Math.abs(t.body.artic) <= VC.ARTIC_MAX + 1e-9 && Math.abs(t.body.artic) > VC.ARTIC_MAX - 0.02, 'at the stop: ' + t.body.artic);
-  assert.ok(jack && Math.abs(b.u) < 0.05, 'bound and stopped: ' + b.u);
+  let jack = false, maxA = 0;
+  for (let i = 0; i < 12 / VC.SUB; i++) { VC.stepBody(b, ATV, { throttle: -0.6, steer: -1 }, FLAT, VC.SUB, t); jack = jack || b.jack; maxA = Math.max(maxA, Math.abs(t.body.artic)); }
+  assert.ok(maxA <= VC.ARTIC_MAX + 1e-9 && Math.abs(t.body.artic) > VC.ARTIC_MAX - 0.02, 'at the stop: ' + t.body.artic);
+  assert.ok(jack && t.body.slip > 1, 'bound: the trailer tyres scrub sideways: ' + t.body.slip);
+  // pushing behind with the heading steer: it folds to the stop and the rider stops there
+  const h = VC.createBody(ATV, { fuelL: 10 }, FLAT), ht = { body: VC.createBody(TR, VC.hitchPose(h, ATV, TR, 0.5), FLAT), kind: TR };
+  ht.body.artic = 0.5; h.cargoKg = 80;
+  let hj = false;
+  for (let i = 0; i < 10 / VC.SUB; i++) { VC.stepBody(h, ATV, VC.headingControl(h, ATV, 1, -1), FLAT, VC.SUB, ht); hj = hj || h.jack; }
+  assert.ok(hj && Math.abs(h.u) < 0.05, 'bound and stopped: ' + h.u + ' artic ' + ht.body.artic);
 });
