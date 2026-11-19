@@ -5,8 +5,9 @@
 import { STATE_VERSION } from './sim.js';
 import { packReplacer, unpackReviver, unpackAll } from './core/earthwork-codec.js';
 import { makeGround, importTile } from './core/ground.js';
+import { isLegacyLink } from './services-legacy.js';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 export const FORMAT = 'homestead-save';
 
 // MIGRATIONS[n] upgrades a save from version n to n + 1.
@@ -24,6 +25,15 @@ const MIGRATIONS = {
       save.sim.sys.ground = G;
     }
     if (save.world) delete save.world.edits;
+    return save;
+  },
+  // v4: build mode's Equip wires and water pipes (world.builds.links) become runs in the routes store (services S4).
+  // Their lengths are build mode's own (linkRoute), so the page converts them once build mode has loaded them
+  // (src/sim/services-legacy.js, called from engine.js syncSite); this step only marks a save that has some.
+  // Flue pipes (100 mm and up) stay build mode links.
+  3: (save) => {
+    const links = (save.world && save.world.builds && save.world.builds.links) || [];
+    if (links.some(isLegacyLink)) save.world.legacyLinks = true;
     return save;
   },
 };

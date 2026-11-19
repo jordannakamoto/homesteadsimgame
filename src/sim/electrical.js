@@ -41,12 +41,15 @@
 //   Wires     current against ampacity, voltage drop 2 I R L as a percentage (warned above 3 %), I^2 R
 //             loss as heat. Breakers integrate their overload along a trip curve and stay tripped until
 //             electrical.resetBreaker.
+//   Grid      a service entrance (category grid) is an AC source like a generator with no fuel: up to its rating,
+//             metered, billed at midnight from stock.money (sources[id]: meterKWh, owedUsd, paidUsd, shutoff); it
+//             feeds the AC breaker panel behind it. A generator on the same panel is left out (no transfer switch).
 //   Generator runs when switched on or by its auto-start rule (settings.autoStart, startBelow and
 //             stopAbove as fractions of the usable battery), serves AC loads first, charges the battery
 //             through an inverter-charger, and burns fuel along its Willans line until the tank is empty.
 //
 // Energy is conserved, every minute and in the books:
-//   generated + discharged + generator = used + charged + wire losses + inverter losses + wasted
+//   generated + discharged + generator + grid = used + charged + wire losses + inverter losses + wasted
 // where generated is what the charge controllers could deliver and wasted is what they held back
 // because nothing could take it (a full battery). Upstream of that, array output = generated +
 // controller loss (including PWM mismatch and clipping) + PV wire loss; and inside each battery,
@@ -166,7 +169,21 @@ function topoKeyOf(s) {
   return trips + '|' + sw + '|' + cmd;
 }
 
-const ROLE_OF = { solar_panel: 'panel', battery: 'battery', generator: 'gen', load: 'load', tool: 'load', outlet: 'load' };
+const ROLE_OF = { solar_panel: 'panel', battery: 'battery', generator: 'gen', grid: 'gen', load: 'load', tool: 'load', outlet: 'load' };
+const isGrid = (def) => def.category === 'grid';
+// The AC breaker panel a grid service feeds: the one its settings name, else the nearest within its feedM (ties by id).
+function feedPanel(fx, p, def) {
+  const named = p.settings && p.settings.panel != null ? fx.get(p.settings.panel) : null;
+  if (named && named.def.acPanel) return p.settings.panel;
+  let best = null, bd = def.feedM || 4;
+  const at = p.a || { x: 0, z: 0 };
+  for (const [id, f] of [...fx].sort((x, y) => (x[0] < y[0] ? -1 : 1))) {
+    if (!f.def.acPanel || !f.p.a) continue;
+    const d = Math.hypot(f.p.a.x - at.x, f.p.a.z - at.z);
+    if (d < bd - 1e-9) { bd = d; best = id; }
+  }
+  return best;
+}
 
 function compile(pieces, s) {
   electricalStats.compiles++;
@@ -223,6 +240,15 @@ function compile(pieces, s) {
     const w = { id: p.id, from: p.from.piece, to: p.to.piece, spec, lengthM, R: 2 * spec.ohmPerM * lengthM, bus: -1, v: -1 };
     wires.push(w); if (a !== b) edges.push({ a, b, R: w.R, wire: w });
   }
+  // a grid service feeds its breaker panel through the wall: a joint with no wire of its own
+  const feeds = {};
+  for (const [id, { p, def }] of fx) {
+    if (!isGrid(def)) continue;
+    const pan = feedPanel(fx, p, def);
+    if (pan == null) { issue('warning', id, 'The ' + def.noun + ' has no breaker panel to feed.', 'Put a 120/240 V breaker panel on the inside of the wall, within ' + (def.feedM || 4) + ' m of the meter.'); continue; }
+    feeds[id] = pan;
+    edges.push({ a: vKey.get(id + ':ac'), b: vKey.get(pan), R: 0, feed: true });
+  }
   for (const [id, { def }] of fx) {
     if (def.role !== 'breaker') continue;
     const br = { id, ratingA: def.ratingA, bus: -1, v: -1, tripped: !!(s.breakers[id] && s.breakers[id].tripped) };
@@ -244,7 +270,7 @@ function compile(pieces, s) {
   for (const e of edges) buses[verts[e.a].bus].edges.push(e);
   const wired = new Set();
   for (const e of edges) { wired.add(verts[e.a].pieceId); wired.add(verts[e.b].pieceId); }
-  for (const [id, { def }] of fx) if (def.category !== 'solar_mount' && !wired.has(id))
+  for (const [id, { def }] of fx) if (def.category !== 'solar_mount' && !isGrid(def) && !wired.has(id))
     issue('info', id, 'The ' + def.noun + ' is not wired to anything.', 'Run a wire from it to the rest of the system.');
 
   const byRole = (B, role) => B.terms.filter((t) => t.role === role).sort((x, y) => (x.pieceId < y.pieceId ? -1 : 1));
@@ -312,7 +338,12 @@ function compile(pieces, s) {
   const cmdAt = new Map();
   for (const k of Object.keys(s.loads).sort()) { const L = s.loads[k]; if (L.source === 'command' && L.pieceId) cmdAt.set(L.pieceId, k); }
   for (const c of circuits) {
-    if (c.ac) for (const t of byRole(c.ac, 'gen')) { const g = { ...t, circuit: c.idx, idx: gens.length }; gens.push(g); c.gens.push(g); }
+    const grid = c.ac ? byRole(c.ac, 'gen').some((t) => isGrid(t.def)) : false;
+    if (c.ac) for (const t of byRole(c.ac, 'gen')) {
+      // no transfer switch is modelled: a generator wired into a grid-fed panel would backfeed the line, so it stays out
+      if (grid && !isGrid(t.def)) { issue('danger', t.pieceId, 'The generator is wired into the same panel as the grid service: without a transfer switch it would feed the power line.', 'Wire it to its own panel, or take the grid service away.'); continue; }
+      const g = { ...t, circuit: c.idx, idx: gens.length }; gens.push(g); c.gens.push(g);
+    }
     if (!c.root && c.ac) c.root = c.gens[0];
     c.splitPhase = c.invs.length ? c.invs.every((i) => i.def.splitPhase) : c.gens.length ? c.gens.every((g) => g.def.splitPhase) : false;
   }
@@ -385,7 +416,7 @@ function compile(pieces, s) {
     pn.tiltRad = clamp(tilt, 0, 90) * RAD; pn.azRad = az * RAD; pn.cosT = Math.cos(pn.tiltRad); pn.sinT = Math.sin(pn.tiltRad);
   }
   designChecks(buses, verts, wires, circuits, ctrls, nounOf, issue);
-  return { empty: false, buses, verts, wires, breakers, circuits, panels, ctrls, bats, invs, gens, loads, issues, fx, main };
+  return { empty: false, buses, verts, wires, breakers, circuits, panels, ctrls, bats, invs, gens, loads, issues, fx, main, feeds };
 }
 const mainScore = (c) => c.bats.reduce((a, b) => a + b.def.capacityWh, 0) + c.invs.reduce((a, i) => a + i.def.ratedW, 0) + c.gens.reduce((a, g) => a + g.def.ratedW, 0);
 
@@ -485,9 +516,9 @@ function pass(B) {
 }
 
 // ------------------------------------------------------------------------------------------- state
-const LEDGER_KEYS = ['generatedWh', 'usedWh', 'wastedWh', 'dischargedWh', 'chargedWh', 'generatorWh', 'wireLossWh', 'inverterLossWh', 'unservedWh', 'fuelL',
+const LEDGER_KEYS = ['generatedWh', 'usedWh', 'wastedWh', 'dischargedWh', 'chargedWh', 'generatorWh', 'gridWh', 'gridUsd', 'wireLossWh', 'inverterLossWh', 'unservedWh', 'fuelL',
   'arrayWh', 'controllerLossWh', 'pvWireLossWh', 'batteryLossWh', 'selfDischargeWh'];
-const ledger = (day) => ({ day, generatedWh: 0, usedWh: 0, wastedWh: 0, dischargedWh: 0, chargedWh: 0, generatorWh: 0, wireLossWh: 0,
+const ledger = (day) => ({ day, generatedWh: 0, usedWh: 0, wastedWh: 0, dischargedWh: 0, chargedWh: 0, generatorWh: 0, gridWh: 0, gridUsd: 0, wireLossWh: 0,
   inverterLossWh: 0, unservedWh: 0, fuelL: 0, arrayWh: 0, controllerLossWh: 0, pvWireLossWh: 0, batteryLossWh: 0, selfDischargeWh: 0 });
 function initState(ctx) {
   return { v: STATE_V, active: false, topoKey: '||', sig: '', circuits: [], sources: {}, batteries: {}, inverters: {}, loads: {}, breakers: {}, wires: {},
@@ -504,7 +535,9 @@ function reconcile(s, T, sig) {
   const srcIds = new Map();
   for (const pn of T.panels) srcIds.set(pn.pieceId, () => ({ kind: 'solar', ratedW: pn.def.ratedW, outputW: 0, energyWh: 0, snowCover: 0 }));
   for (const k of T.ctrls) srcIds.set(k.pieceId, () => ({ kind: 'controller', ratedW: k.def.maxOutputA * T.circuits[k.circuit].classV, outputW: 0, availableW: 0 }));
-  for (const g of T.gens) srcIds.set(g.pieceId, () => ({ kind: 'generator', ratedW: g.def.ratedW, outputW: 0, fuelL: g.def.tankL, tankL: g.def.tankL, running: false, manual: false, hours: 0, fuelUsedL: 0 }));
+  for (const g of T.gens) srcIds.set(g.pieceId, () => (isGrid(g.def)
+    ? { kind: 'grid', ratedW: g.def.ratedW, mainA: g.def.mainA, outputW: 0, running: true, on: true, shutoff: false, meterKWh: 0, owedUsd: 0, paidUsd: 0, lastBillUsd: 0, tariffUsdPerKWh: g.def.tariffUsdPerKWh, dailyChargeUsd: g.def.dailyChargeUsd, panel: T.feeds[g.pieceId] || null }
+    : { kind: 'generator', ratedW: g.def.ratedW, outputW: 0, fuelL: g.def.tankL, tankL: g.def.tankL, running: false, manual: false, hours: 0, fuelUsedL: 0 }));
   keep(s.sources, new Set(srcIds.keys()), (id) => srcIds.get(id)());
   const batMake = new Map(T.bats.map((b) => [b.pieceId, b]));
   keep(s.batteries, new Set(batMake.keys()), (id) => {
@@ -549,6 +582,28 @@ function deactivate(s) {
   s.busV = 0; s.generationW = 0; s.solarAvailableW = 0; s.demandW = 0; s.unservedW = 0;
 }
 
+// The grid bill: at midnight the day's metered energy and the daily customer charge are paid from the player's money
+// (stock.money, moved here as construction moves it). Not enough money: the service is cut off until it can be paid,
+// tried every minute while it is off. Sub-cent remainders carry to the next bill. Without a stock system nothing is paid.
+const cents = (x) => Math.round(x * 100) / 100;
+function payGrid(ctx, s, daily) {
+  const st = ctx.get('stock');
+  let off = false;
+  for (const id of Object.keys(s.sources).sort()) {
+    const gs = s.sources[id];
+    if (gs.kind !== 'grid') continue;
+    if (daily) gs.owedUsd += gs.dailyChargeUsd || 0;
+    const due = cents(gs.owedUsd);
+    if (st && due > 0 && st.money + 1e-9 >= due) {
+      st.money = cents(st.money - due); gs.paidUsd = cents(gs.paidUsd + due); gs.owedUsd -= due; gs.lastBillUsd = due;
+      if (gs.shutoff) { gs.shutoff = false; ctx.emit('electrical.gridOn', { id }); }
+      ctx.emit('electrical.gridBill', { id, usd: due, kWh: gs.meterKWh });
+    } else if (st && due > 0 && daily && !gs.shutoff) { gs.shutoff = true; ctx.emit('electrical.gridOff', { id, owedUsd: due }); }
+    if (gs.shutoff) off = true;
+  }
+  s.gridOff = off;
+}
+
 // ------------------------------------------------------------------------------------------- the step
 function step(ctx) {
   let s = ctx.s;
@@ -560,7 +615,8 @@ function step(ctx) {
   if (s.sig !== sig) { reconcile(s, T, sig); fresh = true; }
   const dt = ctx.dt, dtH = dt / 3600, t = ctx.t, tMid = t + dt / 2;
   const day = dayIndex(t);
-  if (s.today.day !== day) { s.yesterday = s.today; s.today = ledger(day); }
+  if (s.today.day !== day) { s.yesterday = s.today; s.today = ledger(day); payGrid(ctx, s, true); }
+  else if (s.gridOff) payGrid(ctx, s, false);                       // cut off: reconnect as soon as the bill can be paid
   const W = ctx.get('weather') || {}, O = s.weatherOverride;
   const airC = O && O.tempC !== undefined ? O.tempC : W.tempC !== undefined ? W.tempC : 15;
   const hour = dayFraction(tMid) * 24, minute = Math.floor(t / 60);
@@ -654,6 +710,7 @@ function step(ctx) {
     let genAvail = 0;
     for (const g of c.gens) {
       const gs = s.sources[g.pieceId], d = g.def;
+      if (isGrid(d)) { gs.running = gs.on !== false && !gs.shutoff; g.avail = gs.running ? d.ratedW : 0; genAvail += g.avail; continue; }
       const auto = g.p.settings && g.p.settings.autoStart;
       if (auto && socUsable !== null) {
         if (socUsable <= (g.p.settings.startBelow !== undefined ? g.p.settings.startBelow : 0.2)) gs.autoOn = true;
@@ -746,10 +803,15 @@ function step(ctx) {
     }
     led.inverterLossWh += fin.invLoss * dtH;
     // generators
-    let gOut = 0;
+    let gOut = 0, gridOut = 0;
     for (const g of c.gens) {
       const gs = s.sources[g.pieceId], d = g.def, P = c.genRated > 0 && fin.genOut > 0 ? (fin.genOut * g.avail) / Math.max(EPS, genAvail) : 0;
       gs.outputW = P;
+      if (isGrid(d)) {                                       // the meter turns: kWh billed at the tariff, no fuel
+        const kWh = (P * dtH) / 1000, usd = kWh * d.tariffUsdPerKWh;
+        gs.meterKWh += kWh; gs.owedUsd += usd; led.gridUsd += usd; gridOut += P; gOut += P;
+        continue;
+      }
       if (gs.running) {
         const fuel = Math.min(gs.fuelL, generatorFuelLph(d, P) * dtH);
         gs.fuelL -= fuel; gs.fuelUsedL += fuel; gs.hours += dtH; led.fuelL += fuel;
@@ -757,7 +819,7 @@ function step(ctx) {
       }
       gOut += P;
     }
-    led.generatorWh += fin.genOut * dtH;
+    led.generatorWh += (fin.genOut - gridOut) * dtH; led.gridWh += gridOut * dtH;
     led.wireLossWh += fin.wireLoss * dtH;
     // loads
     let used = 0, uns = 0, firstShed = -Infinity;
@@ -792,7 +854,7 @@ function step(ctx) {
   }
   if (tripped) s.topoKey = topoKeyOf(s);
   // books
-  for (const k of LEDGER_KEYS) { s.today[k] += led[k]; s.totals[k] += led[k]; }
+  for (const k of LEDGER_KEYS) { s.today[k] = (s.today[k] || 0) + led[k]; s.totals[k] = (s.totals[k] || 0) + led[k]; }   // || 0: a ledger from before the grid
   s.busV = T.main ? s.circuits[T.main.idx].busV : 0;
   s.generationW = genAll; s.solarAvailableW = solarAvail; s.demandW = demandAll; s.unservedW = unservedAll;
   if (fresh || ctx.tick % ISSUE_EVERY === 0 || tripped) s.issues = issuesNow(s, T);
@@ -929,7 +991,11 @@ function issuesNow(s, T) {
       if (bs.chargeBlocked) out.push({ severity: 'warning', pieceId: b.pieceId, reason: 'The battery is too cold to charge (' + bs.tempC.toFixed(0) + ' C). Lithium batteries must not be charged below ' + b.def.minChargeTempC + ' C.', fix: 'Move it somewhere warmer or insulate it; it charges again above ' + b.def.minChargeTempC + ' C.' });
       else if (bs.storedWh <= bs.floorWh + 1e-6) out.push({ severity: 'info', pieceId: b.pieceId, reason: 'The battery is down to its reserve (' + Math.round(100 * bs.soc) + '% charge).', fix: 'It recovers when the sun comes back, or charge it with a generator.' });
     }
-    for (const g of c.gens) { const gs = s.sources[g.pieceId]; if (gs.fuelL <= 0) out.push({ severity: 'warning', pieceId: g.pieceId, reason: 'The generator is out of fuel.', fix: 'Refuel it.' }); }
+    for (const g of c.gens) {
+      const gs = s.sources[g.pieceId];
+      if (gs.kind === 'grid') { if (gs.shutoff) out.push({ severity: 'warning', pieceId: g.pieceId, reason: 'The power company has cut the service off: $' + gs.owedUsd.toFixed(2) + ' is unpaid.', fix: 'It comes back on as soon as there is money to pay the bill.' }); continue; }
+      if (gs.fuelL <= 0) out.push({ severity: 'warning', pieceId: g.pieceId, reason: 'The generator is out of fuel.', fix: 'Refuel it.' });
+    }
   }
   return out.map((x, i) => ({ id: 'e' + i, ...x }));
 }
@@ -953,6 +1019,7 @@ const commands = {
   'electrical.switch': (ctx, p = {}) => {
     const s = ctx.s, id = p.pieceId, on = !!p.on;
     if (s.sources[id] && s.sources[id].kind === 'generator') { s.sources[id].manual = on; if (!on) s.sources[id].autoOn = false; return; }
+    if (s.sources[id] && s.sources[id].kind === 'grid') { s.sources[id].on = on; return; }        // the disconnect at the meter
     if (s.loads[id]) { s.loads[id].on = on; return; }
     if (on) delete s.switches[id]; else s.switches[id] = false;
     s.topoKey = topoKeyOf(s);

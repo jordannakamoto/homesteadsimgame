@@ -991,6 +991,13 @@ Nothing new to see yet: this is the plumbing decks, porches, lofts, skylights an
 - Console: `__game.foundation.hard(__game.sim.state, __foundation.job().id)`; commands `foundation.bore / setTube / plumb / fill / rod / setBracket / setPanel / tie / setBeam`. `debugPour` is no longer needed for any foundation (kept for tests).
 - Weak: a frost-depth trench by shovel is a lot of earth (a 3 x 2.4 m shed is about 8 m3): wants the hired hand or a machine; panels are bought, not rented; no bucket, only the barrow, tips into a tube; no backfill step (the 70% gate is only told); the tube's cardboard stays drawn above ground; the gestures (twist and lift, the plumbing drag, the rod pump) were only tested through their commands, so their feel needs a playtest.
 
+
+## Wave 2 S-3: one connection model, and power from the grid (branch `wave2-s3-legacy-grid`, design `services-roughin.md` S4 and S9a)
+- **Old wires and pipes**: an older save's Equip wires and water pipes are moved into the routes store when it loads (save v4): each becomes a finished run in the world, drawn like any other run (X shows it in the Power and Water overlays), and keeps its id, gauge, size and length, so circuits, breakers (a tripped one stays tripped) and flows are as they were. Removing a piece of equipment takes its runs with it. Flue pipes stay as they were.
+- **Equip** no longer draws port dots for power (or water): cable and pipe are run with Hands (F). `__build.connect(a, port, b, port, { gauge | diameterMm })` still works from the console and makes the same kind of run.
+- **Grid service** (Equip, Electrical: "100 A grid service (meter and mast)" or 200 A; also in the Supplier under Electrical): put it on an outside wall with the 120/240 V breaker panel on the inside, within 4 m. The panel is fed from it, no fuel, up to 24 kW (48 kW for 200 A). Every kWh is metered at 18 cents plus 50 cents a day and paid from your money at midnight; with too little money the power company cuts it off until you can pay (it comes back on by itself). The meter is a disconnect: `__game.sim.commandNow('electrical.switch', { pieceId, on })`. Read it: `__game.sim.state.sys.electrical.sources[<meter id>]` (`meterKWh`, `lastBillUsd`, `owedUsd`, `shutoff`). A generator wired into the same panel is refused with a reason (no transfer switch yet).
+- Try: an old save with an Equip-wired panel and a piped tap (it loads and works the same); a meter behind a panel, one circuit with Hands, a light at night with no generator; set your money to 0 before midnight and watch it go dark.
+- Weak: the meter is drawn as a plain grey box (no mast or drop); nothing checks it is on an outside wall; a legacy run's gauge cannot be changed in the inspector any more (it was Equip's); there is no transfer switch or net metering; the bill is a number, with no Home panel line yet (S12).
 ## Vehicles: wheel loads, a trailer with real weight, and tracks (branch `wave2-g3-drive`, slice G-3 / V13)
 
 - **Every wheel carries its own load now.** The ATV's weight sits where its centre of mass is (the rider behind the middle), and moves: rearward when you pull away or climb, forward when you brake or go downhill, outward in a turn or across a slope. Each tyre grips by its own load (a little less per kilo as the load rises, as real tyres do), with one friction circle shared by driving or braking and cornering.
@@ -1033,3 +1040,9 @@ Nothing new to see yet: this is the plumbing decks, porches, lofts, skylights an
 - A wall counts as closed in once its shell is on (frame, sheathing, wrap, siding, lining): the cut's caps and the jamb boards in its openings appear then, not only once everything (trim, paint, wiring, plumbing) is done. Before, a building built by hand with later stages to go showed none of it.
 - Where the cut passes through a window, it shows the window in section: a solid white frame across the wall with a pale line for the glass, instead of a notch; through a door, its frame posts are solid and the doorway stays open.
 - Nails: a closed-in wall shows no nail heads; the nail marks are cut by the dollhouse like the pieces they are in (none float above a cut wall); driven nails are drawn small.
+
+## Solid dollhouse cuts without seams (branch `solid-cuts`)
+
+- Anything the dollhouse cut slices (door and window units, trim, framing) shows its cut faces in its own colour, a little darker, not dark brown: a cut piece reads solid.
+- The cut walls' caps are one flat colour over the whole thickness (no thin strips per layer, so no seams), run on into the corners where walls meet, and windows stay solid in the cut's sides too; only a doorway stays open.
+- A closed wall at full height gets a flat cap on its top, so its top plates and stud ends do not show.

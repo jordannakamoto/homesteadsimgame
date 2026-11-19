@@ -69,6 +69,7 @@ export { channelsFor as frameChannelsFor, channelsFromMembers as frameChannels, 
 export { plumbingSystem, compilePlumbing } from './plumbing.js';
 export * from './content/plumbing-parts.js';
 export { services, servicesSystem, compileServices, servicesGuard, runInfo as serviceRunInfo, overlayData as servicesOverlay } from './services.js';
+export { isLegacyLink, legacyLinkCommands, legacyPrune, convertLegacyLinks } from './services-legacy.js';
 export { SERVICE_CLASSES, SERVICE_SPECS, NODE_KINDS as SERVICE_NODE_KINDS, DEVICES as SERVICE_DEVICES, FIXTURES_SERVICES, PRESETS_M as SERVICE_PRESETS_M } from './content/services.js';
 export * as vehicleCore from './core/vehicles.js';
 export { VEHICLE_KINDS, IMPLEMENT_KINDS, ITEMS_VEHICLES, FUEL_ITEM, VEHICLE_SURFACES } from './content/vehicles.js';
