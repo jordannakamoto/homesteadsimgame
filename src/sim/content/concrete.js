@@ -69,6 +69,7 @@ export const STEP_SAYS = Object.freeze({
   layout: 'Lay out the corners with string lines first',
   excavate: 'Dig to the strings: the amber is ground still too high',
   base: 'Dug to the line. The gravel base goes in next',
+  footing: 'Dug to the frost line. Pour the footing into the trench from the barrow',
   forms: 'The base is firm. Set the form boards along the strings and stake them',
   pour: 'Formed. Mix concrete in the barrow, tip it in, rake it and screed it off the forms',
   finish: 'Screeded. Bull float it, wait for the bleed water to go, then trowel or broom, joint it and set the anchor bolts',
@@ -161,8 +162,62 @@ export const BOLTS = Object.freeze({ item: 'anchor_bolt', everyM: 1.8, endM: 0.2
 export const COVERS = Object.freeze({ blanket: 'curing_blanket', plastic: 'poly_sheeting' });
 export const MIST = Object.freeze({ tool: 'garden_hose', holdS: 1800, minAirC: 3 });   // a misting keeps the top wet for half an hour
 export const BOLT_SAYS = 'Anchor bolts first: the sills bolt to the slab, and the bolts go in while the concrete is wet';
+export const BRACKET_SAYS = 'Post brackets first: the beams fix to them, and they go in while the concrete is wet';
 export const FINISH_SAYS = Object.freeze({
   bleeding: 'Bleed water still on top: float it, then wait for the sheen to go before you trowel',
   ready: 'The sheen is gone: trowel or broom it now, before it stiffens',
   late: 'It has set: too late to work the surface',
+});
+
+// ------------------------------------------------------------------------------------------------ piers and stem walls (B8 / B-1)
+// Footings go below the frost line, or the ground heaves them each winter (IRC R403.1.4.1; at least 12 in below
+// undisturbed ground where it does not freeze). Frost depth by the site's climate: Vermont builds to 48-60 in
+// (Burlington, the temperate station), Moscow's normative frost depth in loam is about 1.4 m, Lisbon's ground does not
+// freeze (footings go below the topsoil). Metres, to the bottom of the footing.
+export const FROST_DEPTH_M = Object.freeze({ temperate: 1.2, 'cold-continental': 1.35, 'mediterranean-coast': 0.45 });
+export const FROST_DEFAULT_M = 1.2;
+export const FROST_SAYS = (cm, name, planCm) => 'Frost reaches ' + cm + ' cm down here (' + name + '): footings sit below it, or the ground heaves them each winter.' + (planCm && planCm < cm ? ' The plan showed ' + planCm + ' cm; the holes go to ' + cm + ' cm and take more concrete.' : '');
+// Poured piers: a post-hole digger (clamshell) bores a 12-14 in hole to the frost line, a belled footing at the
+// bottom (a 20 in square, 8 in thick: about twice the pier), a 10 in cardboard tube form set on it and plumbed, then
+// concrete to the top, rodded, and a wet-set post bracket pushed into the top.
+export const PIER = Object.freeze({
+  holeR: 0.17,             // a 14 in hole
+  biteM: 0.15,             // one bite of the clamshell: about 6 in of earth lifted out
+  maxPerCall: 4,           // holes worked by one gesture at most (the gesture setting)
+  footW: 0.5, footT: 0.2,  // the belled footing at the bottom of the hole (when the plan has no pad of its own)
+  tubeItem: 'tube_form', tubeM: 3.66,   // 10 in x 12 ft tubes, cut to length; the offcut is kept for the next pier
+  tool: 'post_hole_digger',
+  tiltMinM: 0.03, tiltMaxM: 0.06,       // a tube dropped in the hole leans this far out at the top
+  plumbTolM: 0.006, snapM: 0.012,       // plumb within 6 mm over its length; inside 12 mm the level's bubble snaps it true
+  nudgeMaxM: 0.08,                      // one plumbing nudge moves the top at most this far
+  bracketItem: 'post_bracket',
+  spoilOutM: 1.1,                       // the plugs of earth are dropped this far out from the hole (the heap runs to its repose, not back in)
+});
+// Poured concrete traps air: about 4% of what is placed until it is rodded (a stick worked up and down: the bubbles
+// rise and the level drops a little; top it up). Each rodding lets most of what is left out.
+export const ROD = Object.freeze({ airFrac: 0.04, keep: 0.25, doneFrac: 0.004, fullTol: 0.004 });
+// Stem walls: the trench to the frost line, a footing poured in it (earth-formed: the trench walls hold it, its top at
+// grade stakes), then wall forms (4 x 8 ft plywood panels on a 2x4 frame, set in pairs either side of the wall) tied
+// through with snap ties every 2 ft along and up, the wall poured and rodded, anchor bolts set in its wet top,
+// stripped at a fifth strength. Footing 16 x 8 in under an 8 in wall: above the IRC minimum of 12 x 6 in.
+export const WALL = Object.freeze({
+  panelItem: 'wall_form_panel', panelL: 2.44, panelH: 1.22,
+  tieItem: 'form_tie', tieEveryM: 0.61, tieEndM: 0.2, tieRowM: 0.61,
+  trenchOverM: 0.1,        // the trench is this much wider than the footing on each side, room for the outer panel
+  trenchMaxM: 1.2,         // a shovel throws earth out of a trench this deep at most (the earthwork tool's reach): on
+                           // ground that falls away the footing is not taken deeper than this at the high end
+  boltEndM: 0.3, boltEveryM: 1.8,        // anchor bolts within 12 in of each end and at most 6 ft apart (IRC R403.1.6)
+  maxPerCall: 4,
+});
+export const WALL_SAYS = Object.freeze({
+  soft: 'The footing is still soft: the wall forms stand on it once it is a tenth strength',
+  untied: 'Tie the forms through first: wet concrete a metre deep pushes 23 kN on every square metre of panel',
+  panels: 'Set the panels on this run first',
+});
+export const PIER_SAYS = Object.freeze({
+  dig: 'Bore the holes to the frost line with the post-hole digger: press, twist, lift',
+  tube: 'Drop a tube form in each hole, then plumb it: drag its top until the bubble centres',
+  pour: 'Fill each tube from the barrow, rod it, top it up, and set a post bracket in the wet top',
+  bracket: 'Set the post brackets: the beams are fixed to them',
+  beams: 'The piers can carry the beams now: set them on the brackets',
 });

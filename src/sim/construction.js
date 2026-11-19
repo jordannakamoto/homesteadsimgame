@@ -357,9 +357,17 @@ export function tutorialStep(s) {
 export const carriedMassKg = (s) => (s.carried ? s.carried.qty * item(s.carried.itemId).massKgPerUnit : 0);
 
 // Build mode's pieces and shopping lines for one building, as the payload of construction.setPlan.
+// Members of the foundation stage carry their shape in world metres (geo), so a system that builds them by hand
+// (src/sim/foundation.js) can lay them out with no page: { a: [x, z], b: [x, z], y0, y1, w, h, type, mat, vol }.
+const r4 = (v) => Math.round(v * 1e4) / 1e4;
+const GEO_STAGES = ['foundation'];
+function geoOf(p) {
+  if (!GEO_STAGES.includes(p.stage) || !p.a || !p.b || !Number.isFinite(p.a.x) || !Number.isFinite(p.y0)) return null;
+  return { a: [r4(p.a.x), r4(p.a.z)], b: [r4(p.b.x), r4(p.b.z)], y0: r4(p.y0), y1: r4(p.y1), w: p.section ? r4(p.section.d) : 0, h: p.section ? r4(p.section.b) : 0, type: p.type || null, mat: p.material || null, ...(Number.isFinite(p.volume) ? { vol: r4(p.volume) } : {}) };
+}
 export function planFromPieces(structId, pieces, lines, extra = {}) {
   const members = [];
-  for (const p of pieces) if (p.struct === structId && p.stage && p.parent && C.STAGE[p.stage]) members.push({ id: p.id, stage: p.stage, kind: p.kind, parent: p.parent, ...(p.fin ? { fin: p.fin } : {}), len: p.length, pcs: p.plies || 1, built: p.built !== false || p.area === 0 || (p.length === 0 && p.area === undefined && !p.volume) });
+  for (const p of pieces) if (p.struct === structId && p.stage && p.parent && C.STAGE[p.stage]) { const geo = !p.storey ? geoOf(p) : null; members.push({ id: p.id, stage: p.stage, kind: p.kind, parent: p.parent, ...(p.fin ? { fin: p.fin } : {}), ...(geo ? { geo } : {}), len: p.length, pcs: p.plies || 1, built: p.built !== false || p.area === 0 || (p.length === 0 && p.area === undefined && !p.volume) }); }
   return { structId, members, lines: lines.map((l) => ({ key: l.key, stage: l.stage, itemId: l.itemId, qty: l.qty, unit: l.unit, label: l.label, why: l.why, count: l.count, members: l.members })), ...extra };
 }
 
@@ -496,6 +504,7 @@ function setPlan(ctx, p) {
     const o0 = old && old.members[m.id], o = o0 && (o0.fin || null) !== (m.fin || null) ? null : o0;
     pr.members[m.id] = { stage: m.stage, kind: m.kind, parent: m.parent || null, line: null, need: 0, got: o ? o.got : 0, built: o ? o.built : m.built && !o0 ? 1 : 0 };
     if (m.fin) pr.members[m.id].fin = m.fin;
+    if (m.geo && typeof m.geo === 'object') pr.members[m.id].geo = JSON.parse(JSON.stringify(m.geo));
     // a save from before walls were hung sheet by sheet: one lining piece per wall. If that was in, the wall's sheets (or
     // boards) and its seams are in too, so a finished room stays finished
     if (!o && old && (m.kind === 'lining' || m.kind === 'joint') && m.parent && old.members[m.parent + '.ln'] && old.members[m.parent + '.ln'].built) { pr.members[m.id].built = 1; if (m.kind === 'joint') pr.members[m.id].coat = C.FINISH.coats + 1; }
@@ -575,7 +584,18 @@ function setPlan(ctx, p) {
   const was = old ? old.done : false;
   pr.done = was;
   refresh(ctx, s, pr);
+  follow(ctx, pr.id, false);
   return { ok: true, structId: pr.id, stage: pr.stage };
+}
+// Systems that follow buildings (a poured foundation's job) hear of each plan, and of a building forgotten, at once:
+// any command named '<system>.followPlan' is called in place with { structId, gone }.
+function follow(ctx, structId, gone) {
+  if (!ctx.sim || !ctx.sim.handlers) return;
+  for (const [name, h] of ctx.sim.handlers) {
+    if (!name.endsWith('.followPlan') || h.sys.name === 'construction') continue;
+    const st = ctx.state;
+    h.fn({ sim: ctx.sim, state: st, t: st.t, tick: st.tick, dt: 0, lifeDt: 0, get s() { return st.sys[h.sys.name]; }, set s(v) { st.sys[h.sys.name] = v; }, get: (n) => st.sys[n], rng: ctx.rng, emit: ctx.emit }, { structId, gone: !!gone });
+  }
 }
 
 function order(ctx, p) {
@@ -1079,7 +1099,7 @@ export const constructionSystem = () => ({
   },
   commands: {
     'construction.setPlan': setPlan,
-    'construction.forget': (c, p) => { if (!c.s.progress[p.structId]) return { ok: false, reason: 'unknown building' }; delete c.s.progress[p.structId]; if (c.s.anchors) delete c.s.anchors[p.structId]; if (c.s.tutorial.shed === p.structId) c.s.tutorial.shed = null; return { ok: true }; },
+    'construction.forget': (c, p) => { if (!c.s.progress[p.structId]) return { ok: false, reason: 'unknown building' }; delete c.s.progress[p.structId]; if (c.s.anchors) delete c.s.anchors[p.structId]; if (c.s.tutorial.shed === p.structId) c.s.tutorial.shed = null; follow(c, p.structId, true); return { ok: true }; },
     'construction.setDropPoint': (c, p) => { if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.z)) return { ok: false, reason: 'bad place' }; c.s.dropPoint = { x: round6(p.x), z: round6(p.z) }; for (const d of c.s.deliveries) { d.x = c.s.dropPoint.x; d.z = c.s.dropPoint.z; } return { ok: true }; },
     // the hands open or close a door or window that is built (docs/FRAMING.md): id, open? (omitted: toggle)
     'construction.operate': (c, p) => {
