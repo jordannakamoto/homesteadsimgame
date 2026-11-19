@@ -639,7 +639,8 @@ function land(ctx, s, id) {
   const r = SUP.deliver(s, id, C.DELIVERY.layout);
   // the wheelbarrow stands beside the stacks on the side away from the building (the stacks run +x from the drop point), never on its footprint
   if (r.ok && !s.barrow) { const pb = r.delivery.tag && s.progress[r.delivery.tag.structId], away = pb && Number.isFinite(pb.x) && pb.x < r.delivery.x ? 6.2 : -2.4; s.barrow = { x: round6(r.delivery.x + away), z: round6(r.delivery.z + 1.2), yaw: 0.6, held: false }; }
-  if (r.ok && !s.horses && r.delivery.lines.some((l) => C.isStickItem(l.itemId))) { const pr = r.delivery.tag && s.progress[r.delivery.tag.structId]; if (pr) setUpHorses(s, pr, r.delivery.x, r.delivery.z); }
+  // the sawhorses come with the first lumber for a building, unless they are already by it: left at an earlier site, they move to this one
+  if (r.ok && r.delivery.lines.some((l) => C.isStickItem(l.itemId))) { const pr = r.delivery.tag && s.progress[r.delivery.tag.structId]; if (pr && (!s.horses || Math.hypot(s.horses.x - pr.x, s.horses.z - pr.z) > (pr.r || 3) + 12)) setUpHorses(s, pr, r.delivery.x, r.delivery.z); }
   if (r.ok) ctx.emit('construction.delivered', { deliveryId: id, stacks: r.stacks, x: r.delivery.x, z: r.delivery.z, tag: r.delivery.tag });
   return r;
 }

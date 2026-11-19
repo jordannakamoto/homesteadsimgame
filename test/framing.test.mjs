@@ -38,7 +38,7 @@ test('a 5 m stick-framed wall with a window: plates, studs at 0.4 m, kings, jack
   const box = (m) => (m.type === 'boards' ? [m.a[0], m.b[0], m.a[1] - m.section.d / 2, m.a[1] + m.section.d / 2] : [m.a[0] - m.section.d / 2, m.a[0] + m.section.d / 2, m.a[1], m.b[1]]);
   for (const m of [...sh, ...wr, ...cl]) { const [x0, x1, y0, y1] = box(m); assert.ok(x1 <= 2.1 + 1e-6 || x0 >= 2.9 - 1e-6 || y1 <= 1.11 + 1e-6 || y0 >= 1.89 - 1e-6, m.id + ' covers the window opening'); }
   const wallNet = 5 * 2.84;
-  assert.ok(wr.reduce((a, m) => a + m.area, 0) < wallNet + 0.5 && cl.filter((m) => m.type === 'boards').every((m) => m.row >= 0 && near(m.section.d, 0.18, 0.03)));
+  assert.ok(wr.reduce((a, m) => a + m.area, 0) < wallNet + 0.5 && cl.filter((m) => m.type === 'boards').every((m) => m.row >= 0 && near(m.section.d, 0.18 * (m.courses || 1), 0.03)) && cl.some((m) => m.courses === 3));
   const batts = of('insulation');
   assert.ok(batts.length >= 10 && batts.every((m) => m.material === 'fibreglass_batt' && near(m.thickness, 0.089) && m.area > 0));
   assert.ok(batts.every((m) => m.section.d <= 0.45));
