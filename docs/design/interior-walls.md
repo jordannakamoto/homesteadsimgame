@@ -4,13 +4,13 @@ Design round, 18 Nov 2026. Workstream 4, after ground, services and vehicles. Pa
 
 ## 10-line summary
 
-1. Inside a framed building, walls and partitions are finished the way a drywall crew and a finish carpenter do it: **hang**, **tape and mud**, **trim**.
+1. Inside a framed building, walls and partitions are finished the way a drywall crew and a finish carpenter do it: **hang**, **tape and mud**, then **finish carpentry**. (Not to be confused with services' **Trim-out**, the electrician and plumber fitting devices and fixtures, which already exists and now follows taping.)
 2. **Hang** (stage `lining`): drywall sheets 1.2 m tall go on sheet by sheet, the top row first, the bottom row second, end joints staggered and landing on a stud, sheets cut round windows and doors. Each sheet is set and screwed into every stud it crosses. Board lining (tongue and groove pine) goes on a board at a time from the floor up instead, and needs no taping.
 3. Interior partitions (walls with floor on both sides, `out = 0`) are lined on **both faces**. Today they get one face.
 4. **Tape and mud** (new stage `finish`, drywall only): every seam is taped and given three coats of joint compound, each coat has to dry before the next, then it is sanded flush. Wet mud looks wet; dry mud is lighter; a sanded seam disappears.
-5. **Trim** (later slice, stage `trim`): door and window casings with a reveal, then baseboard, cut with miters at the sawhorses (the same cut-on-site mechanic as cripples and rafters).
+5. **Finish carpentry** (later slice, stage `carpentry`): door and window casings with a reveal, then baseboard, cut with miters at the sawhorses (the same cut-on-site mechanic as cripples and rafters). It sits beside services' `trim-out`; with no painting yet, both follow taping.
 6. A finished room shows its drywall or boards, not the old plank-and-post voxel faces: build mode draws lining like it draws siding, and the voxel wall body sits behind both.
-7. Services: rough-in stays before insulation; `trim-out` (devices) should also need `finish` where a building has drywall. Services should ask the sim `liningCovered(pr, wallId)` instead of looking for one `<wall>.ln` member, because a wall face is now many sheets.
+7. Services (reconciled 18 Nov): the stage order is `rough-in, insulation, lining, finish, trim-out`; `trim-out` needs `finish` (a building without drywall has no seams, so it counts as done). Services checks and opens walls by their lining pieces (any sheet built = covered; opening takes every sheet, seam and batt of the wall), `api.liningCovered(pr, wallId)` is there for a whole-wall check, and boxes are set proud of the studs by the lining's thickness (`frame-channels` `w.finish`) so outlets sit flush with the finished wall.
 8. Satisfying beats: a sheet swung up and screwed stud by stud (screws sink with a small dimple), a seam swept with a knife and widening coat by coat, the sanding pass where the joint vanishes.
 9. Realism kept honest: ceilings before walls is noted but ceilings stay as they are in V1 (no ceiling drywall slice yet, see open questions).
 10. No new full-screen passes, no per-frame allocation; joints draw as one instanced mesh.
@@ -47,9 +47,9 @@ Design round, 18 Nov 2026. Workstream 4, after ground, services and vehicles. Pa
 
 ## Slices
 
-1. **Hang the walls** (this branch): sheets and board courses per face, both faces of partitions, finished rooms show lining, `liningCovered` and `builtAt` in the sim. Tests: the shed and cabin build end to end; sheet joints land on studs; partitions lined both sides.
-2. **Tape and mud** (this branch): the `finish` stage, coats with drying, sanding, joint drawing, the guide line for drying.
-3. **Trim**: casings and baseboard cut at the sawhorses with miters.
+1. **Hang the walls** (merged): sheets and board courses per face, both faces of partitions, finished rooms show lining, `liningCovered` and `builtAt` in the sim. Tests: the shed and cabin build end to end; sheet joints land on studs; partitions lined both sides.
+2. **Tape and mud** (merged): the `finish` stage, coats with drying, sanding, joint drawing, the guide line for drying.
+3. **Finish carpentry**: casings and baseboard cut at the sawhorses with miters (stage `carpentry`, named apart from services' `trim-out`).
 4. **Ceilings**: drywall on ceiling joists before walls, a drywall lift as a construction tool.
 5. **Blocking and backing**: blocking placed in partitions where the kitchen and shelves will hang (coordinates with the kitchen and furnishing).
 

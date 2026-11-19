@@ -15,6 +15,7 @@ import { INGREDIENTS, foodId } from './food-catalog.js';
 import { ITEMS_GARDEN, GARDEN_CATEGORIES } from './content/garden-items.js';
 import { ITEMS_LANDSCAPE, LANDSCAPE_CATEGORIES } from './content/landscape.js';
 import { ITEMS_VEHICLES, VEHICLE_CATEGORIES } from './content/vehicles.js';
+import { finishOf, SHEENS } from './content/decor.js';
 import { ITEMS_SERVICES, SERVICE_ITEM_CATEGORIES } from './content/services.js';
 import { ITEMS_CONCRETE } from './content/concrete-items.js';
 import { openingItems, openingItemFromId } from './content/openings.js';
@@ -95,6 +96,7 @@ add({ id: 'plywood_12', name: 'Plywood 12 mm (1220 x 2440)', category: 'sheet', 
 add({ id: 'plywood_18', name: 'Plywood 18 mm (1220 x 2440)', category: 'sheet', unit: 'each', material: 'plywood', dims: { ...SHEET, thicknessM: 0.018 }, priceUsd: 64 });
 add({ id: 'osb_11', name: 'OSB 11 mm (1220 x 2440)', category: 'sheet', unit: 'each', material: 'osb', dims: { ...SHEET, thicknessM: 0.011 }, priceUsd: 19 });
 add({ id: 'osb_18', name: 'OSB 18 mm (1220 x 2440)', category: 'sheet', unit: 'each', material: 'osb', dims: { ...SHEET, thicknessM: 0.018 }, priceUsd: 31 });
+add({ id: 'primer_pva', name: 'Drywall primer (PVA)', category: 'sheet', unit: 'L', massKg: 1.3, priceUsd: 6, blurb: 'Seals new drywall so the paint dries even' });
 add({ id: 'joint_compound', name: 'Joint compound and tape', category: 'sheet', unit: 'kg', material: 'gypsum_board', priceUsd: 1.2, blurb: 'Setting-type compound with paper tape, for drywall seams' });
 add({ id: 'gypsum_13', name: 'Gypsum board 12.7 mm (1220 x 2440)', category: 'sheet', unit: 'each', material: 'gypsum_board', dims: { ...SHEET, thicknessM: 0.0127 }, priceUsd: 15 });
 add({ id: 'housewrap', name: 'Housewrap', category: 'sheet', unit: 'm2', material: 'housewrap', dims: { thicknessM: 0.00018 }, priceUsd: 1.9 });
@@ -188,6 +190,12 @@ const BASE = Object.fromEntries(list.map((i) => [i.id, i])), MADE = Object.creat
 const madeItem = (id) => {
   if (typeof id !== 'string') return undefined;
   if (MADE[id]) return MADE[id];
+  // wall paint, made to order in a colour and sheen of the palette: 'paint_<colour>_<sheen>' by the litre
+  if (id.startsWith('paint_')) {
+    const f = finishOf(id.slice(6));
+    if (!f) return undefined;
+    return (MADE[id] = Object.freeze({ id, name: 'Paint, ' + f.name + ' (' + SHEENS[f.sheen].name.toLowerCase() + ')', category: 'sheet', unit: 'L', massKgPerUnit: 1.3, priceUsd: 14, made: true, colorHex: f.hex }));
+  }
   // pieces cut at the sawhorses: counted one by one, about 1.2 m each on average, never sold
   if (id.startsWith('cut_lumber_') && BASE[id.slice(4)]) {
     const b = BASE[id.slice(4)];

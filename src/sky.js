@@ -146,7 +146,7 @@ const SKY_COMMON = /* glsl */ `
       uniform vec3 uSunDir, uSunCol, uAmb, uSky, uZenith, uDeep, uTrueSun, uSunLo, uSunHi, uSunCi, uFogC, uFog;
       uniform float uTime, uCloud, uGrey, uNight, uDay, uCamY, uSea;
       uniform vec2 uWindOff; uniform sampler2D uView, uHz, uMW;
-      uniform vec4 uMoon, uOpt; uniform mat3 uEq;
+      uniform vec4 uMoon, uOpt, uMoonX; uniform vec3 uMoonCol; uniform mat3 uEq;
       #include <common>
       vec3 airAt(vec3 d) {
         if (uOpt.x < 0.5) {                                   // painted: the earlier gradient, with a glow round the sun
@@ -292,6 +292,8 @@ export function createSkyDome({ scene, camera, renderer, water, U, SEA = 0 }) {
     uCloud: { value: 0.3 }, uGrey: { value: 0 }, uNight: { value: 0 }, uDay: { value: 1 }, uWind: { value: new THREE.Vector2() }, uWindOff: { value: new THREE.Vector2() },
     uFogC: { value: new THREE.Color() }, uFog: { value: new THREE.Vector3(60, 1000, 1) }, uCamY: { value: 10 }, uSea: { value: SEA },
     uMoon: { value: new THREE.Vector4(0, -1, 0, 0) },            // direction, lit fraction
+    uMoonX: { value: new THREE.Vector4(1, 0, 0, 0) },            // size (distance), eclipse (0..1 totality), penumbra
+    uMoonCol: { value: new THREE.Color(1, 0.97, 0.92) },          // its light through the air (orange low down)
     uEq: { value: new THREE.Matrix3() },                          // the sky's frame: world direction to the stars' frame
     uOpt: { value: new THREE.Vector4(1, 2, 2, 0) },               // model (1 physical), clouds (2 layered, 1 heaped), night (2 real, 1 simple)
   };
@@ -358,12 +360,12 @@ ${SKY_COMMON}      void main() {
             // view moves; the scale steps in powers of two, so it holds still)
             vec3 q = e * uDust, c = floor(q);
             float hs = h3(c);
-            float pr = (0.02 + 0.24 * mw) * clamp(1100.0 / uDust, 0.6, 3.0);
+            float pr = 0.22 * smoothstep(0.25, 0.8, mw) * clamp(1100.0 / uDust, 0.6, 3.0);   // only in the band, as its grain
             float res = 1.0;
             if (hs < pr) {
               vec3 sp = c + 0.5 + (vec3(h3(c + 1.7), h3(c + 4.1), h3(c + 9.3)) - 0.5) * 0.6;
               float b = smoothstep(0.5, 0.0, length(q - sp)) * (0.05 + 0.2 * h3(c + 6.0));
-              col += b * mix(vec3(0.75, 0.82, 1.0), vec3(1.0, 0.9, 0.78), h3(c + 2.0)) * clear * dark * 1.6 * res;
+              col += b * mix(vec3(0.75, 0.82, 1.0), vec3(1.0, 0.9, 0.78), h3(c + 2.0)) * clear * dark * 0.7 * res;
             }
             // airglow: the faint green-gold light of the high air itself, low round the horizon on the darkest nights
             col += vec3(0.010, 0.016, 0.008) * exp(-max(d.y, 0.0) * 9.0) * dark * (1.0 - uMoon.w * 0.8);
@@ -377,14 +379,17 @@ ${SKY_COMMON}      void main() {
             col += star * vec3(0.85, 0.9, 1.0) * 0.9 * clear * dark;
           }
         }
-        // ---- the moon: its disc lit on the side toward the sun, earthshine on the rest; pale by day
+        // ---- the moon: its disc lit on the side toward the sun, earthshine on the rest; pale by day. Bigger and
+        // brighter at perigee (a full moon then is a supermoon), its light through the air (rising orange, whitening
+        // as it climbs), and in an eclipse dimmed and turned copper red by the Earth's shadow (the sunsets round the
+        // whole Earth are what light it)
         vec3 md = uMoon.xyz;
         float mc = dot(d, md);
-        if (md.y > -0.02 && mc > 0.9997 - 0.0003 && uOpt.z > 0.5) {
+        if (md.y > -0.02 && mc > 0.9995 && uOpt.z > 0.5) {
           vec3 tx = normalize(cross(md, vec3(1e-4, 1.0, 0.0))), ty = cross(tx, md);
           // disc radius 0.7 degrees (twice the real moon, as games draw it, so it reads on screen), and larger still low down:
           // the moon illusion, the low moon looking huge against the far horizon
-          float mR = 0.012 * mix(1.45, 1.0, smoothstep(0.0, 0.45, md.y));
+          float mR = 0.012 * uMoonX.x * mix(1.45, 1.0, smoothstep(0.0, 0.45, md.y));
           vec2 o = vec2(dot(d, tx), dot(d, ty)) / mR;
           float r2 = dot(o, o);
           if (r2 < 1.0) {
@@ -392,11 +397,25 @@ ${SKY_COMMON}      void main() {
             float lit = smoothstep(-0.04, 0.06, dot(n, uTrueSun));
             float maria = 0.72 + 0.28 * fbm4(o * 2.4 + 11.0);
             float edge = smoothstep(1.0, 0.9, r2);
-            vec3 mcol = vec3(1.0, 0.97, 0.92) * maria * (lit * mix(0.35, 1.6, uNight) + 0.025 * uNight) * edge;
+            // the eclipse: the shadow's dark core, darkest at its middle, its edge a little brighter and greyer
+            float ecl = uMoonX.y * mix(1.0, 0.7, smoothstep(0.2, 1.0, length(o + vec2(0.35, 0.2) * (1.0 - uMoonX.y))));
+            vec3 tint = mix(uMoonCol, vec3(0.62, 0.2, 0.08), ecl);
+            float bright = (1.0 - 0.3 * uMoonX.z) * mix(1.0, 0.07, ecl) * uMoonX.x * uMoonX.x;
+            vec3 mcol = tint * maria * (lit * mix(0.35, 1.6, uNight) * bright + 0.025 * uNight) * edge;
             col = mix(col, col * (1.0 - lit * 0.4) + mcol, edge * (1.0 - 0.85 * smoothstep(0.5, 0.95, uCloud)));
           }
         }
-        if (md.y > -0.02) col += vec3(0.55, 0.65, 0.85) * pow(max(mc, 0.0), 900.0) * 0.1 * uMoon.w * uNight;
+        if (md.y > -0.02 && uNight > 0.01) {
+          float mb = uMoon.w * (1.0 - 0.9 * uMoonX.y) * uMoonX.x * uMoonX.x;
+          col += uMoonCol * vec3(0.55, 0.65, 0.85) * pow(max(mc, 0.0), 900.0) * 0.1 * mb * uNight;
+          // the halo: a ring 22 degrees out where thin high cloud lies across the moon, its inner edge faintly red
+          float thin = smoothstep(0.2, 0.4, uCloud) * (1.0 - smoothstep(0.65, 0.85, uCloud));
+          if (thin > 0.0 && mb > 0.3) {
+            float ang = acos(clamp(mc, -1.0, 1.0));
+            float ring = exp(-pow((ang - 0.384) / 0.014, 2.0)), inner = exp(-pow((ang - 0.372) / 0.008, 2.0));
+            col += (vec3(0.6, 0.65, 0.75) * ring + vec3(0.25, 0.08, 0.02) * inner) * 0.05 * thin * mb * uNight * (0.6 + 0.4 * fbm2(d.xz * 30.0));
+          }
+        }
         // ---- the sun's disc (darker at its rim), reddened by the air it shines through
         float disc = smoothstep(0.99995, 0.99998, mu);
         vec3 sunDisc = uSunLo * disc * (0.7 + 0.3 * smoothstep(0.99995, 1.0, mu)) * 40.0;
@@ -569,6 +588,8 @@ ${SKY_COMMON}      void main() {
     u.uWindOff.value.x += o.windX * 0.0012 * dt; u.uWindOff.value.y += o.windZ * 0.0012 * dt;
     u.uFogC.value.copy(o.fog.color); u.uFog.value.set(o.fog.near, o.fog.far, 1); u.uCamY.value = camera.position.y;
     u.uMoon.value.copy(o.moon); u.uEq.value.copy(o.eq);
+    if (o.moonX) u.uMoonX.value.copy(o.moonX);
+    if (o.moonCol) u.uMoonCol.value.copy(o.moonCol);
     if (u.uOpt.value.x > 0.5) view.update(o.trueSun);
   }
   const MODEL = { physical: 1, painted: 0 }, CLOUDS = { volume: 2, layered: 2, flat: 1, heaped: 1, off: 0 }, NIGHT = { real: 2, simple: 1, off: 0 };

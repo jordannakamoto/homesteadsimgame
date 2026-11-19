@@ -2430,6 +2430,12 @@ const pm = {};
         const hh = mk(0.035, 0.035, 0.34, 0x8a5a32); hh.position.set(0, -0.5, 0.13);
         const hd = mk(0.045, 0.15, 0.05, 0x5f666c); hd.position.set(0, -0.53, 0.3);
         hh.visible = hd.visible = false; arm.add(hh, hd); pm.hammer = [hh, hd];
+        // a paint roller, out while painting walls (P.roller: the paint's colour, set by construction): a handle along
+        // the hand, a wire frame, and the sleeve across the end, coloured by what is on it
+        const rh = mk(0.035, 0.035, 0.3, 0x3b3f44); rh.position.set(0, -0.5, 0.12);
+        const rf = mk(0.015, 0.015, 0.16, 0xb5bac0); rf.position.set(0, -0.5, 0.33);
+        const rs = mk(0.24, 0.07, 0.07, 0xf1efe8); rs.position.set(0, -0.5, 0.42);
+        rh.visible = rf.visible = rs.visible = false; arm.add(rh, rf, rs); pm.roller = [rh, rf, rs];
       }
       continue;
     }
@@ -2801,7 +2807,17 @@ const farLand = createFarLand({ scene, baseHeight, forestAt, chunks: world.chunk
 skyDome.setHorizon(farLand.horizon);
 // the real stars (src/night-sky.js), and the sky's frame and moon for the date and hour
 const nightSky = createNightSky({ scene, camera, sky: skyDome });
-const SKYF = { eq: new THREE.Matrix3(), eqInv: new THREE.Matrix3(), moon: new THREE.Vector4(0, -1, 0, 0), age: 0 };
+const SKYF = { eq: new THREE.Matrix3(), eqNow: new THREE.Matrix3(), eqInv: new THREE.Matrix3(), moon: new THREE.Vector4(0, -1, 0, 0), age: 0, moonSize: 1, eclipse: 0, penumbra: 0, days: 0 };
+const _skyV2 = new THREE.Vector2();
+const MOONX = new THREE.Vector4(1, 0, 0, 0), MOONCOL = new THREE.Color(1, 0.97, 0.92), _mc = [0, 0, 0];
+// whether any of the sky is in the view (the default camera mostly looks down at the ground): the night sky's
+// layers are not drawn when none is
+const _skyV = new THREE.Vector3();
+function skyInView() {
+  let up = -1;
+  for (const x of [-1, 0, 1]) { _skyV.set(x, 1, 1).unproject(camera).sub(camera.position); up = Math.max(up, _skyV.normalize().y); }
+  return up > -0.01;
+}
 const HAZE = { light: 1.7, normal: 1, heavy: 0.5 };
 function applySkyLook() {
   skyDome.setOptions({ model: LOOK.skyModel, clouds: LOOK.skyClouds, night: LOOK.nightSky, cloudStyle: LOOK.cloudStyle });
@@ -3156,6 +3172,18 @@ const SKYK = { day: 1, night: 0 };   // how much day and night there is now, for
 // haze at the horizon (an average round the compass; the fog of every material warms it toward the sun), the blue
 // overhead, and the colour of the sunlight at the ground, at the height of the heaped clouds and of the cirrus
 const ATM = { t: -1, sx: 9, sy: 9, sz: 9, hor: new THREE.Color(), zen: new THREE.Color(), lo: new THREE.Color(), hi: new THREE.Color(), ci: new THREE.Color(), sun: new THREE.Vector3() };
+const _sl = [0, 0, 0];
+let noonLum = 0;
+function cloudLight(sv, hk, lift, outC) {
+  if (!noonLum) { sunColor([0, 1, 0], hk, _sl); noonLum = 0.2126 * _sl[0] + 0.7152 * _sl[1] + 0.0722 * _sl[2]; }
+  const hor = Math.hypot(sv[0], sv[2]) || 1, el = Math.asin(Math.max(-1, Math.min(1, sv[1]))) + lift;
+  const ce = Math.cos(el);
+  sunColor([sv[0] / hor * ce, Math.sin(el), sv[2] / hor * ce], hk, _sl);
+  const lum = 0.2126 * _sl[0] + 0.7152 * _sl[1] + 0.0722 * _sl[2];
+  const boost = Math.min(6, Math.max(1, Math.pow(noonLum / Math.max(lum, 1e-4), 0.55)));
+  const fade = smoothstep(-0.105, -0.03, sv[1]);
+  outC.setRGB(_sl[0] * boost * fade, _sl[1] * boost * fade, _sl[2] * boost * fade);
+}
 function updateAtmosphere(s) {
   const now = performance.now();
   if (now - ATM.t < 250 && (s.x - ATM.sx) ** 2 + (s.y - ATM.sy) ** 2 + (s.z - ATM.sz) ** 2 < 1e-5) return;
@@ -3167,8 +3195,13 @@ function updateAtmosphere(s) {
   ATM.hor.setRGB(r / 8, g / 8, b / 8);
   skyRadiance([0, 1, 0], sv, o); ATM.zen.setRGB(o[0], o[1], o[2]);
   sunColor(sv, 0.25, o); ATM.lo.setRGB(o[0], o[1], o[2]);
-  sunColor(sv, 1.5, o); ATM.hi.setRGB(o[0], o[1], o[2]);
-  sunColor(sv, 8, o); ATM.ci.setRGB(o[0], o[1], o[2]);
+  // the light on the clouds. They are kilometres up and tens of kilometres off toward the sun, so they keep it
+  // after the ground has lost it (and the air bends it round a little more): their light is taken from a little
+  // above where they are, and they glow on after sunset until the sun is some 6 degrees down. As the light dims
+  // the eye adapts, so the low sun's deep gold and red light is lifted rather than left muddy: what makes a sunset's
+  // clouds burn orange, rose and magenta against the blue-violet sky.
+  cloudLight(sv, 3.0, 1.0 * Math.PI / 180, ATM.hi);
+  cloudLight(sv, 9.0, 1.6 * Math.PI / 180, ATM.ci);
 }
 function updateSky() {
   if (window.__game && !window.__game.calendar) window.__game.calendar = calendar;
@@ -3179,8 +3212,13 @@ function updateSky() {
   const goldF = clamp(1 - dayF - nightF, 0, 1);
   SKYK.day = dayF; SKYK.night = nightF;
   // the real night: as dark as the moon allows (a moonless night is starlight only; a full moon lights the land)
-  skyFrame(sim.calendarT(), site.latitudeDeg, SKYF);
-  const moonK = SKYF.moon.w * smoothstep(0.02, 0.2, SKYF.moon.y);
+  skyFrame(sim.calendarT(), site.latitudeDeg, SKYF, performance.now() / 1000);
+  // (a supermoon lights a little more, an eclipsed moon hardly at all)
+  const moonK = SKYF.moon.w * smoothstep(0.02, 0.2, SKYF.moon.y) * SKYF.moonSize * SKYF.moonSize * (1 - 0.9 * SKYF.eclipse) * (1 - 0.3 * SKYF.penumbra);
+  // the moon's light through the air: orange as it rises, whitening as it climbs
+  sunColor([SKYF.moon.x, Math.max(SKYF.moon.y, -0.02), SKYF.moon.z], 0.25, _mc);
+  { const mx = Math.max(_mc[0], _mc[1], _mc[2], 1e-4); MOONCOL.setRGB(_mc[0] / mx, _mc[1] / mx, _mc[2] / mx); }
+  MOONX.set(SKYF.moonSize, SKYF.eclipse, SKYF.penumbra, 0);
   const nightDark = LOOK.nightSky === 'real' ? lerp(1, lerp(0.3, 1.05, moonK), nightF) : 1;
   const mix3 = (k) => SKY.day[k] * dayF + SKY.gold[k] * goldF + SKY.night[k] * nightF;
   const mixC = (out, k) => out.setRGB(
@@ -3228,9 +3266,9 @@ function updateSky() {
   skyDome.update({
     trueSun: ATM.sun, sunLo: ATM.lo, sunHi: ATM.hi, sunCi: ATM.ci, cloud, grey, night: nightF, day: dayF,
     windX: wx ? Math.sin(wx.windDirRad || 0) * (wx.windMs || 0) : 1, windZ: wx ? Math.cos(wx.windDirRad || 0) * (wx.windMs || 0) : 0,
-    fog: scene.fog, moon: SKYF.moon, eq: SKYF.eqInv,
+    fog: scene.fog, moon: SKYF.moon, eq: SKYF.eqInv, moonX: MOONX, moonCol: MOONCOL,
   }, lastDt);
-  nightSky.update(SKYF.eq, nightF, SKYF.moon, renderer.getPixelRatio());
+  nightSky.update(SKYF, nightF, renderer.getPixelRatio(), skyInView(), cloud, Math.min(lastDt, 0.1), (camera.fov * Math.PI / 180) / Math.max(1, renderer.getDrawingBufferSize(_skyV2).y));
   motes.material.opacity = (0.22 + 0.7 * nightF + 0.25 * goldF) * (1 - 0.8 * wet);
   motes.material.color.setHex(nightF > 0.5 ? 0xd9ff8a : 0xfff6c8);
   motes.material.size = 0.13 + 0.09 * nightF;
@@ -4316,9 +4354,11 @@ function updatePlayer(dt) {
     if (P.work.kind === 'hammer') { armR = -2.3 + 1.7 * P.work.k; lean = 0.1 + 0.12 * P.work.k; }
     else if (P.work.kind === 'lift') { armL = armR = -2.5; lean = -0.12; }
     else if (P.work.kind === 'carry') armR = -2.0 + armR * 0.2;
+    else if (P.work.kind === 'roll') { armR = -2.15 + 0.75 * Math.sin(P.work.k * Math.PI * 2); armL = -1.6 + 0.3 * Math.sin(P.work.k * Math.PI * 2); lean = 0.05; }
     else if (P.work.kind === 'saw') { armR = -1.25 + 0.5 * Math.sin(P.work.k * Math.PI * 2); armL = -0.85; lean = 0.38; }
   }
-  if (pm.hammer && (pm.hammer[0].visible !== !!P.hammer)) { const h = !!P.hammer; pm.hammer[0].visible = pm.hammer[1].visible = h; pm.hatchet[0].visible = pm.hatchet[1].visible = !h; }
+  if (pm.hammer && (pm.hammer[0].visible !== !!P.hammer || pm.roller[0].visible !== !!P.roller)) { const r = !!P.roller, h = !r && !!P.hammer; pm.hammer[0].visible = pm.hammer[1].visible = h; for (const q of pm.roller) q.visible = r; pm.hatchet[0].visible = pm.hatchet[1].visible = !h && !r; }
+  if (pm.roller && P.roller && pm.roller[2].userData.hex !== P.roller) { pm.roller[2].userData.hex = P.roller; pm.roller[2].material.color.setHex(P.roller); }
   if (P.handPose) { armL = P.handPose.l; armR = P.handPose.r; lean += P.handPose.lean || 0; }   // hands-on work poses the arms (set by add-ons)
   pm.legL.rotation.x = legL; pm.legR.rotation.x = legR;
   pm.armL.rotation.x = armL; pm.armR.rotation.x = armR;
@@ -4741,7 +4781,13 @@ window.__game = {
     sky: (o = {}) => { const map = { cloudStyle: 'cloudStyle', cloudRes: 'cloudRes', model: 'skyModel', clouds: 'skyClouds', night: 'nightSky', farLand: 'farLand', openSea: 'openSea', haze: 'haze' }; for (const k in o) if (map[k]) setLook(map[k], o[k]); return { model: LOOK.skyModel, clouds: LOOK.skyClouds, night: LOOK.nightSky, farLand: LOOK.farLand, openSea: LOOK.openSea, haze: LOOK.haze }; },
     // stand the camera at [x, y, z] looking at [x, y, z] (6 numbers), or null to give it back
     debugView: (v) => { debugView = v && v.length === 6 ? v.slice() : null; },
-    skyFrame: () => ({ moon: SKYF.moon.toArray(), age: SKYF.age, eqInv: SKYF.eqInv.toArray() }),
+    // the sky's frame and moon for the present moment (worked out fresh, so a test can step the clock and read it)
+    skyFrame: () => {
+      const wx = sim.state.sys.weather, site = (wx && wx.site) || SKY.site;
+      const f = skyFrame(sim.calendarT(), site.latitudeDeg, { eq: new THREE.Matrix3(), eqNow: new THREE.Matrix3(), eqInv: new THREE.Matrix3(), moon: new THREE.Vector4() }, performance.now() / 1000);
+      return { moon: f.moon.toArray(), age: f.age, eqInv: f.eqInv.toArray(), moonSize: f.moonSize, eclipse: f.eclipse, days: f.days };
+    },
+    meteorNow: () => nightSky.meteorNow(SKYF),
     streamReflections: (v) => { if (['probe', 'full', 'simple'].includes(v)) setLook('waterReflect', v); return LOOK.waterReflect; },
     waterStyle: (v) => { if (['smooth', 'fine', 'ground'].includes(v)) setLook('waterTexel', v); return LOOK.waterTexel; },
     farGrass: (v) => { if (['off', 'normal', 'aggressive'].includes(v)) setLook('farGrass', v); return LOOK.farGrass; },

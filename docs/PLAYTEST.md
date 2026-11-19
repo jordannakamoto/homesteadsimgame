@@ -882,3 +882,20 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - To try it: in plan options choose Inside: Drywall (the cabin defaults to pine boards). `__build.placePlan('cabin', x, z, yaw, { lining: 'gypsum' })` does it from the console.
 - Old saves: a wall lined in one piece before this change counts its new sheets and seams as in, so finished buildings stay finished.
 - Known: `test/shed.e2e.mjs` still fails at the foundation (the pointer picks a neighbouring stack and puts it back), as noted above; not from this branch.
+
+## Interior walls and services, reconciled (branch `reconcile`)
+
+- Electrical boxes are set proud of the studs by the wall's lining (13 mm drywall, 19 mm boards), so after hanging and taping they sit flush with the finished wall and the outlets fitted at Trim-out are on the surface, not buried behind the drywall. Boxes placed before this change keep where they are.
+- Order inside a building: rough-in, insulation, lining (hang), tape and mud, trim-out (devices and fixtures). Trim-out waits for the taping.
+- Opening a wall to get at a run takes off every sheet or board of it, its taped seams and the batts; the hints say so.
+- The planned interior "trim" slice (casings, baseboard) is renamed finish carpentry, apart from services' Trim-out. See `docs/design/interior-walls.md` and the design README.
+
+## Paint: walls and trim (branch `paint`, design in `docs/design/interior-finishes.md`)
+
+- New last building stage, **Paint**: primer on every lined wall face, a rectangle (up to 1.2 m wide, clear of the openings) at a time, then two coats of colour, each on dry paint. The trim (corner boards and round doors and windows) takes two coats of its own colour; it comes primed.
+- Hands: point at a part of a wall or a trim board with E. The roller runs over it and the coat wipes on from the end you stand at; the first coat lets the primer show through, wet paint is darker. The roller in the hand carries the colour.
+- Choosing: plan options (or a selected building's options) have **Walls** (12 colours or bare, with Matte, Eggshell or Satin) and **Trim** (12 colours or as it comes). On a finished building in construction mode, a colour adds the painting as work; changing a colour later means two more coats. Paint is ordered by the litre per colour and sheen, primer by the litre.
+- Finishes are stored by surface (walls, a face, trim, a single piece), so cabinets and new furniture can take their own colour later without changes to the paint code.
+- Opening a wall for services takes its paint off with the drywall.
+- Console: `__build.setDeco(structId, { walls: 'sage_eggshell', trim: 'moss_semigloss' })`.
+- Weak: one colour for all the walls of a building (per face comes in slice 2); no clear oil for boards yet; sheen does not change the look yet; with "Work until done" the paint stage works like taping (waits on wet coats).
