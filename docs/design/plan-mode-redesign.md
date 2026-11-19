@@ -1,6 +1,6 @@
 # Plan mode and the door and window designer: redesign
 
-Plan for the `ui-redesign` branch. It also covers the stairs tool (section 3A). Implementers: read this, `CLAUDE.md`, and sections 1, 2 and 4.2 of `docs/design/ui-redesign.md` (tokens, kit classes, `window.__ui`). Rules that bind every step: 144 fps (no per-frame JS added to the UI, no new full-screen pass), kit classes and tokens only (no literal colours; instruments keep `--cad`, `--cad-ink`, `--cad-bg` in both skins), `buildui.js` draws only what `__build.view()` describes and reports through `__build.choose()`, letter keys stay as they are, nothing in `src/sim/` changes except `src/sim/content/openings.js` and the new `src/sim/content/stairs.js`.
+Plan for the `ui-redesign` branch. It also covers the stairs tool (section 3A) and what plan mode shows (section 3B). Implementers: read this, `CLAUDE.md`, and sections 1, 2 and 4.2 of `docs/design/ui-redesign.md` (tokens, kit classes, `window.__ui`). Rules that bind every step: 144 fps (no per-frame JS added to the UI, no new full-screen pass), kit classes and tokens only (no literal colours; instruments keep `--cad`, `--cad-ink`, `--cad-bg` in both skins), `buildui.js` draws only what `__build.view()` describes and reports through `__build.choose()`, letter keys stay as they are, nothing in `src/sim/` changes except `src/sim/content/openings.js` and the new `src/sim/content/stairs.js`.
 
 Screenshots of today's build mode (1440x900, Cozy, sandbox) are in `/tmp/FAB/shots/`; the script that made them is `/tmp/FAB/shots.mjs` (run from `/tmp/FAB`, same loader as `test/build.smoke.mjs`).
 
@@ -94,7 +94,7 @@ Bar height becomes about 150 px on every tool (bar 72 + tray 76), against 225-36
 ### 2.6 Storeys
 
 - `#blevel` becomes a `.ui-seg` of chips: the storeys that exist (`Cellar`, `Ground`, `2`, `3`) plus one empty chip above the top one (`+`). Cellar shows dim until one is dug. Page Up / Page Down unchanged.
-- Next to it a `Roofs` eye toggle (`#broofs`, `choose('roofs')`), for every tool.
+- Next to it a `Roofs` eye toggle (`#broofs`, `choose('roofs')`), for every tool. Step V2 later replaces it with the view control of section 3B.
 - Ceiling height, Raise and Split level are the inspector's Level section. This is where great halls, cellars and half-levels are set; nothing about them is on the bar.
 
 ### 2.7 From plan to building
@@ -210,6 +210,54 @@ A selected stair has handles at its foot and its head (drag to re-fit: the step 
 
 Not connected yet. A stair is still one piece that is not made of members (`src/build.js` near 9201): it appears with the shell stage, and nobody cuts stringers. This plan gives the piece the numbers a later construction step needs (stringer length, tread and riser counts, baluster count) and adds them to the Materials list as lines if `FR.materialsList` takes extra lines without change; cutting and setting a stair by hand is a follow-up, not in this plan.
 
+## 3B. What plan mode shows
+
+### 3B.1 Today
+
+- **With sandbox off (the real game) a drawn plan is a blueprint, not a house.** Unbuilt pieces are drawn by `drawMembers` as one blue shell (`shellMat`, the same geometry `buildGeo` makes for a finished building) plus a ghost box for every framing member of every later stage. The finished look only shows in sandbox, or once the building has been raised.
+- Roofs are hidden for every tool except Roof, Remove, Equip on a roof and Select with "Show roofs" (`roofsShown`): `S.roofOp` fades `S.roofMat` and switches the roof member meshes.
+- Storeys above the one being worked on are hidden whole (`S.group.visible = S.level <= B.level` in the update loop). Walls stand full height in plan mode.
+- In play, third person, a building opens while you stand in it: walls are cut at 1.15 m by four clipping planes per building (`S.clip` horizontal, `S.near`, `S.sideA`, `S.sideB`, with `clipIntersection`), only between the camera and the player; first person keeps rooms whole. `renderer.localClippingEnabled` is already on and every wall, glass and member material is already compiled with those four planes.
+- Nothing tells the player why a roof or a storey is missing, and there is no way to ask for a cut.
+
+### 3B.2 The rule
+
+Plan mode shows the house as it will look finished: walls in their material and paint, trim, windows and doors with glass, the roof on. Planned and built parts look the same here; what is still to build is the Materials panel's business (it gets a "Show what is left to build" switch that brings today's blueprint back). The view opens up only as far as the task in hand needs, says so in one chip, and closes again when the task ends. Play mode is not touched by this plan: no new cuts there.
+
+### 3B.3 Automatic views
+
+A view is four settings: which storeys are drawn, roof on or off, a cut height (or none), and the layer (finished, or structure below the floor).
+
+| Task | Storeys | Roof | Cut | Chip |
+|---|---|---|---|---|
+| Select with nothing selected; Roof; Path; Measure; pointer outside every building | all | on | none | none |
+| Door, Window | current and below | on if working on the top storey | none | "Storeys above hidden" when any are |
+| Room, Wall | current and below | off | none | "Roof lifted" |
+| Floor, Stairs, Pillar, Furnish, Equip indoors; a selected inside wall, floor, stair or furnishing | current and below | off | walls at 1.2 m above the current floor (dollhouse) | "Cut at 1.2 m" |
+| A selected roof, or Equip on a roof | all | on | none | none |
+| Stands on (foundation), or the floor frame, being changed: the control has focus or was changed in the last few seconds | ground only | off | just under the finish floor, structure layer: foundation and floor frame drawn solid, the rest hidden | "Showing the foundation" |
+| Insulation or Inside (lining) being changed | current | off | 1.2 m, with the near wall's layers visible in the cut | "Showing inside the walls" |
+
+The chip sits beside the view control and has a close button: closing it pins Finished until the tool changes. Changes fade over about 0.2 s (the existing `roofOp` and `cutH` easing); nothing animates when nothing changes.
+
+### 3B.4 The view control
+
+`#bview`, in the bar's right cluster next to the storey chips (it replaces the Roofs toggle of 2.6):
+
+- A `.ui-seg` of four: **Auto** (default), **Finished**, **Cutaway** (roof off, storeys above hidden, walls whole), **Section**.
+- Section shows a vertical height slider on the right edge of the view, drawn as an instrument (`--cad`): from the bottom of the foundation to the ridge, 0.1 m steps, with ticks at each floor and at 1.2 m above each floor; the value shows as a chip ("1.20 m above Ground"). Dragging it moves the cut live.
+- The storey chips say which storey is being worked on; in Finished they change only where new pieces go, not what is drawn.
+- Phone: the control is in the `...` sheet; the Section slider is 44 px wide on the right edge.
+- The choice is kept for the session (`B.vmode`), not saved with the world.
+
+### 3B.5 How it is drawn, cheaply
+
+- **Finished look for planned pieces:** in plan mode `drawMembers` gives the shell geometry the building's own wall, roof and glass materials in place of `shellMat` (split back into the three meshes `buildGeo` already returns) and skips the ghost members. With "Show what is left to build" on, or outside plan mode, it draws as today. One implementer check: wall paint and trim reach the picture through member sets today; where a planned building's paint or trim does not show from `buildGeo` alone, draw those member sets solid for planned pieces too.
+- **Cuts use the planes that are already there.** A horizontal section sets `S.clip.constant` to the cut height and sets the other three planes to always clip, so the intersection is the horizontal plane alone. No new material, no new shader program, no extra pass; the four plane tests per fragment are already being paid in every frame of the game today. three.js clipping planes are therefore cheap enough here, and per-group hiding (storeys, roof meshes, the structure layer's member meshes) covers the rest.
+- **Cut faces:** walls are drawn double-sided, so a cut shows the wall's inside faces; member materials already cap (`capped`). No stencil caps are added. If the open wall tops read badly in playtest, the follow-up is a dark top strip added to the wall geometry at 1.2 m, not a pass.
+- **Cost:** the planes, `group.visible` and `roofOp` are written only when the view's version changes (tool, selection kind, storey, mode, slider) or while a fade runs; the plan-mode branch of the update loop does nothing else.
+- Shadows follow the cut (`clipShadows` is already set), so a lifted roof lets the sun into the rooms.
+
 ## 4. What stays and what changes underneath
 
 Stays: every plan and save field, piece ids, `__build.pieces()`, `serialize`/`restore`, the schedule, `placePlan`, construction mode, snapping, undo, all letter keys, `#buildbar #bpieces #bopts #bdecor #bsnap #bsched #bschedp #bundo #bredo #bdone #bdesign #bover`, `.bchip .btile .bsw[title] .bdim .bhandle .bmeas .bport`, `data-piece`, `B.frameHook`.
@@ -220,6 +268,7 @@ Changes:
 - **New `choose` ids**: `insp` (toggle), `level:set` (a storey number), `o:anchor` (`sill|head|centre`), `o:y` (the anchored height), `o:pos` (distance from the run's left end), `o:align` (`centre|between|equal`), `o:hand` (`{ flip, out }`), `o:fix` (index into `fit.fixes`), `o:recent` (index).
 - **One new saved field**: a free opening may carry `out: true` (opens outward). Absent means inward, so old saves are unchanged. `freeToFraming` ignores it.
 - **`src/sim/content/openings.js`**: `family` on every type; `opts` on every door type (which designer groups apply: `face glass bars side transom hw metal finish leaves`); the new types of 3.2; pure helpers `anchorY(spec, anchor)`, `fromAnchor(type, h, anchor, y)`, and `fitReport({ type, w, h, sill, at, L, wallH, others })` returning `{ ok, issues: [{ code, by }], fixes: [{ code, patch }] }` with codes `tall wide end overlap range`.
+- **View** (section 3B): `view().viewc = { mode: 'auto'|'finished'|'cutaway'|'section', chip: text or '', cut: metres or null, range: [lo, hi], ticks: [{ y, name }], left: boolean }`; `choose` ids `view:mode`, `view:cut` (metres), `view:unpin` (the chip's close), `view:left` (show what is left to build). No saved field.
 - **Stairs** (section 3A): new `src/sim/content/stairs.js` (types, rules, the solver `solve({ rise, run, side, clear, width, type })` returning `{ type, n, riser, tread, flights, landing, footprint, headroom, ok, issues, fixes }`, and `heightAt(layout, x, z)`; pure), new `src/stairs-geo.js` and `src/stairs-spiral.js` (`window.__stairsGeo.build(layout, look)` returns the box lists; `draw(layout, size)` returns the side-view and thumb SVG), the optional stair fields of 3A.6, and `choose` ids `st:type st:width st:n st:turn st:at st:rail st:railStyle st:open st:nosing st:boxed st:mat st:fix`.
 - **New `src/opening-preview.js`** (`window.__openingPreview`): string-building only, no DOM, no three.js, so it also runs under node. `draw(spec, { wall: { L, H, others }, at, size: 'stage'|'thumb', handles, hand })` returns SVG; `plan(spec, hand)` returns the door plan view. Stage handles are `<rect data-h="l|r|t|b|move">`. The window drawing moves here from `buildui.js` `winPreview`; its literal colours become `var(--cad)` and `currentColor`.
 
@@ -304,11 +353,23 @@ Shared rules: start from the newest `ui-redesign`; one commit per step saying wh
 - Extend `test/build.smoke.mjs` after the roof part: drag a stair in the house and check its piece (`type`, `steps`, riser between 150 and 190 mm), that the floor above is opened, and that the walking height (the hook near line 10904) climbs along it; place Steps between a floor and one raised 0.5 m.
 - Done: `node test/build.smoke.mjs`, `node test/plan-unbuilt.smoke.mjs`, `node test/shed.e2e.mjs`.
 
-### Wave 5
+### Wave 5 (parallel)
+
+**V1 - Finished look and task views** (opus). Owns `src/build.js`: `roofsShown` (near 5597), the shell part of `drawMembers` (near 9436-9616), the plan-mode lines of the update loop (near 10976-11030: `S.group.visible`, `S.cutH` and the four planes, the roof target), and new `view:` branches in `view()` and `choose()` (added as their own lines; nothing else in those functions is touched). Line numbers are as of commit `7120c19`; find by name. It is the only step editing `src/build.js` in this wave.
+- 3B.2 (finished look for planned pieces, the "left to build" switch), 3B.3 (one function `planView()` that turns tool, selection, focus and `B.vmode` into storeys, roof, cut and layer, with a version counter), 3B.5 (planes and visibility written on change only). Play mode's branch stays byte for byte.
+- `__build.planViewState()` returns the current settings for tests.
+- Done: `node test/build.smoke.mjs`, `node test/plan-unbuilt.smoke.mjs`, `node test/shed.e2e.mjs`, `node test/page.smoke.mjs`; screenshots with sandbox off of a planned house in Auto with Select, Furnish, and the foundation being changed.
+
+**V2 - The view control** (opus). Owns `src/buildui.js` (the right cluster and a new overlay element), `template/ui/50-build.css` and `template/ui/60-touch.css` (a marked "view" block at the end of each), new `test/planview.smoke.mjs`.
+- 3B.4 from `view().viewc`: the four-way control replacing `#broofs`, the chip with its close button, the Section slider (pointer events, one `choose('view:cut')` per animation frame while dragging), the Materials panel's "Show what is left to build" switch.
+- `test/planview.smoke.mjs` (loader from `build.smoke.mjs`, sandbox off, `__build.placePlan('shed', ...)`): the planned shed is drawn with the wall material, not `shellMat`; Furnish gives a 1.2 m cut and no roof; changing "Stands on" gives the foundation view and the chip; Finished pins the whole house; Section at 2.0 m sets the plane; leaving plan mode restores play's values; no page errors; saves `dist/planview-<name>.png`.
+- Done after V1 is merged: `node test/planview.smoke.mjs`, `node test/build.smoke.mjs`, `node test/ui.smoke.mjs`.
+
+### Wave 6
 
 **P9 - Sweep and docs** (sonnet). Owns `CLAUDE.md`, `ARCHITECTURE.md`, `docs/PLAYTEST.md`.
-- `CLAUDE.md`: add `test/designer.smoke.mjs` to the smoke list and `src/opening-preview.js`, `src/sim/content/stairs.js`, `src/stairs-geo.js`, `src/stairs-spiral.js` to the code map. `ARCHITECTURE.md`: the view contract additions and the `out` field. `docs/PLAYTEST.md`: what to try (plan a two-room house with a great hall, an arched window, a French door opening out, three steps down into a sunken room, an L stair to a loft, a spiral, porch steps from the ground, on desktop and phone, in both skins).
-- Run the gates: `node test/page.smoke.mjs`, `build.smoke`, `plan-unbuilt.smoke`, `construction-tools.smoke`, `designer.smoke`, `ui.smoke`, `shed.e2e`, and `node --test test/stairs.test.mjs test/openings.test.mjs`. Report failures to the owning step; fix nothing in `src/`.
+- `CLAUDE.md`: add `test/designer.smoke.mjs` and `test/planview.smoke.mjs` to the smoke list and `src/opening-preview.js`, `src/sim/content/stairs.js`, `src/stairs-geo.js`, `src/stairs-spiral.js` to the code map. `ARCHITECTURE.md`: the view contract additions and the `out` field. `docs/PLAYTEST.md`: what to try (plan a two-room house with a great hall, an arched window, a French door opening out, three steps down into a sunken room, an L stair to a loft, a spiral, porch steps from the ground, on desktop and phone, in both skins).
+- Run the gates: `node test/page.smoke.mjs`, `build.smoke`, `plan-unbuilt.smoke`, `construction-tools.smoke`, `designer.smoke`, `planview.smoke`, `ui.smoke`, `shed.e2e`, and `node --test test/stairs.test.mjs test/openings.test.mjs`. Report failures to the owning step; fix nothing in `src/`.
 - Then the owner playtests.
 
 | Step | Model | Wave | Title | Files |
@@ -325,8 +386,10 @@ Shared rules: start from the newest `ui-redesign`; one commit per step saying wh
 | P8 | opus | 4 | Phone | `src/touch.js`, `template/ui/60-touch.css`, `test/build.smoke.mjs` (phone part) |
 | S3 | opus | 4 | Spiral stair | `src/stairs-spiral.js` |
 | S4 | opus | 4 | Stairs in build mode | `src/build.js` (stairs: 2179-2231, 4422-4436, 10599-10605, 10904 and the stairs branches), `test/build.smoke.mjs` (stairs part) |
-| P9 | sonnet | 5 | Sweep and docs | `CLAUDE.md`, `ARCHITECTURE.md`, `docs/PLAYTEST.md` |
+| V1 | opus | 5 | Finished look and task views | `src/build.js` (`roofsShown`, shell part of `drawMembers`, plan-mode lines of the update loop, `view:` branches) |
+| V2 | opus | 5 | The view control | `src/buildui.js` (right cluster, slider), `50-build.css` and `60-touch.css` (view blocks), new `test/planview.smoke.mjs` |
+| P9 | sonnet | 6 | Sweep and docs | `CLAUDE.md`, `ARCHITECTURE.md`, `docs/PLAYTEST.md` |
 
-Merge risk: P1 (wave 1), P5 (wave 2), P6 (wave 3) and S4 (wave 4) all edit `src/build.js`, one per wave, in different ranges; S4 edits the `stairs` branches inside functions P1 reshaped, so it starts from the merged wave 3. In wave 4, P8 and S4 both edit `test/build.smoke.mjs` (P8 lines 280-298, S4 inserts after the roof part near line 92): merge S4 first. `choose()` is shared by P1 (wave 1) and P5 (wave 2), so P5 must start from P1's commit. P4 and P7 both edit `src/buildui.js` and `50-build.css` in consecutive waves, never the same one.
+Merge risk: P1 (wave 1), P5 (wave 2), P6 (wave 3), S4 (wave 4) and V1 (wave 5) all edit `src/build.js`, one per wave, in different ranges; V1 adds `view:` lines to `view()` and `choose()`, which P1, P5 and S4 have edited before it, so it starts from the merged wave 4 and V2 codes against the contract in section 4 until V1 lands; S4 edits the `stairs` branches inside functions P1 reshaped, so it starts from the merged wave 3. In wave 4, P8 and S4 both edit `test/build.smoke.mjs` (P8 lines 280-298, S4 inserts after the roof part near line 92): merge S4 first. `choose()` is shared by P1 (wave 1) and P5 (wave 2), so P5 must start from P1's commit. P4 and P7 both edit `src/buildui.js` and `50-build.css` in consecutive waves, never the same one.
 
 Not in this plan: building a stair by hand (3A.7), balconies, curved walls, free openings in angled or round walls (rustic pieces remain the answer there), new roof shapes, any change to construction or the plan book.
