@@ -139,3 +139,15 @@ test('the ATV turning circle at walking pace matches the published 11.5 ft withi
   const R = Math.max(Math.max(...pts.map((p) => p[0])) - Math.min(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1])) - Math.min(...pts.map((p) => p[1])));
   assert.ok(Math.abs(R / 2 - 3.51) < 0.351, `outer-tyre turning radius ${(R / 2).toFixed(2)} m vs published 3.51 m`);
 });
+
+// The solid rear axle's scrub is a friction moment (it does not fade as the quad slows), so the circle at a slow crawl
+// is the circle at a walk: the tyres are not softer at a crawl than they are at a walk.
+test('the ATV turning circle at a slow crawl is the same as at a walk', () => {
+  const env = on('dirt'), b = ridden(env), pts = [];
+  for (let i = 0, t = 0; i < 30 / SUB; i++, t += SUB) {
+    stepBody(b, ATV, { throttle: b.u < 0.7 ? 0.3 : 0, steer: 1, brake: b.u > 0.9 ? 0.2 : 0 }, env);
+    if (t > 8) { const f = ATV.axles[0].z, hw = ATV.track / 2; pts.push([b.x + Math.sin(b.yaw) * f - Math.cos(b.yaw) * hw, b.z + Math.cos(b.yaw) * f + Math.sin(b.yaw) * hw]); }
+  }
+  const R = Math.max(Math.max(...pts.map((p) => p[0])) - Math.min(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1])) - Math.min(...pts.map((p) => p[1])));
+  assert.ok(Math.abs(R / 2 - 3.51) < 0.351, `outer-tyre turning radius at 0.7 m/s ${(R / 2).toFixed(2)} m vs published 3.51 m`);
+});

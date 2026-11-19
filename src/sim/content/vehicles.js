@@ -26,7 +26,12 @@ export const VEHICLE_KINDS = Object.freeze({
       brakeK: 0.6, creepMps: 0.8, creepG: 0.07,
     },
     gears: { ratios: [26, 18.5, 14, 11.5, 9.6], reverse: 30, eff: 0.85, shiftS: 0.3, upRpm: [4300, 6500], downRpm: 2300 },
-    steerMaxRad: deg(23), steerRate: 1.6, steerSpeedFalloff: 1 - 9 / 23,   // 3.5 m turning radius at a crawl; 9 degrees at speed
+    // Steering: the mechanical lock (28.5 degrees) at a walk; moving, 23 degrees falling to 9 at top speed. The lock is
+    // set from Honda's published 11.5 ft (3.51 m to the outer front tyre) as the model drives it: the solid rear axle
+    // scrubs its inner wheel in a tight turn (a moment of about mu x wheel load x track), the front tyres need a few
+    // degrees of slip angle to hold against it, so the quad turns as if its wheels pointed about 5 degrees less. The
+    // 23 degrees of lock alone turns it 4.5 m.
+    steerMaxRad: deg(23), steerRate: 1.6, steerSpeedFalloff: 1 - 9 / 23, steerLockRad: deg(28.5), steerLockMps: 2,
     grip: { mu: 0.65, slide: 0.85, lateral: 8, rolling: 0.045, loadSens: 0.1 }, // knobby tyres on dry grass (lateral: cornering stiffness per unit load, 1/rad)
     susp: { travel: 0.2, hz: 2.0, damp: 0.32 },                               // 185-215 mm of travel; lightly damped, it bobs
     riderKg: 80,

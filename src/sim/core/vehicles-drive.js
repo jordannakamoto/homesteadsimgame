@@ -65,7 +65,9 @@ export const ARTIC_MAX = (75 * Math.PI) / 180;  // a towed unit's stop against i
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 export const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const ITER = 8;                                  // solver passes per substep
-const U0 = 1;                                    // m/s: below this a tyre's slip angle is taken against this speed
+const U0 = 0.3;                                  // m/s: below this a tyre's slip angle is taken against this speed (a floor
+                                                 // for the solver only: at 1 m/s it softened the tyres at a crawl, so a
+                                                 // solid axle's scrub pushed the turn wider the slower it went)
 
 // ---------------------------------------------------------------- geometry
 // local [lx, lz] -> world, written into out
@@ -146,6 +148,17 @@ function dragOf(kind) {
     DRAG.set(kind, d);
   }
   return d;
+}
+// How far the front wheels may turn at this speed. Moving, the lock falls from steerMaxRad at rest toward
+// steerMaxRad x (1 - steerSpeedFalloff) at topMps (what a rider uses at speed). steerLockRad, if set, is the steering's
+// mechanical stop, reached at a crawl (below steerLockMps, default 2 m/s; blended into the moving line by twice that):
+// parking and tight turns at a walk use all of it.
+export function steerLimit(kind, u) {
+  const a = Math.abs(u), line = kind.steerMaxRad * (1 - (kind.steerSpeedFalloff || 0) * Math.min(1, a / kind.topMps));
+  const lock = kind.steerLockRad;
+  if (!(lock > line)) return line;
+  const v0 = kind.steerLockMps || 2, w = clamp((a - v0) / v0, 0, 1);
+  return lock + (line - lock) * w * w * (3 - 2 * w);
 }
 const susp = (kind) => kind.susp || { travel: 0.15, hz: 2, damp: 0.4 };
 const RPM = 60 / (2 * Math.PI);
@@ -501,7 +514,7 @@ export function stepBody(b, kind, input, env, dt = SUB, trailer = null) {
     A.vx += F * sy; A.vz += F * cy;
     A.vx += -GRAV * sinLat * kc * cy * dt; A.vz -= -GRAV * sinLat * kc * sy * dt;   // the cross-slope pulls it downhill
     // steering
-    const lim = kind.steerMaxRad * (1 - (kind.steerSpeedFalloff || 0) * Math.min(1, Math.abs(b.u) / kind.topMps));
+    const lim = steerLimit(kind, b.u);
     const tgt = clamp(input.steer || 0, -1, 1) * lim, ds = kind.steerRate * (1 - 0.5 * Math.min(1, Math.abs(b.u) / kind.topMps)) * dt;
     b.steer = clamp(b.steer + clamp(tgt - b.steer, -ds, ds), -lim, lim);
     // the rows: rolling resistance and brakes (Coulomb, they hold a stopped body), then a side row per axle
@@ -746,7 +759,7 @@ export function headingControl(b, kind, mx, mz, { gentle = false } = {}) {
   if (kind.engine && b.u < -0.6) return { throttle: 0, steer: 0, brake: mag, handbrake: false };   // still rolling back: stop first
   // tracks: slow down to turn (turning drags the tracks sideways and takes the power the straight run would)
   if (tracked) { const st = clamp(err * 2, -1, 1); return { throttle: mag * k * Math.max(0, Math.cos(err)) * (1 - 0.7 * Math.abs(st)), steer: st, brake: 0, handbrake: false }; }
-  const lim = kind.steerMaxRad * (1 - (kind.steerSpeedFalloff || 0) * Math.min(1, Math.abs(b.u) / kind.topMps));
+  const lim = steerLimit(kind, b.u);
   // the rider: no more lock than the grip under it can turn (three quarters of mu g sideways), and eases the throttle
   // when the tail steps out or the wheels spin in a turn
   const u2 = b.u * b.u, grip = Math.atan((0.75 * (b.mu || kind.grip.mu) * GRAV * (kind.wheelbase || 1)) / Math.max(u2, 1e-6));
