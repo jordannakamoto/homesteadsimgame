@@ -13,7 +13,7 @@
 //     bedPoint(id, out), nearest(x, z, r) -> id | null, spawn(kind, x?, z?, yaw?) -> id (debug and tests),
 //     findSpot(x, z, { rMin, rMax, rad, away }) -> { x, z, yaw } | null   a clear, dry, flat place near a point
 //     unstick(id), stats(),
-//     towing: hitch(id?) (the driven unit to the nearest towed unit in reach), unhitch() (X while seated),
+//     towing: hitch(id?) (the driven unit to the nearest towed unit in reach), unhitch() (hold R while seated and stopped),
 //     cargo:  setCargo(id, groups, kg)  what lies on a unit's bed: groups = [{ n, w, h, l, color }] (pieces, metres,
 //             laid along the bed, layer on layer); kg is what it weighs (the drive model tows it),
 //             flyFrom(id, { x, y, z })  the next pieces added fly onto the bed from there,
@@ -37,7 +37,7 @@
   if (!G || !G.control || !G.vehicleCore) return;
   const T = G.THREE, VC = G.vehicleCore, control = G.control, P = G.player, pm = G.pm, SUB = VC.SUB;
   const canvas = G.renderer.domElement;
-  const MAX_SUB = 4, SYNC_S = 0.5, HOP_S = 0.3, OFF_MPS = 1.5, ZONE_HOLD_S = 0.25, TIP_WARN = 0.8, TIP_OVER_S = 0.35;
+  const MAX_SUB = 4, SYNC_S = 0.5, HOP_S = 0.3, OFF_MPS = 1.5, ZONE_HOLD_S = 0.25, TIP_WARN = 0.8, TIP_OVER_S = 0.35, UNHITCH_HOLD_S = 0.6;
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const sysDef = () => G.sim.systems.find((s) => s.name === 'vehicles') || null;
   const S = () => G.sim.state.sys.vehicles || null;
@@ -53,7 +53,20 @@
   const line = document.createElement('div');
   line.style.cssText = 'position:fixed;left:50%;bottom:118px;transform:translateX(-50%);padding:6px 14px;border-radius:8px;background:rgba(20,22,18,.72);color:#f1ead6;font:14px/1.3 system-ui,sans-serif;pointer-events:none;z-index:30;display:none;max-width:80vw;text-align:center';
   document.body.appendChild(line);
-  function say(t, s = 2) { line.textContent = t; line.style.display = t ? 'block' : 'none'; sayT = s; }
+  // with the interface kit the line is a toast in the top lane; without it, a line near the bottom of the view
+  function say(t, s = 2) {
+    sayT = s; hintOn = false;
+    if (window.__ui && window.__ui.toast) { if (t) window.__ui.toast(t, { seconds: s }); return; }
+    line.textContent = t; line.style.display = t ? 'block' : 'none';
+  }
+  // a standing prompt (key chip + words) shown while nothing else is being said; chip() comes from game/keymap.js when loaded
+  let hintOn = false;
+  const kc = (k) => (window.__keymap ? window.__keymap.chip(k) : '<b>' + k + '</b>');
+  function hint(html) {
+    if (!html) { if (hintOn) { line.style.display = 'none'; hintOn = false; } return; }
+    if (sayT > 0) return;
+    line.innerHTML = html; line.style.display = 'block'; hintOn = true;
+  }
 
   // ---------------------------------------------------------------- models
   const lambert = () => new T.MeshLambertMaterial({ vertexColors: true });
@@ -400,7 +413,7 @@
     L.towL = Lt; wakeTowed(L, Lt);
     L.body.u *= 0.2; guide.visible = false;
     G.cam.shake = Math.min(0.4, G.cam.shake + 0.09);
-    say(Lt.kind.cargo && Lt.kind.cargo.tips ? 'Hitched. X unhitches; hold the left button to tip the bed.' : 'Hitched. X unhitches.', 3);
+    say(Lt.kind.cargo && Lt.kind.cargo.tips ? 'Hitched. Hold R to unhitch; hold the left button to tip the bed.' : 'Hitched. Hold R to unhitch.', 3);
     return true;
   }
   function unhitch() {
@@ -514,6 +527,12 @@
       if (Lt) { Lt.bedWant = !!(seat.useDown && Lt.kind.cargo && Lt.kind.cargo.tips); guide.visible = false; }
       else if (k.points && k.points.length) hitchGuide(L);
       if (seat.useDown && !Lt && warnT <= 0) { say('Nothing to tip: hitch a trailer first.', 1.2); warnT = 1.2; }
+      // unhitching is a held R at the tongue (X belongs to the overlays everywhere); the prompt shows while stopped with a trailer on
+      if (Lt && seat.phase === 'ride' && Math.abs(b.u) <= 0.5) {
+        seat.rHold = seat.rDown ? (seat.rHold || 0) + dt : 0;
+        if (seat.rHold >= UNHITCH_HOLD_S) { seat.rHold = 0; seat.rDown = false; unhitch(); }
+        else hint(seat.rHold > 0 ? 'Unhitching ' + Math.round(100 * seat.rHold / UNHITCH_HOLD_S) + '%' : 'Hold ' + kc('R') + ' to unhitch');
+      } else { seat.rHold = 0; hint(null); }
     }
     if (seat.offReq) {
       if (Math.abs(b.u) < OFF_MPS) {
@@ -550,7 +569,7 @@
     if (L.towL) { L.towL.bedWant = false; park(L.towL, S().units[L.towL.id]); }
     guide.visible = false;
     const h = seat.poss;
-    seat = null;
+    hint(null); seat = null;
     control.pop(h, 'off');
     P.x = to.x; P.z = to.z; P.y = to.y;
     releaseRider(yaw);
@@ -563,7 +582,7 @@
     const hw = L.kind.dims.w / 2 + 0.9, o = VC.toWorld(b, dir * hw, 0, {});
     G.pushOut(o, 0.28);
     const h = seat.poss;
-    seat = null;
+    hint(null); seat = null;
     control.pop(h, 'tip');
     P.x = o.x; P.z = o.z; P.y = G.groundAt(o.x, o.z, b.y + 1);
     releaseRider(b.yaw);
@@ -681,7 +700,7 @@
 
   // ---------------------------------------------------------------- keys and clicks while seated
   // While seated the walking keys that would switch tools, open build mode or act with the hands are the seat's:
-  // E steps off, the rest are swallowed. Panels (stock, weather, help, quality, speed) still open.
+  // E steps off, hold R unhitches, the rest are swallowed. Panels (stock, weather, help, quality, speed) still open.
   const BLOCK = /^(Digit\d|Key[EQFRCBLKXZ])$/;
   window.addEventListener('keydown', (e) => {
     if (!seat || !BLOCK.test(e.code)) return;
@@ -689,8 +708,10 @@
     if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return;
     e.stopImmediatePropagation(); e.preventDefault();
     if (e.code === 'KeyE' && !e.repeat) seat.offReq = true;
-    if (e.code === 'KeyX' && !e.repeat) unhitch();
+    if (e.code === 'KeyR') seat.rDown = true;               // held: unhitch (see ride)
   }, true);
+  window.addEventListener('keyup', (e) => { if (seat && e.code === 'KeyR') seat.rDown = false; }, true);
+  window.addEventListener('blur', () => { if (seat) seat.rDown = false; });
   window.addEventListener('pointerdown', (e) => {
     if (!seat || e.target !== canvas || e.pointerType !== 'mouse') return;
     e.stopImmediatePropagation();

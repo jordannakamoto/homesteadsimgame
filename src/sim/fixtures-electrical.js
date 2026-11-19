@@ -174,7 +174,7 @@ load('well_pump', 'Submersible well pump 1/2 hp (240 V)', 'well pump', 1000, 'ac
 load('circ_pump', 'Circulator pump (hydronic)', 'circulator pump', 65, 'ac', 6, 160, 2.5, dims(0.16, 0.12, 0.12), {}, 'Wet-rotor, three-speed, middle speed.');
 load('space_heater', 'Space heater 1500 W', 'space heater', 1500, 'any', 3, 50, 3, dims(0.25, 0.2, 0.35), { lowW: 750 },
   'Every watt becomes heat, and it takes a lot of watts. Low setting 750 W (settings.ratedW).');
-for (const [itemId, noun] of [['circular_saw', 'circular saw'], ['power_drill', 'drill'], ['chainsaw', 'chainsaw'], ['table_saw', 'table saw']]) {
+for (const [itemId, noun] of [['circular_saw', 'circular saw'], ['power_drill', 'drill'], ['chainsaw', 'chainsaw'], ['table_saw', 'table saw'], ['miter_saw', 'miter saw']]) {
   const it = ITEMS[itemId];
   load('tool_' + itemId, it.name, noun, it.powerW, 'ac', 5, it.priceUsd, it.massKgPerUnit, dims(0.3, 0.2, 0.2), { category: 'tool', item: itemId }, 'Plug it into an outlet.');
 }

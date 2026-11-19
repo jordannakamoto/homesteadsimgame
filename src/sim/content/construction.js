@@ -8,12 +8,14 @@ import { SERVICE_SUPPLY } from './services.js';
 export { PAINTS, PAINT, SHEENS, SURFACES, finishOf, DECOR } from './decor.js';
 export { PROFILES, REVEAL_M, ENDS, cutWords, FINISH_NAILS_KG_PER_M } from './carpentry.js';
 
-// ---- stages, in the order a building is raised. `needs`: the stages it stands on. `parentFirst`: stages whose
+// ---- stages, in the order a building is raised. `hint` + `handsKey`: the tool and key the construction note names when the job is a
+// slab, stem wall or pier foundation (hand-built in the Site tool, key 7). `by` is NOT set on these: a stage with `by` is tallied by
+// another system and skips the pieces; here the pieces and the job both count. `needs`: the stages it stands on. `parentFirst`: stages whose
 // members of the same wall or gable must be in first. `flat`: its frames are put together lying down, one at a
 // time, and then raised.
 export const STAGES = Object.freeze([
-  { id: 'site', name: 'Site', needs: [], verb: 'Level the ground', what: 'Stake out the plan, then clear and level the ground.', why: 'A building needs flat, firm ground.' },
-  { id: 'foundation', name: 'Foundation', needs: ['site'], verb: 'Set the foundation', what: 'Set the pier blocks, posts and beams.', why: 'Keeps the wood off wet ground and spreads the weight.' },
+  { id: 'site', name: 'Site', needs: [], hint: 'Site (7): lay the strings out, dig to the line and rake the base level', handsKey: '7', verb: 'Level the ground', what: 'Stake out the plan, then clear and level the ground.', why: 'A building needs flat, firm ground.' },
+  { id: 'foundation', name: 'Foundation', needs: ['site'], hint: 'Site (7): set the forms and rebar, pour, finish and cure the concrete', handsKey: '7', verb: 'Set the foundation', what: 'Set the pier blocks, posts and beams.', why: 'Keeps the wood off wet ground and spreads the weight.' },
   { id: 'floor-frame', name: 'Floor frame', needs: ['foundation'], verb: 'Frame the floor', what: 'Rim joists round the edge, then joists every 40 cm.', why: 'Joists carry the floor. Closer joists make a stiffer floor.' },
   { id: 'subfloor', name: 'Subfloor', needs: ['floor-frame'], verb: 'Lay the subfloor', what: 'Lay sheets across the joists.', why: 'Gives you a deck to stand and build on.' },
   { id: 'wall-frame', name: 'Wall frames', needs: ['subfloor'], flat: true, verb: 'Frame the walls', what: 'Lay plates and studs flat on the deck, then tilt each wall up.', why: 'Studs carry the roof down to the floor. A header carries the load around a door or window.' },
@@ -114,7 +116,7 @@ export function itemForm(itemId) {
   if (/^board_/.test(itemId)) return 'boards';
   if (/^(osb|plywood|gypsum)_/.test(itemId)) return 'sheet';
   if (itemId === 'pier_block') return 'block';
-  if (/^(nails|screws)_/.test(itemId)) return 'box';
+  if (/^(nails|screws)_/.test(itemId) || itemId === 'caulk_acrylic') return 'box';
   if (itemId === 'housewrap' || itemId === 'roof_underlayment' || itemId === 'vapour_barrier' || itemId === 'roof_epdm' || itemId === 'roof_ice_water' || itemId === 'roof_green') return 'roll';
   if (itemId === 'drip_edge' || itemId === 'ridge_cap' || itemId === 'gutter_alu' || itemId === 'downspout_alu') return 'trim';
   if (/^roof_/.test(itemId)) return 'bundle';
@@ -163,7 +165,7 @@ export const isStickItem = (itemId) => /^(lumber|trim)_/.test(itemId);     // fr
 // fitted pieces and the angled ones: posts cut to height once the piers are level, blocking, cripples under sills and over
 // headers, gable studs, rafters and hips with their plumb cuts and seat cuts, and any stub under stubM. Those are bought as stock sticks and cut at the sawhorses as a job of their own;
 // each cut piece goes into the arms (an armful at most) or onto the horses.
-export const SITE_CUT = Object.freeze({ kinds: Object.freeze(['block', 'cripple', 'rafter', 'hip', 'post', 'casing', 'base']), armful: 6, shortM: 1.5, stubM: 0.6,
+export const SITE_CUT = Object.freeze({ kinds: Object.freeze(['block', 'cripple', 'rafter', 'hip', 'post', 'casing', 'base', 'stool']), armful: 6, shortM: 1.5, stubM: 0.6,
   says: 'Cut it at the sawhorses first', why: 'Posts, blocking, cripples and rafters are cut on site, to fit; everything else comes cut to length from the yard' });
 export const isSiteCut = (kind, len) => SITE_CUT.kinds.includes(kind) || (len > 0 && len < SITE_CUT.stubM) || ((kind === 'stud' || kind === 'jack') && len > 0 && len < SITE_CUT.shortM);
 // the pieces cut at the sawhorses from a lumber item, carried and stacked like any other item

@@ -225,7 +225,9 @@ export function settle(g, x, z, r = 0.8, slope = REPOSE, iters = 40, firmOnly = 
 // where the next push picks it up again. Firm ground and turf are not cut. Volume is conserved. Returns
 // { m3: what is now in front of the blade, s: its surface }.
 // `level` may also be a function (x, z) -> relief metres, for a blade held at one height over uneven untouched ground.
-export function push(g, x0, z0, x1, z1, level, { w = 0.45, t = 0, ahead: AHEAD = 0.14 } = {}) {
+// Optional limits for a hand blade (a shovel): `cap` (m3), what it holds, more spilling off its ends to either side;
+// `stop` (m), firm ground standing more than that above the blade where it is going stops it ({ blocked: true }).
+export function push(g, x0, z0, x1, z1, level, { w = 0.45, t = 0, ahead: AHEAD = 0.14, cap = Infinity, stop = Infinity } = {}) {
   const st = g.step, A = area(g), L = Math.hypot(x1 - x0, z1 - z0);
   if (L < 1e-4) return { m3: 0, s: '' };
   const ux = (x1 - x0) / L, uz = (z1 - z0) / L, half = w / 2, lvAt = typeof level === 'function' ? (i, j) => Math.round(level(i * st, j * st) * 1000) : null;
@@ -239,6 +241,12 @@ export function push(g, x0, z0, x1, z1, level, { w = 0.45, t = 0, ahead: AHEAD =
     if (across > half) continue;
     if (along >= -st * 0.5 && along <= L) swept.push([i, j, along]);
     else if (along > L && along <= L + AHEAD) ahead.push([i, j]);
+  }
+  // firm ground (the wall of a hole, a bank of undug earth) standing above the blade where it is going: it stops
+  if (Number.isFinite(stop)) for (const [i, j, along] of swept) {
+    if (along < L - st * 1.5) continue;
+    const r = tileOf(g, i, j, false), h = r ? r[0].h[r[1]] : 0, firm = !r || r[0].s[r[1]] === 0 || !((r[0].f[r[1]] & LOOSE_BIT) || r[0].l[r[1]] > 0);
+    if (firm && h > (lvAt ? lvAt(i, j) : lv) + stop * 1000) return { m3: 0, s: '', blocked: true };
   }
   // what the blade gathers, by surface (in mm over one point's area)
   const load = new Map();
@@ -259,9 +267,13 @@ export function push(g, x0, z0, x1, z1, level, { w = 0.45, t = 0, ahead: AHEAD =
   let surf = 'soil', most = -1;
   for (const [k, v] of load) if (v > most) { most = v; surf = k; }
   const layer = surf !== 'soil', c = code(g, surf);
+  const stopMm = Number.isFinite(stop) ? stop * 1000 : Infinity;
   const put = (i, j, d) => {
     const [tl, n] = tileOf(g, i, j, true);
-    tl.h[n] += d; tl.f[n] |= LOOSE_BIT;
+    // earth pushed up against firm ground standing above a hand blade does not make that ground loose (or the blade
+    // would cut the wall of a hole away under the earth it piled there)
+    const wall = stopMm < Infinity && !((tl.f[n] & LOOSE_BIT) || tl.l[n] > 0) && tl.h[n] > (lvAt ? lvAt(i, j) : lv) + stopMm;
+    tl.h[n] += d; if (!wall) tl.f[n] |= LOOSE_BIT;
     if (layer) { if (tl.s[n] !== c) tl.l[n] = 0; tl.l[n] += d; tl.s[n] = c; } else if (tl.s[n] === 0 || tl.l[n] === 0) { tl.s[n] = code(g, 'soil'); }
     tl.t[n] = t;
   };
@@ -274,6 +286,22 @@ export function push(g, x0, z0, x1, z1, level, { w = 0.45, t = 0, ahead: AHEAD =
     if (h >= lv) continue;
     const d = Math.min(lv - h, total);
     put(i, j, d); total -= d;
+  }
+  // more than the blade holds spills off its ends, to either side of it
+  const capMm = Number.isFinite(cap) ? Math.round((cap / A) * 1000) : Infinity;
+  if (total > capMm) {
+    const sides = [];
+    for (let j = j0 - 3; j <= j1 + 3; j++) for (let i = i0 - 3; i <= i1 + 3; i++) {
+      const px = i * st - x0, pz = j * st - z0, along = px * ux + pz * uz, across = Math.abs(-px * uz + pz * ux);
+      if (across > half && across <= half + 0.2 && along >= L - 0.25 && along <= L + AHEAD) sides.push([i, j]);
+    }
+    if (sides.length) {
+      const spill = total - capMm, each = Math.floor(spill / sides.length);
+      let left = spill - each * sides.length;
+      for (const [i, j] of sides) { const d = each + (left > 0 ? 1 : 0); if (left > 0) left--; if (d > 0) put(i, j, d); }
+      total = capMm;
+      settle(g, x1, z1, half + 0.45, REPOSE, 8, false, (i, j) => Math.abs(-(i * st - x0) * uz + (j * st - z0) * ux) > half - st * 0.5);
+    }
   }
   // the rest rides ahead of the blade as a ridge
   if (total > 0 && ahead.length) {
@@ -289,9 +317,12 @@ export function push(g, x0, z0, x1, z1, level, { w = 0.45, t = 0, ahead: AHEAD =
   g.rev++;
   return { m3: (most > 0 ? [...load.values()].reduce((a, b) => a + b, 0) : 0) / 1000 * A, s: surf };
 }
-// The back of a shovel patted down on worked ground: within r the surface is drawn toward the plane that best fits it
-// (lumps go, the slope stays), by k (0..1), and loose earth there is firmed so it stays put. Volume is conserved.
-export function pat(g, x, z, r = 0.32, k = 0.85) {
+// The back of a shovel patted down on worked ground: within r the surface is drawn toward the plane that best fits it,
+// by k (0..1), with that plane's tilt eased by `level` (0: the slope stays, 1: dead flat), so lumps go at once and
+// slopes flatten with each pat; loose earth there is firmed so it stays put. The edge blends over the outer quarter.
+// Volume is conserved.
+// `firm: false`: smooth without packing (a hoe or a rake working a tilth)
+export function pat(g, x, z, r = 0.5, k = 1, level = 0.35, { firm = true } = {}) {
   const st = g.step, pts = [];
   for (let j = Math.floor((z - r) / st); j <= Math.ceil((z + r) / st); j++) for (let i = Math.floor((x - r) / st); i <= Math.ceil((x + r) / st); i++) {
     const dx = i * st - x, dz = j * st - z;
@@ -310,7 +341,10 @@ export function pat(g, x, z, r = 0.32, k = 0.85) {
   const mx = sx / N, mz = sz / N, mh = sh / N, cxx = sxx / N - mx * mx, czz = szz / N - mz * mz, cxz = sxz / N - mx * mz, cxh = sxh / N - mx * mh, czh = szh / N - mz * mh;
   const det = cxx * czz - cxz * cxz, b = det > 1e-12 ? (cxh * czz - czh * cxz) / det : 0, c = det > 1e-12 ? (czh * cxx - cxh * cxz) / det : 0;
   // move each point toward the plane by k, in whole millimetres that add back to nothing
-  const want = pts.map(([, , dx, dz, h]) => k * (mh + b * (dx - mx) + c * (dz - mz) - h));
+  const bl = b * (1 - level), cl = c * (1 - level);
+  const want = pts.map(([, , dx, dz, h]) => { const d = Math.hypot(dx, dz) / r, edge = d < 0.75 ? 1 : Math.max(0, (1 - d) / 0.25); return k * edge * (mh + bl * (dx - mx) + cl * (dz - mz) - h); });
+  // the blend at the edge would add or take a little: spread the difference evenly so volume stays exact
+  { const off = want.reduce((a2, v) => a2 + v, 0) / want.length; for (let q = 0; q < want.length; q++) want[q] -= off; }
   const dd = want.map(Math.round);
   let err = dd.reduce((a2, v) => a2 + v, 0);
   for (let q = 0; err !== 0 && q < dd.length * 2; q++) { const n2 = q % dd.length; const s2 = Math.sign(err); dd[n2] -= s2; err -= s2; }
@@ -318,7 +352,7 @@ export function pat(g, x, z, r = 0.32, k = 0.85) {
   pts.forEach(([tl, n], q) => {
     tl.h[n] += dd[q];
     if (tl.l[n] > 0) tl.l[n] = Math.max(0, tl.l[n] + Math.min(0, dd[q]));
-    else tl.f[n] &= ~LOOSE_BIT;                      // patted earth is firm: it stays where it was put
+    else if (firm) tl.f[n] &= ~LOOSE_BIT;            // patted earth is firm: it stays where it was put
     moved += Math.abs(dd[q]);
   });
   g.rev++;

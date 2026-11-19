@@ -16,25 +16,34 @@
 //          or an end not yet crimped. Drains compile the same way between drain ports.
 // State (saved, plain JSON): { v, routesV, version, pieces, powerPieces, waterPieces, sig, links: { [pieceId]: [runIds] },
 //   tally: { [frame]: { 'rough-in': [done, total], 'trim-out': [done, total] } }, covered: { [runId]: true },
-//   issues: [{ runId, severity, reason, fix }], checks: {}, deferred: { [runId]: true }, notes: {} }
+//   issues: [{ runId, severity, reason, fix }], checks: {}, deferred: { [runId]: true }, notes: {}, mains: { [panelKey]: bool } }
 //   want: { [frame]: { sig, tally, lines } }: what the Build panel is told (construction.setExternal / setExtLines)
 // Commands: services.sync, services.note { key } -> { first }, services.defer { structId, undo? } ("Close up anyway"),
-//   services.auto { structId, stage } ("do it for me"), services.openWall { structId, host } ("Open this wall").
+//   services.auto { structId, stage } ("do it for me"; trim-out draws every device, plate and breaker from the stacks),
+//   services.openWall { structId, host } ("Open this wall").
+// Trim-out by hand (S9b): services.trim { node, step?, n? } (strip, land, fold, plate at a box; press at a panel slot; n per
+//   gesture), services.device { node, device } (what goes in a box, until a wire is on it), services.main { panel | node, on }
+//   (state mains: { [panelKey]: false } is off; unset is on, so older saves stay lit; the first breaker pressed in by hand
+//   turns it off), services.breaker { node, on } (a tripped one is reset by throwing it on), services.flip { node, on? } (a
+//   wall switch: its `controls`, by default the lights after it on the cable), services.check { structId, kind: 'power' }
+//   (the tester: checks[structId].power = { pass, t, circuits: [{ slot, hops }], faults }).
 // The building (src/sim/construction.js) sees rough-in and trim-out as two stages: services tells it the tally of each and
 // the shopping lines for them (cable, PEX, boxes, staples, plates, rings), so ordering, deliveries and stacks are the
 // Build panel's own. A run is covered when the lining of a wall or ceiling it passes inside is on.
 // Readers: overlayData(state), runInfo(state, runId), servicesGuard (the routes system's guard: covered runs refuse work).
 
+import { kept } from './core/keep.js';
 import { compileLinks } from './core/links.js';
 import { toNeutral, worldOf, runState, progress, pathLength } from './core/routes.js';
 import { SERVICE_CLASSES, SERVICE_SPECS, DEFAULT_SPEC, DEVICES, NODE_KINDS, SERVICE_TEXT, PRESETS_M, routeRule, boreCheck,
-  SERVICE_LINES, FIXINGS, workCost, runCostLeft, runCostAll, nodeCost, stapleMarks } from './content/services.js';
+  SERVICE_LINES, FIXINGS, workCost, runCostLeft, runCostAll, nodeCost, stapleMarks,
+  DEVICE_ITEM, DEFAULT_DEVICE, PRESET_DEVICE, TRIM_STEPS, TRIM_TEXT, trimCost, deviceIsLight } from './content/services.js';
 import { FIXTURES_ELECTRICAL } from './fixtures-electrical.js';
 import { FIXTURES_WATER } from './fixtures-water.js';
 
 const STATE_V = 1;
 const fresh = () => ({ v: STATE_V, routesV: -1, version: 0, pieces: [], powerPieces: [], waterPieces: [], sig: '[[],[]]', links: {},
-  tally: {}, covered: {}, issues: [], checks: {}, deferred: {}, notes: {}, want: {} });
+  tally: {}, covered: {}, issues: [], checks: {}, deferred: {}, notes: {}, want: {}, mains: {} });
 const specFor = (run) => SERVICE_SPECS[run.spec] || SERVICE_SPECS[DEFAULT_SPEC[run.cls]] || {};
 const r3 = (x) => Math.round(x * 1000) / 1000;
 const deviceOf = (n) => (n && n.state === 'trimmed' && n.set && n.set.device ? DEVICES[n.set.device] || null : null);
@@ -51,8 +60,8 @@ function endWorld(R, run, e) {
   return worldOf(R, run.frame, p);
 }
 
-function compilePower(R, g, out) {
-  const fx = new Map(), wires = [];
+function compilePower(R, g, out, opts = {}) {
+  const fx = new Map(), wires = [], mains = opts.mains || {}, dark = switchedOff(R, opts.classes || SERVICE_CLASSES);
   const terminals = [], refs = {};
   const slotRating = {};                                                   // slot id -> thinnest cable from it
   for (const e of g.edges) for (const end of ['a', 'b']) {
@@ -69,11 +78,14 @@ function compilePower(R, g, out) {
       if (n.state !== 'trimmed') { refs[id] = null; continue; }        // no breaker in yet: dead
       const sp = slotRating[id] || SERVICE_SPECS[DEFAULT_SPEC.cable], brId = 'sv:br:' + id;
       fx.set(brId, fixturePiece(R, n, brId, sp.breaker || 'breaker_15a'));
-      wires.push({ id: 'sv:bw:' + id, kind: 'wire', from: { ...n.ref }, to: { piece: brId, port: 'line' }, gauge: sp.gauge || 14, lengthM: 0.3, node: id, services: true });
+      // the breaker's own handle off, or the panel's main off: it stands in its slot fed by nothing
+      if (!(n.set && n.set.on === false) && mains[panelKey(n)] !== false) wires.push({ id: 'sv:bw:' + id, kind: 'wire', from: { ...n.ref }, to: { piece: brId, port: 'line' }, gauge: sp.gauge || 14, lengthM: 0.3, node: id, services: true });
       refs[id] = { piece: brId, port: 'load' };
     } else if (n.ref) refs[id] = { ...n.ref };
     else if (dev && dev.elec && FIXTURES_ELECTRICAL[dev.elec] && FIXTURES_ELECTRICAL[dev.elec].role !== 'junction') {
-      const pid = 'sv:' + id; fx.set(pid, fixturePiece(R, n, pid, dev.elec)); refs[id] = { piece: pid, port: FIXTURES_ELECTRICAL[dev.elec].ports[0].id };
+      const pid = 'sv:' + id, pc = fixturePiece(R, n, pid, dev.elec);
+      if (dark.has(id)) pc.settings = { on: false };                             // a wall switch before it is off
+      fx.set(pid, pc); refs[id] = { piece: pid, port: FIXTURES_ELECTRICAL[dev.elec].ports[0].id };
     } else {
       const pid = 'sv:' + id; fx.set(pid, fixturePiece(R, n, pid, 'box_junction')); refs[id] = { piece: pid, port: 'main' };
     }
@@ -130,12 +142,12 @@ function compileWater(R, g, kind, out, fxSeen) {
 }
 
 // Pure: routes state -> { powerPieces, waterPieces, links, issues }
-export function compileServices(R, classes = SERVICE_CLASSES) {
+export function compileServices(R, classes = SERVICE_CLASSES, opts = {}) {
   const out = { links: {} };
   const graphs = toNeutral(R, classes, {
     joint: (n) => ({ open: (n.kind === 'stub_supply' || n.kind === 'stub_drain') && !n.ref && !deviceOf(n) && !!n.set && n.set.capped === false }),
   });
-  const powerPieces = graphs.power ? compilePower(R, graphs.power, out) : [];
+  const powerPieces = graphs.power ? compilePower(R, graphs.power, out, { ...opts, classes }) : [];
   const fxSeen = new Set(), waterPieces = [];
   for (const k of ['water', 'drain']) if (graphs[k]) waterPieces.push(...compileWater(R, graphs[k], k, out, fxSeen));
   const issues = [];
@@ -169,7 +181,132 @@ function linesOf(R, s, frame, classes) {
     const c = nodeCost(n);
     addTo(tot, c); addTo(count, c);
   }
-  return Object.keys(tot).sort().map((itemId) => ({ key: ROUGH + '|services:' + itemId, stage: ROUGH, itemId, qty: tot[itemId], label: (SERVICE_LINES[itemId] || {}).label || itemId, why: (SERVICE_LINES[itemId] || {}).why || '', count: count[itemId] || 0 }));
+  // trim-out: a device (and its plate) for each box a cable comes to, a breaker for each slot. A node trimmed before
+  // trim-out took stock (no `set.trim`) was fitted for free: it asks for nothing now.
+  const trimTot = {};
+  for (const id of Object.keys(R.nodes).sort()) {
+    const n = R.nodes[id];
+    if (n.frame !== frame || n.stray || s.deferred[id] || !CABLE_TRIM.has(n.kind) || (n.state === 'trimmed' && !(n.set && n.set.trim))) continue;
+    if (!cableRunsAt(R, id, classes, s.deferred).length) continue;
+    addTo(trimTot, fullTrimCost(R, n, classes));
+  }
+  const line = (stage, tot, cnt) => (itemId) => ({ key: stage + '|services:' + itemId, stage, itemId, qty: tot[itemId], label: (SERVICE_LINES[itemId] || {}).label || itemId, why: (SERVICE_LINES[itemId] || {}).why || '', count: cnt ? cnt[itemId] || 0 : Math.round(tot[itemId]) });
+  return [...Object.keys(tot).sort().map(line(ROUGH, tot, count)), ...Object.keys(trimTot).sort().map(line(TRIM, trimTot, null))];
+}
+
+// ------------------------------------------------------------------------------------------- trim-out helpers (pure)
+const CABLE_TRIM = new Set(['box', 'box_ceiling', 'slot']);
+// the panel a slot is on (its equipment piece), or the building for a slot bound to nothing
+export const panelKey = (n) => (n && n.ref && n.ref.piece != null ? String(n.ref.piece) : 'f:' + (n ? n.frame : ''));
+const isPower = (classes, r) => !!classes[r.cls] && classes[r.cls].linkKind === 'power';
+function cableRunsAt(R, id, classes = SERVICE_CLASSES, deferred = {}) {
+  const out = [];
+  for (const k of Object.keys(R.runs).sort()) { const r = R.runs[k]; if ((r.a === id || r.b === id) && isPower(classes, r) && !r.stray && !deferred[r.id]) out.push(r); }
+  return out;
+}
+// the device a box gets: chosen, or what it was planned as, or by its kind (an outlet in a wall box, a light in a ceiling box)
+export const deviceFor = (n) => (n && n.set && (n.set.device || PRESET_DEVICE[n.set.preset])) || (n ? DEFAULT_DEVICE[n.kind] : null) || null;
+// the breaker a slot takes: the thinnest cable leaving it sets it (NEC 240.4(D))
+export function breakerFor(R, slotId, classes = SERVICE_CLASSES) {
+  let sp = null;
+  for (const r of cableRunsAt(R, slotId, classes)) { const q = specFor(r); if (!sp || (q.ratingA || 15) < (sp.ratingA || 15)) sp = q; }
+  return (sp && sp.breaker) || 'breaker_15a';
+}
+// Where a node's trim-out stands: { steps, units, done, next, ready, reason, ends, device, breaker, trimmed } or null
+export function trimInfo(R, n, classes = SERVICE_CLASSES, deferred = {}) {
+  if (!n || !CABLE_TRIM.has(n.kind)) return null;
+  const steps = TRIM_STEPS[n.kind], runs = cableRunsAt(R, n.id, classes, deferred), E = runs.length;
+  const units = n.kind === 'slot' ? { press: 1 } : { strip: E, land: E, fold: 1, plate: 1 };
+  const t = (n.set && n.set.trim) || {}, trimmed = n.state === 'trimmed', done = {};
+  for (const st of steps) done[st] = trimmed ? units[st] : Math.min(units[st], +t[st] || 0);
+  let next = null;
+  if (!trimmed) for (const st of steps) if (done[st] < units[st]) { next = st; break; }
+  const N = TRIM_TEXT.notReady;
+  const reason = n.stray ? N.stray : !E ? N.none : n.kind !== 'slot' && n.state === 'planned' ? N.planned : runs.some((r) => !runState(r, classes[r.cls]).complete) ? N.runs : null;
+  return { node: n.id, kind: n.kind, steps, units, done, next, ready: !reason, reason, trimmed, ends: runs.map((r) => ({ run: r.id, end: r.a === n.id ? 'a' : 'b' })),
+    device: n.kind === 'slot' ? null : deviceFor(n), breaker: n.kind === 'slot' ? breakerFor(R, n.id, classes) : null };
+}
+// what is still to go into a node at trim-out
+function fullTrimCost(R, n, classes, deferred) {
+  const ti = trimInfo(R, n, classes, deferred), out = {};
+  if (!ti) return out;
+  const done = { ...ti.done };
+  for (const st of ti.steps) { addTo(out, trimCost(n.kind, ti.device, st, ti.units[st] - done[st], done, ti.breaker)); done[st] = ti.units[st]; }
+  return out;
+}
+// the cable network as neighbours: node -> [{ to, run }]
+function cableGraph(R, classes) {
+  const adj = {};
+  for (const id of Object.keys(R.runs).sort()) {
+    const r = R.runs[id];
+    if (!isPower(classes, r) || r.stray) continue;
+    (adj[r.a] || (adj[r.a] = [])).push({ to: r.b, run: r });
+    (adj[r.b] || (adj[r.b] = [])).push({ to: r.a, run: r });
+  }
+  return adj;
+}
+// What a wall switch controls: the lights after it on the cable (away from the panel), through other switches (those are in
+// series); with no light after it, the outlets (a switched outlet). An explicit `set.controls` list wins.
+export function switchControls(R, swId, classes = SERVICE_CLASSES) {
+  const sw = R.nodes[swId];
+  if (!sw) return [];
+  if (sw.set && Array.isArray(sw.set.controls)) return sw.set.controls.filter((id) => R.nodes[id]);
+  const adj = cableGraph(R, classes);
+  // which neighbour leads back to a panel slot
+  let up = null;
+  { const prev = { [swId]: null }, q = [swId];
+    while (q.length && up == null) {
+      const x = q.shift();
+      for (const e of adj[x] || []) {
+        if (e.to in prev) continue;
+        prev[e.to] = x;
+        if (R.nodes[e.to] && R.nodes[e.to].kind === 'slot') { let k = e.to; while (prev[k] !== swId) k = prev[k]; up = k; break; }
+        q.push(e.to);
+      }
+    } }
+  const seen = new Set([swId]), q = [swId], lights = [], outlets = [];
+  while (q.length) {
+    const x = q.shift();
+    for (const e of adj[x] || []) {
+      if (seen.has(e.to) || (x === swId && e.to === up)) continue;
+      seen.add(e.to);
+      const n = R.nodes[e.to];
+      if (!n || n.kind === 'slot') continue;
+      const dev = deviceFor(n);
+      if (deviceIsLight(dev)) lights.push(n.id); else if (dev === 'outlet_120v') outlets.push(n.id);
+      q.push(e.to);
+    }
+  }
+  return lights.length ? lights : outlets;
+}
+// the devices a switch that is off keeps dark
+function switchedOff(R, classes) {
+  const out = new Set();
+  for (const id of Object.keys(R.nodes)) {
+    const n = R.nodes[id];
+    if (n.state === 'trimmed' && n.set && n.set.on === false && deviceFor(n) === 'switch_single') for (const c of switchControls(R, id, classes)) out.add(c);
+  }
+  return out;
+}
+// A circuit from its panel slot, box to box in the order the cable reaches them: [{ node, run, from, depth, ok, why }].
+// A run not finished stops the walk there; `why` names what is missing (the tester at the panel shows it in red).
+export function circuitWalk(R, slotId, classes = SERVICE_CLASSES) {
+  const adj = cableGraph(R, classes), hops = [], seen = new Set([slotId]), runs = new Set(), q = [{ id: slotId, depth: 0 }];
+  while (q.length) {
+    const { id, depth } = q.shift();
+    for (const e of adj[id] || []) {
+      if (runs.has(e.run.id)) continue;
+      runs.add(e.run.id);
+      const rs = runState(e.run, classes[e.run.cls]), n = R.nodes[e.to];
+      if (!rs.complete) { hops.push({ node: e.to, run: e.run.id, from: id, depth: depth + 1, ok: false, why: TRIM_TEXT.faults[rs.next] || rs.next }); continue; }
+      if (seen.has(e.to)) continue;
+      seen.add(e.to);
+      const bad = n && n.state === 'planned' && n.kind !== 'slot';
+      hops.push({ node: e.to, run: e.run.id, from: id, depth: depth + 1, ok: !bad, why: bad ? TRIM_TEXT.faults.box : null });
+      q.push({ id: e.to, depth: depth + 1 });
+    }
+  }
+  return hops;
 }
 // a command of another system, run now with that system's own context (the way construction moves money through stock)
 function callAs(ctx, sysName, name, payload) {
@@ -183,11 +320,11 @@ function callAs(ctx, sysName, name, payload) {
 const builtLining = (pr, host) => !!pr && Object.keys(pr.members).some((id) => { const m = pr.members[id]; return m.kind === 'lining' && m.parent === host && m.built; }) || !!(pr && pr.members[host + '.ln'] && pr.members[host + '.ln'].built);
 
 export function servicesSystem({ classes = SERVICE_CLASSES, routesName = 'routes' } = {}) {
-  const ensure = (ctx) => { if (!ctx.s || ctx.s.v !== STATE_V) ctx.s = fresh(); if (!ctx.s.want) { ctx.s.want = {}; ctx.s.routesV = -1; } return ctx.s; };   // a save from before S8: work the lines out again
+  const ensure = (ctx) => { if (!ctx.s || ctx.s.v !== STATE_V) ctx.s = fresh(); if (!ctx.s.want) { ctx.s.want = {}; ctx.s.routesV = -1; } if (!ctx.s.mains) ctx.s.mains = {}; return ctx.s; };   // a save from before S8: work the lines out again
   const compile = (ctx) => {
     const s = ensure(ctx), R = ctx.get(routesName);
     if (!R || R.version === s.routesV) return s;
-    const c = compileServices(R, classes);
+    const c = compileServices(R, classes, { mains: s.mains });
     const sig = JSON.stringify([c.powerPieces, c.waterPieces]);
     if (sig !== s.sig) {                                                     // same arrays (so the same networks) when nothing changed
       s.powerPieces = c.powerPieces; s.waterPieces = c.waterPieces; s.pieces = c.powerPieces.concat(c.waterPieces);
@@ -218,7 +355,7 @@ export function servicesSystem({ classes = SERVICE_CLASSES, routesName = 'routes
     for (const f of Object.keys(s.want)) {
       const pr = CN.progress[f], w = s.want[f];
       if (!pr) continue;
-      const have = pr.extLines && pr.extLines.services;
+      const have = (kept(pr, 'extLines') || {}).services;
       if (have && have.sig === w.sig) continue;
       const t = s.tally[f] || {};
       for (const st of [ROUGH, TRIM]) callAs(ctx, 'construction', 'construction.setExternal', { structId: f, stage: st, built: (t[st] || [0, 0])[0], total: (t[st] || [0, 0])[1] });
@@ -227,6 +364,121 @@ export function servicesSystem({ classes = SERVICE_CLASSES, routesName = 'routes
   };
   const recount = (ctx) => { const s = ensure(ctx); s.routesV = -1; compile(ctx); link(ctx); };
   const routes = (ctx, cmd, p) => callAs(ctx, routesName, routesName + '.' + cmd, p) || { ok: false, reason: 'no routes' };
+
+  // material from the building's lines: null when there is enough (or the building counts nothing), else the refusal
+  function lack(ctx, f, need) {
+    for (const [itemId, qty] of Object.entries(need)) {
+      const c = callAs(ctx, 'construction', 'construction.use', { structId: f, itemId, qty, from: 'stacks', check: true });
+      if (c && !c.ok && c.reason !== 'not in the plan') return { ok: false, reason: c.reason, itemId, need: qty, have: c.have };
+    }
+    return null;
+  }
+  function useAll(ctx, f, need) { for (const [itemId, qty] of Object.entries(need)) callAs(ctx, 'construction', 'construction.use', { structId: f, itemId, qty, from: 'stacks' }); }
+
+  // Trim-out by hand, one gesture: { node, step?, n? }. n: how many of the step one gesture does (the Build panel's
+  // per-gesture setting): ends stripped or landed at this box, or breakers pressed into this panel. Fold and plate are both
+  // clicks, so a gesture of two or more folds the device in and puts its plate on.
+  function trim(ctx, p = {}) {
+    const s = ensure(ctx), R = ctx.get(routesName), n = R && R.nodes[p.node];
+    if (!n) return { ok: false, reason: 'no such box' };
+    const ti = trimInfo(R, n, classes, s.deferred);
+    if (!ti) return { ok: false, reason: 'nothing to fit there' };
+    if (ti.trimmed) return { ok: true, done: 0, trimmed: true, node: n.id };
+    if (!ti.ready) return { ok: false, reason: ti.reason };
+    const step = p.step || ti.next, want = Math.max(1, p.n | 0 || 1);
+    if (step !== ti.next) return { ok: false, reason: 'First ' + TRIM_TEXT.steps[ti.next] + '.', need: ti.next };
+    const work = [[step, Math.min(want, ti.units[step] - ti.done[step])]];
+    if (step === 'fold' && want >= 2) work.push(['plate', 1]);
+    const more = [];                                                     // the next slots of the same panel, for a press of several
+    if (step === 'press' && want > 1) for (const id of Object.keys(R.nodes).sort()) {
+      if (more.length >= want - 1) break;
+      const o = R.nodes[id];
+      if (o === n || o.kind !== 'slot' || o.frame !== n.frame || panelKey(o) !== panelKey(n) || o.state === 'trimmed') continue;
+      const oi = trimInfo(R, o, classes, s.deferred);
+      if (oi && oi.ready) more.push(oi);
+    }
+    const need = {}, done = { ...ti.done };
+    for (const [st, k] of work) { addTo(need, trimCost(n.kind, ti.device, st, k, done, ti.breaker)); done[st] += k; }
+    for (const oi of more) addTo(need, trimCost('slot', null, 'press', 1, {}, oi.breaker));
+    const miss = lack(ctx, n.frame, need);
+    if (miss) return miss;
+    const fin = ti.steps.every((st) => done[st] >= ti.units[st]);
+    if (ti.device && !(n.set && n.set.device)) routes(ctx, 'setNode', { id: n.id, key: 'device', value: ti.device });
+    if (n.kind !== 'slot') routes(ctx, 'setNode', { id: n.id, key: 'trim', value: done });
+    const pressed = [];
+    for (const x of fin ? [n, ...more.map((oi) => R.nodes[oi.node])] : []) {
+      routes(ctx, 'setNode', { id: x.id, state: 'trimmed' });
+      if (x.kind === 'slot') { pressed.push(x.id); if (s.mains[panelKey(x)] === undefined) s.mains[panelKey(x)] = false; }   // you work with the main off
+    }
+    useAll(ctx, n.frame, need);
+    recount(ctx);
+    ctx.emit('services.trim', { node: n.id, step, trimmed: fin });
+    return { ok: true, node: n.id, step, did: work.map(([st, k]) => ({ step: st, n: k })), trimmed: fin, pressed, used: need, next: fin ? null : trimInfo(R, n, classes, s.deferred).next };
+  }
+  // choose what goes in a box, until the first wire is on it: { node, device }
+  function device(ctx, p = {}) {
+    const s = ensure(ctx), R = ctx.get(routesName), n = R && R.nodes[p.node];
+    const ti = n && trimInfo(R, n, classes, s.deferred);
+    if (!ti || n.kind === 'slot') return { ok: false, reason: 'no such box' };
+    if (!DEVICE_ITEM[p.device] || !DEVICE_ITEM[p.device].fits.includes(n.kind)) return { ok: false, reason: 'that does not go in this box' };
+    if (ti.done.land > 0 || ti.trimmed) return { ok: false, reason: 'the wires are already on it' };
+    routes(ctx, 'setNode', { id: n.id, key: 'device', value: p.device });
+    recount(ctx);
+    return { ok: true, device: p.device };
+  }
+  // the panel's main breaker: { panel | node, on }. Off, nothing after it has power.
+  function main(ctx, p = {}) {
+    const s = ensure(ctx), R = ctx.get(routesName);
+    const k = p.panel != null ? String(p.panel) : R && R.nodes[p.node] ? panelKey(R.nodes[p.node]) : null;
+    if (k == null) return { ok: false, reason: 'no such panel' };
+    const on = p.on === undefined ? s.mains[k] === false : !!p.on;
+    s.mains[k] = on;
+    recount(ctx);
+    ctx.emit('services.main', { panel: k, on });
+    return { ok: true, panel: k, on };
+  }
+  // one breaker's handle: { node, on }. A tripped one is reset by throwing it on (through off: one drag).
+  function breaker(ctx, p = {}) {
+    const s = ensure(ctx), R = ctx.get(routesName), n = R && R.nodes[p.node];
+    if (!n || n.kind !== 'slot') return { ok: false, reason: 'no such breaker' };
+    if (n.state !== 'trimmed') return { ok: false, reason: TRIM_TEXT.steps.press + ' first' };
+    const E = ctx.get('electrical'), b = E && E.breakers ? E.breakers['sv:br:' + n.id] : null, tripped = !!(b && b.tripped);
+    const on = p.on === undefined ? tripped || (n.set && n.set.on === false) : !!p.on;
+    if (tripped && on) callAs(ctx, 'electrical', 'electrical.resetBreaker', { id: 'sv:br:' + n.id });
+    if (!!(n.set && n.set.on === false) === on) routes(ctx, 'setNode', { id: n.id, key: 'on', value: on });
+    recount(ctx);
+    return { ok: true, on, reset: tripped && on };
+  }
+  // a wall switch clicked: { node, on? }. The lights it controls follow at once.
+  function flip(ctx, p = {}) {
+    const s = ensure(ctx), R = ctx.get(routesName), n = R && R.nodes[p.node];
+    if (!n || n.state !== 'trimmed' || deviceFor(n) !== 'switch_single') return { ok: false, reason: 'no switch there' };
+    const on = p.on === undefined ? !!(n.set && n.set.on === false) : !!p.on;
+    routes(ctx, 'setNode', { id: n.id, key: 'on', value: on });
+    const ctl = switchControls(R, n.id, classes), dark = switchedOff(R, classes);
+    for (const id of ctl) callAs(ctx, 'electrical', 'electrical.switch', { pieceId: 'sv:' + id, on: !dark.has(id) });
+    recount(ctx);
+    return { ok: true, on, controls: ctl };
+  }
+  // the tester clipped on at the panel: every circuit walked from its slot, box to box. { structId, kind: 'power' }
+  function check(ctx, p = {}) {
+    const s = ensure(ctx), R = ctx.get(routesName), f = p.structId != null ? String(p.structId) : null;
+    if (!R || f == null) return { ok: false, reason: 'unknown building' };
+    if ((p.kind || 'power') !== 'power') return { ok: false, reason: 'only power can be tested yet' };
+    const slots = Object.keys(R.nodes).sort().filter((id) => R.nodes[id].frame === f && R.nodes[id].kind === 'slot' && !R.nodes[id].stray && cableRunsAt(R, id, classes).length);
+    if (!slots.length) return { ok: false, reason: 'No circuit starts at a panel in this building.' };
+    const circuits = slots.map((slot) => ({ slot, hops: circuitWalk(R, slot, classes) })), reached = new Set(slots), faults = [];
+    for (const c of circuits) for (const h of c.hops) { reached.add(h.node); if (!h.ok) faults.push({ slot: c.slot, node: h.node, run: h.run, why: h.why }); }
+    for (const id of Object.keys(R.runs).sort()) {
+      const r = R.runs[id];
+      if (r.frame !== f || !isPower(classes, r) || r.stray || s.deferred[id] || reached.has(r.a) || reached.has(r.b)) continue;
+      faults.push({ slot: null, node: r.b, run: id, why: TRIM_TEXT.faults.loose });
+    }
+    const res = { pass: !faults.length, t: ctx.state.t, circuits, faults };
+    s.checks[f] = { ...(s.checks[f] || {}), power: res };
+    ctx.emit('services.checked', { structId: f, kind: 'power', pass: res.pass });
+    return { ok: true, ...res };
+  }
 
   // "Close up anyway": what is not roughed in on this building leaves the tally and stays as plan lines
   function defer(ctx, p = {}) {
@@ -279,18 +531,35 @@ export function servicesSystem({ classes = SERVICE_CLASSES, routesName = 'routes
     }
     if (stage === TRIM) {
       const kinds = new Set(Object.values(classes).flatMap((c) => (c.phases && c.phases.trim) || []));
-      let done = 0, waiting = 0;
+      let waiting = 0;
+      const todo = [];
       for (const id of ids(R.nodes)) {
         const n = R.nodes[id];
         if (n.frame !== f || n.stray || n.state === 'trimmed' || !kinds.has(n.kind) || s.deferred[id]) continue;
         const ends = Object.values(R.runs).filter((r) => (r.a === id || r.b === id) && !s.deferred[r.id] && classes[r.cls]);
         if (!ends.length || ends.some((r) => !runState(r, classes[r.cls]).complete) || (n.state === 'planned' && n.kind !== 'slot')) { waiting++; continue; }
-        // a device in each box that has none chosen yet: a light in a ceiling box, an outlet in a wall box
-        if (!(n.set && n.set.device)) { const dev = n.kind === 'box_ceiling' ? 'light_ceiling' : n.kind === 'box' ? 'outlet_120v' : null; if (dev) routes(ctx, 'setNode', { id, key: 'device', value: dev }); }
-        if (routes(ctx, 'setNode', { id, state: 'trimmed' }).ok) done++;
+        todo.push(n);
       }
+      if (!todo.length) return { ok: false, reason: waiting ? 'rough-in first' : 'nothing to trim', waiting };
+      // every device, plate and breaker comes off the stacks: all of it there, or nothing is done
+      const need = {};
+      for (const n of todo) addTo(need, fullTrimCost(R, n, classes, s.deferred));
+      const miss = lack(ctx, f, need);
+      if (miss) return miss;
+      const panels = new Set();
+      for (const n of todo) {
+        const ti = trimInfo(R, n, classes, s.deferred);
+        if (ti) {
+          if (ti.device && !(n.set && n.set.device)) routes(ctx, 'setNode', { id: n.id, key: 'device', value: ti.device });
+          if (n.kind !== 'slot') routes(ctx, 'setNode', { id: n.id, key: 'trim', value: { ...ti.units } });
+          if (n.kind === 'slot') panels.add(panelKey(n));
+        }
+        routes(ctx, 'setNode', { id: n.id, state: 'trimmed' });
+      }
+      useAll(ctx, f, need);
+      for (const k of panels) s.mains[k] = true;                             // and the main thrown: it is all done
       recount(ctx);
-      return done ? { ok: true, nodes: done, waiting } : { ok: false, reason: waiting ? 'rough-in first' : 'nothing to trim', waiting };
+      return { ok: true, nodes: todo.length, waiting, used: need };
     }
     return { ok: false, reason: 'unknown stage' };
   }
@@ -301,7 +570,7 @@ export function servicesSystem({ classes = SERVICE_CLASSES, routesName = 'routes
     if (!p.host) return { ok: false, reason: 'no wall' };
     const ids = [];
     // the paint, the taped seams and the lining first (every sheet or board on the wall, or an older plan's single piece), then the batts
-    for (const id of Object.keys(pr.members).sort()) { const m = pr.members[id]; if ((m.kind === 'joint' || m.kind === 'lining' || m.kind === 'prime' || m.kind === 'paint' || id === p.host + '.ln') && m.stage !== 'subfloor' && m.parent === p.host && (m.built || m.got > 0 || m.coat > 0)) ids.push(id); }
+    for (const id of Object.keys(pr.members).sort()) { const m = pr.members[id]; if ((m.kind === 'joint' || m.kind === 'lining' || m.kind === 'prime' || m.kind === 'paint' || m.kind === 'casing' || m.kind === 'base' || m.kind === 'stool' || m.kind === 'caulk' || id === p.host + '.ln') && m.stage !== 'subfloor' && m.parent === p.host && (m.built || m.got > 0 || m.coat > 0)) ids.push(id); }
     for (const id of Object.keys(pr.members).sort()) { const m = pr.members[id]; if (m.stage === 'insulation' && m.parent === p.host && (m.built || m.got > 0)) ids.push(id); }
     if (!ids.length) return { ok: false, reason: 'nothing covers it' };
     const r = callAs(ctx, 'construction', 'construction.dismantle', { structId: p.structId, memberIds: ids, local: true }) || { ok: false, reason: 'no construction' };
@@ -316,10 +585,18 @@ export function servicesSystem({ classes = SERVICE_CLASSES, routesName = 'routes
       'services.defer': defer,
       'services.auto': auto,
       'services.openWall': openWall,
+      'services.trim': trim,
+      'services.device': device,
+      'services.main': main,
+      'services.breaker': breaker,
+      'services.flip': flip,
+      'services.check': check,
     },
     // for page add-ons (global scripts cannot import): the content tables and the pure read-outs
     api: { classes, specs: SERVICE_SPECS, devices: DEVICES, nodeKinds: NODE_KINDS, compileServices: (R) => compileServices(R, classes), overlayData, runInfo,
-      presets: PRESETS_M, routeRule, boreCheck, workCost, runCostLeft, nodeCost, stapleMarks, fixings: FIXINGS, coveredHosts },
+      presets: PRESETS_M, routeRule, boreCheck, workCost, runCostLeft, nodeCost, stapleMarks, fixings: FIXINGS, coveredHosts,
+      trimInfo: (R, n, deferred) => trimInfo(R, n, classes, deferred), switchControls: (R, id) => switchControls(R, id, classes), circuitWalk: (R, slot) => circuitWalk(R, slot, classes),
+      deviceFor, panelKey, breakerFor: (R, id) => breakerFor(R, id, classes), deviceItems: DEVICE_ITEM, trimText: TRIM_TEXT, isLight: deviceIsLight },
   };
 }
 export const services = servicesSystem();
@@ -368,7 +645,7 @@ export function overlayData(state) {
   const brk = (E && E.breakers) || {};
   const nodes = Object.keys(R.nodes).sort().map((id) => {
     const n = R.nodes[id], br = brk['sv:br:' + id];
-    return { id, kind: n.kind, frame: n.frame, state: n.state, device: n.set && n.set.device, tripped: !!(br && br.tripped) };
+    return { id, kind: n.kind, frame: n.frame, state: n.state, device: n.set && n.set.device, tripped: !!(br && br.tripped), on: !(n.set && n.set.on === false) };
   });
   return { runs, nodes };
 }

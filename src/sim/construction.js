@@ -9,11 +9,13 @@
 //     unlocked: [...], tutorial: { card, shed, seen: { [stage]: true }, done }, options: { sandbox, instant, cards, auto, mute }, finished }
 //   progress[..].lines[key]   = { stage, itemId, qty, unit, label, why, count, supply, ordered, used }
 //   progress[..].members[id]  = { stage, kind, parent, line, need, got, built }
-//   progress[..].ext[stage]   = [built, total]: work another system tallies (services: rough-in, trim-out), added to the tally
-//   progress[..].extLines[source] = { sig, lines }: that system's shopping lines, merged into lines (marked `ext`)
+//   progress[..].keep[source] = whatever another system keeps on the building; setPlan carries the whole bag over (keepOf, kept)
+//   progress[..].keep.ext[stage]   = [built, total]: work another system tallies (services: rough-in, trim-out), added to the tally
+//   progress[..].keep.extLines[source] = { sig, lines }: that system's shopping lines, merged into lines (marked `ext`)
 // Build mode owns the shape of a building; the page hands its members and shopping lines to construction.setPlan.
 // Commands return { ok, reason? ... } and change nothing when they fail.
 
+import { keepOf, kept } from './core/keep.js';
 import { ITEMS } from './items.js';
 import * as SUP from './core/supply.js';
 import * as C from './content/construction.js';
@@ -194,6 +196,7 @@ export function cutList(pr, key) {
 // ---------------------------------------------------------------- reading a building's progress (pure)
 const membersOfStage = (pr, stage) => Object.keys(pr.members).filter((id) => pr.members[id].stage === stage);
 // the frames of a lie-flat stage, in the order they are put together
+export { keepOf, kept };
 export function flatParents(pr, stage) {
   const out = [];
   for (const id in pr.members) { const m = pr.members[id]; if (m.stage === stage && !out.includes(m.parent)) out.push(m.parent); }
@@ -217,7 +220,7 @@ export function stageSatisfied(pr, stage, seen = {}) {
 export function stageOpen(pr, stage) {
   const def = C.STAGE[stage];
   if (!def) return false;
-  if (pr.hold && pr.hold[stage]) return false;      // held by another system (green concrete: construction.setHold)
+  if (kept(pr, 'hold') && kept(pr, 'hold')[stage]) return false;      // held by another system (green concrete: construction.setHold)
   const seen = {};
   return def.needs.every((n) => stageSatisfied(pr, n, seen));
 }
@@ -245,7 +248,7 @@ export function blocked(pr, id) {
   if (m.built) return 'already built';
   const def = C.STAGE[m.stage];
   if (!def) return 'not part of the build';
-  if (pr.hold && pr.hold[m.stage]) return pr.hold[m.stage];
+  { const h = kept(pr, 'hold'); if (h && h[m.stage]) return h[m.stage]; }
   if (!stageOpen(pr, m.stage)) return 'stage not open';
   if (def.parentFirst) for (const o in pr.members) { const q = pr.members[o]; if (!q.built && q.parent === m.parent && def.parentFirst.includes(q.stage)) return 'frame not finished'; }
   if (def.flat && flatCurrent(pr, m.stage) !== m.parent) return 'one frame at a time';
@@ -384,7 +387,8 @@ function ensureCard(ctx, s) {
 function retally(pr) {
   pr.tally = {};
   for (const id in pr.members) { const m = pr.members[id]; const t = pr.tally[m.stage] || (pr.tally[m.stage] = [0, 0]); t[1]++; if (m.built) t[0]++; }
-  for (const st in pr.ext || {}) { const e = pr.ext[st]; if (!e || !(e[1] > 0)) continue; const t = pr.tally[st] || (pr.tally[st] = [0, 0]); t[0] += e[0]; t[1] += e[1]; }
+  const xe = kept(pr, 'ext') || {};
+  for (const st in xe) { const e = xe[st]; if (!e || !(e[1] > 0)) continue; const t = pr.tally[st] || (pr.tally[st] = [0, 0]); t[0] += e[0]; t[1] += e[1]; }
 }
 function refresh(ctx, s, pr) {
   const was = pr.done;
@@ -548,9 +552,7 @@ function setPlan(ctx, p) {
   if (!s.waste) s.waste = {};
   requote(s, pr);
   if (old) for (const k in old.raised) pr.raised[k] = true;
-  if (old && old.ext) pr.ext = JSON.parse(JSON.stringify(old.ext));               // work another system tallies stays with the building
-  if (old && old.extLines) pr.extLines = JSON.parse(JSON.stringify(old.extLines));
-  if (old && old.hold && Object.keys(old.hold).length) pr.hold = { ...old.hold };   // holds belong to another system (construction.setHold): a plan sent again keeps them
+  if (old) { const ok = keepOf(old); if (Object.keys(ok).length) pr.keep = JSON.parse(JSON.stringify(ok)); }   // what other systems keep (work they tally, their lines, holds) stays with the building, whole
   if (!old) for (const st of C.STAGES) if (st.flat) for (const par of flatParents(pr, st.id)) if (frameReady(pr, st.id, par)) pr.raised[par] = true;
   retally(pr);
   if (!pr.lines[LADDER_KEY] && C.LADDER.with.some((st) => pr.tally[st] && pr.tally[st][1]) && item(C.LADDER.itemId)) {   // work at height is done from a ladder: it comes with the order
@@ -558,7 +560,7 @@ function setPlan(ctx, p) {
     pr.lines[LADDER_KEY] = { stage: C.LADDER.stage, itemId: C.LADDER.itemId, qty: 1, unit: 'each', label: 'Ladder', why: C.LADDER.why, count: 1, supply: false, ordered: o ? o.ordered : 0, used: o ? o.used : 0 };
   }
   for (const key in pr.lines) { const ln = pr.lines[key]; if (ln.supply) { const t = pr.tally[ln.stage]; ln.used = old && old.lines[key] ? Math.min(old.lines[key].used, ln.qty) : 0; if (!old && t && t[1]) ln.used = round6((ln.qty * t[0]) / t[1]); } }
-  if (old && old.extLines) applyExtLines(s, pr, old.lines);
+  if (old && kept(old, 'extLines')) applyExtLines(s, pr, old.lines);
   // what a piece picked up in play (cut at the sawhorses, coats of mud, when it went in), carried over after the plan's own
   // fields, in the order play adds them, so a plan sent again unchanged (as after a reload) leaves the record exactly as it was
   if (old) for (const id in pr.members) {
@@ -639,7 +641,8 @@ function land(ctx, s, id) {
   const r = SUP.deliver(s, id, C.DELIVERY.layout);
   // the wheelbarrow stands beside the stacks on the side away from the building (the stacks run +x from the drop point), never on its footprint
   if (r.ok && !s.barrow) { const pb = r.delivery.tag && s.progress[r.delivery.tag.structId], away = pb && Number.isFinite(pb.x) && pb.x < r.delivery.x ? 6.2 : -2.4; s.barrow = { x: round6(r.delivery.x + away), z: round6(r.delivery.z + 1.2), yaw: 0.6, held: false }; }
-  if (r.ok && !s.horses && r.delivery.lines.some((l) => C.isStickItem(l.itemId))) { const pr = r.delivery.tag && s.progress[r.delivery.tag.structId]; if (pr) setUpHorses(s, pr, r.delivery.x, r.delivery.z); }
+  // the sawhorses come with the first lumber for a building, unless they are already by it: left at an earlier site, they move to this one
+  if (r.ok && r.delivery.lines.some((l) => C.isStickItem(l.itemId))) { const pr = r.delivery.tag && s.progress[r.delivery.tag.structId]; if (pr && (!s.horses || Math.hypot(s.horses.x - pr.x, s.horses.z - pr.z) > (pr.r || 3) + 12)) setUpHorses(s, pr, r.delivery.x, r.delivery.z); }
   if (r.ok) ctx.emit('construction.delivered', { deliveryId: id, stacks: r.stacks, x: r.delivery.x, z: r.delivery.z, tag: r.delivery.tag });
   return r;
 }
@@ -790,11 +793,13 @@ function putDownCmd(ctx, p) {
 // under them; the sanding pass after the last coat needs neither material nor anything but dry mud
 // the coats of each kind of piece that goes on wet: seams (three coats then sanding), primer (one), paint (two, over dry
 // primer). The last coat builds a primed or painted piece; it stays wet (dryAt) a while, which the view shows
-const COATS = { joint: () => ({ coats: C.FINISH.coats, dryS: C.FINISH.dryS, sand: true }), prime: () => ({ ...C.DECOR.prime, sand: false }), paint: () => ({ ...C.DECOR.paint, sand: false }) };
+const COATS = { joint: () => ({ coats: C.FINISH.coats, dryS: C.FINISH.dryS, sand: true }), prime: () => ({ ...C.DECOR.prime, sand: false }), paint: () => ({ ...C.DECOR.paint, sand: false }),
+  caulk: () => ({ coats: 1, dryS: 1800, sand: false }) };     // a bead of caulk along a piece of trim: on once it is nailed up, dry in half an hour
 export const isCoat = (kind) => !!COATS[kind];
 function mudPass(ctx, s, pr, m, ln, fromStacks, id) {
   const t = ctx.state.t, F = COATS[m.kind](), coat = m.coat || 0;
   if (m.dryAt && t + 1e-6 < m.dryAt) return { reason: 'wet', waitS: round6(m.dryAt - t) };
+  if (m.kind === 'caulk') { const tp = pr.members[String(id).replace(/\.ck$/, '')]; if (tp && !tp.built) return { reason: 'set the trim first' }; }
   if (m.kind === 'paint') {        // over its primer, dry
     const pm = pr.members[String(id).replace('.pt', '.pr')];
     if (pm && !pm.built) return { reason: 'prime first' };
@@ -827,9 +832,9 @@ function install(ctx, p) {
   for (const id of p.memberIds || []) {
     const m = pr.members[id];
     const why = blocked(pr, id);
-    if (why) { out.refused.push({ id, reason: why, missing: why === 'support missing' ? supportMissing(pr, id) : undefined, held: m && pr.hold && pr.hold[m.stage] ? 1 : undefined }); break; }
+    if (why) { out.refused.push({ id, reason: why, missing: why === 'support missing' ? supportMissing(pr, id) : undefined, held: m && kept(pr, 'hold') && kept(pr, 'hold')[m.stage] ? 1 : undefined }); break; }
     const ln = m.line ? pr.lines[m.line] : null;
-    if (m.kind === 'joint' || m.kind === 'prime' || m.kind === 'paint') {      // a coat at a time: a seam (tape, fill, finish, sanding), primer, paint
+    if (COATS[m.kind]) {      // a coat at a time: a seam (tape, fill, finish, sanding), primer, paint, a bead of caulk
       const r = mudPass(ctx, s, pr, m, ln, fromStacks, id);
       if (!r.ok) { out.refused.push({ id, ...r }); break; }
       if (r.built) { pr.tally[m.stage][0]++; out.installed.push(id); } else out.set.push(id);
@@ -969,7 +974,7 @@ function dismantle(ctx, p) {
       if (!s.offcuts) s.offcuts = {};
       (s.offcuts[ln.itemId] || (s.offcuts[ln.itemId] = [])).push(m.area);
       m.cut = null;
-    } else if (ln && m.got > 0 && m.kind !== 'joint' && m.kind !== 'prime' && m.kind !== 'paint') {      // (seams, primer and paint: what was spread is spent, nothing comes back)
+    } else if (ln && m.got > 0 && !COATS[m.kind]) {      // (seams, primer, paint and caulk: what was spread is spent, nothing comes back)
       SUP.giveBack(s, ln.itemId, m.got, at.x, at.z, C.DELIVERY.layout);
       ln.used = round6(ln.used - m.got);
       out.returned[ln.itemId] = round6((out.returned[ln.itemId] || 0) + m.got);
@@ -995,10 +1000,10 @@ function setExternal(ctx, p) {
   if (!pr) return { ok: false, reason: 'unknown building' };
   if (!C.STAGE[p.stage]) return { ok: false, reason: 'unknown stage' };
   const total = Math.max(0, Math.round(+p.total || 0)), built = Math.max(0, Math.min(total, Math.round(+p.built || 0)));
-  if (!pr.ext) pr.ext = {};
-  const was = pr.ext[p.stage] || [0, 0];
+  const ext = keepOf(pr).ext || (pr.keep.ext = {});
+  const was = ext[p.stage] || [0, 0];
   if (was[0] === built && was[1] === total) return { ok: true, changed: false };
-  if (total > 0) pr.ext[p.stage] = [built, total]; else delete pr.ext[p.stage];
+  if (total > 0) ext[p.stage] = [built, total]; else delete ext[p.stage];
   const before = stageComplete(pr, p.stage);
   retally(pr);
   refresh(ctx, s, pr);
@@ -1012,7 +1017,8 @@ function applyExtLines(s, pr, prev) {
   for (const key in prev) if (prev[key].ext) keep[key] = { ordered: prev[key].ordered, used: prev[key].used, stage: prev[key].stage, itemId: prev[key].itemId, label: prev[key].label, why: prev[key].why, ext: prev[key].ext };
   for (const key of Object.keys(pr.lines)) if (pr.lines[key].ext) delete pr.lines[key];
   const want = {};
-  for (const src in pr.extLines || {}) for (const l of pr.extLines[src].lines) want[l.key] = { ...l, ext: src };
+  const xl = kept(pr, 'extLines') || {};
+  for (const src in xl) for (const l of xl[src].lines) want[l.key] = { ...l, ext: src };
   for (const key of new Set([...Object.keys(keep), ...Object.keys(want)])) {
     const o = keep[key], w = want[key] || { ...o, qty: 0, count: 0 }, it = item(w.itemId);
     const used = o ? o.used : 0, ordered = o ? o.ordered : 0, qty = round6(Math.max(+w.qty || 0, used));
@@ -1029,8 +1035,8 @@ function setExtLines(ctx, p) {
     if (!l || !C.STAGE[l.stage] || !item(l.itemId) || !(+l.qty >= 0)) return { ok: false, reason: 'bad line', itemId: l && l.itemId };
     lines.push({ key: String(l.key || l.stage + '|' + p.source + ':' + l.itemId), stage: l.stage, itemId: l.itemId, qty: round6(+l.qty), label: l.label || '', why: l.why || '', count: Math.max(0, Math.round(+l.count || 0)) });
   }
-  if (!pr.extLines) pr.extLines = {};
-  pr.extLines[p.source] = { sig: p.sig === undefined ? null : p.sig, lines };
+  const xl = keepOf(pr).extLines || (pr.keep.extLines = {});
+  xl[p.source] = { sig: p.sig === undefined ? null : p.sig, lines };
   applyExtLines(s, pr, pr.lines);
   ctx.emit('construction.extLines', { structId: pr.id, source: p.source });
   return { ok: true, lines: lines.length };
@@ -1119,7 +1125,7 @@ export const constructionSystem = () => ({
       const pr = c.s.progress[p && p.structId];
       if (!pr) return { ok: false, reason: 'unknown building' };
       const done = [];
-      for (const id of p.memberIds || []) { const m = pr.members[id]; if (!m || m.built || m.kind === 'site') continue; m.got = m.need; m.built = 1; m.builtAt = round6(ctx.state.t); pr.tally[m.stage][0]++; done.push(id); }
+      for (const id of p.memberIds || []) { const m = pr.members[id]; if (!m || m.built || m.kind === 'site') continue; m.got = m.need; m.built = 1; m.builtAt = round6(c.state.t); pr.tally[m.stage][0]++; done.push(id); }
       if (done.length) refresh(c, c.s, pr);
       return { ok: done.length > 0, settled: done };
     },
@@ -1128,8 +1134,8 @@ export const constructionSystem = () => ({
       const pr = c.s.progress[p && p.structId], stages = p && (Array.isArray(p.stages) ? p.stages : [p.stage]);
       if (!pr) return { ok: false, reason: 'unknown building' };
       if (!stages.length || !stages.every((st) => C.STAGE[st])) return { ok: false, reason: 'unknown stage' };
-      if (!pr.hold) pr.hold = {};
-      for (const st of stages) if (p.reason) pr.hold[st] = String(p.reason); else delete pr.hold[st];
+      const hold = keepOf(pr).hold || (pr.keep.hold = {});
+      for (const st of stages) if (p.reason) hold[st] = String(p.reason); else delete hold[st];
       refresh(c, c.s, pr);
       c.emit('construction.hold', { structId: pr.id, stages, reason: p.reason || null });
       return { ok: true };
@@ -1159,5 +1165,5 @@ export const constructionSystem = () => ({
     'construction.setExtLines': setExtLines,
     'construction.use': useExt,
   },
-  api: { content: C, wantItem, nextCut, liningCovered, feelOf: (s) => C.feelOf(s), knows: (s, kind) => !!(s.learn && s.learn.known[C.learnGroup(kind)]), sheetSource, needsStock, stockNeed, stickSource, stickImbalance, cutList, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance, carrierKg },
+  api: { content: C, wantItem, nextCut, liningCovered, feelOf: (s) => C.feelOf(s), knows: (s, kind) => !!(s.learn && s.learn.known[C.learnGroup(kind)]), sheetSource, needsStock, stockNeed, stickSource, stickImbalance, cutList, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, keepOf, kept, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance, carrierKg },
 });

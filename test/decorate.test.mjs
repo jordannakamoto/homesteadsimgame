@@ -84,7 +84,7 @@ test('a new colour on a painted wall: two more coats over the primer, which stay
 test('the trim takes its own colour: two coats on each board, no primer (it comes primed), after the siding', () => {
   const { sim, mem, pr } = start({ walls: 'sage_eggshell', trim: 'chalk_semigloss' });
   // the siding trim outside, and the casings and baseboard inside (docs/design/carpentry.md)
-  const trim = mem.filter((m) => (m.kind === 'cladding' && m.type === 'trim') || m.kind === 'casing' || m.kind === 'base'), tp = mem.filter((m) => m.kind === 'paint' && m.surface === 'trim');
+  const trim = mem.filter((m) => (m.kind === 'cladding' && m.type === 'trim') || m.kind === 'casing' || m.kind === 'base' || m.kind === 'stool'), tp = mem.filter((m) => m.kind === 'paint' && m.surface === 'trim');
   assert.ok(trim.filter((m) => m.kind === 'cladding').length >= 4, 'corner boards and the window trim');
   assert.equal(tp.length, trim.length);
   assert.ok(tp.every((m) => m.fin === 'chalk_semigloss' && m.of && m.section.b > mem.find((q) => q.id === m.of).section.b && !mem.some((q) => q.id === m.id.replace('.pt', '.pr'))));

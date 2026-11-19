@@ -6,6 +6,7 @@ import { water, catchmentLmin, staticPressureKPa, hazenWilliamsHeadLossM, pumpHe
   overlayData, KPA_PER_M, frostDepthM } from '../src/sim/water.js';
 import { FIXTURES_WATER } from '../src/sim/fixtures-water.js';
 import { house, setSite, fixture, link } from './helpers/pieces.mjs';
+import { BENCH, benchOnly } from './helpers/bench.mjs';
 
 // Weather held at whatever the test sets.
 const fixedWeather = (w = {}) => ({
@@ -424,10 +425,10 @@ test('old saves without water state load, and with nothing installed the system 
   assert.equal(sim.state.sys.water.empty, true);
   const t0 = performance.now(); for (let i = 0; i < 20000; i++) water.step({ s: sim.state.sys.water, get: (n) => sim.state.sys[n], sim, dt: 60, t: 0, tick: 0 });
   const us = ((performance.now() - t0) / 20000) * 1000;
-  assert.ok(us < 1, 'empty step ' + us + ' us');
+  if (BENCH) assert.ok(us < 1, 'empty step ' + us + ' us');
 });
 
-test('performance: 40 water devices step in under 0.03 ms', () => {
+test('performance: 40 water devices step in under 0.03 ms', benchOnly, () => {
   const pieces = [];
   for (let k = 0; k < 4; k++) {
     const id = (s) => s + k, f = (fx, s, o = {}) => { const p = fixture(fx, { id: id(s), ...o }); pieces.push(p); return p; };

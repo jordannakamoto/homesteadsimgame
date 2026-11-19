@@ -76,7 +76,7 @@
     let h = '';
     slots.forEach((s, i) => {
       h += '<button type="button" class="hslot' + (s.dim ? ' dim' : '') + '" data-slot="' + s.id + '" aria-pressed="' + (cur && cur.id === s.id) + '" title="' + (s.title || s.name) + '">' +
-        (i < 9 ? '<span class="key">' + (i + 1) + '</span>' : '') + s.icon + '<span class="nm">' + s.name + '</span>' +
+        (i < 9 ? '<span class="key ui-key">' + (i + 1) + '</span>' : '') + s.icon + '<span class="nm">' + s.name + '</span>' +
         (s.badge != null ? '<span class="bdg">' + s.badge + '</span>' : '') +
         (s.meter != null ? '<span class="mtr"><i style="width:' + Math.round(clamp(s.meter, 0, 1) * 100) + '%"></i></span>' : '') + '</button>';
     });
@@ -165,6 +165,9 @@
   window.addEventListener('pointermove', (e) => {
     if (!cfg || (e.target !== canvas && !aim.down && !ptr.turning)) return;
     e.stopImmediatePropagation();
+    // a second button pressed or let go while the first is held comes as a move with the buttons changed (the
+    // pointer is already down), not as a new press: the right button during a left press is aim.second
+    if (aim.down && !aim.alt && e.pointerType === 'mouse') aim.second = !!(e.buttons & 2);
     if (e.pointerType === 'touch' && fingers.size > 1) {       // two fingers turn and tilt the view
       const f = fingers.get(e.pointerId); if (!f) return;
       turn(e.clientX - f.x, e.clientY - f.y); f.x = e.clientX; f.y = e.clientY; return;

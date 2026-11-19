@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createGameSim, calendar as C, CLIMATES, conditionWord, DAY, HOUR, START_T, TICK } from '../src/sim/index.js';
 import { dewPointFrom, saturationVapourHPa } from '../src/sim/weather.js';
+import { BENCH, benchOnly } from './helpers/bench.mjs';
 
 const DEG = Math.PI / 180;
 const at = (doy, hour, year = 0) => (doy - C.START_DAY_OF_YEAR + 365 * year) * DAY + hour * HOUR;   // world time of a date
@@ -219,7 +220,7 @@ test('the site can be changed by command, and bad sites are refused', () => {
   assert.ok(Math.abs(saturationVapourHPa(0) - 6.112) < 1e-9 && Math.abs(saturationVapourHPa(20) - 23.37) < 0.1);
 });
 
-test('a year of weather runs fast, well under 0.02 ms a step', () => {
+test('a year of weather runs fast, well under 0.02 ms a step', benchOnly, () => {
   const s = createGameSim(31);
   const sys = s.systems.find((x) => x.name === 'weather'), step = sys.step;
   let ms = 0, n = 0;

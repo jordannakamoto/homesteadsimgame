@@ -406,9 +406,10 @@ The ground is a physical thing now: a smooth surface you shape 10 cm at a time, 
 
 **The tools and how they move**
 
-- **Shovel.** The mouse is your hand on the shovel. Press where the blade should go in: it is stamped in (a stop and crumbs; quick in loose earth, a hard stamp in turf) and takes about half a blade. Hold still and it goes on sinking, deeper and fuller (faster in loose earth, slowly through turf and clay), with earth crumbling in from the rim. Drag and it levers up and comes with you: a ring shows where it will land, dots show the arc if it will be thrown, and you walk after your hand past arm's reach. Let go and it drops there; a plain click drops it beside the hole. Press a bag to rip it open. No screen shake.
-- **The flat of the blade (right-drag).** Drag it along the ground: loose earth in its way is pushed ahead of it, hollows it passes are filled from what it pushes, and what is left drops where you let go. The blade only goes down as you push (it starts a few centimetres into the ground where you press and follows the ground down), so pushed into a heap from beside it, it bulldozes the heap along; dragged off the top of a heap, it spreads it out. The ridge it pushes slumps as it goes and the sides of its track fall in behind it, so nothing stands up in walls or spires. Firm ground and turf are not cut.
-- **Pat it down (right-click).** The back of the blade slapped on the spot: lumps go, the slope stays, and the earth is firm (it no longer slides). Pat a bank to shape it, or a bed to level it.
+- **Shovel.** The mouse is your hand on the shovel. Press where the blade should go in: it bites (a stop and crumbs) and takes a first bite of earth. Keep the left button down and click the right one: the character puts a boot on the blade and stamps it deeper, taking more each time (a good bite in loose earth, a little through turf and clay) until the blade is full. Drag and it levers up and comes with you: a ring shows where it will land, dots show the arc if it will be thrown, and you walk after your hand past arm's reach. Let go and it drops there; a plain click drops it beside the hole. Press a bag to rip it open. No screen shake.
+- **The flat of the blade (right-drag).** Drag it along the ground: loose earth in its way is pushed ahead of it, hollows it passes are filled from what it pushes, and what is left drops where you let go. It holds about two thirds of a scoop; more spills off its ends to either side. It stops at firm ground standing above it (the wall of a hole, undug earth): it shapes what was dug, it does not dig. The blade only goes down as you push, so pushed into a heap from beside it, it moves the heap along; dragged off the top of a heap, it spreads it out. Nothing stands up in walls or spires.
+- **Pat it down (right-click).** The back of the blade slapped on the spot, about a metre across: lumps go at once, slopes flatten a little with each pat, and the earth is firm (it no longer slides). Pat a bank to shape it, or a bed to level it.
+- **Garden and shovel together.** Ground the shovel has broken hoes up faster: thrown earth turns into a bed in one stroke, dug-out or skimmed ground in half the strokes of turf. The hoe on shaped ground breaks the clods and smooths the lumps but keeps the shape and leaves it loose, so a hill you heaped is a hill of fine soil to plant. Beds are drawn as finely as the shaped ground and ease their raise and furrows off on slopes, so a dug shape shows through the bed.
 - **The view.** Q and E turn it, the wheel zooms, shift and the wheel tilt it, and the middle button drags it round. The yard opens on a lower view so the shape of the ground reads.
 - **Cut turf.** The shovel held flat: drag along the grass to strip the turf off in a strip.
 - **Materials arrive as things.** Wood chips, bark and bed soil come in 56 L bags set down in front of you (a ring marks the spot, and the store closes so you see them): drag one with your hands, rip it open with the shovel, then scoop the heap where it goes. Gravel, crushed stone, sand and the rest are tipped in a heap. Chips thrown straight on grass work, but the grass comes up through them in a week or two; fabric under them stops it.
@@ -883,6 +884,10 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - Old saves: a wall lined in one piece before this change counts its new sheets and seams as in, so finished buildings stay finished.
 - Known: `test/shed.e2e.mjs` still fails at the foundation (the pointer picks a neighbouring stack and puts it back), as noted above; not from this branch.
 
+## Key map, help on ? / F1, X means overlays (branch `wave2-k1-keys`)
+- **New:** `src/game/keymap.js` is one table of every key by context; the Controls sheet is drawn from it (combat rows only with `localStorage.combat`), and `__keymap.chip('E')` gives key chips for prompts. The sheet opens on `?` or F1 (H is the Hens'). Unhitching a trailer is now hold R while stopped (a prompt shows; X is overlays everywhere). The 2/3/4 terrain brush needs `localStorage.sandbox = '1'` (its buttons are hidden otherwise). Site and Foundation notes name "Site (7)" for slab, stem wall and pier foundations. Esc also leaves the terrain brush.
+- **Try:** `?` in the world; drive the ATV with a trailer, stop, hold R; `localStorage.sandbox='1'` then reload for keys 2-4.
+- **Weak:** the table is hand-kept (no test ties it to the real handlers); `by` was not set on site/foundation stages (it would make another system tally them), only `hint`.
 ## Interior walls and services, reconciled (branch `reconcile`)
 
 - Electrical boxes are set proud of the studs by the wall's lining (13 mm drywall, 19 mm boards), so after hanging and taping they sit flush with the finished wall and the outlets fitted at Trim-out are on the surface, not buried behind the drywall. Boxes placed before this change keep where they are.
@@ -890,6 +895,10 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - Opening a wall to get at a run takes off every sheet or board of it, its taped seams and the batts; the hints say so.
 - The planned interior "trim" slice (casings, baseboard) is renamed finish carpentry, apart from services' Trim-out. See `docs/design/interior-walls.md` and the design README.
 
+## Wave 2 X2: one bag for what other systems keep on a building
+- Nothing new to see. What services (rough-in work and lines) and the foundation (holds on framing) keep on a building now lives under `progress[id].keep[source]`, and sending a building's plan again carries the whole bag over, so a new source cannot be dropped by accident. Try: pour a slab and watch framing stay held across a reload; order services lines and reload.
+- Older saves with `ext` / `extLines` / `hold` on the record are moved under `keep` when first read (no save version bump). Console: `__game.sim.state.sys.construction.progress[id].keep`.
+- Also fixed: `construction.settle` read an undefined `ctx` (the foundation smoke hit it).
 ## Paint: walls and trim (branch `paint`, design in `docs/design/interior-finishes.md`)
 
 - New last building stage, **Paint**: primer on every lined wall face, a rectangle (up to 1.2 m wide, clear of the openings) at a time, then two coats of colour, each on dry paint. The trim (corner boards and round doors and windows) takes two coats of its own colour; it comes primed.
@@ -909,6 +918,40 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - Drawing: the old wall body's foot (a dark band 30 cm tall) no longer stands in front of framed walls, inside or out, so the baseboard and siding meet the floor as built.
 - Ordered as Casing, Baseboard and Finish nails. The guide no longer asks to reorder when every stick has been cut into pieces still to set.
 - Weak: miters and copes are drawn as square ends; window trim is a picture frame (stool and apron later); no caulk yet; the aim can pick a neighbouring piece first at a corner.
+
+## Build mode extension point X1 (branch `wave2-x1-build-ext`)
+Nothing new to see yet: this is the plumbing decks, porches, lofts, skylights and chimneys will plug into, each in a file of its own (ARCHITECTURE.md, "Adding to build mode").
+- Try it with the test fixture (free-standing 4x4 posts): in the console, paste `test/fixtures/build-ext-post.js`, then `__build.setExt(__build.state.structs[0].id, 'xpost', { posts: [[0, -2]] })`. A post appears beside the first building, on its shopping list (List) and, in a plan, as a blueprint in the floor-frame stage. Ctrl+Z takes it away. In build mode a "Post" button joins the bar: click a building to stand another post there (the smoke test covers the button and options, not this click).
+- Weak: extension pieces cannot be picked with the pointer yet, extension tools have no keyboard key, and the fixture's buttons have no real icon art.
+
+## Trim-out by hand: outlets, switches, lights, breakers (branch `wave2-s1-trim`, slice S9b of `docs/design/services-roughin.md`)
+
+- Trim-out is real work and real stock now. The Build panel's Trim-out lines list an outlet and its plate, a switch and its plate, or a light for each box a cable comes to, and a breaker sized to the cable (15 A for 14/2) for each panel slot. Order them like any stage; they sit by the stacks. "Do it for me" still finishes the stage, but it draws all of it from the stacks and says what is missing if it is short.
+- A box planned as a switch gets a switch, an outlet an outlet, a ceiling box a light. Before the first wire goes on, the wheel over the box changes it (outlet, switch, wall light).
+- In Hands (F), at a roughed-in box whose walls are done: **click** strips the cable ends (the copper shows), **drag** away from the box lands the wires on the device (it comes off the stacks then), **click** folds it in and screws it, **click** puts on the plate (a light: its shade). The per-gesture setting (1x to 4x) is how many ends one click or drag does; from 2x the fold click puts the plate on too.
+- At the panel: empty slots pulse; **click** presses a breaker onto the bus bar (several at 3x/4x). The main goes off while you work: **drag** its handle up and the lights come on one after another along the circuit. **Click** a breaker to switch it off or on. A tripped breaker sits mid-throw; hover it for what it drew; switch the load off and click to reset.
+- **Click** a wall switch: the lights after it on the cable go out or on (with no light after it, the outlets: a switched outlet).
+- **Hold** on the yellow tester under the panel: a light hops box to box along every circuit, green where the cable is through, red where it is not; the red marks stay a while and say why on hover ("cable not pulled through to here", "not joined to the panel"). A pass hangs a green tag on the panel. The tester works during rough-in too.
+- Lamps glow by their lens; one point light follows the nearest lit lamp.
+- Console: `__servicesTrim.targets()`, `.where('trim' | 'slot' | 'breaker' | 'main' | 'switch' | 'tester' | 'fault')`, `.lamps()`; sim commands `services.trim { node, n }`, `services.main { panel, on }`, `services.breaker { node }`, `services.flip { node }`, `services.check { structId }`.
+- Old saves: boxes and slots trimmed before this change stay as they were, live and free; a panel has no main state until a breaker is pressed in by hand.
+- Weak: the device is a plain ivory box and the plate a white slab; the land drag accepts any drag of about 20 px from the box (it does not need to end on a screw); touch has no drag mapping for land or the main; wall-face direction for boxes on partitions is guessed from where the box sits in the wall; one switch per light chain (no three-way); the light's glow follows the electrical tick, so after throwing the main it can take a moment of game time to start.
+
+## Trim slice 2: stool and apron, real miters, caulk, miter saw (branch `trim2`)
+
+- Windows get a **stool** (a shelf on the sill, its horns notched round the casing, standing proud of the wall) and an **apron** under it; the legs stand on the stool. The picture frame stays as an option (`spec.winTrim: 'frame'`).
+- Mitered casings are drawn with real 45 degree ends, the long point on the outside, in build mode (and their paint follows the same shape).
+- **Caulk**: after the trim is nailed, a bead where each casing and the base meet the wall (E with the caulk to hand); it dries in about half an hour, and the stage is done when it is all on. Bought in litres (300 ml tubes, about 9 m of bead each).
+- **Miter saw**: a power tool ($180, 1500 W). With it and power, trim is cut on it, quicker; without it, a hand saw in a miter box. The cut note says which.
+- Opening a wall for services takes its trim and caulk off too.
+
+## Cabin feedback: gables, pace, dollhouse, sawhorses, insulation (branch `cabin-feedback`)
+
+- **Gables**: a framed building's gables are its siding, like the walls below; the roof's own gable triangle (in the roof's colours) stays in behind.
+- **Pace**: siding goes up three courses at a time where the courses run the same (round a window or up a gable, one at a time), and board linings four boards at a time; the siding shader draws every course, the boards get a tongue-and-groove line. About a third of the pieces in those two stages.
+- **Dollhouse**: where the cut opens a finished wall, a cap at the cut height shows it in section as one solid thing (the room's colour inside, a pale timber core, the siding's colour outside); no studs, batts or hollows. Walls still being built stay open to see into.
+- **Sawhorses** come with the first lumber delivered for a building when they are away at an earlier site (left where you put them if they are close by).
+- **Insulation**: a wall shows its frame until both its siding and its lining are on, so the batts going in are seen; batts are drawn soft and fibrous, pillowed between the studs, and a batt pressed into its bay gives a puff of fibres. Between the studs, before a batt, the back of the sheathing shows.
 
 ## Vehicles: wheel loads, a trailer with real weight, and tracks (branch `wave2-g3-drive`, slice G-3 / V13)
 
