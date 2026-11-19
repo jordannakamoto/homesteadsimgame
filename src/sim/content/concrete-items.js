@@ -12,4 +12,11 @@ export const ITEMS_CONCRETE = Object.freeze([
   // reusable covers for curing: plastic holds the moisture in, a blanket also keeps the heat in on a cold night
   { id: 'poly_sheeting', name: 'Polyethylene sheeting 6 mil', category: 'tools_hand', unit: 'each', massKg: 4, priceUsd: 28, blurb: 'Laid over a finished slab to hold its moisture in while it cures. Reusable' },
   { id: 'curing_blanket', name: 'Curing blanket', category: 'tools_hand', unit: 'each', massKg: 14, priceUsd: 70, blurb: 'An insulated blanket for curing in the cold: keeps moisture and heat in. Reusable' },
+  // piers (B-1): a clamshell digger bores the holes; cardboard tubes form the piers; galvanized brackets set in the wet tops
+  { id: 'post_hole_digger', name: 'Post-hole digger', category: 'tools_hand', unit: 'each', massKg: 4.5, priceUsd: 38, blurb: 'Two hinged steel blades on long handles: drive it in, twist, spread the handles and lift a plug of earth out. Bores pier holes to the frost line' },
+  { id: 'tube_form', name: 'Concrete tube form, 10 in x 12 ft', category: 'stone', unit: 'each', massKg: 5, priceUsd: 32, blurb: 'A waxed cardboard tube: cut to length, stood in the hole on its footing and plumbed, it holds a round pier while it cures. Left in the ground' },
+  { id: 'post_bracket', name: 'Wet-set post bracket', category: 'fasteners', unit: 'each', massKg: 0.9, priceUsd: 9.5, blurb: 'A galvanized steel saddle pushed into the top of a wet pier: the post or beam is bolted into it, held up off the concrete' },
+  // stem walls (B-1): reusable plywood panels set in pairs and tied through
+  { id: 'wall_form_panel', name: 'Wall form panel, 4 x 8 ft', category: 'stone', unit: 'each', massKg: 30, priceUsd: 46, blurb: 'Plywood on a 2x4 frame: set in pairs either side of a wall, tied through, it holds the wet concrete to shape. Reusable' },
+  { id: 'form_tie', name: 'Snap tie, 8 in wall', category: 'fasteners', unit: 'each', massKg: 0.15, priceUsd: 0.95, blurb: 'A steel rod through both panels with wedges at its ends, every 2 ft along and up: it holds the forms together under the concrete. Its ends are snapped off when the forms come off' },
 ]);
