@@ -909,3 +909,8 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - Drawing: the old wall body's foot (a dark band 30 cm tall) no longer stands in front of framed walls, inside or out, so the baseboard and siding meet the floor as built.
 - Ordered as Casing, Baseboard and Finish nails. The guide no longer asks to reorder when every stick has been cut into pieces still to set.
 - Weak: miters and copes are drawn as square ends; window trim is a picture frame (stool and apron later); no caulk yet; the aim can pick a neighbouring piece first at a corner.
+
+## Build mode extension point X1 (branch `wave2-x1-build-ext`)
+Nothing new to see yet: this is the plumbing decks, porches, lofts, skylights and chimneys will plug into, each in a file of its own (ARCHITECTURE.md, "Adding to build mode").
+- Try it with the test fixture (free-standing 4x4 posts): in the console, paste `test/fixtures/build-ext-post.js`, then `__build.setExt(__build.state.structs[0].id, 'xpost', { posts: [[0, -2]] })`. A post appears beside the first building, on its shopping list (List) and, in a plan, as a blueprint in the floor-frame stage. Ctrl+Z takes it away. In build mode a "Post" button joins the bar: click a building to stand another post there (the smoke test covers the button and options, not this click).
+- Weak: extension pieces cannot be picked with the pointer yet, extension tools have no keyboard key, and the fixture's buttons have no real icon art.
