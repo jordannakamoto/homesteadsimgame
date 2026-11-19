@@ -10,6 +10,7 @@ export async function openPage({ viewport = { width: 640, height: 360 }, quality
   const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] });
   const page = await (await browser.newContext({ viewport })).newPage();
   page.setDefaultTimeout(timeout);
+  await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.abort());   // offline: a blocked font request only slows load
   const errors = [], fails = [];
   page.on('console', (m) => { if (m.type() === 'error' && !/net::ERR_/.test(m.text())) errors.push(m.text().slice(0, 400)); });
   page.on('pageerror', (e) => errors.push('PAGEERROR ' + String(e.stack || e).slice(0, 600)));
