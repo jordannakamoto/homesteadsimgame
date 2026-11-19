@@ -10,7 +10,7 @@ export const OPERATION = Object.freeze({
   fixed: 'does not open', swing: 'swings on hinges', slide: 'slides sideways', tilt_in: 'tilts in from the top',
   awning: 'tilts out from the bottom', double_hung: 'sashes slide up and down', fold: 'folds in panels', roll: 'rolls up overhead',
   casement: 'swings out on side hinges', dutch: 'top and bottom open separately', pocket: 'slides into the wall', barn: 'slides on a track outside',
-  pivot: 'turns on a pivot pin set in from the edge',
+  pivot: 'turns on a pivot pin set in from the edge', open: 'a cased opening with no leaf',
 });
 
 // sill presets for windows, metres above the floor
@@ -32,7 +32,9 @@ export const OPENING_TYPES = Object.freeze([
   // ---- windows: classic
   T('double_hung', 'Double-hung window', 'window', 'double_hung', [0.6, 0.9, 1.2], [1.2, 1.5], 0.85, { mass: 14, price: 210, look: { panels: 2, grid: [2, 3] }, blurb: 'The classic: two sashes, the lower one slides up. Colonial, farmhouse, craftsman.' }),
   T('casement', 'Casement window', 'window', 'casement', [0.6, 0.9, 1.2], [0.9, 1.2, 1.5], 0.9, { mass: 15, price: 240, look: { grid: [1, 2] }, blurb: 'Hinged at the side, swings out. Cottages, prairie and craftsman homes.' }),
+  T('casement_pair', 'Casement pair', 'window', 'casement', [1.2, 1.5, 1.8], [0.9, 1.2, 1.5], 0.9, { mass: 28, price: 420, look: { grid: [1, 2], lites: [2, 1] }, blurb: 'Two casements side by side with a mullion between. Opens wide for air.' }),
   T('picture', 'Picture window', 'window', 'fixed', [0.9, 1.2, 1.8], [1.0, 1.2, 1.5], 0.75, { mass: 24, price: 260, look: {}, range: { w: [0.4, 3.6], h: [0.4, 2.4] }, blurb: 'One big fixed pane for the view.' }),
+  T('picture_trio', 'Picture window, three lites', 'window', 'fixed', [1.8, 2.4, 3.0], [1.0, 1.2, 1.5], 0.75, { mass: 40, price: 480, look: { lites: [3, 1] }, range: { w: [1.2, 4.2], h: [0.4, 2.4] }, blurb: 'A wide fixed view split in three by two mullions.' }),
   T('slider', 'Sliding window', 'window', 'slide', [0.9, 1.2, 1.5, 1.8], [0.6, 0.9, 1.2], 1.0, { mass: 16, price: 190, look: { panels: 2, track: true }, blurb: 'Two sashes, one slides sideways. Ranch and mid-century.' }),
   T('awning', 'Awning window', 'window', 'awning', [0.6, 0.9, 1.2, 1.8], [0.4, 0.6, 0.9], 1.2, { mass: 10, price: 170, blurb: 'Hinged at the top, tilts out: open in the rain.' }),
   T('hopper', 'Hopper window', 'window', 'tilt_in', [0.6, 0.9, 1.2], [0.4, 0.6], 0.5, { mass: 9, price: 150, blurb: 'Hinged at the bottom, tips in. Cellars, baths, under a picture window.' }),
@@ -54,15 +56,34 @@ export const OPENING_TYPES = Object.freeze([
   T('door_farmhouse', 'Farmhouse plank door', 'door', 'swing', [0.81, 0.915], [2.03, 2.13], 0, { mass: 46, price: 300, finish: 'sage', look: { face: 'plank', glass: 'top', bars: true, hw: 'lever', metal: 'black' } }),
   T('door_pivot', 'Modern pivot door', 'door', 'pivot', [1.07, 1.22, 1.52], [2.13, 2.44], 0, { mass: 80, price: 1400, finish: 'walnut', look: { face: 'groove', glass: 'slot', hw: 'pull', metal: 'black' } }),
   T('door_glass', 'Steel-frame glass door', 'door', 'swing', [0.81, 0.915, 1.07], [2.03, 2.13, 2.44], 0, { mass: 52, price: 900, finish: 'black', look: { face: 'flush', glass: 'full', bars: true, hw: 'pull', metal: 'black' } }),
+  T('door_cottage', 'Cottage plank door', 'door', 'swing', [0.76, 0.81, 0.915], [1.9, 2.03], 0, { mass: 34, price: 240, finish: 'sage', look: { face: 'plank', glass: 'top', hw: 'knob', metal: 'black' } }),
+  T('door_modern', 'Modern slot-glass door', 'door', 'swing', [0.915, 1.07], [2.03, 2.13, 2.44], 0, { mass: 48, price: 780, finish: 'black', look: { face: 'flush', glass: 'slot', hw: 'pull', metal: 'black' } }),
   T('door_interior', 'Interior shaker door', 'door', 'swing', [0.61, 0.71, 0.76, 0.81], [2.03], 0, { mass: 14, price: 95, finish: 'white', look: { face: 'shaker', hw: 'lever', metal: 'steel' }, more: { thin: true } }),
   T('door_french', 'Double / French door', 'door', 'swing', [1.22, 1.52, 1.83], [2.03, 2.13], 0, { mass: 70, price: 520, finish: 'white', look: { panels: 2, grid: [3, 5], face: 'shaker', glass: 'full', bars: true, hw: 'lever', metal: 'brass' } }),
+  T('door_entry_double', 'Double entry door', 'door', 'swing', [1.52, 1.83], [2.03, 2.13, 2.44], 0, { mass: 84, price: 980, finish: 'oak', look: { panels: 2, face: 'p6', hw: 'lever', metal: 'brass' }, blurb: 'Two six-panel leaves, wide enough for sidelights.' }),
   T('door_dutch', 'Dutch door', 'door', 'dutch', [0.81, 0.915], [2.03], 0, { mass: 42, price: 340, finish: 'blue', look: { panels: 2, face: 'shaker', glass: 'half', bars: true, hw: 'knob', metal: 'brass' } }),
   T('door_patio', 'Sliding patio door', 'door', 'slide', [1.83, 2.44, 3.05], [2.03, 2.13], 0, { mass: 95, price: 780, look: { panels: 2, track: true } }),
   T('door_barn', 'Barn door on a track', 'door', 'barn', [0.915, 1.07, 1.22], [2.03, 2.13], 0, { mass: 55, price: 290, look: { track: true }, more: { surface: true, leafOver: 0.1 } }),
   T('door_pocket', 'Pocket door', 'door', 'pocket', [0.76, 0.81, 0.915], [2.03], 0, { mass: 36, price: 320, frame: 'pocket', more: { pocket: true } }),
   T('door_bifold', 'Bifold closet door', 'door', 'fold', [0.76, 0.91, 1.22, 1.52], [2.03], 0, { mass: 20, price: 140, look: { panels: 2 } }),
+  T('door_cased', 'Cased opening', 'door', 'open', [0.81, 0.915, 1.22, 1.83], [2.03, 2.13], 0, { mass: 10, price: 120, finish: 'white', blurb: 'A framed doorway with no door in it.' }),
   T('door_garage', 'Roll-up garage door', 'door', 'roll', [2.44, 3.05, 4.88], [2.13, 2.44], 0, { mass: 120, price: 950, frame: 'beam', look: { grid: [1, 4], track: true } }),
 ]);
+
+// ---- the designer's catalogue: family (the tray's tabs) and opts (which designer groups apply to a door type).
+export const WINDOW_FAMILIES = Object.freeze({ classic: 'Classic', modern: 'Modern', rustic: 'Rustic' });
+export const DOOR_FAMILIES = Object.freeze({ entry: 'Entry', interior: 'Interior', patio: 'Patio and sliding', utility: 'Utility', rustic: 'Rustic' });
+const MODERN_WIN = new Set(['full_panel', 'window_wall', 'slot', 'ribbon', 'tilt_turn']);
+const DOOR_FAMILY = { door_single: 'entry', door_craftsman: 'entry', door_farmhouse: 'entry', door_pivot: 'entry', door_glass: 'entry', door_french: 'entry', door_dutch: 'entry', door_cottage: 'entry', door_modern: 'entry', door_entry_double: 'entry',
+  door_interior: 'interior', door_pocket: 'interior', door_bifold: 'interior', door_cased: 'interior', door_patio: 'patio', door_barn: 'utility', door_garage: 'utility' };
+const HINGED = ['face', 'glass', 'bars', 'side', 'transom', 'hw', 'metal', 'finish'];
+const DOOR_OPTS = { door_french: [...HINGED, 'leaves'], door_entry_double: [...HINGED, 'leaves'], door_dutch: ['face', 'glass', 'bars', 'hw', 'metal', 'finish', 'leaves'],
+  door_patio: ['leaves', 'glass', 'bars', 'finish'], door_barn: ['face', 'glass', 'bars', 'finish'], door_pocket: ['face', 'glass', 'bars', 'finish'],
+  door_bifold: ['leaves', 'face', 'finish'], door_garage: ['leaves', 'finish'], door_cased: ['finish'] };
+for (const t of OPENING_TYPES) {
+  t.family = t.kind === 'door' ? DOOR_FAMILY[t.id] || 'utility' : MODERN_WIN.has(t.id) ? 'modern' : 'classic';
+  if (t.kind === 'door') t.opts = Object.freeze((DOOR_OPTS[t.id] || HINGED).slice());
+}
 
 export const OPENING_BY_ID = Object.freeze(Object.fromEntries(OPENING_TYPES.map((t) => [t.id, t])));
 export const openingType = (id) => OPENING_BY_ID[id] || null;
@@ -245,4 +266,96 @@ export function snapFree({ L, at, w, h, sill, others = [], windowsOnly = true, s
   if (a < END_GAP - 1e-9 || b > L - END_GAP + 1e-9) { ok = false; reason = 'Too close to the end of the wall (keep 0.1 m)'; }
   else for (const q of os) if (a < q.b + OPEN_GAP - 1e-9 && b > q.a - OPEN_GAP + 1e-9) { ok = false; reason = a < q.a ? 'Overlaps the next opening' : 'Overlaps the opening beside it'; break; }
   return { offset, centre: c, sill: sl, snap: name, headLine, guides, ok, reason };
+}
+
+// ---- the designer's height anchor and the fit report (docs/design/plan-mode-redesign.md, sections 3.1 and 3.3)
+const r3 = (v) => Math.round(v * 1000) / 1000;
+const r2d = (v) => Math.round(v * 100) / 100;
+export const TOP_PLATE = 0.19;           // the top plate and its gap: a rough opening stops this far below the wall's height
+export const MIN_SILL = 0.1;             // the lowest a window's sill goes
+// the height (metres above the floor) of the anchor line: sill, head or centre. spec: { sill, h } or a freeSpec result.
+export const anchorY = (spec, anchor = 'sill') => {
+  const sill = spec.sill || 0, h = spec.h || 0;
+  return r3(anchor === 'head' ? sill + h : anchor === 'centre' ? sill + h / 2 : sill);
+};
+// the sill that puts the anchor at y for a unit of height h (doors: always 0)
+export const fromAnchor = (type, h, anchor = 'sill', y = 0) => {
+  const t = typeof type === 'string' ? OPENING_BY_ID[type] : type;
+  if (t && t.kind === 'door') return 0;
+  return r3(anchor === 'head' ? y - h : anchor === 'centre' ? y - h / 2 : y);
+};
+
+const EPS = 1e-6;
+// what is wrong with a unit of size w x h, sill, centred `at` along a run of length L under a wall wallH high.
+// others: [{ a, b }] rough extents of the neighbours along the run. Returns issue records { code, by } (by in metres).
+function fitIssues(t, w, h, sill, at, L, wallH, others) {
+  const out = [], door = t.kind === 'door', rw = w + 2 * ROUGH_GAP;
+  const rough = roughOpening(t, w, h, door ? 0 : sill), top = rough.sill + rough.height + TOP_PLATE;
+  if (top > wallH + EPS) out.push({ code: 'tall', by: r3(top - wallH) });
+  const R = t.range, rr = Math.max(w - R.w[1], R.w[0] - w, h - R.h[1], R.h[0] - h);
+  if (rr > EPS) out.push({ code: 'range', by: r3(rr) });
+  if (L !== undefined && L !== null) {
+    if (rw > L - 2 * END_GAP + EPS) out.push({ code: 'wide', by: r3(rw - (L - 2 * END_GAP)) });
+    else {
+      const a = at - w / 2 - ROUGH_GAP, b = at + w / 2 + ROUGH_GAP, past = Math.max(END_GAP - a, b - (L - END_GAP));
+      if (past > EPS) out.push({ code: 'end', by: r3(past) });
+    }
+    const a = at - w / 2 - ROUGH_GAP, b = at + w / 2 + ROUGH_GAP;
+    for (const q of others || []) if (a < q.b + OPEN_GAP - EPS && b > q.a - OPEN_GAP + EPS) { out.push({ code: 'overlap', by: r3(Math.min(b - (q.a - OPEN_GAP), q.b + OPEN_GAP - a)) }); break; }
+  }
+  return out;
+}
+// fitReport({ type, w, h, sill, at, L, wallH, others }) -> { ok, issues: [{ code, by }], fixes: [{ code, patch, label }] }
+// at is the unit's centre along the run, sill the height above the floor (doors: 0), wallH the wall's height.
+// Codes: tall (head under the top plate: by = metres too tall), wide (does not fit the run), end (too near an end),
+// overlap (too near a neighbour), range (outside the sizes the type is made in). Every fix's patch (a partial
+// { w, h, sill, at }) leaves a report with no issues. Fix codes: sill (lower the sill), height (shorter), width (narrower),
+// size (inside the made range), slide (move along the run; by = signed metres, label says left or right).
+export function fitReport({ type, w, h, sill = 0, at, L, wallH, others = [] }) {
+  const t = typeof type === 'string' ? OPENING_BY_ID[type] : type, door = t.kind === 'door';
+  sill = door ? 0 : sill;
+  const cur = { w, h, sill, at };
+  const check = (p) => fitIssues(t, p.w, p.h, p.sill, p.at, L, wallH, others);
+  const issues = check(cur), fixes = [], seen = new Set();
+  const add = (code, patch, label, by) => {
+    const m = { ...cur, ...patch };
+    const key = JSON.stringify([code, m.w, m.h, m.sill, m.at]);
+    if (seen.has(key) || check(m).length) return;
+    seen.add(key);
+    fixes.push({ code, patch, label, ...(by !== undefined ? { by } : {}) });
+  };
+  const has = (c) => issues.some((i) => i.code === c);
+  const fl = (v) => Math.floor(v * 100 + 1e-6) / 100;
+  const gapV = door ? ROUGH_GAP + 2 * FLOOR_GAP : 2 * ROUGH_GAP;      // rough height less the unit height
+  const topFor = (s0) => wallH - TOP_PLATE - (door ? FLOOR_GAP : s0 - ROUGH_GAP) - gapV;   // tallest unit under the plate
+  if (has('tall')) {
+    if (!door) {
+      const s = fl(wallH - TOP_PLATE - ROUGH_GAP - h);
+      // the lowest sill at which the unit fits, to the centimetre (rounded down so it stays under the plate)
+      if (s >= MIN_SILL - EPS && s < sill) add('sill', { sill: Math.max(MIN_SILL, s) }, `Lower the sill to ${r2d(Math.max(MIN_SILL, s)).toFixed(2)}`);
+    }
+    const hm = fl(topFor(sill));
+    if (hm > 0) add('height', { h: hm }, `Make it ${hm.toFixed(2)} high`);
+  }
+  if (has('range')) add('size', { w: r2d(Math.min(Math.max(w, t.range.w[0]), t.range.w[1])), h: r2d(Math.min(Math.max(h, t.range.h[0]), t.range.h[1])) }, 'Use a size it is made in');
+  if (has('wide')) {
+    const wm = fl(L - 2 * END_GAP - 2 * ROUGH_GAP);
+    if (wm > 0) add('width', { w: wm, at: r3(L / 2) }, `Make it ${wm.toFixed(2)} wide`);
+  }
+  if (has('end') || has('overlap')) {
+    const lo = END_GAP + ROUGH_GAP + w / 2, hi = L - END_GAP - ROUGH_GAP - w / 2, cand = [lo, hi];
+    for (const q of others) cand.push(q.b + OPEN_GAP + ROUGH_GAP + w / 2, q.a - OPEN_GAP - ROUGH_GAP - w / 2);
+    let left = null, right = null;
+    for (const c0 of cand) {
+      const c = Math.ceil(c0 * 1000 - 1e-6) / 1000, c2 = Math.floor(c0 * 1000 + 1e-6) / 1000;
+      for (const x of [c, c2]) {
+        if (check({ ...cur, at: x }).length) continue;
+        if (x < at - EPS && (left === null || x > left)) left = x;
+        if (x > at + EPS && (right === null || x < right)) right = x;
+      }
+    }
+    if (left !== null) add('slide', { at: r3(left) }, `Slide left ${(at - left).toFixed(2)}`, r3(left - at));
+    if (right !== null) add('slide', { at: r3(right) }, `Slide right ${(right - at).toFixed(2)}`, r3(right - at));
+  }
+  return { ok: issues.length === 0, issues, fixes };
 }

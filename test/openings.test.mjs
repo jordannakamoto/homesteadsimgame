@@ -179,3 +179,73 @@ test('a designed door with sidelights and a transom is one bigger rough opening,
   assert.equal(big.finish, 'green'); assert.equal(plain.finish, 'oak'); assert.equal(big.look.face, 'p3');
   assert.equal(freeToFraming({ id: 'x', typeId: 'door_craftsman', sizeIdx: 2, look: { side: 'left' } }, 1).width, freeSpec({ typeId: 'door_craftsman', sizeIdx: 2, look: { side: 'left' } }).rough.width);
 });
+
+// ---- the designer's catalogue and fit rules
+import { WINDOW_FAMILIES, DOOR_FAMILIES, anchorY, fromAnchor, fitReport, END_GAP, OPEN_GAP, ROUGH_GAP } from '../src/sim/content/openings.js';
+test('every type has a family; every door has opts; the new types exist', () => {
+  for (const t of OPENING_TYPES) {
+    assert.ok(t.kind === 'door' ? DOOR_FAMILIES[t.family] : WINDOW_FAMILIES[t.family], t.id);
+    if (t.kind === 'door') assert.ok(Array.isArray(t.opts), t.id); else assert.equal(t.opts, undefined);
+  }
+  for (const id of ['casement_pair', 'picture_trio', 'door_cottage', 'door_modern', 'door_entry_double', 'door_cased']) assert.ok(OPENING_BY_ID[id], id);
+  assert.equal(OPENING_BY_ID.full_panel.family, 'modern');
+  assert.ok(OPENING_BY_ID.door_craftsman.opts.includes('transom') && !OPENING_BY_ID.door_patio.opts.includes('hw'));
+  assert.ok(Object.keys(openingItems()).some((k) => k.startsWith('op_door_cased_')));
+});
+test('anchorY and fromAnchor round-trip', () => {
+  const sp = { sill: 0.9, h: 1.5 };
+  assert.equal(anchorY(sp, 'sill'), 0.9); assert.equal(anchorY(sp, 'head'), 2.4); assert.equal(anchorY(sp, 'centre'), 1.65);
+  for (const a of ['sill', 'head', 'centre']) assert.equal(fromAnchor('double_hung', 1.5, a, anchorY(sp, a)), 0.9);
+  assert.equal(fromAnchor('door_single', 2.03, 'head', 2.03), 0);
+  assert.equal(fromAnchor('double_hung', 1.8, 'head', 2.4), 0.6);
+});
+const ok = (r) => assert.ok(r.ok && !r.issues.length, JSON.stringify(r));
+test('fitReport: a good unit fits; each code comes from a case; every fix passes', () => {
+  const base = { type: 'double_hung', w: 0.9, h: 1.5, sill: 0.9, at: 2, L: 4, wallH: 2.84, others: [] };
+  ok(fitReport(base));
+  const cases = {
+    tall: { ...base, h: 1.9 },
+    wide: { ...base, w: 3.9 },
+    end: { ...base, at: 0.4 },
+    overlap: { ...base, others: [{ a: 1.4, b: 2.2 }] },
+    range: { ...base, type: 'picture', w: 4.0, L: 8 },
+  };
+  for (const [code, inp] of Object.entries(cases)) {
+    const r = fitReport(inp);
+    assert.ok(!r.ok && r.issues.some((i) => i.code === code && i.by > 0), code);
+    assert.ok(r.fixes.length >= 1, code + ' has a fix');
+    for (const f of r.fixes) ok(fitReport({ ...inp, ...f.patch }));
+  }
+  const ov = fitReport(cases.overlap);
+  assert.ok(ov.fixes.some((f) => f.code === 'slide' && f.by < 0) && ov.fixes.some((f) => f.code === 'slide' && f.by > 0));
+});
+test('a gothic window 2.4 m high on a 2.84 m wall is offered a lower sill, and keeping it that tall passes', () => {
+  const inp = { type: 'gothic', w: 0.9, h: 2.4, sill: 0.8, at: 2, L: 4, wallH: 2.84, others: [] };
+  const r = fitReport(inp), sill = r.fixes.find((f) => f.code === 'sill');
+  assert.ok(r.issues.some((i) => i.code === 'tall'));
+  assert.ok(sill && sill.patch.sill >= 0.2 && sill.patch.sill <= 0.25 && sill.patch.sill < 0.8, JSON.stringify(sill));
+  assert.equal(sill.patch.sill, 0.23);   // 0.238 is the limit: 0.24 would sit 2 mm into the top plate
+  assert.ok(r.fixes.some((f) => f.code === 'height' && f.patch.h < 2.4));
+  ok(fitReport({ ...inp, ...sill.patch }));
+  // a taller unit than the floor allows has only the height fix
+  const r2 = fitReport({ ...inp, h: 2.6 });
+  assert.ok(!r2.fixes.some((f) => f.code === 'sill'));
+});
+test('doors: head under the plate, no sill fix, ends and neighbours use the same gaps as snapFree', () => {
+  const r = fitReport({ type: 'door_pivot', w: 1.07, h: 2.44, at: 2, L: 4, wallH: 2.5, others: [] });
+  assert.ok(r.issues.some((i) => i.code === 'tall') && !r.fixes.some((f) => f.code === 'sill'));
+  for (const f of r.fixes) ok(fitReport({ type: 'door_pivot', w: 1.07, h: 2.44, at: 2, L: 4, wallH: 2.5, ...f.patch }));
+  const w = 0.81, L = 3, tight = fitReport({ type: 'door_single', w, h: 2.03, at: END_GAP + ROUGH_GAP + w / 2, L, wallH: 2.84 });
+  ok(tight);
+  assert.equal(fitReport({ type: 'door_single', w, h: 2.03, at: END_GAP + ROUGH_GAP + w / 2 - 0.01, L, wallH: 2.84 }).issues[0].code, 'end');
+  const q = { a: 1.0, b: 1.5 }, at = q.b + OPEN_GAP + ROUGH_GAP + w / 2;
+  ok(fitReport({ type: 'door_single', w, h: 2.03, at, L, wallH: 2.84, others: [q] }));
+  assert.equal(fitReport({ type: 'door_single', w, h: 2.03, at: at - 0.01, L, wallH: 2.84, others: [q] }).issues[0].code, 'overlap');
+});
+test('fitReport agrees with snapFree on ends and neighbours', async () => {
+  const { snapFree } = await import('../src/sim/content/openings.js');
+  for (const at of [0.3, 0.5, 0.6, 1.0, 1.9, 2.4, 3.5]) {
+    const o = [{ a: 1.2, b: 1.9 }], sn = snapFree({ L: 4, at, w: 0.9, h: 1.2, sill: 0.9, others: o, snap: false }), fr = fitReport({ type: 'casement', w: 0.9, h: 1.2, sill: 0.9, at, L: 4, wallH: 2.84, others: o });
+    assert.equal(fr.ok, sn.ok, String(at));
+  }
+});
