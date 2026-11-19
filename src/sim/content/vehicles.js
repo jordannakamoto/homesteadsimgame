@@ -18,7 +18,7 @@ export const VEHICLE_KINDS = Object.freeze({
     id: 'atv', name: 'Utility ATV', drive: 'wheeled',
     dims: { l: 2.15, w: 1.2, h: 1.19 }, massKg: 292, cgH: 0.55, clearance: 0.234,
     wheelbase: 1.295, track: 0.95, wheelR: 0.305,
-    axles: [{ z: 0.6475, steer: true, driven: true }, { z: -0.6475, steer: false, driven: true }],
+    axles: [{ z: 0.6475, steer: true, driven: true, diff: 'open' }, { z: -0.6475, steer: false, driven: true }],   // front differential, solid rear axle
     powerW: 19800, topMps: 18, reverseMps: 3, brakeG: 0.75, dragK: 0.55,     // 65 km/h governed (see PLAYTEST: streaming)
     engine: {
       idleRpm: 1400, launchRpm: 3200, redRpm: 7000, torqueNm: 32,              // about 20 kW at 6000 rpm
@@ -27,7 +27,7 @@ export const VEHICLE_KINDS = Object.freeze({
     },
     gears: { ratios: [26, 18.5, 14, 11.5, 9.6], reverse: 30, eff: 0.85, shiftS: 0.3, upRpm: [4300, 6500], downRpm: 2300 },
     steerMaxRad: deg(23), steerRate: 1.6, steerSpeedFalloff: 1 - 9 / 23,   // 3.5 m turning radius at a crawl; 9 degrees at speed
-    grip: { mu: 0.65, slide: 0.85, lateral: 8, rolling: 0.045 },             // knobby tyres on dry grass; surfaces scale it
+    grip: { mu: 0.65, slide: 0.85, lateral: 8, rolling: 0.045, loadSens: 0.1 }, // knobby tyres on dry grass (lateral: cornering stiffness per unit load, 1/rad)
     susp: { travel: 0.2, hz: 2.0, damp: 0.32 },                               // 185-215 mm of travel; lightly damped, it bobs
     riderKg: 80,
     seats: [{ id: 'rider', at: [0, 0.886, -0.2], pose: 'straddle', mount: [{ x0: -0.6, x1: 0.4, side: -1 }, { x0: -0.6, x1: 0.4, side: 1 }] }],
@@ -38,19 +38,22 @@ export const VEHICLE_KINDS = Object.freeze({
   }),
   // A small utility trailer with a tipping bed, towed on the ATV's ball: an ATV dump trailer of the common steel kind
   // (about 1.8 x 1.1 m bed, 90 kg empty, 350 kg rated, 2-inch ball, 18-22 in tyres). Unbraked, as they are: the ATV's
-  // brakes stop both. About a tenth of its gross weight rests on the ball. The bed is a manual dump: it pivots just
-  // behind the axle, and dry lumber on steel slides once the bed passes about 27 degrees (friction about 0.5).
+  // brakes stop both. The empty trailer's centre of mass is 0.165 m ahead of the axle (a tenth of its weight on the
+  // ball); a load sits 0.2 m ahead (packed against the front board), so a full trailer puts about 12 percent of its
+  // gross on the ball, inside the usual 10-15 percent for utility trailers. A load further back (body.cargoZ) sways.
+  // The bed is a manual dump: it pivots just behind the axle, and dry lumber on steel slides once the bed passes about
+  // 27 degrees (friction about 0.5).
   trailer_small: Object.freeze({
     id: 'trailer_small', name: 'Small utility trailer', drive: 'towed',
-    dims: { l: 2.9, w: 1.3, h: 0.75 }, massKg: 90, cgH: 0.45,
+    dims: { l: 2.9, w: 1.3, h: 0.75 }, massKg: 90, cgH: 0.45, cgZ: 0.165,
     wheelbase: 0, track: 1.15, wheelR: 0.25,
     axles: [{ z: 0, steer: false, driven: false }],
     powerW: 0, topMps: 0, reverseMps: 0, brakeG: 0,
     grip: { mu: 0.65, lateral: 12, rolling: 0.035 },
     susp: { travel: 0.1, hz: 2.6, damp: 0.35 },
     seats: [], points: [{ id: 'bed', type: 'bed', at: [0, 0.5, 0] }],
-    hitch: { type: 'ball', at: [0, 0.42, 1.65], tongueK: 0.1, latchM: 0.4, alignRad: deg(35) },
-    cargo: { capKg: 350, bed: { at: [0, 0.5, 0], l: 1.8, w: 1.1, h: 0.3 }, tips: true,
+    hitch: { type: 'ball', at: [0, 0.42, 1.65], latchM: 0.4, alignRad: deg(35) },
+    cargo: { capKg: 350, bed: { at: [0, 0.5, 0], l: 1.8, w: 1.1, h: 0.3 }, loadZ: 0.2, tips: true,
       pivot: [0.44, -0.3], tipMaxRad: deg(48), tipRadS: deg(30), slideRad: deg(27) },
     fuel: null,
     look: 'trailer_small',

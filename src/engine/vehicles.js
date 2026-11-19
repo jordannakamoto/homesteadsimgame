@@ -7,7 +7,9 @@
 //                                                surface(x, z) -> a name in the vehicles system's api.surfaces
 //     units(), unit(id), driven() -> id | null, kinds(),
 //     mount(id, seat?), dismount(),              also done by walking into a mount zone / pressing E
-//     body(id) -> { x, y, z, yaw, pitch, roll, speed, rpm, gear } the live pose,
+//     body(id) -> { x, y, z, yaw, pitch, roll, speed, rpm, gear, ... } the live pose and the drive model's readings:
+//                slip / plow (rear / front tyres sliding, m/s), spin, tip, mu, load (N per wheel), hitch (N on the ball,
+//                [along, across]), tongue (N), artic (a towed unit's), belt / tslip (tracks, m/s), jack,
 //     bedPoint(id, out), nearest(x, z, r) -> id | null, spawn(kind, x?, z?, yaw?) -> id (debug and tests),
 //     findSpot(x, z, { rMin, rMax, rad, away }) -> { x, z, yaw } | null   a clear, dry, flat place near a point
 //     unstick(id), stats(),
@@ -738,7 +740,8 @@
       const L = live.get(id);
       if (!L) return null;
       const p = L.pose, b = L.body;
-      return { x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch, roll: p.roll, steer: p.steer, speed: b.u, slip: b.slip, spin: b.spin, rpm: b.rpm, gear: b.gear, tip: b.tip, air: b.air, fuelL: b.fuelL, surface: L.surf };
+      return { x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch, roll: p.roll, steer: p.steer, speed: b.u, slip: b.slip, spin: b.spin, rpm: b.rpm, gear: b.gear, tip: b.tip, air: b.air, fuelL: b.fuelL, surface: L.surf,
+        plow: b.plow, mu: b.mu, load: b.load.slice(), hitch: b.hitch.slice(), tongue: b.tongue, artic: b.artic, belt: b.belt.slice(), tslip: b.tslip.slice(), jack: b.jack };
     },
     bedPoint(id, out = {}) {
       const L = live.get(id), c = L && L.kind.cargo;

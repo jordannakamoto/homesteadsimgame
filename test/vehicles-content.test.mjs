@@ -72,8 +72,10 @@ test('ATV: 0-50 km/h takes a few seconds through the gears; wet grass spins the 
   const t50 = (surf) => { const b = ridden(on(surf)); let t = 0, spun = 0, gears = new Set(); drive(b, { throttle: 1 }, on(surf), 12, (q) => { if (q.u < 50 / 3.6) t += SUB; if (q.spin > 0.5) spun += SUB; gears.add(q.gear); }); return { t, spun, gears: gears.size }; };
   const dry = t50('grass'), wet = t50('grass_wet');
   assert.ok(dry.t > 3 && dry.t < 6, '0-50 on dry grass ' + dry.t);
-  assert.ok(dry.spun === 0 && dry.gears >= 3, 'grips and shifts: ' + JSON.stringify(dry));
-  assert.ok(wet.t > dry.t * 1.2 && wet.spun > 0.5, 'wet grass: ' + JSON.stringify(wet));
+  // per-wheel loads (G-3): a full-throttle launch puts three quarters of the weight on the rear tyres, and load
+  // sensitivity costs them a few percent, so at peak torque in first the tyres chirp briefly before the shift
+  assert.ok(dry.spun < 0.6 && dry.gears >= 3, 'grips and shifts: ' + JSON.stringify(dry));
+  assert.ok(wet.t > dry.t * 1.2 && wet.spun > dry.spun + 0.5, 'wet grass: ' + JSON.stringify(wet));
 });
 
 test('ATV: lifting off brakes through the engine; it creeps at idle; braking takes longer on wet grass', () => {
@@ -90,11 +92,14 @@ test('ATV: lifting off brakes through the engine; it creeps at idle; braking tak
 });
 
 test('ATV: it climbs 25 degrees of dry grass but spins out on wet grass; 35 degrees is too steep', () => {
-  const climb = (deg, surf) => { const g = (x, z) => Math.max(0, z - 2) * Math.tan((deg * Math.PI) / 180), b = ridden({ ground: g }); drive(b, { throttle: 1 }, on(surf, g), 10); return b; };
+  const climb = (deg, surf) => { const g = (x, z) => Math.max(0, z - 2) * Math.tan((deg * Math.PI) / 180), b = ridden({ ground: g }); let zMax = 0, uMin = 0; drive(b, { throttle: 1 }, on(surf, g), 10, (q) => { zMax = Math.max(zMax, q.z); uMin = Math.min(uMin, q.u); }); b.zMax = zMax; b.uMin = uMin; return b; };
   assert.ok(climb(25, 'grass').u > 3, 'dry 25');
   const wet = climb(25, 'grass_wet');
   assert.ok(wet.u < 0.5 && wet.spin > 0.5, 'wet 25 spins: ' + wet.u);
-  assert.ok(climb(35, 'grass').u < 0.5, 'dry 35');
+  // 35 degrees: the run-up carries it a few metres, then it spins and slides back down (G-3: it no longer sticks where it
+  // stalled; with the weight on the rear tyres and their grip below tan 35 it cannot hold either)
+  const steep = climb(35, 'grass');
+  assert.ok(steep.zMax < 2 + 7 && steep.uMin < -1, 'dry 35: ' + steep.zMax + ' ' + steep.uMin);
 });
 
 test('ATV: hard cornering leans it and washes the front out before it tips; a side slope adds to the tip', () => {
