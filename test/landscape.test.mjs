@@ -299,6 +299,10 @@ test('the garden builds on shovel work: thrown earth hoes into a bed at once, an
   const gx = Math.floor(4.05 / 0.3), gz = Math.floor(4.05 / 0.3);
   const r = c(sim, 'garden.till', { cells: [[gx, gz]] });
   assert.ok(r.ok && r.worked === 1, 'one stroke works loose thrown earth: ' + JSON.stringify(r));
+  // so is the floor of a dug hole (firm earth, but no sod on it)
+  const hx = Math.floor(2 / 0.3), hz = Math.floor(2 / 0.3);
+  const rh = c(sim, 'garden.till', { cells: [[hx, hz]] });
+  assert.ok(rh.ok && rh.worked === 1, 'one stroke works a dug hole: ' + JSON.stringify(rh));
   // grass needs more than one
   const r2 = c(sim, 'garden.till', { cells: [[gx + 20, gz + 20]] });
   assert.ok(r2.ok && r2.worked === 0);
@@ -306,4 +310,20 @@ test('the garden builds on shovel work: thrown earth hoes into a bed at once, an
   const h0 = reliefAt(L(sim).grid, 4.05, 4.05);
   assert.ok(c(sim, 'landscape.tilth', { x: 4.05, z: 4.05 }).ok);
   assert.ok(reliefAt(L(sim).grid, 4.05, 4.05) > h0 * 0.7, 'still a heap');
+});
+
+test('each stamp on the blade bites wider', () => {
+  const sim = makeSim();
+  c(sim, 'landscape.dig', { x: 2, z: 2, m3: 0.01, r: 0.34 });
+  c(sim, 'landscape.dig', { x: 2, z: 2, m3: 0.008, add: true, r: 0.5 });
+  assert.ok(reliefAt(L(sim).grid, 2.42, 2) < -0.001, 'the ground 42 cm out (beyond a first bite) was dug: ' + reliefAt(L(sim).grid, 2.42, 2));
+});
+
+test('a stamped blade bites wider: the hole opens out with each stamp', () => {
+  const sim = makeSim(), g = () => L(sim).grid;
+  c(sim, 'landscape.dig', { x: 2, z: 2, m3: 0.01 });
+  for (const r of [0.42, 0.5, 0.58]) c(sim, 'landscape.dig', { x: 2, z: 2, m3: 0.006, add: true, r });
+  c(sim, 'landscape.dump', { x: 5, z: 5 });
+  c(sim, 'landscape.dig', { x: 8, z: 2, m3: 0.028 });       // the same earth in one narrow bite
+  assert.ok(reliefAt(g(), 2.45, 2) < -0.002 && reliefAt(g(), 8.45, 2) > -0.001, 'wider: ' + reliefAt(g(), 2.45, 2) + ' vs ' + reliefAt(g(), 8.45, 2));
 });
