@@ -114,12 +114,28 @@ generator('gen_petrol_2kw', '2 kW petrol inverter generator', 1800, 2200, 3.6, 3
 generator('gen_petrol_5500w', '5.5 kW petrol inverter generator', 5500, 7000, 19.2, 6.5, 18, 120, true, 4500, 118, dims(0.71, 0.64, 0.73),
   '120/240 V on wheels. Honda EU7000is class.');
 
+// ---------------------------------------------------------------- the grid
+// A service entrance: the utility's drop to a mast on an outside wall, a meter base, and the service conductors through
+// the wall to the main breaker panel. To the solver it is an AC source with no fuel: 120/240 V split phase, as much as
+// the service is rated for (ratedW = mainA x 240 V), every kWh metered and billed at the tariff, plus a fixed daily
+// customer charge, paid from the player's money at midnight. Unpaid, the power company cuts it off until the bill is paid.
+// It feeds the AC breaker panel within feedM of it (settings.panel names one); the service conductors are short and sized
+// for the service (NEC 310.12: 4 AWG Cu for 100 A, 2/0 for 200 A), so they are a joint, not a wire with losses.
+// Tariff: the US residential average was about 17 to 18 cents a kWh in 2025 (EIA Electric Power Monthly); a fixed
+// customer charge of about $15 a month is common. Prices: meter base and mast kit plus a typical utility hook-up fee.
+const service = (id, name, mainA, priceUsd, blurb) => add({
+  id, name, noun: 'grid service', category: 'grid', ports: [{ id: 'ac', bus: 'ac' }], priceUsd, massKg: mainA > 100 ? 18 : 14, dims: dims(0.33, 0.14, 0.55),
+  mount: 'wall', mainA, voltageV: 240, ratedW: mainA * 240, acV: 120, splitPhase: true, tariffUsdPerKWh: 0.18, dailyChargeUsd: 0.5, feedM: 4, blurb,
+});
+service('service_entrance_100a', '100 A grid service (meter and mast)', 100, 1400, 'Power from the line: no fuel, no batteries, a bill at midnight. Put it on an outside wall behind the breaker panel.');
+service('service_entrance_200a', '200 A grid service (meter and mast)', 200, 2100, 'A bigger service for a whole house with electric heat or a shop. Feeds the breaker panel behind it.');
+
 // ---------------------------------------------------------------- distribution
 const junction = (id, name, n, extra, priceUsd, massKg, d, blurb) => add({
   id, name, noun: extra.noun, category: extra.category, role: 'junction',
   ports: [{ id: 'main' }, ...Array.from({ length: n }, (_, i) => ({ id: 'b' + (i + 1) }))], priceUsd, massKg, dims: d, ...extra, blurb,
 });
-junction('panel_ac_100a', '100 A breaker panel (120/240 V)', 20, { noun: 'breaker panel', category: 'breaker_panel', mainA: 100 }, 180, 9, dims(0.36, 0.1, 0.6),
+junction('panel_ac_100a', '100 A breaker panel (120/240 V)', 20, { noun: 'breaker panel', category: 'breaker_panel', mainA: 100, acPanel: true }, 180, 9, dims(0.36, 0.1, 0.6),
   'Where the house circuits start. Put a breaker on each branch.');
 junction('panel_dc_12', '12-circuit DC fuse block', 12, { noun: 'DC fuse block', category: 'breaker_panel', mainA: 100 }, 45, 0.5, dims(0.2, 0.05, 0.12),
   'Distribution for 12 V lights, fridge and sockets.');

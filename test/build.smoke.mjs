@@ -252,23 +252,22 @@ async function open(opts) {
   const ids = { panel: fx.find((f) => f.fixture === 'demo_solar_panel').id, bat: bat.id, light: more[0], tank: more[1], tap: more[2] };
   const c1 = await G((i) => __build.connect(i.panel, 'dc', i.bat, 'dc'), ids), c2 = await G((i) => __build.connect(i.tank, 'out', i.tap, 'in', { diameterMm: 25 }), ids), bad = await G((i) => __build.connect(i.bat, 'dc', i.tap, 'in'), ids), dup = await G((i) => __build.connect(i.bat, 'dc', i.panel, 'dc'), ids);
   check('ports of different kinds refuse to join, in plain words', c1.ok && c2.ok && !bad.ok && /power port cannot be joined to a water port/.test(bad.reason) && !dup.ok, bad.reason);
-  // the third run is made by hand: from the battery's port dot to the light's
+  // power and water are runs in the routes store now (services S4): Equip draws no power or water port dots, and
+  // __build.connect makes a legacy run that keeps the link's id; services compiles it to the wire or pipe piece
   await step(3);
-  const dot = (fid, ev) => G(([fid, ev]) => { const d = [...document.querySelectorAll('.bport')].find((e) => !e.hidden && e._q && e._q.fid === fid); d.dispatchEvent(new PointerEvent(ev, { bubbles: true, cancelable: true })); return true; }, [fid, ev]);
-  await dot(ids.bat, 'pointerdown'); await step(2); await dot(ids.light, 'pointerup'); await step(3);
-  const links = await G(() => __build.pieces().filter((p) => p.kind === 'wire' || p.kind === 'pipe'));
-  const wire = links.find((l) => l.kind === 'wire' && l.to.piece === ids.light), pipe = links.find((l) => l.kind === 'pipe');
-  check('dragging from one port to another runs a wire; wires and pipes are pieces with a routed length', links.length === 3 && !!wire && wire.from.piece === ids.bat && wire.from.port === 'dc' && wire.to.port === 'in' && wire.gauge === 12 && wire.lengthM > 2 && wire.material === 'copper' && pipe.diameterMm === 25 && pipe.lengthM > 3 && pipe.gauge === undefined, JSON.stringify(wire));
-  check('the inspector offers the run\'s gauge', await G(() => __build.view().groups.some((g) => g.id === 'fx:gauge')));
-  await G(() => __build.choose('fx:gauge', 8)); await step(2);
-  check('and changing it changes the piece', (await G((id) => __build.piece(id).gauge, wire.id)) === 8);
+  check('Equip shows no power or water port dots: cable and pipe are run with Hands (F)', await G(() => !!window.__servicesHands && __build.state.ov.ports.every((q) => q.type !== 'power' && q.type !== 'water')));
+  const c3 = await G((i) => __build.connect(i.bat, 'dc', i.light, 'in'), ids);
+  const links = await G(() => { __game.sim.commandNow('services.sync'); return __game.sim.state.sys.services.pieces.filter((p) => p.kind === 'wire' || p.kind === 'pipe'); });
+  const wire = links.find((l) => l.id === c3.id), pipe = links.find((l) => l.id === c2.id);
+  check('connect runs a wire or pipe as a run in the routes store; services gives it back as a piece with the link\'s id and a routed length', c3.ok && links.length === 3 && !!wire && wire.from.piece === ids.bat && wire.from.port === 'dc' && wire.to.port === 'in' && wire.gauge === 12 && wire.lengthM > 2 && wire.material === 'copper' && !!pipe && pipe.diameterMm === 25 && pipe.lengthM > 3 && pipe.gauge === undefined, JSON.stringify(links));
+  check('the runs are legacy, done, and no longer build mode pieces', await G((id) => { const r = __game.sim.state.sys.routes.runs[id]; return !!r && r.legacy && r.state === 'done' && r.props.linkId === id && !__build.pieces().some((p) => p.kind === 'wire' || p.kind === 'pipe'); }, c3.id));
   const st = await G((i) => ({ a: __build.setFixtureSetting(i.light, 'on', false), b: __build.setFixtureSetting(i.panel, 'tiltDeg', 10), on: __build.piece(i.light).settings.on, tilt: __build.piece(i.panel).settings.tiltDeg }), ids);
   check('setFixtureSetting changes a setting; a roof panel keeps the roof\'s tilt', st.a === true && st.on === false && st.b === false && st.tilt > 20, JSON.stringify(st));
   const frt = await G(() => { const a = JSON.stringify(__build.serialize()), pj = JSON.stringify(__build.pieces().filter((p) => p.stage === 'services')); __build.restore(JSON.parse(a)); return { same: a === JSON.stringify(__build.serialize()), pieces: pj === JSON.stringify(__build.pieces().filter((p) => p.stage === 'services')), n: JSON.parse(pj).length }; });
-  check('fixtures and connections survive saving and loading, ids included', frt.same && frt.pieces && frt.n === 8, JSON.stringify(frt));
+  check('fixtures survive saving and loading, ids included', frt.same && frt.pieces && frt.n === 5, JSON.stringify(frt));
   await G((i) => __build.removeFixture(i.tank), ids); await step(2);
-  check('removing a fixture takes its connections with it', (await G(() => __build.pieces().filter((p) => p.kind === 'pipe').length)) === 0);
-  check('the simulation sees the equipment', await G(() => { __game.step(1 / 60); return __game.sim.state.sys.site.pieces.some((p) => p.kind === 'fixture' && p.fixture === 'demo_battery' && p.ports.length === 1) && __game.sim.state.sys.site.pieces.some((p) => p.kind === 'wire' && p.material === 'copper'); }));
+  check('removing a fixture takes its runs with it', await G((id) => { __game.step(1 / 60); return !__game.sim.state.sys.routes.runs[id]; }, c2.id));
+  check('the simulation sees the equipment and the wires', await G(() => { __game.step(1 / 60); __game.sim.commandNow('services.sync'); return __game.sim.state.sys.site.pieces.some((p) => p.kind === 'fixture' && p.fixture === 'demo_battery' && p.ports.length === 1) && __game.sim.state.sys.services.pieces.some((p) => p.kind === 'wire' && p.material === 'copper'); }));
   await draw(); await page.waitForTimeout(600); await page.screenshot({ path: 'dist/build-smoke-equip.png' });
   await page.keyboard.press('Escape'); await step(2); await page.keyboard.press('Escape'); await step(2);
   await draw(); await page.waitForTimeout(600);

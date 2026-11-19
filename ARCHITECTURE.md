@@ -120,6 +120,7 @@ Rules:
 - Autosaves every 20 s and when the page is hidden or closed. The last world played reopens on load.
 - `SAVE_VERSION` and `MIGRATIONS` in `save.js`: any change to the shape of a save adds a migration. A save from the previous wave must load.
 - Terrain edits live in the simulation (`sys.ground.macro`, see "One ground" below); save v3 moved the old `world.edits` (base64 `Float32Array` tiles) there.
+- Save v4: build mode's Equip wires and water pipes became legacy runs in `sys.routes` (`src/sim/services-legacy.js`, converted on the page once build mode has them, ids kept); only flues are build mode links now.
 - Every earthwork-format grid anywhere in the state is packed when stored (`src/sim/core/earthwork-codec.js`, save v2): `stringifySave(save)` uses `packReplacer`, `readSave` uses `unpackReviver`, so packed and plain saves both load and the in-memory shape never changes. About 17 KB to 1-2 KB a dug 3.2 m tile; flat machine tiles about 0.1 KB. `__game.saveSize()` reports `{ bytes, plainBytes }`. The engine's autosave hands `sim.state` by reference (no deep copy); `__game.saveData()` still returns a copy.
 - Editable buildings are saved in `world.builds`. Build mode keeps `world-engine-build:1:<seed>` as a legacy fallback. Loose objects in flight (falling trees, logs, pickups) are not saved.
 - New systems get saved automatically, because their state lives in `sim.state.sys`.

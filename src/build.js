@@ -6964,7 +6964,7 @@
     decor: "Pick a piece, then click to place it. Wall pieces snap to walls.",
     measure: "Click two points to measure between them. Measurements stay until you clear them.",
     erase: "Click a piece to remove it, or drag a box to clear an area.",
-    equip: "Pick a piece of equipment and click to place it: on the ground, a floor, a wall or a roof. Drag from one port dot to another to run a wire or pipe.",
+    equip: "Pick a piece of equipment and click to place it: on the ground, a floor, a wall or a roof. Cable and pipe are run with Hands (F); a flue joins port dot to port dot.",
     copy: "Click where you want a copy.",
   };
   function hint() {
@@ -10154,7 +10154,9 @@
     const pv = [];
     if (eq) {
       // water ports get no dots: pipes are fitted by hand, part by part (docs/FIRST_WATER.md). Wires and flues stay here for now.
-      for (const f of FX.list) for (const p of (fxDef(f.fixture) || { ports: [] }).ports) if (p.type !== "water") pv.push({ p: portPos(f, p.id), type: p.type, fid: f.id, pid: p.id, from: !!FX.from && FX.from.piece === f.id && FX.from.port === p.id });
+      // power ports too once cable is run with Hands (services, src/services-hands.js): Equip keeps only flues
+      const noPower = !!window.__servicesHands;
+      for (const f of FX.list) for (const p of (fxDef(f.fixture) || { ports: [] }).ports) if (p.type !== "water" && !(noPower && p.type === "power")) pv.push({ p: portPos(f, p.id), type: p.type, fid: f.id, pid: p.id, from: !!FX.from && FX.from.piece === f.id && FX.from.port === p.id });
       for (const ln of FX.links) {
         const r = linkRoute(ln);
         r && pv.push({ p: [(r.pts[1][0] + r.pts[3][0]) / 2, r.pts[1][1], (r.pts[1][2] + r.pts[3][2]) / 2], type: "link", lid: ln.id, text: fmtM(r.len), sel: ln.id === FX.sel });
@@ -10314,9 +10316,14 @@
     const c = CONN[pa.type];
     if (!c) return no("Nothing can be run from a " + pa.type + " port yet.");
     if (FX.links.some((l) => (l.from.piece === a && l.from.port === ap && l.to.piece === b && l.to.port === bp) || (l.from.piece === b && l.from.port === bp && l.to.piece === a && l.to.port === ap))) return no("These two ports are already joined.");
-    pushUndo();
     const ln = { id: newPid(), kind: c.kind, from: { piece: a, port: ap }, to: { piece: b, port: bp }, material: (opts && opts.material) || c.material };
     ln[c.key] = (opts && opts[c.key]) || c.def;
+    // power and water are runs in the routes store now (services): one connection model, kept by the simulation
+    if ((pa.type === "power" || pa.type === "water") && G.servicesLink && G.sim && G.sim.handlers.has("routes.addRun")) {
+      const r = linkRoute(ln);
+      return G.servicesLink({ ...ln, pts: r ? r.pts : [], lengthM: r ? r.len : 0 });
+    }
+    pushUndo();
     FX.links.push(ln);
     FX.sel = ln.id;
     fxTouch();
@@ -11371,6 +11378,29 @@
     addFixtures: fxAdd,
     setFixtureSetting: fxSetting,
     connect: fxConnect,
+    // services (S4): where a port is, and the old Equip wires and water pipes, for their move into the routes store
+    portPos(fixtureId, portId) {
+      const f = FX.list.find((q) => q.id === fixtureId),
+        d = f && fxDef(f.fixture);
+      return d && d.ports.some((p) => p.id === portId) ? portPos(f, portId) : null;
+    },
+    legacyLinks() {
+      const out = [];
+      for (const ln of FX.links) {
+        if (!(ln.kind === "wire" || (ln.kind === "pipe" && !((ln.diameterMm || 0) >= 100)))) continue;
+        const r = linkRoute(ln);
+        if (r) out.push({ ...ln, from: { ...ln.from }, to: { ...ln.to }, pts: r.pts, lengthM: r.len });
+      }
+      return out;
+    },
+    dropLegacyLinks(ids) {
+      const drop = new Set(ids || []),
+        n = FX.links.length;
+      FX.links = FX.links.filter((l) => !drop.has(l.id));
+      if (FX.sel && drop.has(FX.sel)) FX.sel = null;
+      if (n !== FX.links.length) fxTouch();
+      return n - FX.links.length;
+    },
     removeFixture(id) {
       const ok = fxRemove(id);
       ok && fxTouch();
