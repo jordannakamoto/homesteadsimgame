@@ -1,1 +1,127 @@
-/* ui: tokens (stub) */
+/* ui: tokens. Two skins on <html data-skin="cozy|minimal">; cozy is the default (also when the attribute is missing).
+   Values are docs/design/ui-redesign.md section 2. Everything else in template/ui/ reads these names only. */
+
+/* ---- shared by both skins ---- */
+:root {
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px;
+  --fs-xs: 11px; --fs-sm: 13px; --fs-md: 15px; --fs-lg: 18px; --fs-xl: 24px;
+  --r-pill: 999px;
+  --slot: 64px;
+  --hit: 44px;
+  --float-ink: #fff7dc;
+  --float-shadow: 0 1px 4px rgba(0, 0, 0, .85);
+  --cad: #9fe3ff;
+  --cad-ink: #dff5ff;
+  --cad-bg: rgba(16, 24, 30, .92);
+  --focus-ring: 2px solid var(--accent-edge);
+
+  /* lane geometry (the frame in section 3); later steps may tune these, never hard-code offsets */
+  --lane-edge: 16px;                                   /* gap from the screen edge */
+  --lane-gap: 8px;                                     /* gap between stacked lanes */
+  --lane-bottom-h: 104px;                              /* hotbar row incl. its panel padding, lift and marker */
+  --lane-context-h: 92px;                              /* seed cards / plan row when shown */
+  --lane-left-top: 132px;                              /* under #stock + #vitals */
+  --hud-top-h: 112px;                                  /* under the top-right cluster (clock, weather, speed) */
+  --sa-t: env(safe-area-inset-top, 0px);
+  --sa-r: env(safe-area-inset-right, 0px);
+  --sa-b: env(safe-area-inset-bottom, 0px);
+  --sa-l: env(safe-area-inset-left, 0px);
+}
+body.touch {
+  --slot: 56px;
+  --lane-edge: 6px;
+  --lane-bottom-h: 84px;
+  --lane-context-h: 80px;
+  --lane-left-top: 96px;
+  --hud-top-h: 56px;
+}
+
+/* ---- cozy (default): warm cream, rounded, chunky lips, bouncy ---- */
+:root:not([data-skin="minimal"]) {
+  color-scheme: light;
+  --font-body: "Nunito", ui-rounded, "SF Pro Rounded", "Hiragino Maru Gothic ProN", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Fredoka", "Nunito", ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+  --fw-body: 700; --fw-strong: 800; --fw-display: 600;
+  --label-transform: none; --label-track: 0;
+  --r-sm: 12px; --r-md: 18px; --r-lg: 26px; --r-slot: 20px;
+  --border-w: 2px;
+  --surface-1: rgba(255, 249, 236, .95);
+  --surface-2: #fff9ec;
+  --surface-3: #ffffff;
+  --surface-hover: #fff3d6;
+  --well: #efe2c6;
+  --edge: #e6d6b2; --edge-strong: #cdb78a;
+  --ink: #4a3526; --ink-dim: #8b7459; --ink-inv: #fffaf0;
+  --accent: #35a865; --accent-ink: #ffffff; --accent-soft: #dff3e3; --accent-edge: #2c8f55;
+  --select-bg: #ffffff; --select-ink: #256b43; --select-edge: #35a865;
+  --good: #2f9e5b; --warn: #d98a12; --danger: #d9503b; --info: #2e8fd6; --money: #b97a10;
+  --shadow-1: 0 3px 0 rgba(122, 92, 48, .30), 0 6px 14px rgba(70, 48, 20, .18);
+  --shadow-2: 0 5px 0 rgba(122, 92, 48, .28), 0 16px 36px rgba(70, 48, 20, .24);
+  --lip: 0 3px 0 #d9c69c; --lip-accent: 0 3px 0 #267a49;
+  --press-y: 3px; --press-scale: .95;
+  --blur: none;
+  --ease: cubic-bezier(.34, 1.56, .64, 1); --t-fast: 110ms; --t: 220ms;
+  --icon-stroke: 2.25; --icon-fill: color-mix(in srgb, currentColor 18%, transparent);
+  --ic-outline: #5b4330;
+  --ic-wood: #c48a4a; --ic-steel: #9aa7b2; --ic-stone: #a9a294;
+  --ic-leaf: #58b54a; --ic-water: #3f9fe0; --ic-soil: #8a5d3a;
+  --ic-skin: #f0bf96; --ic-paper: #fff3cf; --ic-warn: #e9a11f;
+  /* kit-internal extras (not in the table): derived, skin-specific */
+  --lip-danger: 0 3px 0 #a63a29;
+  --pressed-ink: var(--select-ink);
+  --inner-hi: inset 0 2px 0 rgba(255, 255, 255, .9);
+  --hover-y: -2px;
+  --lift-y: -6px;
+  --scrim: rgba(74, 53, 38, .28);
+}
+
+/* ---- minimal: crisp dark glass, flat, quick ---- */
+:root[data-skin="minimal"] {
+  color-scheme: dark;
+  --font-body: "Inter", "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", Roboto, system-ui, sans-serif;
+  --font-display: var(--font-body);
+  --fw-body: 500; --fw-strong: 650; --fw-display: 650;
+  --label-transform: uppercase; --label-track: .06em;
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-slot: 12px;
+  --border-w: 1px;
+  --surface-1: rgba(16, 19, 23, .62);
+  --surface-2: rgba(16, 19, 23, .90);
+  --surface-3: rgba(255, 255, 255, .08);
+  --surface-hover: rgba(255, 255, 255, .14);
+  --well: rgba(0, 0, 0, .35);
+  --edge: rgba(255, 255, 255, .12); --edge-strong: rgba(255, 255, 255, .28);
+  --ink: #f3f5f7; --ink-dim: #a3acb5; --ink-inv: #14181c;
+  --accent: #ffd166; --accent-ink: #1b1708; --accent-soft: rgba(255, 209, 102, .18); --accent-edge: #ffd166;
+  --select-bg: #f3f5f7; --select-ink: #14181c; --select-edge: transparent;
+  --good: #7ddc9a; --warn: #ffb84d; --danger: #ff7a66; --info: #7cc7ff; --money: #ffd166;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .35);
+  --shadow-2: 0 12px 32px rgba(0, 0, 0, .45);
+  --lip: none; --lip-accent: none;
+  --press-y: 0; --press-scale: .97;
+  --blur: blur(10px) saturate(1.2);
+  --ease: cubic-bezier(.2, .8, .2, 1); --t-fast: 80ms; --t: 140ms;
+  --icon-stroke: 1.75; --icon-fill: none;
+  --ic-outline: #e9eef2;
+  --ic-wood: #c9a36f; --ic-steel: #b7c0c8; --ic-stone: #9aa0a6;
+  --ic-leaf: #8fd16a; --ic-water: #7cc7ff; --ic-soil: #7a5a3c;
+  --ic-skin: #e9b88f; --ic-paper: #f2e8c8; --ic-warn: #ffb84d;
+  --lip-danger: none;
+  --pressed-ink: var(--accent);
+  --inner-hi: inset 0 1px 0 rgba(255, 255, 255, .06);
+  --hover-y: 0px;
+  --lift-y: -6px;
+  --scrim: rgba(0, 0, 0, .35);
+}
+
+/* ---- legacy names: untouched rules in head.html and injected styles follow the skin ---- */
+:root:not([data-skin="minimal"]), :root[data-skin="minimal"] {
+  --panel: var(--surface-1);
+  --panel-edge: var(--edge);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-skin="minimal"]), :root[data-skin="minimal"] {
+    --ease: ease-out; --t-fast: 60ms; --t: 100ms;
+    --press-scale: .98; --hover-y: 0px;
+  }
+}
