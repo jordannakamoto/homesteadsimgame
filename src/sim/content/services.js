@@ -193,6 +193,9 @@ export const ITEMS_SERVICES = Object.freeze([
   { id: 'fx_shower', name: 'Shower valve and head', category: 'plumbing', unit: 'each', massKg: 5, priceUsd: 160, blurb: 'A mixing valve on hot and cold, and a 2.0 gpm head' },
   { id: 'fx_hose_bib', name: 'Hose bib, 1/2 in', category: 'plumbing', unit: 'each', massKg: 0.4, priceUsd: 18, blurb: 'An outdoor tap through the wall' },
   { id: 'pex_coil_20', name: 'Copper crimp rings, 20 mm', category: 'plumbing', unit: 'each', massKg: 0.006, priceUsd: 0.35, blurb: 'The same for 20 mm PEX' },
+  // the grid (S9a): the meter base and mast kit with the utility's hook-up; the catalog entry is service_entrance_* in fixtures-electrical.js
+  { id: 'svc_entrance_100a', name: 'Grid service, 100 A: meter base, mast and hook-up', category: 'electrical', unit: 'each', massKg: 14, priceUsd: 1400, blurb: 'The power company brings the line to a mast on an outside wall; the meter feeds the breaker panel behind it. Billed by the kWh' },
+  { id: 'svc_entrance_200a', name: 'Grid service, 200 A: meter base, mast and hook-up', category: 'electrical', unit: 'each', massKg: 18, priceUsd: 2100, blurb: 'A bigger service, for electric heat or a shop' },
   // trim-out (S9b): what goes into the boxes and the panel once the walls are finished
   { id: 'elec_receptacle', name: 'Duplex outlet, 15 A', category: 'electrical', unit: 'each', massKg: 0.09, priceUsd: 1.8, blurb: 'Two sockets; the wires land on its screws, then it folds into the box' },
   { id: 'elec_switch', name: 'Wall switch, single pole, 15 A', category: 'electrical', unit: 'each', massKg: 0.07, priceUsd: 1.6, blurb: 'Breaks the hot wire to the lights after it' },
