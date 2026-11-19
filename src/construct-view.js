@@ -845,6 +845,11 @@
     if (!m0 || !ln0 || m0.type === 'ridge' || pm0.kind === 'door' || pm0.kind === 'window' || pm0.kind === 'site') return [];
     if (pm0.kind === 'rafter' && !Object.values(pr.members).some((q) => q.kind === 'rafter' && q.built)) return [];
     const mx = (m0.a[0] + m0.b[0]) / 2, mz = (m0.a[2] + m0.b[2]) / 2, out = [];
+    if (m0.deck) {         // deck boards: one gesture lays the next rows out from the house, as many as the gesture setting (Feel) says
+      const k = C.gestureOf(S().options), rows = [];
+      for (const mid of plan(pr.id).inst) { const pm = pr.members[mid], m = g.byId.get(mid); if (mid !== ctx.mid && pm && m && m.deck && pm.parent === pm0.parent && pm.need - pm.got > 1e-6 && m.row >= m0.row && m.row < m0.row + k) rows.push({ mid, k: (m.row - m0.row) * 1000 + Math.hypot((m.a[0] + m.b[0]) / 2 - mx, (m.a[2] + m.b[2]) / 2 - mz) }); }
+      return rows.sort((a, b) => a.k - b.k).map((o) => o.mid);
+    }
     if (m0.course) {       // a roof course: the rest of this course along the eave, then the course above it, as many pieces as a click sets
       const rows = [];
       for (const mid of plan(pr.id).inst) { const pm = pr.members[mid], m = g.byId.get(mid); if (mid !== ctx.mid && pm && m && m.course && pm.kind === pm0.kind && pm.parent === pm0.parent && pm.need - pm.got > 1e-6 && m.row >= m0.row && m.row <= m0.row + 1) rows.push({ mid, k: (m.row - m0.row) * 1000 + Math.hypot((m.a[0] + m.b[0]) / 2 - mx, (m.a[2] + m.b[2]) / 2 - mz) }); }

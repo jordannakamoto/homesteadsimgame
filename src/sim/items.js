@@ -18,6 +18,7 @@ import { ITEMS_VEHICLES, VEHICLE_CATEGORIES } from './content/vehicles.js';
 import { finishOf, SHEENS } from './content/decor.js';
 import { ITEMS_SERVICES, SERVICE_ITEM_CATEGORIES } from './content/services.js';
 import { ITEMS_CONCRETE } from './content/concrete-items.js';
+import { ITEMS_DECK } from './content/deck.js';
 import { openingItems, openingItemFromId } from './content/openings.js';
 
 export const ITEM_UNITS = Object.freeze(['each', 'm', 'm2', 'm3', 'kg', 'L']);
@@ -138,6 +139,8 @@ add({ id: 'mortar_mix', name: 'Mortar mix (dry)', category: 'stone', unit: 'kg',
 
 // forms for poured foundations: boards and stakes (src/sim/content/concrete-items.js)
 for (const g of ITEMS_CONCRETE) add(g);
+// decks: treated lumber, deck boards, hangers, ledger lags, deck screws (src/sim/content/deck.js)
+for (const g of ITEMS_DECK) add(g);
 
 // ---- fasteners, by weight
 add({ id: 'trim_casing', name: 'Colonial casing 57 x 17 (primed)', category: 'lumber', unit: 'm', material: 'pine_seasoned', dims: { widthM: 0.057, depthM: 0.0175 }, priceUsd: 2.6, blurb: 'Finger-jointed pine moulding, primed: trim round doors and windows' });
