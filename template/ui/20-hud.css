@@ -141,6 +141,7 @@ body.building #ui-lane-bottom > #tools { display: none; }
   box-shadow: var(--shadow-2); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
 }
 #tools-fly[hidden] { display: none; }
+body:has(#tools-fly:not([hidden])) #ui-lane-prompt { opacity: 0; }   /* the prompt shares the flyout's spot */
 body.touch #ui-lane-bottom > #tools { -webkit-backdrop-filter: none; backdrop-filter: none; }
 #tool-terrain[aria-expanded="true"]:not([aria-pressed="true"]) { background: var(--surface-hover); }
 /* the mode chip: in a sub-mode only its own button stays, with a back arrow; a click on it returns to the axe */
