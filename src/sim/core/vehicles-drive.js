@@ -315,6 +315,10 @@ const _m = { M: 0, z: 0, y: 0, I: 0 }, _mt = { M: 0, z: 0, y: 0, I: 0 };
 const _s = [null, null, null, null];
 const _y = [0, 0, 0, 0], _xu = [0, 0, 0, 0], _cap = [0, 0, 0, 0], _lk = [false, false, false, false];
 const NOSURF = { mu: 1, roll: 1 };
+// what wheel i can give along its rolling direction for a demand X with its side demand _y[i] (proportional past the circle)
+const ach = (i, X) => { const h = Math.hypot(X, _y[i]); return h > _cap[i] ? (_cap[i] * X) / h : X; };
+// an axle's pull with nothing asked sideways: an open differential is held to twice its lighter wheel
+const pureA = (i, open) => (open ? 2 * Math.min(_cap[i], _cap[i + 1]) : _cap[i] + _cap[i + 1]);
 const _b = { x: 0, z: 0 }, _c = { x: 0, z: 0 };
 
 // One substep of a driven body, and of the unit it tows (trailer = { body, kind }) if any.
@@ -448,8 +452,6 @@ export function stepBody(b, kind, input, env, dt = SUB, trailer = null) {
       _y[i] = Nax > 0 ? (Yax * ld[i]) / Nax : 0;
       _lk[i] = false; _xu[i] = 0;
     }
-    const ach = (i, X) => { const h = Math.hypot(X, _y[i]); return h > _cap[i] ? (_cap[i] * X) / h : X; };
-    const pureA = (i, open) => (open ? 2 * Math.min(_cap[i], _cap[i + 1]) : _cap[i] + _cap[i + 1]);
     const pF = D.drvF ? pureA(0, D.openF) : 0, pR = D.drvR ? pureA(2, D.openR) : 0, pure = pF + pR;
     let want = 0;
     if (kind.engine) want = b.stalled ? 0 : engineForce(b, kind, th, brake, Mo + (mt ? mt.M : 0), dt);
@@ -508,8 +510,9 @@ export function stepBody(b, kind, input, env, dt = SUB, trailer = null) {
     const Cs = g.lateral || 8, uAbs = Math.max(Math.abs(b.u), U0);
     // past the peak slip angle (about 1.5 mu / cornering stiffness) a sliding axle gives its sliding grip: a front past it
     // plows on (understeer stays put), a rear past it lets go (the tail comes round)
-    const aPk = (1.5 * b.mu) / Cs, past = (sl) => { const x = clamp((sl / uAbs - aPk) / aPk, 0, 1); return 1 - x * (1 - slideK); };
-    latF *= past(b.plow); latR *= past(b.slip);
+    const aPk = (1.5 * b.mu) / Cs;
+    latF *= 1 - clamp((b.plow / uAbs - aPk) / aPk, 0, 1) * (1 - slideK);
+    latR *= 1 - clamp((b.slip / uAbs - aPk) / aPk, 0, 1) * (1 - slideK);
     const axle = (zA, steerA, Nax, capA, lk, i) => {
       const both = _lk[i] && _lk[i + 1], dl = steerA && !both ? b.steer : 0, cd = Math.cos(dl), sd = Math.sin(dl);
       const nx = cy * cd - sy * sd, nz = -sy * cd - cy * sd;                     // the wheels' sideways: R cos - F sin
