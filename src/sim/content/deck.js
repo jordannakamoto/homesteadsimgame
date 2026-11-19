@@ -17,7 +17,17 @@
 // Span limits are the IRC's prescriptive deck tables (2015 IRC Table R507.5 / AWC DCA 6 Table 2: 40 psf live + 10 psf
 // dead, L/360, No. 2 grade, no cantilever), in feet-inches. Ledger fastener spacing is 2015 IRC Table R507.9.1.3(1)
 // (1/2 in lag screws through 15/32 in sheathing into a 2x band joist). Guards are required where the walking surface is
-// more than 30 in above grade (IRC R312.1.1); rails come with slice B-3, so for now that is a warning.
+// more than 30 in above grade (IRC R312.1.1).
+//
+// Slice B-3 adds three things to a deck, all optional data on it (see the bottom of this file):
+//   rails   d.rails 'auto' | 'on' | 'off', d.post '4x4' | '6x6': a guard round the open edges, 36 in high, balusters spaced so a
+//           4 in sphere cannot pass (IRC R312.1.2, R312.1.3); required (and 'off' refused) when the boards are over 30 in up.
+//   stair   d.stair { edge: 'out' | 'left' | 'right' | 'house', w }: a stair from that edge down to a landing pad at grade, its
+//           risers at most 7-3/4 in and treads at least 10 in (IRC R311.7.5), handrails once it has four risers (R311.7.8).
+//   porch   d.porch { pitch (rise in 12) }: 6x6 posts on the beam line, a header, and one shed roof plane from a ledger on the
+//           house wall down to the header (the roof comes from framing.js's roofMembers through desc.roofs).
+// Stages: 'porch-frame' (posts, header, wall ledger, rafters), then the house's roof-deck / dry-in / roofing take the porch
+// roof's sheets, flashing and shingles; 'rails' (Rails and stairs) after the decking.
 
 export const IN = 0.0254;
 const ftin = (ft, inch) => (ft * 12 + inch) * IN;
@@ -59,10 +69,17 @@ export const ITEMS_DECK = Object.freeze([
   ...['2x6', '2x8', '2x10', '2x12'].map((s, k) => ({ id: 'joist_hanger_' + s, name: 'Joist hanger, ' + s.replace('x', ' x '), category: 'fasteners', unit: 'each', massKg: [0.18, 0.22, 0.28, 0.34][k], priceUsd: [1.6, 2.1, 2.8, 3.6][k], blurb: 'A galvanized steel stirrup nailed to the ledger: the joist end drops into it' })),
   { id: 'ledger_lag', name: 'Ledger lag screw 1/2 x 4 in, with washer', category: 'fasteners', unit: 'each', material: 'steel', dims: { lengthM: 0.1, widthM: 0.0127, thicknessM: 0.0127 }, priceUsd: 1.1, blurb: 'Hot-dipped galvanized: bolts the ledger through the sheathing into the house rim, staggered' },
   { id: 'screws_deck', name: 'Deck screws #8 x 2-1/2 in', category: 'fasteners', unit: 'kg', material: 'steel', priceUsd: 14, blurb: 'Coated for treated lumber: two into every joist a board crosses' },
+  { id: 'lumber_pt_4x4', name: '4 x 4 pressure-treated post', category: 'lumber', unit: 'm', material: 'pine_seasoned', dims: { widthM: 0.089, depthM: 0.089 }, priceUsd: 7.5, blurb: 'Treated for ground contact: guard posts, notched and bolted to the rim joist' },
+  { id: 'lumber_pt_2x4', name: '2 x 4 pressure-treated lumber', category: 'lumber', unit: 'm', material: 'pine_seasoned', dims: { widthM: 0.038, depthM: 0.089 }, priceUsd: 2.9, blurb: 'Treated rails for guards' },
+  { id: 'baluster_pt', name: 'Baluster 2 x 2 x 36 in, treated', category: 'lumber', unit: 'each', material: 'pine_seasoned', dims: { widthM: 0.038, depthM: 0.038, lengthM: 0.9 }, priceUsd: 1.6, blurb: 'Square balusters: set closer than 4 in so a child cannot slip through' },
+  { id: 'handrail_pt', name: 'Handrail, treated, graspable profile', category: 'lumber', unit: 'm', material: 'pine_seasoned', dims: { widthM: 0.05, depthM: 0.05 }, priceUsd: 9, blurb: 'A profile you can close your hand round (1-1/4 to 2 in across)' },
+  { id: 'stair_pad', name: 'Precast landing pad 36 x 36 in', category: 'stone', unit: 'each', material: 'concrete', dims: { lengthM: 0.914, widthM: 0.914, thicknessM: 0.05 }, priceUsd: 38, blurb: 'A firm landing at the foot of the stair, set into the ground on gravel' },
+  { id: 'carriage_bolt', name: 'Carriage bolt 1/2 x 4-1/2 in, nut and washer', category: 'fasteners', unit: 'each', massKg: 0.12, priceUsd: 1.4, blurb: 'Hot-dipped galvanized: bolts a guard post to the rim joist' },
+  { id: 'stair_bracket', name: 'Stair stringer connector', category: 'fasteners', unit: 'each', massKg: 0.25, priceUsd: 3.4, blurb: 'A galvanized angle that holds the top of a stringer to the rim joist' },
   { id: 'ledger_flashing', name: 'Ledger Z-flashing', category: 'fasteners', unit: 'm', massKg: 0.25, priceUsd: 3.2, blurb: 'Bent metal over the top of the ledger and up under the wrap: rain runs out over it, not behind it' },
 ]);
 // the small things used up as the deck goes on (like nails): they sit by the stacks
-export const DECK_SUPPLY = Object.freeze(['joist_hanger_2x6', 'joist_hanger_2x8', 'joist_hanger_2x10', 'joist_hanger_2x12', 'ledger_lag', 'screws_deck', 'ledger_flashing']);
+export const DECK_SUPPLY = Object.freeze(['joist_hanger_2x6', 'joist_hanger_2x8', 'joist_hanger_2x10', 'joist_hanger_2x12', 'ledger_lag', 'screws_deck', 'ledger_flashing', 'carriage_bolt', 'stair_bracket']);
 export const BOARD_ITEM = Object.freeze({ pt: 'board_deck_pt', cedar: 'board_deck_cedar' });
 export const BOARD_NAME = Object.freeze({ pt: 'Treated pine', cedar: 'Cedar' });
 
@@ -135,15 +152,134 @@ export function planDeck(d, ctx = {}) {
   if (beamBot < gMax + DECK.pier.aboveM - 1e-6) errors.push('Too low for a beam over the piers: the boards need to be at least ' + out.minAbove.toFixed(2) + ' m above the ground.');
   const above = top - gMin;
   out.above = above;
-  if (above > DECK.guardM) warns.push('Over 30 in (' + above.toFixed(2) + ' m) above the ground: it needs a guard rail (IRC R312.1.1). Rails come later; mind the edge.');
+  // guards (slice B-3): required where the boards are more than 30 in above the ground (IRC R312.1.1), optional below that
+  const railsOpt = d.rails === 'on' || d.rails === 'off' ? d.rails : 'auto';
+  out.guardRequired = above > DECK.guardM;
+  out.guard = railsOpt === 'on' || (railsOpt === 'auto' && out.guardRequired);
+  out.postSize = d.post === '6x6' ? '6x6' : '4x4';
+  if (railsOpt === 'off' && out.guardRequired) errors.push('A guard is required: the boards are ' + (above / IN).toFixed(0) + ' in above the ground and the rule is 30 in (IRC R312.1.1). Put the rails on, or build the deck lower.');
+  // a stair, a porch
+  out.stair = null; out.porch = null;
+  if (d.stair) {
+    out.stair = planStair(d, f, top, ctx.groundY || (() => 0), attached, out.postSize);
+    errors.push(...out.stair.errors); warns.push(...out.stair.warns);
+  }
+  if (d.porch) {
+    out.porch = planPorch(d, out, ctx);
+    errors.push(...out.porch.errors); warns.push(...out.porch.warns);
+  }
   out.ok = !errors.length;
   return out;
+}
+
+// ======================================================================== guards, stairs, porch (slice B-3)
+export const GUARD = Object.freeze({
+  heightM: 36 * IN,                 // at least 36 in from the boards to the top of the guard (IRC R312.1.2)
+  sphereM: 4 * IN,                  // no opening a 4 in sphere passes through (IRC R312.1.3)
+  aimGapM: 3.75 * IN,               // the gap the balusters are spaced for, a little under the limit
+  postMaxM: 6 * 0.3048,             // posts at most 6 ft apart (AWC DCA 6)
+  baluster: 0.038,                  // 2 x 2
+  bottomLiftM: 0.05,                // the bottom rail's underside sits 2 in over the boards (the gap under it is under 4 in)
+  postOff: Object.freeze({ '4x4': 0.02, '6x6': 0.07 }),   // post centre outside the deck's edge: a 4 x 4 notched into the rim, a 6 x 6 bolted to its face
+  postSize: Object.freeze({ '4x4': 0.089, '6x6': 0.14 }),
+});
+export const STAIR = Object.freeze({
+  maxRiseM: 7.75 * IN,              // IRC R311.7.5.1
+  minTreadM: 10 * IN,               // IRC R311.7.5.2
+  treadM: 2 * 0.14 + 0.005,         // two 5/4 x 6 boards with a gap: 11-3/16 in
+  treadT: 0.025,
+  minWidthM: 36 * IN,               // IRC R311.7.1
+  maxFlightM: 12 * 0.3048,          // IRC R311.7.3: 12 ft between landings
+  handrailRisers: 4,                // IRC R311.7.8: handrails on stairs of four or more risers
+  handrailM: 36 * IN,               // 34 to 38 in above the nosings (R311.7.8.1)
+  stringerOcM: 18 * IN,             // 2 x 12 stringers at most 18 in apart under 5/4 treads (AWC DCA 6)
+  stringerSpanM: 6 * 0.3048,        // and no more than 6 ft of horizontal run without a support
+  throatMinM: 3.5 * IN,             // what must be left of the stringer's depth under the notches
+  padM: 36 * IN, padT: 0.05,          // a 36 in precast landing pad (R311.7.6), set 2 in proud of the ground
+  stringer: '2x12',
+});
+export const PORCH = Object.freeze({
+  pitches: Object.freeze([2, 3, 4]),   // rise in 12
+  clearMinM: 1.8, clearWarnM: 80 * IN, // headroom under the header: refuse under 1.8 m, warn under 6 ft 8 in
+  eaveOverM: 0.3, rakeM: 0.15,         // the roof reaches this far past the header and past the ends
+  ledgerBelowTopM: 0.1,                // the roof's top edge meets the wall this far under the top plate
+  postMaxM: 2.4,
+  postEndM: 0.15,
+});
+export const HEADER_SIZE = (spacing) => (spacing <= 1.8 ? '2x8' : spacing <= 2.4 ? '2x10' : '2x12');
+const rafterFor = (run) => (run <= 3.2 ? '2x6' : run <= 4.2 ? '2x8' : '2x10');   // framing.js's rule
+const OSB_T = 0.011;
+
+export const OPEN_EDGES = (attached) => (attached ? ['out', 'left', 'right'] : ['house', 'out', 'left', 'right']);
+const EDGE_N = { out: [0, 1], house: [0, -1], left: [-1, 0], right: [1, 0] };
+export const edgeLen = (f, e) => (e === 'out' || e === 'house' ? f.W : f.D);
+// the point [s, t] of an edge at distance p along it
+export const edgeAt = (f, e, p) => (e === 'out' ? [p, f.D] : e === 'house' ? [p, 0] : e === 'left' ? [0, p] : [f.W, p]);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// The stair from one edge down to grade: how many risers the drop needs at most 7-3/4 in each, the stringers cut to that
+// rise and run, treads, the landing pad, handrails from four risers. Returns { errors, warns, none?, ... }.
+export function planStair(d, f, top, gy, attached, postSize = '4x4') {
+  const st = d.stair, errors = [], warns = [], out = { ok: false, errors, warns };
+  if (!st || !st.edge) return out;
+  const e = st.edge;
+  if (!OPEN_EDGES(attached).includes(e)) { errors.push('A stair goes down from an open edge: the house side of a deck bolted to the house is the door.'); return out; }
+  const w = Math.max(STAIR.minWidthM, +st.w || STAIR.minWidthM), ps = GUARD.postSize[postSize] || 0.089, gap = w + ps, L = edgeLen(f, e);
+  if (L < gap + 0.5) { errors.push('That edge is too short for a ' + (w / IN).toFixed(0) + ' in stair.'); return out; }
+  const pc = clamp(Number.isFinite(+st.s) ? +st.s : L / 2, gap / 2 + 0.25, L - gap / 2 - 0.25), nrm = EDGE_N[e];
+  const o = [nrm[0] * f.u[0] + nrm[1] * f.v[0], nrm[0] * f.u[1] + nrm[1] * f.v[1]];   // outward, in the building's metres
+  const E = f.at(...edgeAt(f, e, pc)), T = STAIR.treadM;
+  // the ground at the foot depends on how far out the foot is, which depends on the drop: settle it
+  let N = 1, g = 0, drop = 0;
+  for (let k = 0; k < 8; k++) {
+    const run = (N - 1) * T, c = [E[0] + o[0] * (run + STAIR.padM / 2), E[1] + o[1] * (run + STAIR.padM / 2)];
+    g = gy(c[0], c[1]); drop = top - g - STAIR.padT;
+    const n2 = Math.max(1, Math.ceil(drop / STAIR.maxRiseM - 1e-9));
+    if (n2 === N) break;
+    N = n2;
+  }
+  Object.assign(out, { edge: e, w, gap, pc, o, nrm, E, ps, g, drop, N, T });
+  if (drop < 0.02) { out.none = true; out.N = 0; out.ok = true; warns.push('The deck is at the ground: no steps are needed.'); return out; }
+  if (drop > STAIR.maxFlightM) { errors.push('A flight can rise 12 ft at most (IRC R311.7.3); this drop is ' + (drop / 0.3048).toFixed(1) + ' ft. It needs a landing partway down.'); return out; }
+  const rise = drop / N, run = (N - 1) * T, D = ACTUAL[STAIR.stringer][1], throat = D - (rise * T) / Math.hypot(rise, T);
+  Object.assign(out, { rise, run, throat, pitchLen: Math.hypot(run, drop - rise), theta: Math.atan2(rise, T), stringers: N > 1 ? Math.max(2, Math.ceil(w / STAIR.stringerOcM - 1e-6) + 1) : 0, treads: N - 1,
+    pads: Math.max(1, Math.ceil(w / STAIR.padM - 1e-6)), handrails: N >= STAIR.handrailRisers ? (drop > DECK.guardM ? 2 : 1) : 0, treadTop0: top });
+  if (rise > STAIR.maxRiseM + 1e-9) errors.push('Risers over 7-3/4 in (IRC R311.7.5.1).');
+  if (T < STAIR.minTreadM - 1e-9) errors.push('Treads under 10 in (IRC R311.7.5.2).');
+  if (throat < STAIR.throatMinM) errors.push('The stringers would be cut too thin: 3-1/2 in must be left under the notches.');
+  if (run > STAIR.stringerSpanM + 1e-9) warns.push('A stringer runs ' + (run / 0.3048).toFixed(1) + ' ft: over 6 ft it wants a post under it.');
+  out.ok = !errors.length;
+  return out;
+}
+
+// The porch roof: one shed plane from a ledger on the house wall (its top edge) down to a header on posts on the deck's
+// beam line. The geometry framing.js's roofMembers takes in desc.roofs, and what the header must clear.
+export function planPorch(d, pl, ctx = {}) {
+  const errors = [], warns = [], out = { ok: false, errors, warns };
+  const pitch = PORCH.pitches.includes(+d.porch.pitch) ? +d.porch.pitch : 2;
+  if (!pl.attached) { errors.push('A porch roof ties to the house: draw the deck against an outside wall.'); return out; }
+  if (!Number.isFinite(ctx.wallTop)) { errors.push('The porch roof needs the wall it ties to.'); return out; }
+  const f = pl.frame, k = pitch / 12, cs = 1 / Math.sqrt(1 + k * k), tL = pl.tL, tHdr = pl.tOut, tE = tHdr + PORCH.eaveOverM, run = tE - tL;
+  const ridgeY = ctx.wallTop - PORCH.ledgerBelowTopM, eaveY = ridgeY - k * run, rafter = rafterFor(run), RD = ACTUAL[rafter][1];
+  const ySurfHdr = eaveY + k * PORCH.eaveOverM, hdrTop = ySurfHdr - (RD + OSB_T) / cs;
+  const spacing = PORCH.postMaxM, hSize = HEADER_SIZE(spacing), hdd = ACTUAL[hSize][1], hdrBot = hdrTop - hdd, clear = hdrBot - pl.top;
+  Object.assign(out, { pitch, k, cs, run, tE, tL, tHdr, ridgeY, eaveY, rafter, rafterD: RD, hdrTop, hdrBot, hSize, hdd, clear, ledgerY: ridgeY - (RD / 2 + OSB_T) / cs });
+  if (clear < PORCH.clearMinM) errors.push('Not enough headroom under the porch: ' + clear.toFixed(2) + ' m under the header, at least ' + PORCH.clearMinM + ' m. Make it shallower, a flatter pitch, or set the deck lower.');
+  else if (clear < PORCH.clearWarnM) warns.push('Headroom under the porch header is ' + clear.toFixed(2) + ' m, under a door\'s 2.03 m (6 ft 8 in): mind your head.');
+  out.ok = !errors.length;
+  return out;
+}
+// the roof desc framing.js's roofMembers takes (src/framing.js, "r:"), for a planned porch
+export function porchRoofDesc(pl, pid, groundY) {
+  const f = pl.frame, P = pl.porch, s0 = -PORCH.rakeM, s1 = f.W + PORCH.rakeM, id = pid + '.pr';
+  return { id, mat: 'asphalt', porch: true, groundY, ridges: [], infills: [], ties: [], gutters: [],
+    planes: [{ id: id + '.0', pts: [f.at(s0, P.tE), f.at(s1, P.tE), f.at(s1, P.tL), f.at(s0, P.tL)], eaveY: P.eaveY, ridgeY: P.ridgeY, run: P.run, facing: [f.v[0], f.v[1]], overhang: PORCH.rakeM, lean: true, drip: true }] };
 }
 
 // The members of one deck. el = { id, poly, dir, height, attach, joist, board, attached, found, groundY }; h = the
 // framing helpers { M, splice } (src/framing.js). Coordinates in the building's own metres.
 export function deckMembers(out, el, h) {
-  const pl = planDeck(el, { attached: el.attached, found: el.found, groundY: el.groundY });
+  const pl = planDeck(el, { attached: el.attached, found: el.found, groundY: el.groundY, wallTop: el.wallTop });
   if (!pl.frame || pl.errors.some((e) => /rectangle|Too small|Too big/.test(e))) return pl;
   const { M, splice } = h, f = pl.frame, id = el.id, UPV = [0, 1, 0], uN = [f.u[0], 0, f.u[1]], vN = [f.v[0], 0, f.v[1]];
   const P = (s, y, t) => { const q = f.at(s, t); return [q[0], y, q[1]]; };
@@ -206,7 +342,121 @@ export function deckMembers(out, el, h) {
         hw: [['screws_deck', cross * 2 * DECK.screwKg, 'kg', 'Deck screws', 'Coated screws for treated wood: two at every joist a board crosses.']] });
     }
   }
+  // ---- the porch: posts on the beam line, a header on them, a ledger on the house wall, the rafters between (they come from
+  // the roof plane describe pushed into desc.roofs; they are re-staged here into the porch's own frame stage)
+  if (pl.porch && pl.porch.ok) porchMembers(out, el, pl, h, { P, nid, r3, id, f, UPV, uN });
+  // ---- rails and stairs, after the decking
+  if (pl.guard || (pl.stair && pl.stair.ok && !pl.stair.none)) guardMembers(out, el, pl, h, { P, nid, r3, id, f, UPV, uN, vN });
   return pl;
+}
+const evenly = (lo, hi, maxStep) => { const n = Math.max(1, Math.ceil((hi - lo) / maxStep - 1e-9)); return Array.from({ length: n + 1 }, (_, k) => lo + ((hi - lo) * k) / n); };
+function porchMembers(out, el, pl, h, c) {
+  const { M, splice } = h, { P, nid, f, UPV, uN } = c, po = pl.porch, id = el.id, hb = ACTUAL[po.hSize][0], st = pl.stair && pl.stair.ok && !pl.stair.none && pl.stair.edge === 'out' ? pl.stair : null;
+  // posts: spread along the beam line, leaving the stair's gap clear
+  const segs = st ? [[PORCH.postEndM, st.pc - st.gap / 2 - 0.1], [st.pc + st.gap / 2 + 0.1, f.W - PORCH.postEndM]].filter(([a, b]) => b - a > 0.2) : [[PORCH.postEndM, f.W - PORCH.postEndM]];
+  const ps = segs.flatMap(([a, b]) => evenly(a, b, PORCH.postMaxM));
+  const base = pl.top, why = {
+    post: 'A 6 x 6 post bolted down to the deck frame carries the header and the roof load to the pier under the beam.',
+    header: 'Two boards on edge across the posts: the rafters\' outer ends sit on it. Sized for the post spacing on the safe side.',
+    ledger: 'A board bolted through the house wall at the roof\'s top edge: the rafters hang from it and the wall carries that side of the roof.',
+    flash: 'Flashing turned up the wall and over the shingles, tucked under the wrap: water runs onto the roof, not behind the siding.',
+  };
+  for (const s of ps) M(out, nid('pp'), 'post', 'porch-post', 'porch-frame', id, 'timber', 0.14, 0.14, P(s, base, po.tHdr), P(s, po.hdrBot, po.tHdr), uN, { col: 'pt', buy: ['porchpost', 'lumber_pt_6x6', 'm', po.hdrBot - base, 'Porch posts (6 x 6 treated)', why.post],
+    hw: [['carriage_bolt', 2, 'each', 'Carriage bolts', 'Half-inch bolts through the post and the deck framing.']] });
+  const bc = po.hdrTop - po.hdd / 2;
+  for (const [a, b] of splice(0, f.W, PORCH.postEndM, PORCH.postMaxM))
+    M(out, nid('ph'), 'beam', 'porch-header', 'porch-frame', id, 'timber', 2 * hb, po.hdd, P(a, bc, po.tHdr), P(b, bc, po.tHdr), UPV, { plies: 2, size: po.hSize, col: 'pt', buy: ['porchhdr' + po.hSize, 'lumber_pt_' + po.hSize, 'm', b - a, 'Porch header (2 x ' + po.hSize.split('x')[1] + ' treated)', why.header, 2] });
+  const RD = po.rafterD, lag = ledgerLags(f.W, po.run);
+  splice(0, f.W, 0, DECK.ocM).forEach(([a, b], k) => M(out, nid('pl'), 'beam', 'porch-ledger', 'porch-frame', id, 'timber', ACTUAL[po.rafter][0], RD, P(a, po.ledgerY, po.tL + 0.019), P(b, po.ledgerY, po.tL + 0.019), UPV, { col: 'pt',
+    buy: ['porchledger', 'lumber_pt_' + po.rafter, 'm', b - a, 'Porch roof ledger (' + po.rafter.replace('x', ' x ') + ' treated)', why.ledger],
+    hw: k ? [] : [['ledger_lag', lag.n, 'each', 'Roof ledger lag screws', 'Half-inch lags through the sheathing into the wall framing, staggered.']] }));
+  // the roof plane's own members: the frame goes in the porch's stage, the flashing joins the dry-in
+  const planeIds = new Set([id + '.pr.0']);
+  for (const m of out) if (planeIds.has(m.parent) && m.stage === 'roof-frame') m.stage = 'porch-frame';
+  // wall flashing along the ledger line, over the underlayment, in the dry-in
+  for (const [a, b] of splice(0, f.W, 0, 3.05))
+    M(out, nid('wf'), 'rake', 'wall-flash', 'dry-in', id + '.pr.0', 'metal', 0.012, 0.15, P(a, po.ridgeY + 0.04, po.tL + 0.012), P(b, po.ridgeY + 0.04, po.tL + 0.012), UPV, { col: 'metal',
+      buy: ['porchflash', 'drip_edge', 'm', b - a, 'Porch wall flashing', why.flash] });
+}
+// guard posts, rails and balusters round the open edges; the stair's stringers, risers, treads, landing pad and handrails
+function guardMembers(out, el, pl, h, c) {
+  const { M } = h, { P, nid, r3, f, UPV, vN } = c, id = el.id, st = pl.stair && pl.stair.ok && !pl.stair.none ? pl.stair : null, top = pl.top;
+  const why = {
+    gpost: 'A treated post fixed to the rim joist: it stands 36 in over the boards and takes a hard shove on the rail.',
+    rail: 'Rails between the posts: a 2 x 4 on edge low and high, a 2 x 6 cap flat on top to lean on.',
+    bal: 'Balusters set so no gap is over 3-3/4 in: a 4 in sphere must not pass (IRC R312.1.3).',
+    stringer: 'The stringer is a 2 x 12 cut to the stair\'s rise and run: the treads sit on the notches.',
+    tread: 'Two 5/4 boards across the stringers: an 11 in tread, at least 10 in (IRC R311.7.5.2).',
+    riser: 'A closed riser, so a 4 in sphere cannot pass between the treads (IRC R311.7.5.1).',
+    pad: 'A firm landing at the foot, at least 36 in each way (IRC R311.7.6).',
+    hand: 'A handrail 36 in over the nosings, a profile you can grip (IRC R311.7.8).',
+  };
+  if (pl.guard) {
+    const ps = GUARD.postSize[pl.postSize], off = GUARD.postOff[pl.postSize], H = top + GUARD.heightM, bot = pl.jt - pl.jd, railOff = off - ps / 2 - 0.019;
+    const posts = new Map();   // nominal [s, t] -> the outward normals of the edges that meet there
+    const addPost = (s, t, n) => { const key = r3(s) + ',' + r3(t); let q = posts.get(key); if (!q) posts.set(key, (q = { s, t, n: [0, 0] })); q.n[0] += n[0]; q.n[1] += n[1]; };
+    const bays = [];
+    for (const e of OPEN_EDGES(pl.attached)) {
+      const L = edgeLen(f, e), n = EDGE_N[e], gaps = st && st.edge === e ? [[st.pc - st.gap / 2, st.pc + st.gap / 2]] : [];
+      const segs = gaps.length ? [[0, gaps[0][0]], [gaps[0][1], L]] : [[0, L]];
+      for (const [a, b] of segs) {
+        if (b - a < 0.05) continue;
+        const ts = evenly(a, b, GUARD.postMaxM);
+        ts.forEach((p) => addPost(...edgeAt(f, e, p), n));
+        for (let k = 0; k + 1 < ts.length; k++) bays.push({ e, n, a: ts[k], b: ts[k + 1] });
+      }
+    }
+    const pos = (q) => [q.s + q.n[0] * off, q.t + q.n[1] * off];
+    for (const q of posts.values()) { const [s, t] = pos(q); M(out, nid('gp'), 'guardpost', 'guard-post', 'rails', id, 'timber', ps, ps, P(s, bot, t), P(s, H, t), UPV, { col: 'pt',
+      buy: ['gpost' + pl.postSize, 'lumber_pt_' + pl.postSize, 'm', H - bot, 'Guard posts (' + pl.postSize.replace('x', ' x ') + ' treated)', why.gpost],
+      hw: [['carriage_bolt', 2, 'each', 'Carriage bolts', 'Half-inch bolts through the post and the rim joist (a ' + (pl.postSize === '4x4' ? 'notched 4 x 4' : '6 x 6 on the face') + ').']] }); }
+    const bw = GUARD.baluster, rb = [0.038, 0.089];
+    const yTopRail = H - 0.038 - rb[1] / 2, yBotRail = top + GUARD.bottomLiftM + rb[1] / 2, yb0 = top + GUARD.bottomLiftM + rb[1], yb1 = H - 0.038 - rb[1];
+    for (const bay of bays) {
+      const { e, n } = bay, len = bay.b - bay.a;
+      const at = (p, y, o2) => { const q = edgeAt(f, e, p); return P(q[0] + n[0] * o2, y, q[1] + n[1] * o2); };
+      const hn = [n[0] * f.u[0] + n[1] * f.v[0], 0, n[0] * f.u[1] + n[1] * f.v[1]];
+      M(out, nid('rt'), 'rail', 'top', 'rails', id, 'timber', 0.038, rb[1], at(bay.a, yTopRail, railOff), at(bay.b, yTopRail, railOff), UPV, { col: 'pt', buy: ['rail24', 'lumber_pt_2x4', 'm', len, 'Guard rails (2 x 4 treated)', why.rail] });
+      M(out, nid('rb'), 'rail', 'bottom', 'rails', id, 'timber', 0.038, rb[1], at(bay.a, yBotRail, railOff), at(bay.b, yBotRail, railOff), UPV, { col: 'pt', buy: ['rail24', 'lumber_pt_2x4', 'm', len, 'Guard rails (2 x 4 treated)', why.rail] });
+      M(out, nid('rc'), 'rail', 'cap', 'rails', id, 'timber', 0.038, 0.14, at(bay.a, H - 0.019, off), at(bay.b, H - 0.019, off), hn, { col: 'pt', buy: ['rail26', 'lumber_pt_2x6', 'm', len, 'Guard rail caps (2 x 6 treated)', why.rail] });
+      const clear = len - ps, nb = Math.max(0, Math.ceil((clear - GUARD.aimGapM) / (bw + GUARD.aimGapM) - 1e-9)), gap = (clear - nb * bw) / (nb + 1);
+      for (let k = 0; k < nb; k++) { const p = bay.a + ps / 2 + gap * (k + 1) + bw * k + bw / 2;
+        M(out, nid('bl'), 'baluster', 'baluster', 'rails', id, 'timber', bw, bw, at(p, yb0, railOff), at(p, yb1, railOff), hn, { col: 'pt', gap: r3(gap), buy: ['baluster', 'baluster_pt', 'each', 1, 'Balusters (2 x 2 treated)', why.bal],
+          hw: [['screws_deck', 4 * DECK.screwKg, 'kg', 'Deck screws', 'Two screws through each end of every baluster.']] });}
+    }
+  }
+  if (st) {
+    const { rise, N, T, w, g, theta, E } = st, sn = Math.sin(theta), cn = Math.cos(theta), SD = ACTUAL[STAIR.stringer];
+    // the stair's own frame: base point E is in the building's metres; step out along the edge's world direction
+    const ow = st.o, lw = [ow[1], -ow[0]];
+    const W3 = (x, y, l) => [E[0] + ow[0] * x + lw[0] * l, y, E[1] + ow[1] * x + lw[1] * l];
+    const yk = (k) => top - k * rise;
+    const n3 = [ow[0] * sn, cn, ow[1] * sn], o3 = [ow[0], 0, ow[1]];
+    for (let j = 0; j < st.stringers; j++) {
+      const l = -w / 2 + 0.019 + (j * (w - 0.038)) / (st.stringers - 1);
+      const ctr = (x, y) => W3(x - (SD[1] / 2) * sn, y - (SD[1] / 2) * cn, l);
+      M(out, nid('sg'), 'stringer', 'stringer', 'rails', id, 'timber', SD[0], SD[1], ctr(0, top), ctr((N - 1) * T, yk(N - 1)), n3, { col: 'pt', rise: r3(rise), run: r3(T), notches: N - 1, throat: r3(st.throat),
+        buy: ['stringer', 'lumber_pt_2x12', 'm', st.pitchLen + 0.3, 'Stair stringers (2 x 12 treated, cut to the rise and run)', why.stringer],
+        hw: [['stair_bracket', 1, 'each', 'Stringer connectors', 'A galvanized angle holds the top of each stringer to the rim joist.']] });
+    }
+    for (let k = 1; k <= N - 1; k++) {
+      M(out, nid('tr'), 'tread', 'tread', 'rails', id, 'pine', STAIR.treadT, T, W3((k - 0.5) * T, yk(k) - STAIR.treadT / 2, -w / 2), W3((k - 0.5) * T, yk(k) - STAIR.treadT / 2, w / 2), o3, { col: 'ptboard', step: k, deck: 1,
+        buy: ['stairtread', 'board_deck_pt', 'm', 2 * w, 'Stair treads (5/4 x 6 treated)', why.tread], hw: [['screws_deck', 2 * st.stringers * DECK.screwKg, 'kg', 'Deck screws', 'Two screws at every stringer.']] });
+      M(out, nid('ri'), 'tread', 'riser', 'rails', id, 'pine', 0.019, rise - STAIR.treadT, W3(k * T - 0.0095, yk(k) - STAIR.treadT - (rise - STAIR.treadT) / 2, -w / 2), W3(k * T - 0.0095, yk(k) - STAIR.treadT - (rise - STAIR.treadT) / 2, w / 2), o3, { col: 'ptboard', step: k, deck: 1,
+        buy: ['stairriser', 'board_deck_pt', 'm', w * ((rise - STAIR.treadT) / 0.14), 'Stair risers (5/4 x 6 treated, ripped)', why.riser] });
+    }
+    for (let q = 0; q < st.pads; q++) {
+      const l = -w / 2 + STAIR.padM / 2 + q * STAIR.padM;
+      M(out, nid('pd'), 'landing', 'pad', 'rails', id, 'concrete', STAIR.padM, STAIR.padM, W3((N - 1) * T + STAIR.padM / 2, g, l), W3((N - 1) * T + STAIR.padM / 2, g + STAIR.padT, l), o3, { col: 'concrete', buy: ['stairpad', 'stair_pad', 'each', 1, 'Landing pad (36 x 36 in precast)', why.pad] });
+    }
+    // handrails (and the newel post at the foot) on one side, or both when the drop is over 30 in
+    const ps = st.ps, sides = st.handrails === 2 ? [-1, 1] : st.handrails === 1 ? [1] : [];
+    for (const sd of sides) {
+      const l = (sd * st.gap) / 2, y1 = yk(N - 1) + STAIR.handrailM;
+      M(out, nid('np'), 'guardpost', 'newel', 'rails', id, 'timber', ps, ps, W3((N - 1) * T, g, l), W3((N - 1) * T, y1 + 0.05, l), UPV, { col: 'pt', buy: ['gpost' + pl.postSize, 'lumber_pt_' + pl.postSize, 'm', y1 + 0.05 - g, 'Guard posts (' + pl.postSize.replace('x', ' x ') + ' treated)', why.gpost] });
+      M(out, nid('hr'), 'rail', 'handrail', 'rails', id, 'timber', 0.05, 0.05, W3(0, top + STAIR.handrailM, l), W3((N - 1) * T, y1, l), UPV, { col: 'pt', buy: ['handrail', 'handrail_pt', 'm', st.pitchLen, 'Handrail (graspable profile)', why.hand] });
+    }
+  }
 }
 // which rows of boards a point stands on: the row index at a local point, or -1 off the boards
 export function rowAt(d, plan, x, z) {

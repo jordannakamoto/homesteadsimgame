@@ -1,7 +1,8 @@
 // Decks (slice B-2) on the page: node test/deck.smoke.mjs  (needs dist/index.html and Playwright)
 // The Deck tool draws one against the shed's back wall (bolted to the house: ledger, hangers, the piece, construction has
 // it) and one free-standing (a structure of its own you can walk on); a too-deep 2x8 deck is refused; Select picks a deck
-// with the pointer and Delete removes it; undo brings it back; both survive a save and reload.
+// with the pointer and Delete removes it; undo brings it back; both survive a save and reload. B-3: rails, a stair and a porch roof
+// on the bolted deck make their members and stages.
 import { openPage } from './helpers/page.mjs';
 const t = await openPage({ viewport: { width: 960, height: 540 } });
 const { G, check } = t;
@@ -44,6 +45,28 @@ check('its members are planned, the piece lists them', att.planned && att.piece 
 check('shopping lines: hangers, ledger lags, deck boards', att.hangers && att.lags && att.boards);
 await t.frames(30);
 check('construction has its decking stage', await G((sid) => Object.values(__game.sim.state.sys.construction.progress[sid].members).some((m) => m.stage === 'decking'), sid));
+
+// B-3: rails, a stair and a porch roof on that deck (set as the strip's chips do), then the construction plan has them
+await G(() => __build.choose('x:deck-tool:rails', 'on'));
+const opts = await G(() => { const v = JSON.stringify(__build.view().groups); return { rails: /Rails/.test(v), stair: /Stairs/.test(v), porch: /Porch roof/.test(v), post: /Rail posts/.test(v) }; });
+check('the strip has Rails, Rail posts, Stairs and Porch roof', opts.rails && opts.stair && opts.porch && opts.post, JSON.stringify(opts));
+await G((sid) => { const d = __build.getExt(sid, 'deck')[0]; __build.setExt(sid, 'deck', [{ ...d, rails: 'on', post: '4x4', stair: { edge: 'out', w: 0.914 }, porch: { pitch: 2 } }]); }, sid);
+await t.frames(30);
+const b3 = await G((sid) => { const mw = __build.membersOf(sid), d = __build.getExt(sid, 'deck')[0], pid = 'x-deck-' + sid + '-' + d.id, pl = __deck.plan(d, { attached: true, found: __build.state.structs.find((q) => q.id === sid).found, groundY: () => -0.4, wallTop: 2.84 }), pr = __game.sim.state.sys.construction.progress[sid];
+  const own = mw.list.filter((m) => m.parent === pid), planeIds = new Set(mw.roofs.filter((r) => r.porch).flatMap((r) => r.planes.map((p) => p.id)));
+  const stages = new Set(Object.values(pr.members).map((m) => m.stage));
+  return { gp: own.filter((m) => m.kind === 'guardpost').length, bal: own.filter((m) => m.kind === 'baluster').length, str: own.filter((m) => m.kind === 'stringer').length, tr: own.filter((m) => m.kind === 'tread' && m.type === 'tread').length, pad: own.filter((m) => m.kind === 'landing').length,
+    posts: own.filter((m) => m.type === 'porch-post').length, planes: planeIds.size, rafters: mw.list.filter((m) => planeIds.has(m.parent) && m.kind === 'rafter').length, stages: [...stages].filter((x) => /porch|rails/.test(x)), planOk: pl.ok, err: pl.errors.join(' '), lines: __build.materialsList(sid).some((l) => l.itemId === 'baluster_pt') && __build.materialsList(sid).some((l) => l.itemId === 'stair_pad') }; }, sid);
+check('rails, stair and porch members are made', b3.gp >= 4 && b3.bal > 10 && b3.str >= 3 && b3.tr >= 1 && b3.pad === 1 && b3.posts >= 2 && b3.planes === 1 && b3.rafters > 3, JSON.stringify(b3));
+check('construction has the porch frame and the rails stage, shopping has balusters and a pad', b3.stages.includes('porch-frame') && b3.stages.includes('rails') && b3.lines, JSON.stringify(b3.stages));
+// the stair's rise is within the IRC limit (7-3/4 in) on the shed's ground
+const stairWalk = await G((sid) => { const S = __build.state.structs.find((q) => q.id === sid), d = __build.getExt(sid, 'deck')[0], pl = __deck.plan(d, { attached: true, found: S.found, groundY: (x, z) => __game.heightAt(...__build.toWorld(S, x, z)) - S.y0, wallTop: 2.84 }), st = pl.stair;
+  return st && st.ok ? { N: st.N, rise: st.rise, ok: st.rise <= 0.19685 + 1e-9 && st.T >= 0.254 } : { err: pl.errors }; }, sid);
+check('the stair is within the IRC rise and tread', !!stairWalk.ok, JSON.stringify(stairWalk));
+// back to a plain deck for the rest of this test
+await G((sid) => { const d = __build.getExt(sid, 'deck')[0]; __build.setExt(sid, 'deck', [{ ...d, rails: 'auto', stair: null, porch: null }]); }, sid);
+await G(() => __build.choose('x:deck-tool:rails', 'auto'));
+await t.frames(10);
 
 // refused: 2x8 joists 4 m deep
 await G(() => __build.choose('x:deck-tool:joist', '2x8'));
