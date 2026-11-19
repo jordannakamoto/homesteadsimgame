@@ -3483,7 +3483,7 @@
     // a wall is cut only where it is both above waist height and between the camera and you
     const m = new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide, clippingPlanes: [plane, near, sideA, sideB], clipIntersection: true, clipShadows: true });
     fadeB(m);
-    return texel(m);
+    return solidCut(texel(m));
   }
   // ---- glass: one transparent mesh per structure, no extra render pass. It reflects the sky and the ground by the
   // Fresnel law (faint head-on, nearly a mirror at a glancing angle), catches the sun as a hard glint, tints what is seen
@@ -9404,13 +9404,16 @@
   // boards, the whole outside of a sided wall) opens with the wall when you are inside
   // where the cut opens a piece you look into the box from inside: its back faces are drawn as a flat dark section, so a
   // cut wall reads as solid (the dollhouse look) instead of hollow boxes
-  const capped = (m) => {
+  // where the dollhouse cut slices a piece, its inside faces show: draw them as the piece in section, its own colour flat and a
+  // little darker, so a cut board, frame or door reads as solid wood, not as a hollow box
+  const solidCut = (m) => {
     m.side = T.DoubleSide;
     const before = m.onBeforeCompile, key = m.customProgramCacheKey && m.customProgramCacheKey.call(m);
-    m.onBeforeCompile = (sh, r) => { before && before.call(m, sh, r); sh.fragmentShader = sh.fragmentShader.replace("#include <dithering_fragment>", "#include <dithering_fragment>\n if (!gl_FrontFacing) gl_FragColor = vec4(0.19, 0.155, 0.125, 1.0);"); };
-    m.customProgramCacheKey = () => (key || "") + "|capped";
+    m.onBeforeCompile = (sh, r) => { before && before.call(m, sh, r); sh.fragmentShader = sh.fragmentShader.replace("#include <opaque_fragment>", "#include <opaque_fragment>\n if (!gl_FrontFacing) gl_FragColor = vec4(diffuseColor.rgb * 0.78, 1.0);"); };
+    m.customProgramCacheKey = () => (key || "") + "|solidcut";
     return m;
   };
+  const capped = solidCut;
   const memberMats = (planes) => ({ mem: capped(Object.assign(memMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })), lap: capped(makeLapMat(planes)), grv: capped(makeLapMat(planes, 0.14, true)), bat: capped(makeBattMat(planes)), wrap: capped(Object.assign(wrapMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })), shp: capped(Object.assign(memMat.clone(), { vertexColors: true, clippingPlanes: planes, clipIntersection: true, clipShadows: true })) });
   // trim with mitered ends (docs/design/carpentry.md) is drawn as its real shape, not a box: each end cut at 45 degrees
   // across the face, the long point on the side away from the opening (m.long, along m.n). One small mesh per building
@@ -9474,41 +9477,19 @@
       if (S.capMesh) (S.group.remove(S.capMesh), S.capMesh.geometry.dispose(), (S.capMesh = null));
       S.capWallsData = [];
       const pos = [], cols = [];
+      // one outline for the whole building in one flat colour: each closed wall's top across its whole thickness, run on into the
+      // corners where it meets another wall, so there are no seams between layers or at the corners
       for (const w of S.mem.walls) {
         if (w.y0 + (w.h || 0) <= h || w.y0 >= h) continue;
-        const ms = (S.mem.byParent.get(w.id) || []).filter((m) => m.draw !== 0 && WALL_SHELL.has(m.stage) && !(m.kind === "cladding" && m.type === "trim") && m.section);
-        if (!ms.length || ms.some((m) => S.plan.has(m.id))) continue;          // still being built: leave it open to see
-        const L = Math.hypot(w.b[0] - w.a[0], w.b[1] - w.a[1]) || 1, ux = (w.b[0] - w.a[0]) / L, uz = (w.b[1] - w.a[1]) / L, N = [-uz, 0, ux];
-        let lo = 1e9, hi = -1e9;
-        const strips = [];      // [from, to, colour] across the wall: the faces you see in the cut
-        const all = S.mem.byParent.get(w.id) || [], paintOf = (fc) => { const p2 = all.find((q) => q.kind === "paint" && q.surface === "walls" && q.face === fc && !S.plan.has(q.id)); return p2 ? finCol(p2.fin) : null; };
-        for (const m of ms) {
-          const ax = m.b[0] - m.a[0], ay = m.b[1] - m.a[1], az = m.b[2] - m.a[2], ml = Math.hypot(ax, ay, az) || 1, u = [ax / ml, ay / ml, az / ml], n = m.n;
-          const t = [u[1] * n[2] - u[2] * n[1], u[2] * n[0] - u[0] * n[2], u[0] * n[1] - u[1] * n[0]], dot = (v) => Math.abs(v[0] * N[0] + v[2] * N[2]);
-          const c = ((m.a[0] + m.b[0]) / 2 - w.a[0]) * N[0] + ((m.a[2] + m.b[2]) / 2 - w.a[1]) * N[2], half = (dot(t) * m.section.b + dot(n) * m.section.d + dot(u) * ml) / 2;
-          if (half > 0.4) continue;      // a piece lying across the wall is not the wall
-          lo = Math.min(lo, c - half); hi = Math.max(hi, c + half);
-          if (m.kind === "lining") strips.push([c - half, c + half, paintOf(m.face) || MCOL[m.col] || MCOL.gypsum]);
-          else if (m.kind === "cladding") strips.push([c - half, c + half, MCOL[m.col || "siding"] || MCOL.siding]);
-        }
-        if (!(hi > lo)) continue;
-        (S.capWallsData || (S.capWallsData = [])).push({ w, L, ux, uz, N, lo, hi, strips, top: w.y0 + (w.h || 0) });
-        // along the wall, less the openings the cut passes through
-        const gaps = (w.openings || []).filter((q) => opensAt.includes(q.id)).map((q) => [q.offset + 0.02, q.offset + q.width - 0.02]).sort((p, q) => p[0] - q[0]);    // over the jambs too
-        let x = 0;
-        // the core across the whole thickness, then each face's strip a hair above it
+        const d = wallThick(S, w);
+        if (!d) continue;                     // still being built: leave it open to see
+        const { L, ux, uz, N, lo, hi } = d, [e0, e1] = capEnds(S, w, hi - lo);
+        S.capWallsData.push({ w, L, ux, uz, N, lo, hi, top: w.y0 + (w.h || 0) });
+        const gaps = (w.openings || []).filter((q) => opensAt.includes(q.id) && q.kind === "door").map((q) => [q.offset + 0.02, q.offset + q.width - 0.02]).sort((p, q) => p[0] - q[0]);    // a doorway stays open; a window is solid in the cut
         const band = (xa, xb, o0, o1, y, c) => { const P = (s2, o) => [w.a[0] + ux * s2 + N[0] * o, y, w.a[1] + uz * s2 + N[2] * o]; for (const q of [P(xa, o0), P(xb, o0), P(xb, o1), P(xa, o0), P(xb, o1), P(xa, o1)]) (pos.push(...q), cols.push(c[0], c[1], c[2])); };
-        const quad = (xa, xb) => { band(xa, xb, lo, hi, 0, CAP_CORE); for (const [o0, o1, c] of strips) band(xa, xb, o0, o1, 0.002, c); };
-        for (const [ga, gb] of gaps) { if (ga - x > 0.01) quad(x, ga); x = Math.max(x, gb); }
-        if (L - x > 0.01) quad(x, L);
-        // a door or window the cut passes through: its frame posts are solid in section too (white, across the unit's depth), and
-        // a window's sash across the middle; a doorway stays open between its posts
-        for (const q of w.openings || []) {
-          if (!opensAt.includes(q.id)) continue;
-          const e = q.offset + q.width, fw = 0.05, FR = MCOL.trim;
-          if (q.kind === "door") { band(q.offset, q.offset + fw + 0.02, lo, hi, 0.003, FR); band(e - fw - 0.02, e, lo, hi, 0.003, FR); }
-          else { band(q.offset, e, lo, hi, 0.003, FR); band(q.offset + fw, e - fw, -0.004, 0.004, 0.0045, CAP_GLASS); }     // and the glass, a pale line
-        }
+        let x = -e0;
+        for (const [ga, gb] of gaps) { if (ga - x > 0.01) band(x, ga, lo, hi, 0, CAP_CORE); x = Math.max(x, gb); }
+        if (L + e1 - x > 0.01) band(x, L + e1, lo, hi, 0, CAP_CORE);
       }
       if (pos.length) {
         const g = new T.BufferGeometry();
@@ -9545,7 +9526,7 @@
     _pl[0].copy(S.near).applyMatrix4(_im); _pl[1].copy(S.sideA).applyMatrix4(_im); _pl[2].copy(S.sideB).applyMatrix4(_im);
     const val = (pl, x, z) => pl.normal.x * x + pl.normal.z * z + pl.constant;    // kept where >= 0 (the planes stand upright)
     for (const d of S.capWallsData || []) {
-      const { w, L, ux, uz, N, lo, hi, strips, top } = d;
+      const { w, L, ux, uz, N, lo, hi, top } = d;
       if (top <= h + 0.02) continue;
       for (let i = 0; i < 3; i++) {
         const pl = _pl[i], nu = pl.normal.x * ux + pl.normal.z * uz;
@@ -9559,11 +9540,11 @@
         // up from the cut to the top of the wall, less an opening the plane passes through
         let ys = [[h, top]];
         // (only the clear opening between the jambs: the jambs and the wall round them are capped like the wall)
-        for (const q of w.openings || []) if (tc > q.offset + 0.02 && tc < q.offset + q.width - 0.02) ys = ys.flatMap(([y0, y1]) => [[y0, Math.min(y1, w.y0 + q.sill + (q.kind === "door" ? 0 : 0.02))], [Math.max(y0, w.y0 + q.sill + q.height - 0.02), y1]].filter(([p0, p1]) => p1 - p0 > 0.01));
+        for (const q of w.openings || []) if (q.kind === "door" && tc > q.offset + 0.02 && tc < q.offset + q.width - 0.02) ys = ys.flatMap(([y0, y1]) => [[y0, Math.min(y1, w.y0 + q.sill + (q.kind === "door" ? 0 : 0.02))], [Math.max(y0, w.y0 + q.sill + q.height - 0.02), y1]].filter(([p0, p1]) => p1 - p0 > 0.01));
         const nr = [pl.normal.x, 0, pl.normal.z], sh = -0.0015;      // a hair toward the cut side, off the clipped faces
         const pt = (o, y) => { const t = at(o); return [w.a[0] + ux * t + N[0] * o + nr[0] * sh, y, w.a[1] + uz * t + N[2] * o + nr[2] * sh]; };
         const quad = (o0, o1, y0, y1, col, e = 0) => { const a = pt(o0, y0), b = pt(o1, y0), c = pt(o1, y1), dd = pt(o0, y1); for (const q of [a, b, c, dd]) ((q[0] -= nr[0] * e), (q[2] -= nr[2] * e)); tri(a, b, c, nr, col); tri(a, c, dd, nr, col); };
-        for (const [y0, y1] of ys) { quad(lo, hi, y0, y1, CAP_CORE); for (const [o0, o1, col2] of strips) quad(o0, o1, y0, y1, col2, 0.0015); }
+        for (const [y0, y1] of ys) quad(lo, hi, y0, y1, CAP_CORE);
       }
     }
     g.setDrawRange(0, n);
@@ -9573,19 +9554,29 @@
   // ---- the openings of a finished wall, lined (docs/design/carpentry.md): a jamb board up each side and across the head, and a
   // sill board under a window, across the wall's whole thickness, so an opening shows finished wood, not the inside of the wall,
   // from any side and in the dollhouse cut. Primed white, or the building's trim colour
+  // how far a wall's cap runs on past each end: across the thickness of the wall it meets there, so a corner is closed
+  function capEnds(S, w, th) {
+    const near = (p) => S.mem.walls.some((o) => {
+      if (o === w) return false;
+      const dx = o.b[0] - o.a[0], dz = o.b[1] - o.a[1], l2 = dx * dx + dz * dz || 1, t = Math.max(0, Math.min(1, ((p[0] - o.a[0]) * dx + (p[1] - o.a[1]) * dz) / l2));
+      return Math.hypot(o.a[0] + dx * t - p[0], o.a[1] + dz * t - p[1]) < 0.25 && Math.abs(o.y0 - w.y0) < 0.3;
+    });
+    return [near(w.a) ? th / 2 + 0.02 : 0, near(w.b) ? th / 2 + 0.02 : 0];
+  }
   function wallThick(S, w) {
     const ms = (S.mem.byParent.get(w.id) || []).filter((m) => m.draw !== 0 && WALL_SHELL.has(m.stage) && !(m.kind === "cladding" && m.type === "trim") && m.section);
     if (!ms.length || ms.some((m) => S.plan.has(m.id))) return null;
     const L = Math.hypot(w.b[0] - w.a[0], w.b[1] - w.a[1]) || 1, ux = (w.b[0] - w.a[0]) / L, uz = (w.b[1] - w.a[1]) / L, N = [-uz, 0, ux];
-    let lo = 1e9, hi = -1e9;
+    let lo = 1e9, hi = -1e9, top = -1e9;
     for (const m of ms) {
       const ax = m.b[0] - m.a[0], ay = m.b[1] - m.a[1], az = m.b[2] - m.a[2], ml = Math.hypot(ax, ay, az) || 1, u = [ax / ml, ay / ml, az / ml], n = m.n;
       const t = [u[1] * n[2] - u[2] * n[1], u[2] * n[0] - u[0] * n[2], u[0] * n[1] - u[1] * n[0]], dot = (v) => Math.abs(v[0] * N[0] + v[2] * N[2]);
       const c = ((m.a[0] + m.b[0]) / 2 - w.a[0]) * N[0] + ((m.a[2] + m.b[2]) / 2 - w.a[1]) * N[2], half = (dot(t) * m.section.b + dot(n) * m.section.d + dot(u) * ml) / 2;
       if (half > 0.4) continue;
       lo = Math.min(lo, c - half); hi = Math.max(hi, c + half);
+      top = Math.max(top, Math.max(m.a[1], m.b[1]) + (Math.abs(n[1]) * m.section.d + Math.abs(t[1]) * m.section.b) / 2);
     }
-    return hi > lo ? { L, ux, uz, N, lo, hi } : null;
+    return hi > lo ? { L, ux, uz, N, lo, hi, top } : null;
   }
   function jambGeo(S) {
     if (!S.mem.walls) return null;
@@ -9599,9 +9590,15 @@
       q(P(-1, 1, -1), P(-1, 1, 1), P(1, 1, 1), P(1, 1, -1)); q(P(-1, -1, -1), P(1, -1, -1), P(1, -1, 1), P(-1, -1, 1));
     };
     for (const w of S.mem.walls) {
-      if (!(w.openings || []).length) continue;
       const d = wallThick(S, w);
       if (!d) continue;
+      // the top of a closed wall: one flat cap over its whole thickness (plates and stud ends under it), into the corners
+      {
+        const [e0, e1] = capEnds(S, w, d.hi - d.lo), K = CAP_CORE, y = d.top + 0.002;
+        const P = (s2, o) => [w.a[0] + d.ux * s2 + d.N[0] * o, y, w.a[1] + d.uz * s2 + d.N[2] * o];
+        for (const q of [P(-e0, d.lo), P(d.L + e1, d.lo), P(d.L + e1, d.hi), P(-e0, d.lo), P(d.L + e1, d.hi), P(-e0, d.hi)]) (pos.push(q[0], q[1], q[2]), cols.push(K[0], K[1], K[2]));
+      }
+      if (!(w.openings || []).length) continue;
       const { ux, uz, N, lo, hi } = d, om = (lo + hi) / 2, oh = (hi - lo) / 2 + 0.001, yb = w.y0 + (w.foot === undefined ? FLOOR_T : w.foot);
       const at = (sv, y) => [w.a[0] + ux * sv + N[0] * om, y, w.a[1] + uz * sv + N[2] * om];
       const U = [ux, 0, uz], X = [N[0] * oh, 0, N[2] * oh];
