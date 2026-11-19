@@ -22,7 +22,7 @@
   const css = document.createElement('style');
   css.textContent = '#reachhint{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:7;padding:7px 14px;font-size:15px;max-width:min(92vw,720px);text-align:center;pointer-events:none;white-space:pre-line}' +
     '#reachhint[hidden],#reachbeat[hidden]{display:none}#reachhint b{color:#ffd98a}' +
-    '#reachbeat{position:fixed;left:50%;top:22%;transform:translateX(-50%);z-index:8;font-size:26px;font-weight:700;color:#fff3c9;text-shadow:0 2px 0 #3a2a12,0 0 18px rgba(255,214,120,.7);pointer-events:none;text-align:center}' +
+    '#reachbeat{position:fixed;left:50%;top:22%;transform:translateX(-50%);z-index:8;font-size:26px;font-weight:700;color:var(--float-ink);text-shadow:0 2px 0 #3a2a12,0 0 18px rgba(255,214,120,.7);pointer-events:none;text-align:center}' +
     'body.handsmode #lock,body.handsmode #reticle,body.handsmode #stance,body.handsmode #combo{display:none!important}body.handsmode #view{cursor:crosshair}body.handsmode.grab #view{cursor:grabbing}';
   document.head.appendChild(css);
   const hintEl = document.createElement('div'); hintEl.id = 'reachhint'; hintEl.className = 'panel'; hintEl.hidden = true; hintEl.setAttribute('aria-live', 'polite');

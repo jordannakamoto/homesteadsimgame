@@ -56,10 +56,10 @@ export function createCookingView(G) {
     '<div class="kitchen-title">Homestead kitchen <small>Esc · leave</small></div><div id="physical-kitchen-readout"></div><div class="kitchen-instructions">Drag food, knife or pan · Hold right mouse while dragging the knife to lower its blade<br>Mouse wheel · lift/lower held object · Drag stove dial up/down · H · heat view · E · eat from plate · Delete · discard hovered food</div>';
   const style = document.createElement("style");
   style.textContent = `
-    #physical-kitchen-ui{position:fixed;inset:0;z-index:34;pointer-events:none;color:#fff0d4;font:14px system-ui}
-    #physical-kitchen-ui[hidden]{display:none}.kitchen-title{position:absolute;top:18px;left:50%;transform:translateX(-50%);font-size:20px;background:#203027e8;padding:12px 20px;border-radius:8px;white-space:nowrap}.kitchen-title small{font-size:12px;margin-left:18px;color:#c5cbb7}
-    .kitchen-instructions{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);width:max-content;max-width:90vw;text-align:center;background:#203027ee;padding:12px 18px;border-radius:8px;line-height:1.6}
-    #physical-kitchen-readout{position:absolute;top:85px;left:50%;transform:translateX(-50%);background:#203027e8;padding:8px 14px;border-radius:6px;text-align:center;white-space:pre-line}
+    #physical-kitchen-ui{position:fixed;inset:0;z-index:34;pointer-events:none;color:var(--float-ink);font:14px system-ui}
+    #physical-kitchen-ui[hidden]{display:none}.kitchen-title{position:absolute;top:18px;left:50%;transform:translateX(-50%);font-size:20px;background:var(--surface-2);padding:12px 20px;border-radius:8px;white-space:nowrap}.kitchen-title small{font-size:12px;margin-left:18px;color:#c5cbb7}
+    .kitchen-instructions{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);width:max-content;max-width:90vw;text-align:center;background:var(--surface-2);padding:12px 18px;border-radius:8px;line-height:1.6}
+    #physical-kitchen-readout{position:absolute;top:85px;left:50%;transform:translateX(-50%);background:var(--surface-2);padding:8px 14px;border-radius:6px;text-align:center;white-space:pre-line}
     body.cooking-active #status,body.cooking-active #tools,body.cooking-active #lock,body.cooking-active #help,body.cooking-active #stance,body.cooking-active #reticle,body.cooking-active #svbar,body.cooking-active #touch{display:none!important}
     #hungerbar{background:#c3a65d}body.cooking-active canvas{cursor:grab}
     @media(max-width:700px){.kitchen-instructions{font-size:11px;bottom:8px}.kitchen-title{font-size:15px}body.cooking-active #vitals{display:none}}

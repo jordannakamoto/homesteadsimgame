@@ -42,7 +42,7 @@
   const css = document.createElement('style');
   css.textContent = '#svplan{position:fixed;left:50%;bottom:150px;transform:translateX(-50%);z-index:7;display:flex;gap:6px;padding:6px 8px}#svplan[hidden]{display:none}' +
     '#svplan button{display:flex;align-items:center;gap:6px;font-size:14px;padding:5px 11px}#svplan button i{width:10px;height:10px;border-radius:50%;display:inline-block}' +
-    '#svplan button kbd{font:11px var(--font-body,system-ui);opacity:.6}#svplan button[aria-pressed="true"]{border-color:currentColor;background:rgba(255,255,255,.14)}';
+    '#svplan button kbd{font:11px var(--font-body,system-ui);opacity:.6}#svplan button[aria-pressed="true"]{border-color:currentColor;background:var(--surface-hover)}';
   document.head.appendChild(css);
   const strip = document.createElement('div'); strip.id = 'svplan'; strip.className = 'panel'; strip.hidden = true;
   strip.innerHTML = MODES.map((m, i) => '<button data-m="' + m.id + '" aria-pressed="false" style="color:' + m.colour + '"><i style="background:' + m.colour + '"></i><span style="color:var(--ink)">' + m.name + '</span><kbd>' + (i + 1) + '</kbd></button>').join('');

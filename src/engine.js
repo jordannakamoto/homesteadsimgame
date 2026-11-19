@@ -3437,14 +3437,14 @@ const gfxPanel = (() => {
 #gfxsettings .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 7px 0; }
 #gfxsettings .seg { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 #gfxsettings .seg button { padding: 3px 8px; }
-#gfxsettings button[aria-pressed="true"] { border-color: var(--accent); background: rgba(226, 182, 90, 0.18); color: var(--accent); }
+#gfxsettings button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 #gfxsettings .sec { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--panel-edge); color: var(--ink-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
 #gfxsettings label.chk { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; margin: 7px 0; }
 #gfxsettings label.chk input { margin-top: 2px; }
 #gfxsettings label.chk.off { opacity: 0.45; }
 #gfxsettings .hint { display: block; color: var(--ink-dim); font-size: 11px; }
 #gfxsettings input[type=range] { width: 130px; }
-#gfxsettings pre { white-space: pre-wrap; font-size: 11px; line-height: 1.35; max-height: 240px; overflow: auto; background: rgba(0, 0, 0, 0.28); padding: 8px; border-radius: 6px; margin: 6px 0 0; }`;
+#gfxsettings pre { white-space: pre-wrap; font-size: 11px; line-height: 1.35; max-height: 240px; overflow: auto; background: var(--well); padding: 8px; border-radius: 6px; margin: 6px 0 0; }`;
   document.head.appendChild(css);
   const box = document.createElement('div');
   box.id = 'gfxsettings'; box.className = 'panel'; box.hidden = true;
