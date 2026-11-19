@@ -94,10 +94,14 @@ function compilePower(R, g, out, opts = {}) {
   // every node is a terminal, so each link is one run between neighbours
   const res = compileLinks({ terminals, edges: g.edges, joints: g.joints, openEnds: [] }, { start: () => [], sum: (acc, st) => acc.concat(st.edge.run) });
   for (const L of res.links) {
-    const A = refs[L.a], B = refs[L.b], runId = L.acc[0];
+    let A = refs[L.a], B = refs[L.b];
+    const runId = L.acc[0], run = R.runs[runId];
     if (!A || !B || !runId) continue;
-    const id = 'sv:w:' + runId;
-    wires.push({ id, kind: 'wire', from: A, to: B, gauge: specFor(R.runs[runId]).gauge || 14, lengthM: r3(Math.max(0.05, L.lengthM)), run: runId, services: true });
+    // a legacy Equip wire keeps its own id, gauge and direction (services-legacy.js), so electrical.wires carries over
+    const lg = run && run.legacy && run.props && run.props.linkId != null ? run.props : null;
+    if (lg && run.a === L.b) [A, B] = [B, A];
+    const id = lg ? String(lg.linkId) : 'sv:w:' + runId;
+    wires.push({ id, kind: 'wire', from: A, to: B, gauge: (lg && lg.gauge != null ? lg.gauge : specFor(run).gauge) || 14, lengthM: r3(Math.max(0.05, L.lengthM)), run: runId, services: true, ...(lg ? { material: lg.material || 'copper', legacy: true } : {}) });
     out.links[id] = [runId];
   }
   return [...fx.values(), ...wires];
@@ -136,16 +140,21 @@ function compileWater(R, g, kind, out, fxSeen, opts = {}) {
   }
   const res = compileLinks({ terminals, edges: g.edges, joints: g.joints, openEnds: g.openEnds }, { start: () => [], sum: (acc, st) => acc.concat(st.edge.run) });
   const material = (runs) => {
-    const sp = specFor(R.runs[runs[0]] || {});
+    const r0 = R.runs[runs[0]] || {}, lp = r0.legacy && r0.props;
+    if (lp && (lp.diameterMm || lp.material)) return { ...(lp.material ? { material: lp.material } : {}), ...(lp.diameterMm ? { diameterMm: lp.diameterMm } : {}) };
+    const sp = specFor(r0);
     if (!sp.material) return { diameterMm: sp.diameterMm || 50 };
     const nw = narrowest(R, runs);
     return nw ? { material: nw.material, ...(nw.equivM ? { equivM: nw.equivM } : {}) } : { material: sp.material };
   };
   for (const r of res.links) {
-    const A = refs[r.a], B = refs[r.b];
+    let A = refs[r.a], B = refs[r.b];
     if (!A || !B || !r.acc.length) continue;
     const runs = r.acc, first = R.runs[runs[0]], props = (first && first.props) || {};
-    const id = 'sv:p:' + r.a + '>' + r.b;
+    // a legacy Equip pipe is one run between two ports: it keeps its own id, size and direction (services-legacy.js)
+    const lg = runs.length === 1 && first && first.legacy && props.linkId != null;
+    if (lg && first.a === r.b) [A, B] = [B, A];
+    const id = lg ? String(props.linkId) : 'sv:p:' + r.a + '>' + r.b;
     const shut = r.blocked.length > 0 || runs.some((x) => closedRun(opts, x)) || closedNode(opts, r.a) || closedNode(opts, r.b);   // the main, a line's stop, a fixture's stop
     pieces.push({ id, kind: 'pipe', from: A, to: B, lengthM: r3(Math.max(0.05, r.lengthM)), ...material(runs), shut,
       indoor: props.indoor ?? runs.every((x) => R.runs[x] && R.runs[x].frame != null), insulationMm: +props.insulationMm || 0, buriedDepthM: +props.buriedDepthM || 0,
