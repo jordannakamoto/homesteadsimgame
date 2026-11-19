@@ -844,9 +844,10 @@
     if (f & (RD.FLAG.TAMP1 | RD.FLAG.TAMP2)) return 0.85;              // packed
     return 0.5 + clamp(-EW.hAt(g, i, j) * 0.5, 0, 0.3);               // firm, harder deeper down (subsoil, clay)
   }
-  // The scoop: the blade is stamped in (it bites and takes about half a blade), then sinks further while you hold
-  // the button still, taking more as it goes (faster in loose earth, slowly through turf and clay), until the blade
-  // is full. Drag and it levers up and comes with you; let go and it levers up and drops beside the hole.
+  // The scoop: a press puts the blade in (it bites and takes a first bite of earth). Holding it there, each click of
+  // the right button is a boot on the blade: the character steps on it and drives it deeper, taking more (a good
+  // bite in loose earth, a little through turf and clay), until the blade is full. Drag and it levers up and comes
+  // with you; let go and it levers up and drops beside the hole.
   const T_LIFT = 0.16;
   function digTick(dt) {
     const P = G.player;
@@ -858,19 +859,29 @@
       if (!dig.bit && dig.t >= T_BITE) {
         dig.bit = true; bite();
         if (dig.bag || dig.fail) { dig.ph = 'lift'; dig.t = 0; return; }
-        if (!lever(SCOOP_M3 * (L().scale || 1) * 0.5, false)) { dig.ph = 'lift'; dig.t = 0; return; }
-        dig.ph = 'sink'; dig.t = 0; dig.next = 0;
+        if (!lever(SCOOP_M3 * (L().scale || 1) * 0.4, false)) { dig.ph = 'lift'; dig.t = 0; return; }
+        dig.ph = 'sink'; dig.t = 0; dig.stomp = -1; dig.sec = !!a.second;
       }
       return;
     }
     if (dig.ph === 'sink') {
-      // still held and not dragged: the blade goes on in
+      // still held and not dragged: a right-click is a boot on the blade
       if (dig.held && !moved) {
-        dig.next -= dt;
-        if (dig.next <= 0 && dig.load < dig.cap - 1e-6) {
-          dig.next = 0.07;
-          const rate = dig.cap / (0.35 + 0.65 * HARD);                // a full blade in 0.45 s (loose) to 1 s (turf)
-          if (!lever(rate * 0.07, true)) dig.load = dig.cap;           // something else under the blade: that is all
+        if (a.second && !dig.sec && dig.stomp < 0) {
+          if (dig.load >= dig.cap - 1e-6) sayS('The blade is full. Drag it where it goes.');
+          else dig.stomp = 0;
+        }
+        dig.sec = !!a.second;
+        if (dig.stomp >= 0) {
+          const s0 = dig.stomp; dig.stomp += dt;
+          if (s0 < 0.12 && dig.stomp >= 0.12) {
+            // the boot comes down: the blade goes in, a stop, crumbs
+            G.juice.hitStop = 0.02 + 0.05 * HARD;
+            const turf = HARD >= 1;
+            if (!lever(dig.cap * (0.34 - 0.18 * HARD), true)) dig.load = dig.cap;
+            G.burst(dig.x, surfaceAt(dig.x, dig.z) + 0.05, dig.z, 3 + Math.round(5 * HARD), turf ? 0x5e8a3a : 0x4c3726, 1.0, 1.4, 0.045, 0.4);
+          }
+          if (dig.stomp >= 0.3) dig.stomp = -1;
         }
         return;
       }
@@ -943,12 +954,15 @@
       // stamped in from above; pushed on in while held (deeper as it fills, rocking a little); levered up and back
       const full = dig.cap ? clamp(dig.load / dig.cap, 0, 1) : 0;
       const kIn = dig.ph === 'in' ? ease(t / T_BITE) : 1, kUp = dig.ph === 'lift' ? ease(t / T_LIFT) : 0;
-      const sink = dig.ph === 'in' ? 0 : 0.12 * full * (1 - kUp), rock = dig.ph === 'sink' ? 0.03 * Math.sin(dig.t * 22) : 0;
+      const sink = dig.ph === 'in' ? 0 : 0.12 * full * (1 - kUp), rock = 0;
       const back = 0.18 * kUp, d = Math.hypot(_D.x, _D.z) || 1;
       _B.set(_D.x - (_D.x / d) * back, _D.y + 0.38 - 0.54 * kIn - sink + 0.62 * kUp, _D.z - (_D.z / d) * back);
       _Hn.set(0.05 + rock, 1.38 - 0.36 * kIn - 0.1 * full * (1 - kUp) - 0.02 * kUp, 0.18 + 0.16 * kIn - 0.2 * kUp);
       arm = -1.7 + 0.7 * kIn + 0.15 * kUp; lean = 0.32 * kIn + 0.08 * full * (1 - kUp) - 0.2 * kUp;
-      leg = dig.ph === 'in' ? -0.55 * Math.sin(Math.PI * Math.min(1, t / T_BITE)) : dig.ph === 'sink' ? -0.35 * (1 - full) : 0;   // a boot on the blade
+      // a boot on the blade: lifted, then stamped down on it, the body dropping with it
+      const st = dig.ph === 'sink' && dig.stomp >= 0 ? dig.stomp : -1, up = st < 0 ? 0 : st < 0.12 ? ease(st / 0.12) : 1 - ease((st - 0.12) / 0.18);
+      leg = dig.ph === 'in' ? -0.55 * Math.sin(Math.PI * Math.min(1, t / T_BITE)) : dig.ph === 'sink' ? -0.25 - 0.7 * up : 0;
+      if (st >= 0) { lean += 0.12 * (st < 0.12 ? 0 : 1 - up); _Hn.y += 0.08 * up; }
       face = Math.atan2(dig.x - P.x, dig.z - P.z);
     } else {
       // carried: the blade, loaded, held out over where it will drop; tipped: a flick up and over
@@ -1190,31 +1204,39 @@
   const bar = $('lbar');
   if (!bar) return;
   const hint = bar.querySelector('.ghint'), toolsEl = bar.querySelector('.gtools'), storeEl = bar.querySelector('.gseeds');
+  // the bar sits in the bottom lane beside the mode chip; its hint and store stack above it in the prompt and context places (template/ui/30-hotbar.css)
+  if (window.__ui) {
+    const ctx = document.createElement('div'); ctx.className = 'gctx'; ctx.append(hint, storeEl); bar.insertBefore(ctx, toolsEl);
+    for (const el of [toolsEl, hint, storeEl]) el.classList.add('panel');
+    bar.classList.remove('panel');
+    window.__ui.mount(bar, 'bottom', { order: 2 });
+    new ResizeObserver(() => document.body.style.setProperty('--lbar-ctx', ctx.offsetHeight + 'px')).observe(ctx);
+  }
   const label = $('glabel');
-  const I = (body) => '<svg viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="#f1ead6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' + body + '</svg>';
+  const I = (body) => '<svg viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="var(--ic-outline)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' + body + '</svg>';
   const ICONS = {
-    hands: I('<path d="M12 22v-9a2 2 0 0 1 4 0v6M16 18v-8a2 2 0 0 1 4 0v8M20 18v-7a2 2 0 0 1 4 0v8M24 19v-4a2 2 0 0 1 4 0v9c0 6-3 10-9 10-4 0-6-2-8-5l-4-7c-1-2 1-4 3-2l2 3" fill="#e9b88f" stroke="#f6dcc0"/>'),
-    shovel: I('<path d="M27 5l-9 17" stroke="#d8b585" stroke-width="2.6"/><path d="M24 4l6 3" stroke="#3a3a3a" stroke-width="3"/><path d="M15 20l7 4-3 9c-1 2-4 2-6 1s-3-3-2-5z" fill="#9aa4ab" stroke="#cfd6dc"/><path d="M6 34c4-3 9-3 14-1" stroke="#a3784e" stroke-width="2"/>'),
-    sod: I('<path d="M30 6L17 21" stroke="#d8b585" stroke-width="2.6"/><path d="M13 19l7 5-5 6c-2 1-5 0-6-2z" fill="#9aa4ab" stroke="#cfd6dc"/><path d="M4 31c8 2 14 2 20-1" stroke="#7aa053" stroke-width="3"/><path d="M24 30c3-1 6 0 8 2" stroke="#a3784e" stroke-width="2"/>'),
-    rake: I('<path d="M29 5L15 27" stroke="#d8b585" stroke-width="2.6"/><path d="M7 25l14 9" stroke="#b9c2c9" stroke-width="2.6"/><path d="M8 26l-2 4M11 28l-2 4M14 30l-2 4M17 32l-2 4M20 34l-2 3" stroke="#b9c2c9" stroke-width="1.8"/>'),
-    bucket: (hex) => I('<path d="M9 15h22l-3 19H12z" fill="#6e7b52" stroke="#d3dcb5"/><path d="M9 15c2-6 20-6 22 0" stroke="#d3dcb5"/><ellipse cx="20" cy="15" rx="10" ry="3" fill="' + hex + '" stroke="none"/>'),
-    stone: (hex, w, h) => I('<path d="M' + (20 - w) + ' ' + (28) + 'q2-' + h + ' ' + w + '-' + h + 't' + w + ' ' + h + 'z" fill="' + hex + '" stroke="#efe6d2"/><path d="M5 30h30" stroke="#a3784e" stroke-width="2"/>'),
-    wall: I('<path d="M6 32h12v-7H6zM20 32h14v-7H20zM10 25h14v-7H10zM26 25h8v-7h-8z" fill="#8f887a" stroke="#efe6d2" stroke-width="1.6"/>'),
-    pot: (hex) => I('<path d="M13 24h14l-2 11H15z" fill="#9a5a3a" stroke="#f0c8a8"/><circle cx="20" cy="15" r="8" fill="' + hex + '" stroke="#e8f0d8"/><path d="M20 23v-6" stroke="#6f9a3a"/>'),
-    barrow: I('<path d="M6 14h20l-4 10H11z" fill="#2f6e8e" stroke="#cfe4ee"/><circle cx="25" cy="29" r="4" fill="#222" stroke="#ddd"/><path d="M8 24l-3 8M21 24l4 2M26 14l9-4" stroke="#d8b585" stroke-width="2"/>'),
-    can: I('<path d="M10 16h16v16H10z" fill="#5f8a6a" stroke="#d6eadb"/><path d="M26 19l9-7" stroke="#d6eadb" stroke-width="3"/><path d="M12 16c0-6 12-6 12 0" stroke="#d6eadb"/>'),
-    hose: I('<circle cx="20" cy="20" r="11" stroke="#58b064" stroke-width="3.2"/><circle cx="20" cy="20" r="6" stroke="#58b064" stroke-width="3"/><path d="M31 20h5" stroke="#58b064" stroke-width="3"/>'),
-    liner: I('<rect x="8" y="10" width="24" height="8" rx="4" fill="#2a2c2d" stroke="#bbb"/><path d="M10 18c0 8 20 8 20 0" fill="#3a6a8a" stroke="#bfe0f0"/>'),
-    tamper: I('<path d="M20 5v24" stroke="#bbb" stroke-width="2.6"/><path d="M15 5h10" stroke="#888" stroke-width="3"/><path d="M11 29h18v4H11z" fill="#7d8287" stroke="#ddd"/><path d="M6 35h28" stroke="#a3784e" stroke-width="2" stroke-dasharray="2 2"/>'),
-    fabric: I('<rect x="7" y="9" width="26" height="9" rx="4.5" fill="#2e2f2c" stroke="#bbb"/><path d="M9 18l-2 15h26l-2-15" fill="#3a3b37" stroke="#aaa"/><path d="M11 22h18M10 26h20M9 30h22" stroke="#666" stroke-width="1"/>'),
-    gbox: I('<path d="M5 20l15-7 15 7-15 7z" fill="#5e4632" stroke="#e8d0b0"/><path d="M5 20v8l15 7 15-7v-8" fill="#a8683f" stroke="#e8d0b0"/><path d="M20 27v8" stroke="#e8d0b0"/>'),
-    ashlar: I('<path d="M5 32h14v-7H5zM19 32h16v-7H19zM9 25h16v-7H9zM25 25h10v-7H25zM5 25h4v-7H5z" fill="#c2a77e" stroke="#f3ead8" stroke-width="1.5"/>'),
-    cobble: I('<path d="M6 12h8v8H6zM16 12h8v8h-8zM26 12h8v8h-8zM11 22h8v8h-8zM21 22h8v8h-8z" fill="#8d8a85" stroke="#eee" stroke-width="1.4"/>'),
-    cap: I('<path d="M5 18h30v5H5z" fill="#c9b08a" stroke="#f3ead8" stroke-width="1.6"/><path d="M8 23h24v10H8z" fill="#8f887a" stroke="#efe6d2" stroke-width="1.4"/>'),
-    curb: I('<path d="M4 20h32v8H4z" fill="#8f8f8c" stroke="#eee" stroke-width="1.6"/><path d="M4 28c6-3 26-3 32 0" stroke="#7aa053" stroke-width="2"/>'),
-    timber: I('<path d="M5 24h30v6H5zM8 18h24v6H8z" fill="#8d7152" stroke="#efe6d2" stroke-width="1.6"/>'),
-    light: I('<path d="M20 16v18" stroke="#888" stroke-width="2.4"/><path d="M14 12h12l-2 5h-8z" fill="#ffd98a" stroke="#efe6d2"/><circle cx="20" cy="9" r="2" fill="#fff3c0" stroke="none"/>'),
-    store: I('<path d="M5 16l3-8h24l3 8z" fill="#7e9b5a" stroke="#e8f0d8"/><path d="M7 16v17h26V16" stroke="#efe6d2"/><path d="M16 33v-9h8v9" fill="#8a6238" stroke="#efe6d2"/>'),
+    hands: I('<path d="M12 22v-9a2 2 0 0 1 4 0v6M16 18v-8a2 2 0 0 1 4 0v8M20 18v-7a2 2 0 0 1 4 0v8M24 19v-4a2 2 0 0 1 4 0v9c0 6-3 10-9 10-4 0-6-2-8-5l-4-7c-1-2 1-4 3-2l2 3" fill="var(--ic-skin)" stroke="var(--ic-outline)"/>'),
+    shovel: I('<path d="M27 5l-9 17" stroke="var(--ic-wood)" stroke-width="2.6"/><path d="M24 4l6 3" stroke="var(--ic-steel)" stroke-width="3"/><path d="M15 20l7 4-3 9c-1 2-4 2-6 1s-3-3-2-5z" fill="var(--ic-steel)" stroke="var(--ic-outline)"/><path d="M6 34c4-3 9-3 14-1" stroke="var(--ic-soil)" stroke-width="2"/>'),
+    sod: I('<path d="M30 6L17 21" stroke="var(--ic-wood)" stroke-width="2.6"/><path d="M13 19l7 5-5 6c-2 1-5 0-6-2z" fill="var(--ic-steel)" stroke="var(--ic-outline)"/><path d="M4 31c8 2 14 2 20-1" stroke="var(--ic-leaf)" stroke-width="3"/><path d="M24 30c3-1 6 0 8 2" stroke="var(--ic-soil)" stroke-width="2"/>'),
+    rake: I('<path d="M29 5L15 27" stroke="var(--ic-wood)" stroke-width="2.6"/><path d="M7 25l14 9" stroke="var(--ic-steel)" stroke-width="2.6"/><path d="M8 26l-2 4M11 28l-2 4M14 30l-2 4M17 32l-2 4M20 34l-2 3" stroke="var(--ic-steel)" stroke-width="1.8"/>'),
+    bucket: (hex) => I('<path d="M9 15h22l-3 19H12z" fill="var(--ic-leaf)" stroke="var(--ic-outline)"/><path d="M9 15c2-6 20-6 22 0" stroke="var(--ic-outline)"/><ellipse cx="20" cy="15" rx="10" ry="3" fill="' + hex + '" stroke="none"/>'),
+    stone: (hex, w, h) => I('<path d="M' + (20 - w) + ' ' + (28) + 'q2-' + h + ' ' + w + '-' + h + 't' + w + ' ' + h + 'z" fill="' + hex + '" stroke="var(--ic-outline)"/><path d="M5 30h30" stroke="var(--ic-soil)" stroke-width="2"/>'),
+    wall: I('<path d="M6 32h12v-7H6zM20 32h14v-7H20zM10 25h14v-7H10zM26 25h8v-7h-8z" fill="var(--ic-stone)" stroke="var(--ic-outline)" stroke-width="1.6"/>'),
+    pot: (hex) => I('<path d="M13 24h14l-2 11H15z" fill="var(--ic-soil)" stroke="var(--ic-outline)"/><circle cx="20" cy="15" r="8" fill="' + hex + '" stroke="var(--ic-outline)"/><path d="M20 23v-6" stroke="var(--ic-leaf)"/>'),
+    barrow: I('<path d="M6 14h20l-4 10H11z" fill="var(--ic-water)" stroke="var(--ic-outline)"/><circle cx="25" cy="29" r="4" fill="var(--ic-steel)" stroke="var(--ic-outline)"/><path d="M8 24l-3 8M21 24l4 2M26 14l9-4" stroke="var(--ic-wood)" stroke-width="2"/>'),
+    can: I('<path d="M10 16h16v16H10z" fill="var(--ic-leaf)" stroke="var(--ic-outline)"/><path d="M26 19l9-7" stroke="var(--ic-outline)" stroke-width="3"/><path d="M12 16c0-6 12-6 12 0" stroke="var(--ic-outline)"/>'),
+    hose: I('<circle cx="20" cy="20" r="11" stroke="var(--ic-leaf)" stroke-width="3.2"/><circle cx="20" cy="20" r="6" stroke="var(--ic-leaf)" stroke-width="3"/><path d="M31 20h5" stroke="var(--ic-leaf)" stroke-width="3"/>'),
+    liner: I('<rect x="8" y="10" width="24" height="8" rx="4" fill="var(--ic-steel)" stroke="var(--ic-outline)"/><path d="M10 18c0 8 20 8 20 0" fill="var(--ic-water)" stroke="var(--ic-outline)"/>'),
+    tamper: I('<path d="M20 5v24" stroke="var(--ic-outline)" stroke-width="2.6"/><path d="M15 5h10" stroke="var(--ic-steel)" stroke-width="3"/><path d="M11 29h18v4H11z" fill="var(--ic-steel)" stroke="var(--ic-outline)"/><path d="M6 35h28" stroke="var(--ic-soil)" stroke-width="2" stroke-dasharray="2 2"/>'),
+    fabric: I('<rect x="7" y="9" width="26" height="9" rx="4.5" fill="var(--ic-steel)" stroke="var(--ic-outline)"/><path d="M9 18l-2 15h26l-2-15" fill="var(--ic-steel)" stroke="var(--ic-outline)"/><path d="M11 22h18M10 26h20M9 30h22" stroke="var(--ic-steel)" stroke-width="1"/>'),
+    gbox: I('<path d="M5 20l15-7 15 7-15 7z" fill="var(--ic-wood)" stroke="var(--ic-outline)"/><path d="M5 20v8l15 7 15-7v-8" fill="var(--ic-wood)" stroke="var(--ic-outline)"/><path d="M20 27v8" stroke="var(--ic-outline)"/>'),
+    ashlar: I('<path d="M5 32h14v-7H5zM19 32h16v-7H19zM9 25h16v-7H9zM25 25h10v-7H25zM5 25h4v-7H5z" fill="var(--ic-stone)" stroke="var(--ic-outline)" stroke-width="1.5"/>'),
+    cobble: I('<path d="M6 12h8v8H6zM16 12h8v8h-8zM26 12h8v8h-8zM11 22h8v8h-8zM21 22h8v8h-8z" fill="var(--ic-stone)" stroke="var(--ic-outline)" stroke-width="1.4"/>'),
+    cap: I('<path d="M5 18h30v5H5z" fill="var(--ic-stone)" stroke="var(--ic-outline)" stroke-width="1.6"/><path d="M8 23h24v10H8z" fill="var(--ic-stone)" stroke="var(--ic-outline)" stroke-width="1.4"/>'),
+    curb: I('<path d="M4 20h32v8H4z" fill="var(--ic-stone)" stroke="var(--ic-outline)" stroke-width="1.6"/><path d="M4 28c6-3 26-3 32 0" stroke="var(--ic-leaf)" stroke-width="2"/>'),
+    timber: I('<path d="M5 24h30v6H5zM8 18h24v6H8z" fill="var(--ic-wood)" stroke="var(--ic-outline)" stroke-width="1.6"/>'),
+    light: I('<path d="M20 16v18" stroke="var(--ic-steel)" stroke-width="2.4"/><path d="M14 12h12l-2 5h-8z" fill="var(--ic-warn)" stroke="var(--ic-outline)"/><circle cx="20" cy="9" r="2" fill="var(--ic-paper)" stroke="none"/>'),
+    store: I('<path d="M5 16l3-8h24l3 8z" fill="var(--ic-leaf)" stroke="var(--ic-outline)"/><path d="M7 16v17h26V16" stroke="var(--ic-outline)"/><path d="M16 33v-9h8v9" fill="var(--ic-wood)" stroke="var(--ic-outline)"/>'),
   };
   const PLANT_HEX = { lavender: '#8b6fc4', coneflower: '#e8b52a', grass: '#b7a26a', boxwood: '#3d6a31', hydrangea: '#f1f0e2', rose: '#c4243a', maple: '#9b2226', blueberry: '#4a5a9c', apple: '#c0392b', iris: '#f2d02a' };
   const LAYER_ITEM = { bedmix: 'raised_bed_mix', gravel: 'gravel', crushed: 'crushed_stone', dg: 'decomposed_granite', slate: 'slate_chips', marble: 'marble_chips', lava: 'lava_rock', riverrock: 'river_rock', woodchips: 'wood_chips', bark: 'bark_mulch', sand: 'sand', seed: 'grass_seed' };
@@ -1314,7 +1336,7 @@
     else {
       const id = held();
       if (id === 'store') h = 'Pick what to buy. Things you own appear on the bar.';
-      else if (id === 'shovel') h = loaded() ? '<b>' + litres(L().carry.m3) + ' L</b> on the shovel: <b>press and drag</b> it where it goes, let go to drop it.' : '<b>Press</b> to dig (hold to push the blade deeper), <b>drag</b> the load where it goes, <b>let go</b> to drop it. <b>Right-drag</b> pushes earth with the flat of the blade; <b>right-click</b> pats it down. <b>Q E</b> or middle-drag turn the view, the <b>wheel</b> zooms (shift tilts).';
+      else if (id === 'shovel') h = loaded() ? '<b>' + litres(L().carry.m3) + ' L</b> on the shovel: <b>press and drag</b> it where it goes, let go to drop it.' : '<b>Press</b> to put the blade in; still holding, <b>right-click</b> to step on it and drive it deeper. <b>Drag</b> the load where it goes, <b>let go</b> to drop it. <b>Right-drag</b> pushes earth with the flat of the blade; <b>right-click</b> pats it down. <b>Q E</b> or middle-drag turn the view, the <b>wheel</b> zooms (shift tilts).';
       else if (id === 'sod') h = '<b>Drag</b> along the grass to cut the turf off in a strip.';
       else if (id === 'barrow') h = L().barrow.m3 > 1e-6 ? '<b>' + litres(L().barrow.m3) + ' L</b> in the barrow. <b>Click</b> to shovel in more, <b>drag down</b> to tip it all out.' : '<b>Click</b> to shovel a scoop into the barrow. When it is full, walk it over and <b>drag down</b> to tip it out.';
       else if (id === 'can') h = '<b>Hold and drag down</b> to pour over new plants: water them in, and keep them moist for three weeks while they root. Fill the can at the pump or the stream.';
@@ -1347,7 +1369,7 @@
   function tip(what, res) {
     if (told[what]) return;
     told[what] = 1;
-    if (what === 'dug') sayS('Hold still and the blade goes deeper, for a full load. Then drag it where you want it and let go: a heap, a hill, a bank.', 6);
+    if (what === 'dug') sayS('Keep holding and right-click to step on the blade: it goes deeper and takes more. Then drag it where you want it and let go: a heap, a hill, a bank.', 7);
     else if (what === 'patted') sayS('Patted down with the back of the blade: the lumps are gone and the earth is firm. Pat a bank to shape it, or a bed to level it.', 6);
     else if (what === 'pushed') sayS('The flat of the blade pushes loose earth ahead of it and fills the hollows it passes. Push from beside a heap to flatten it; drag from its top to spread it out.', 6);
     else if (what === 'scooped') sayS((SURFACES[res.s] ? SURFACES[res.s].name : res.s) + ' on the blade. Drag it to the bed and let go. Rake it level after.', 6);

@@ -49,7 +49,7 @@ THREE.ShaderChunk.opaque_fragment += '\nif ( isnan( gl_FragColor.r + gl_FragColo
 // default), 'fsr' (AMD FSR 1: made for smooth, photoreal, anti-aliased images; on pixel textures it smears texel
 // edges into brush strokes) or 'sharp' (area-weighted nearest: every render pixel stays a crisp block, only the
 // seams between blocks are blended, the usual way to scale pixel art by uneven amounts).
-const LOOK = { ao: false, hudBlur: true, lightBloom: false, compactHdr: false, grassShadows: true, tuftShadow: true, drawOrder: true, farGrass: 'normal', rootShade: 1, grassClumps: true, grassBacklight: true, skyShade: true, sunFog: true, grassSheen: true, farBlend: true, crownShade: true, camFx: false, upscaler: 'bicubic', toneMap: 'aces', taa: false, edgeBelts: true, riverWater: 'live', waterTexel: 'smooth', bedStyle: 'voxel', waterReflect: 'probe', skyModel: 'physical', skyClouds: 'volume', cloudRes: 'half', cloudStyle: 'soft', nightSky: 'real', farLand: true, openSea: true, haze: 'normal' };
+const LOOK = { ao: false, hudBlur: true, lightBloom: false, compactHdr: false, grassShadows: true, tuftShadow: true, drawOrder: true, farGrass: 'normal', rootShade: 1, grassClumps: true, grassBacklight: true, skyShade: true, sunFog: true, grassSheen: true, farBlend: true, crownShade: true, camFx: false, upscaler: 'bicubic', toneMap: 'aces', taa: false, edgeBelts: true, riverWater: 'live', waterTexel: 'smooth', bedStyle: 'voxel', waterReflect: 'probe', skyModel: 'physical', skyClouds: 'volume', cloudRes: 'half', cloudStyle: 'soft', starField: 'natural', nightSky: 'real', farLand: true, openSea: true, haze: 'normal' };
 const LOOK_KEY = 'homestead:look';
 try { const s = JSON.parse(localStorage.getItem(LOOK_KEY) || 'null'); if (s) for (const k in LOOK) if (typeof s[k] === typeof LOOK[k]) LOOK[k] = s[k]; } catch (e) { /* no storage */ }
 const saveLook = () => { try { localStorage.setItem(LOOK_KEY, JSON.stringify(LOOK)); } catch (e) { /* no storage */ } };
@@ -494,6 +494,19 @@ const aoScale = () => (LOOK.ao && msaaSamples() > 0 ? ({ ultra: 1, high: 0.5, me
 // One composer for the whole session, built at start-up even on Low (as before). Add-ons put their own passes into
 // it (fxpost.js and fx.js both claim it once, through composer.__fx), so it is never replaced: graphics settings
 // change it in place, and leave every pass they didn't add where it is.
+// The post passes' full-screen quads write depth by default, and the last of them can land in the buffer whose depth
+// is the scene's, wiping it before the stars (drawn after, hidden by that depth) read it. Their quads never need
+// depth, so every pass's materials are set to leave it alone (once per pass, including ones the add-ons insert later).
+function keepDepth() {
+  for (const p of composer.passes) {
+    if (p.__keepDepth) continue;
+    p.__keepDepth = true;
+    for (const v of Object.values(p)) {
+      const m = v && (v.isMaterial ? v : v.material && v.material.isMaterial ? v.material : null);
+      if (m) { m.depthWrite = false; m.depthTest = false; }
+    }
+  }
+}
 function buildComposer() {
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
   const samples = msaaSamples();
@@ -502,7 +515,7 @@ function buildComposer() {
   composer.msaa = samples;
   composer.addPass(new RenderPass(scene, camera));
   // notes which buffer holds this frame's scene depth, for TAAU's reprojection (draws nothing)
-  composer.addPass({ enabled: true, needsSwap: false, clear: false, renderToScreen: false, setSize() {}, dispose() {}, render(r, w, read) { taa.depth = read.depthTexture; } });
+  composer.addPass({ enabled: true, needsSwap: false, clear: false, renderToScreen: false, setSize() {}, dispose() {}, render(r, w, read) { taa.depth = read.depthTexture; keepDepth(); } });
   bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.3, 0.7, 0.92);
   // Lighter bloom (a switch): the glow chain starts from a quarter-resolution image instead of half
   const bloomSize = bloom.setSize.bind(bloom);
@@ -2430,6 +2443,12 @@ const pm = {};
         const hh = mk(0.035, 0.035, 0.34, 0x8a5a32); hh.position.set(0, -0.5, 0.13);
         const hd = mk(0.045, 0.15, 0.05, 0x5f666c); hd.position.set(0, -0.53, 0.3);
         hh.visible = hd.visible = false; arm.add(hh, hd); pm.hammer = [hh, hd];
+        // a paint roller, out while painting walls (P.roller: the paint's colour, set by construction): a handle along
+        // the hand, a wire frame, and the sleeve across the end, coloured by what is on it
+        const rh = mk(0.035, 0.035, 0.3, 0x3b3f44); rh.position.set(0, -0.5, 0.12);
+        const rf = mk(0.015, 0.015, 0.16, 0xb5bac0); rf.position.set(0, -0.5, 0.33);
+        const rs = mk(0.24, 0.07, 0.07, 0xf1efe8); rs.position.set(0, -0.5, 0.42);
+        rh.visible = rf.visible = rs.visible = false; arm.add(rh, rf, rs); pm.roller = [rh, rf, rs];
       }
       continue;
     }
@@ -2653,7 +2672,11 @@ function applyBrush(x, z, mode, dt, target) {
 // ============================================================ input
 const keys = {};
 const mouse = { x: 0, y: 0, left: false, right: false, inside: false, click: 0, swallow: false };
-const cam = { yaw: 0.6, pitch: 0.95, dist: 24, aimPitch: 0.2, aimK: 0, yawRate: 0, prevYaw: 0.6, tx: 0, ty: 0, tz: 0, shake: 0 };
+const cam = { yaw: 0.6, pitch: 0.95, dist: 24, aimPitch: 0.2, aimK: 0, yawRate: 0, prevYaw: 0.6, tx: 0, ty: 0, tz: 0, shake: 0,
+  // the near views: view is the one V chose (0 overhead, 1 close behind the shoulder, 2 first person); live is the one
+  // showing this frame (a held right button gives a close look while exploring); aimLo / aimHi bound aimPitch for
+  // every input (mouse, touch); bowK / fpK ease the bow's and first person's framing in and out
+  view: 0, live: 0, lookDist: 4.2, fpK: 0, bowK: 0, aimLo: -0.28, aimHi: 0.9, wheelAcc: 0, wheelHold: 0, fromHold: false };
 // what body the input drives and what the camera follows (src/engine/control.js); until the takeovers below move onto it,
 // nothing new may take the body while one of them holds it
 const control = createControl({ player, cam, keys, mouse });
@@ -2683,6 +2706,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyG') cycleQuality();
   // the controls sheet: ? or F1 (H is the Hens'); src/game/keymap.js renders it
   if ((e.code === 'F1' || (e.code === 'Slash' && e.shiftKey)) && !e.repeat && player.tool !== 'build') { e.preventDefault(); const h = document.getElementById('help'); if (h.hidden && window.__keymap) window.__keymap.render(); h.hidden = !h.hidden; }
+  if (e.code === 'KeyV' && !e.repeat && player.tool !== 'build') camView('next');
   if (e.altKey || ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'AltLeft', 'AltRight'].includes(e.code)) e.preventDefault();
 });
 window.addEventListener('keyup', (e) => { keys[e.code] = false; if (e.code === 'AltLeft' || e.code === 'AltRight') e.preventDefault(); });
@@ -2736,17 +2760,59 @@ canvas.addEventListener('pointermove', (e) => {
   mouse.y = -(((e.clientY - r.top) / r.height) * 2 - 1);
   mouse.inside = true;
   if (locked()) {                                    // the mouse steers the camera, and the camera is the aim
-    const sens = cam.aimK > 0.5 ? 0.0019 : 0.0026;
+    const sens = cam.aimK > 0.5 ? (cam.live ? 0.0021 : 0.0019) : 0.0026;
     cam.yaw -= e.movementX * sens;
-    if (cam.aimK > 0.5) cam.aimPitch = clamp(cam.aimPitch + e.movementY * 0.0016, -0.28, 0.9);
+    if (cam.aimK > 0.5) cam.aimPitch = clamp(cam.aimPitch + e.movementY * (cam.live ? 0.0019 : 0.0016), cam.aimLo, cam.aimHi);
     else cam.pitch = clamp(cam.pitch + e.movementY * 0.002, 0.5, 1.35);
   }
 });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
+  if (cam.live) { wheelLook(e.deltaY * (e.deltaMode === 1 ? 40 : 1)); return; }
   cam.dist = clamp(cam.dist * Math.exp(e.deltaY * 0.0012), 9, 50);
 }, { passive: false });
+// In the close view the wheel brings the camera in and out; pushed on past the closest it slides into first person,
+// and a turn back out leaves it. The push has to build up a little so a trackpad's flick does not flip views.
+function wheelLook(dy) {
+  const now = performance.now();
+  if (now < cam.wheelHold) return;
+  if (cam.live === 2) {
+    if (dy > 0) { cam.wheelAcc += dy; if (cam.wheelAcc > 90) { cam.lookDist = 1.9; setView(cam.fromHold && mouse.right ? 0 : 1, !(cam.fromHold && mouse.right)); } }
+    else cam.wheelAcc = 0;
+    return;
+  }
+  const atMin = cam.lookDist <= 1.6 + 1e-3;
+  cam.lookDist = clamp(cam.lookDist * Math.exp(dy * 0.0014), 1.6, 9);
+  if (dy < 0 && atMin) { cam.wheelAcc -= dy; if (cam.wheelAcc > 160) { cam.fromHold = cam.view === 0; setView(2); } }
+  else cam.wheelAcc = 0;
+}
+const VIEW_NAMES = ['overhead', 'close', 'first'];
+const VIEW_SAY = ['Overhead view', 'Close view: look around freely, wheel to come closer', 'First person: wheel out to step back'];
+function setView(v, say = true) {
+  cam.view = v; cam.wheelAcc = 0; cam.wheelHold = performance.now() + 350;
+  if (say && window.__ui && window.__ui.toast) window.__ui.toast(VIEW_SAY[v] + (v ? '. V changes the view' : ''), { tone: 'info', seconds: 2.2 });
+}
+// which view shows this frame. The near views are for walking about with the axe or a terrain tool; any other tool
+// (build mode, hands, garden, yard...), a seat, the kitchen or the bow uses its own camera and the choice waits
+function liveView() {
+  const P = player;
+  if (!control.walking() || window.__game?.cooking?.active || P.dead > 0 || P.aiming || !TOOLS.includes(P.tool) || window.__reach?.on) return 0;
+  if (cam.view) return cam.view;
+  return !COMBAT && mouse.right && P.tool === 'axe' && heightAt(P.x, P.z) >= -0.75 ? 1 : 0;
+}
+// __game.camView(): the view showing ('overhead' | 'close' | 'first'); camView('next') steps V's cycle; camView(name) picks one
+function camView(v) {
+  if (v === 'next' || VIEW_NAMES.includes(v)) {
+    if (!TOOLS.includes(player.tool)) {
+      if (window.__ui && window.__ui.toast) window.__ui.toast('The close views work with the axe or a terrain tool (1 to 4)', { tone: 'info', seconds: 2.4 });
+    } else {
+      const n = v === 'next' ? (cam.view + 1) % 3 : VIEW_NAMES.indexOf(v);
+      if (n !== cam.view) { if (n === 1) cam.lookDist = Math.max(cam.lookDist, 3.2); setView(n); }
+    }
+  }
+  return VIEW_NAMES[cam.live];
+}
 
 const TOOLS = ['axe', 'dig', 'raise', 'level'];
 function setTool(t) {
@@ -2765,7 +2831,7 @@ ring.rotation.x = -Math.PI / 2; ring.renderOrder = 10; ring.visible = false;
 scene.add(ring);
 
 const _ray = new THREE.Raycaster(), _v2 = new THREE.Vector2();
-// Where attacks and tools point. Exploring: the ground just ahead. Bow drawn: whatever sits under the reticle.
+// Where attacks and tools point. Exploring: the ground just ahead. Bow drawn or a near view: whatever sits under the reticle.
 function updateAim() {
   juice.onEnemy = false;
   if (cam.aimK < 0.5) {
@@ -2792,6 +2858,10 @@ function updateAim() {
     if (tc > 0 && tc < tHit + 0.5 && cx * cx + cy * cy + cz * cz - tc * tc < 0.17) { tHit = Math.min(tHit, tc); juice.onEnemy = true; }
   }
   cursor.x = o.x + d.x * tHit; cursor.y = o.y + d.y * tHit; cursor.z = o.z + d.z * tHit; cursor.valid = true;
+  if (cam.live) {                                          // a near view: the tools work where you look, within a few paces
+    const dx = cursor.x - player.x, dz = cursor.z - player.z, dl = Math.hypot(dx, dz);
+    if (dl > 6) { cursor.x = player.x + dx * 6 / dl; cursor.z = player.z + dz * 6 / dl; cursor.y = heightAt(cursor.x, cursor.z); }
+  }
 }
 
 // ============================================================ water, motes, sky
@@ -2806,13 +2876,25 @@ const skyDome = createSkyDome({ scene, camera, renderer, water: waterUniforms, U
 const farLand = createFarLand({ scene, baseHeight, forestAt, chunks: world.chunks, CS, SEA, PAL, smoothstep });
 skyDome.setHorizon(farLand.horizon);
 // the real stars (src/night-sky.js), and the sky's frame and moon for the date and hour
-const nightSky = createNightSky({ scene, camera, sky: skyDome });
-const SKYF = { eq: new THREE.Matrix3(), eqNow: new THREE.Matrix3(), eqInv: new THREE.Matrix3(), moon: new THREE.Vector4(0, -1, 0, 0), age: 0 };
+// drawn in a scene of their own after the frame is enlarged to the screen, at its full resolution (render())
+const skyOverlay = new THREE.Scene();
+const nightSky = createNightSky({ scene: skyOverlay, camera, sky: skyDome });
+const SKYF = { eq: new THREE.Matrix3(), eqNow: new THREE.Matrix3(), eqInv: new THREE.Matrix3(), moon: new THREE.Vector4(0, -1, 0, 0), age: 0, moonSize: 1, eclipse: 0, penumbra: 0, days: 0 };
+const _skyV2 = new THREE.Vector2();
+const MOONX = new THREE.Vector4(1, 0, 0, 0), MOONCOL = new THREE.Color(1, 0.97, 0.92), _mc = [0, 0, 0];
+// whether any of the sky is in the view (the default camera mostly looks down at the ground): the night sky's
+// layers are not drawn when none is
+const _skyV = new THREE.Vector3();
+function skyInView() {
+  let up = -1;
+  for (const x of [-1, 0, 1]) { _skyV.set(x, 1, 1).unproject(camera).sub(camera.position); up = Math.max(up, _skyV.normalize().y); }
+  return up > -0.01;
+}
 const HAZE = { light: 1.7, normal: 1, heavy: 0.5 };
 function applySkyLook() {
   skyDome.setOptions({ model: LOOK.skyModel, clouds: LOOK.skyClouds, night: LOOK.nightSky, cloudStyle: LOOK.cloudStyle });
   skyDome.setCloudScale(LOOK.cloudRes === 'full' ? 1 : LOOK.cloudRes === 'quarter' ? 0.25 : 0.5);
-  nightSky.setOn(LOOK.nightSky === 'real');
+  nightSky.setOn(LOOK.nightSky === 'real'); nightSky.setField(LOOK.starField);
   farLand.setOn(LOOK.farLand); farLand.setOpenSea(LOOK.openSea); farLand.setHaze(LOOK.haze === 'heavy' ? 0.55 : LOOK.haze === 'light' ? 0.12 : 0.3);
   skyDome.setHorizon(LOOK.farLand ? farLand.horizon : null);
 }
@@ -3203,7 +3285,12 @@ function updateSky() {
   SKYK.day = dayF; SKYK.night = nightF;
   // the real night: as dark as the moon allows (a moonless night is starlight only; a full moon lights the land)
   skyFrame(sim.calendarT(), site.latitudeDeg, SKYF, performance.now() / 1000);
-  const moonK = SKYF.moon.w * smoothstep(0.02, 0.2, SKYF.moon.y);
+  // (a supermoon lights a little more, an eclipsed moon hardly at all)
+  const moonK = SKYF.moon.w * smoothstep(0.02, 0.2, SKYF.moon.y) * SKYF.moonSize * SKYF.moonSize * (1 - 0.9 * SKYF.eclipse) * (1 - 0.3 * SKYF.penumbra);
+  // the moon's light through the air: orange as it rises, whitening as it climbs
+  sunColor([SKYF.moon.x, Math.max(SKYF.moon.y, -0.02), SKYF.moon.z], 0.25, _mc);
+  { const mx = Math.max(_mc[0], _mc[1], _mc[2], 1e-4); MOONCOL.setRGB(_mc[0] / mx, _mc[1] / mx, _mc[2] / mx); }
+  MOONX.set(SKYF.moonSize, SKYF.eclipse, SKYF.penumbra, 0);
   const nightDark = LOOK.nightSky === 'real' ? lerp(1, lerp(0.3, 1.05, moonK), nightF) : 1;
   const mix3 = (k) => SKY.day[k] * dayF + SKY.gold[k] * goldF + SKY.night[k] * nightF;
   const mixC = (out, k) => out.setRGB(
@@ -3251,9 +3338,9 @@ function updateSky() {
   skyDome.update({
     trueSun: ATM.sun, sunLo: ATM.lo, sunHi: ATM.hi, sunCi: ATM.ci, cloud, grey, night: nightF, day: dayF,
     windX: wx ? Math.sin(wx.windDirRad || 0) * (wx.windMs || 0) : 1, windZ: wx ? Math.cos(wx.windDirRad || 0) * (wx.windMs || 0) : 0,
-    fog: scene.fog, moon: SKYF.moon, eq: SKYF.eqInv,
+    fog: scene.fog, moon: SKYF.moon, eq: SKYF.eqInv, moonX: MOONX, moonCol: MOONCOL,
   }, lastDt);
-  nightSky.update(SKYF.eq, nightF, SKYF.moon, renderer.getPixelRatio());
+  nightSky.update(SKYF, nightF, renderer.getPixelRatio(), skyInView(), cloud, Math.min(lastDt, 0.1), (camera.fov * Math.PI / 180) / Math.max(1, renderer.getDrawingBufferSize(_skyV2).y));
   motes.material.opacity = (0.22 + 0.7 * nightF + 0.25 * goldF) * (1 - 0.8 * wet);
   motes.material.color.setHex(nightF > 0.5 ? 0xd9ff8a : 0xfff6c8);
   motes.material.size = 0.13 + 0.09 * nightF;
@@ -3419,7 +3506,7 @@ function setLook(key, value) {
   if (key === 'taa') { applyGfx(); resize(); }
   if (key === 'riverWater') riverLive.setMode(value === 'baked' ? 'bed' : value);
   if (key === 'waterReflect') { if (value === 'simple') { reflectProbe.setOn(false); reflectPlane.setOn(false); reflectPlane2.setOn(false); } reflectProbe.setDetail(value === 'full'); reflectPlane.setDetail(value === 'full'); reflectPlane2.setDetail(value === 'full'); }
-  if (['skyModel', 'skyClouds', 'cloudStyle', 'cloudRes', 'nightSky', 'farLand', 'openSea', 'haze'].includes(key)) applySkyLook();
+  if (['starField', 'skyModel', 'skyClouds', 'cloudStyle', 'cloudRes', 'nightSky', 'farLand', 'openSea', 'haze'].includes(key)) applySkyLook();
   if (key === 'bedStyle') U.bedVox.value = value === 'real' ? 0 : value === 'voxelFine' ? 2 : 1;
   if (key === 'waterTexel') { riverWater.uniforms.uTPM.value = value === 'ground' ? 6.4 : 25.6; riverWater.uniforms.uSnap.value = value === 'smooth' ? 0 : 1; }      // MSAA off or back on, and the resolve path
   if (key === 'toneMap') {
@@ -3443,14 +3530,14 @@ const gfxPanel = (() => {
 #gfxsettings .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 7px 0; }
 #gfxsettings .seg { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 #gfxsettings .seg button { padding: 3px 8px; }
-#gfxsettings button[aria-pressed="true"] { border-color: var(--accent); background: rgba(226, 182, 90, 0.18); color: var(--accent); }
+#gfxsettings button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 #gfxsettings .sec { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--panel-edge); color: var(--ink-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
 #gfxsettings label.chk { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; margin: 7px 0; }
 #gfxsettings label.chk input { margin-top: 2px; }
 #gfxsettings label.chk.off { opacity: 0.45; }
 #gfxsettings .hint { display: block; color: var(--ink-dim); font-size: 11px; }
 #gfxsettings input[type=range] { width: 130px; }
-#gfxsettings pre { white-space: pre-wrap; font-size: 11px; line-height: 1.35; max-height: 240px; overflow: auto; background: rgba(0, 0, 0, 0.28); padding: 8px; border-radius: 6px; margin: 6px 0 0; }`;
+#gfxsettings pre { white-space: pre-wrap; font-size: 11px; line-height: 1.35; max-height: 240px; overflow: auto; background: var(--well); padding: 8px; border-radius: 6px; margin: 6px 0 0; }`;
   document.head.appendChild(css);
   const box = document.createElement('div');
   box.id = 'gfxsettings'; box.className = 'panel'; box.hidden = true;
@@ -3564,6 +3651,8 @@ const gfxPanel = (() => {
       h('div', { className: 'hint', textContent: 'Soft: thinner clouds with wisps all round their edges, blending into the sky and the haze. Defined: denser heaps with clearer outlines.' }),
       seg('Cloud resolution', [['full', 'Full'], ['half', 'Half'], ['quarter', 'Quarter']], LOOK.cloudRes, (v) => setLook('cloudRes', v)),
       h('div', { className: 'hint', textContent: 'Volumetric clouds are worked out apart from the rest of the frame at this share of its resolution and enlarged smoothly: soft things lose little by it. Half costs a quarter of Full.' }),
+      seg('Star field', [['rich', 'Rich'], ['natural', 'Natural'], ['sparse', 'Sparse']], LOOK.starField, (v) => setLook('starField', v)),
+      h('div', { className: 'hint', textContent: 'How many stars on a dark night. Rich: all the eye can see from the darkest place on Earth (5000). Natural: as most dark country skies (about 2000). Sparse: the brighter few hundred.' }),
       seg('Night sky', [['real', 'Real stars'], ['simple', 'Simple'], ['off', 'Off']], LOOK.nightSky, (v) => setLook('nightSky', v)),
       h('div', { className: 'hint', textContent: 'Real: the 5000 stars the eye can see, in their true constellations for the date, hour and latitude, the Milky Way, and the moon in its true place and phase, which lights the night. Simple: made-up stars and a fixed moonlight.' }),
       seg('Distance haze', [['light', 'Light'], ['normal', 'Normal'], ['heavy', 'Heavy']], LOOK.haze, (v) => setLook('haze', v)),
@@ -4111,9 +4200,9 @@ function updatePlayer(dt) {
     P.roll = { t: 0, dx, dz }; P.rollCd = 0.7; P.atk = null; P.charging = null; P.parry = null; spendStam(20);
     P.faceTarget = Math.atan2(dx, dz);
   }
-  // bow: hold right mouse to draw
+  // bow (combat only): hold right mouse to draw. While peaceful the same hold is the close view (liveView)
   const wasAiming = P.aiming;
-  P.aiming = mouse.right && armed && !busy() && !swimming;
+  P.aiming = COMBAT && mouse.right && armed && !busy() && !swimming;
   if (P.aiming && !wasAiming) { P.draw = 0; P.atk = null; P.charging = null; P.parry = null; cam.aimPitch = 0.2; }
   if (P.aiming) {
     P.draw += dt;
@@ -4304,6 +4393,7 @@ function updatePlayer(dt) {
   }
   if (P.parry) { P.parry.t += dt; if (P.parry.t >= 0.45) P.parry = null; }
   mouse.click = Math.max(0, mouse.click - dt);
+  if (cam.live === 2 && !P.roll) P.faceTarget = yawF;  // first person: the body turns with the eyes
   if (P.faceHold != null) P.faceTarget = P.faceHold;     // the hands add-on turns the character to what it is reaching for
   let df = P.faceTarget - P.face;
   df = Math.atan2(Math.sin(df), Math.cos(df));
@@ -4339,9 +4429,11 @@ function updatePlayer(dt) {
     if (P.work.kind === 'hammer') { armR = -2.3 + 1.7 * P.work.k; lean = 0.1 + 0.12 * P.work.k; }
     else if (P.work.kind === 'lift') { armL = armR = -2.5; lean = -0.12; }
     else if (P.work.kind === 'carry') armR = -2.0 + armR * 0.2;
+    else if (P.work.kind === 'roll') { armR = -2.15 + 0.75 * Math.sin(P.work.k * Math.PI * 2); armL = -1.6 + 0.3 * Math.sin(P.work.k * Math.PI * 2); lean = 0.05; }
     else if (P.work.kind === 'saw') { armR = -1.25 + 0.5 * Math.sin(P.work.k * Math.PI * 2); armL = -0.85; lean = 0.38; }
   }
-  if (pm.hammer && (pm.hammer[0].visible !== !!P.hammer)) { const h = !!P.hammer; pm.hammer[0].visible = pm.hammer[1].visible = h; pm.hatchet[0].visible = pm.hatchet[1].visible = !h; }
+  if (pm.hammer && (pm.hammer[0].visible !== !!P.hammer || pm.roller[0].visible !== !!P.roller)) { const r = !!P.roller, h = !r && !!P.hammer; pm.hammer[0].visible = pm.hammer[1].visible = h; for (const q of pm.roller) q.visible = r; pm.hatchet[0].visible = pm.hatchet[1].visible = !h && !r; }
+  if (pm.roller && P.roller && pm.roller[2].userData.hex !== P.roller) { pm.roller[2].userData.hex = P.roller; pm.roller[2].material.color.setHex(P.roller); }
   if (P.handPose) { armL = P.handPose.l; armR = P.handPose.r; lean += P.handPose.lean || 0; }   // hands-on work poses the arms (set by add-ons)
   pm.legL.rotation.x = legL; pm.legR.rotation.x = legR;
   pm.armL.rotation.x = armL; pm.armR.rotation.x = armR;
@@ -4365,29 +4457,53 @@ function updateShakes(dt) {
 }
 const _proj = new THREE.Vector3();
 function updateCamera(dt) {
-  if (window.__game?.cooking?.updateCamera(dt)) return;
-  if (control.camera(dt, camera)) { afterCamera(cam.dist); return; }   // a possession placed the camera itself
-  const k = cam.aimK = lerp(cam.aimK, player.aiming ? 1 : 0, 1 - Math.exp(-11 * dt));
+  const live = liveView();
+  if (live && !cam.live && cam.aimK < 0.5) cam.aimPitch = live === 2 ? 0.08 : 0.22;   // a near view starts looking just ahead
+  cam.live = live;
+  if (player.aiming) { cam.aimLo = -0.28; cam.aimHi = 0.9; }
+  else if (live) { cam.aimLo = live === 2 ? -1.45 : -1.2; cam.aimHi = live === 2 ? 1.45 : 1.42; cam.aimPitch = clamp(cam.aimPitch, cam.aimLo, cam.aimHi); }
+  const kitchen = !!window.__game?.cooking?.updateCamera(dt);
+  if (kitchen || control.camera(dt, camera)) {            // the kitchen or a possession placed the camera
+    cam.fpK = 0; pm.root.visible = true;
+    if (camera.near !== 0.5) { camera.near = 0.5; camera.updateProjectionMatrix(); }
+    if (!kitchen) afterCamera(cam.dist);
+    return;
+  }
+  const k = cam.aimK = lerp(cam.aimK, player.aiming || live ? 1 : 0, 1 - Math.exp(-(live ? 8 : 11) * dt));
+  if (player.aiming) cam.bowK = 1; else if (live) cam.bowK = 0;                       // easing out keeps the framing it had
+  const fk = cam.fpK = lerp(cam.fpK, live === 2 ? 1 : 0, 1 - Math.exp(-8 * dt)), bk = cam.bowK;
   const follow = 1 - Math.exp(-lerp(9, 24, k) * dt);
   const f = control.follow();     // the player, or what a possession wants followed, plus its look-ahead
   cam.tx = lerp(cam.tx, f.x, follow); cam.tz = lerp(cam.tz, f.z, follow);
   cam.ty = lerp(cam.ty, f.y + 1.0, 1 - Math.exp(-lerp(5, 18, k) * dt));
   cam.shake = Math.max(0, cam.shake - dt * 1.6);
   const sh = cam.shake * cam.shake * 1.6 * (1 - 0.6 * k);
-  // exploring: high above. Bow drawn: down behind the right shoulder.
-  const dist = lerp(cam.dist * control.rig.distK, 4.4, k), pitch = lerp(control.rig.pitch(cam.pitch), cam.aimPitch, k);
-  const rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw);
-  const tx = cam.tx + rx * 0.8 * k, ty = cam.ty + 0.75 * k, tz = cam.tz + rz * 0.8 * k;
+  // exploring: high above. Bow drawn: down behind the right shoulder. Close view: just behind and over the shoulder,
+  // as near as the wheel puts it. First person: at the eyes.
+  const pitch = lerp(control.rig.pitch(cam.pitch), cam.aimPitch, k);
+  let dist = lerp(cam.dist * control.rig.distK, lerp(cam.lookDist * (1 - fk), 4.4, bk), k);
+  const side = lerp(0.42 * (1 - fk), 0.8, bk) * k, up = lerp(lerp(0.5, 0.55, fk), 0.75, bk) * k, lookW = (1 - bk) * k;
+  const rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw), sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw);
+  const tx = lerp(cam.tx, f.x, fk) + rx * side, ty = cam.ty + up, tz = lerp(cam.tz, f.z, fk) + rz * side;
   const cp = Math.cos(pitch), spn = Math.sin(pitch);
+  if (lookW > 0 && spn < 0 && dist > 0.9) {             // looking up in a near view: the camera comes in along its line, not into the ground
+    const room = (ty - Math.max(heightAt(tx + sy * cp * dist, tz + cy * cp * dist), SEA) - 0.9) / -spn;
+    if (room < dist) dist = lerp(dist, Math.max(0.9, room), lookW);
+  }
   camera.position.set(
-    tx + Math.sin(cam.yaw) * cp * dist + (Math.random() - 0.5) * sh,
+    tx + sy * cp * dist + (Math.random() - 0.5) * sh,
     ty + spn * dist + (Math.random() - 0.5) * sh,
-    tz + Math.cos(cam.yaw) * cp * dist);
-  const floor = Math.max(heightAt(camera.position.x, camera.position.z), SEA) + lerp(1.5, 0.95, k);
+    tz + cy * cp * dist);
+  const floor = Math.max(heightAt(camera.position.x, camera.position.z), SEA) + lerp(1.5, lerp(0.9, 0.95, bk), k);   // above the grass
   if (camera.position.y < floor) camera.position.y = floor;
-  camera.lookAt(tx, ty, tz);
-  const fov = lerp(control.rig.fov(40), 52, k);
-  if (Math.abs(camera.fov - fov) > 0.05) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  // the bow (and the high view) look at the player; a near view looks along its own line, so it can look at the sky
+  const L = Math.max(dist, 1), p = camera.position;
+  camera.lookAt(lerp(tx, p.x - sy * cp * L, lookW), lerp(ty, p.y - spn * L, lookW), lerp(tz, p.z - cy * cp * L, lookW));
+  const fov = lerp(control.rig.fov(40), lerp(lerp(58, 70, fk), 52, bk), k);
+  const near = lookW > 0.5 ? (fk > 0.3 ? 0.1 : 0.25) : 0.5;   // in first person a wall can be an arm's length away
+  if (Math.abs(camera.fov - fov) > 0.05 || camera.near !== near) { camera.fov = fov; camera.near = near; camera.updateProjectionMatrix(); }
+  const hide = fk > 0.55;                                   // first person: your own body would fill the view
+  if (pm.root.visible === hide) pm.root.visible = !hide;
   camera.updateMatrixWorld();
   afterCamera(dist);
 }
@@ -4433,10 +4549,11 @@ function updateHud() {
   if (armed !== hs.armed) { el('stance').hidden = !armed; hs.armed = armed; }
   const h = Math.round(Math.min(1, P.hurt * 2.2) * 20) / 20;
   if (h !== hs.hurt) { el('hurt').style.opacity = String(h); hs.hurt = h; }
-  const show = cam.aimK > 0.35;
+  // the near views show a small dot where the tools work: always in first person, with a terrain tool in the close view
+  const near = cam.live > 0, show = cam.aimK > 0.35 && (!near || cam.live === 2 || P.tool !== 'axe');
   if (show !== hs.ret) { el('reticle').hidden = !show; hs.ret = show; }
   if (show) {
-    const sc = Math.round(lerp(2.6, 1, P.charge) * 20) / 20, cls = (P.charge >= 1 ? 'full ' : '') + (juice.onEnemy ? 'on' : '');
+    const sc = near ? 0.6 : Math.round(lerp(2.6, 1, P.charge) * 20) / 20, cls = near ? '' : (P.charge >= 1 ? 'full ' : '') + (juice.onEnemy ? 'on' : '');
     if (sc !== hs.retScale) { el('reticle').style.transform = 'translate(-50%, -50%) scale(' + sc + ')'; hs.retScale = sc; }
     if (cls !== hs.retCls) { el('reticle').className = cls; hs.retCls = cls; }
   }
@@ -4530,7 +4647,23 @@ function render() {
     composer.renderToScreen = !upscaler.on;            // when upscaling, the composer finishes into its own buffer
     composer.render();
     if (useTaa) { taa.end(); taa.resolve(composer.readBuffer); } else if (upscaler.on) upscaler.draw(composer.readBuffer);
-  } else renderer.render(scene, camera);
+    drawSkyOverlay(taa.depth || null);
+  } else { renderer.render(scene, camera); drawSkyOverlay(null); }
+}
+// the stars, planets and shooting stars, last, on the screen at its own resolution: sharp points rather than blobs
+// enlarged with the rest of the frame. Hidden behind the land by the frame's depth texture (or, drawn straight to
+// the screen, by its own depth)
+function drawSkyOverlay(depthTex) {
+  if (!skyOverlay.children.some((o) => o.visible)) return;
+  const sz = renderer.getDrawingBufferSize(_v2r);
+  nightSky.setTarget(depthTex, sz.x, sz.y);
+  const auto = renderer.autoClear;
+  renderer.autoClear = false; renderer.setRenderTarget(null);
+  // the screen's own depth, after the post passes, is only their full-screen quad's: start it clear, and let the
+  // scene's depth texture do the hiding
+  if (depthTex) renderer.clearDepth();
+  renderer.render(skyOverlay, camera);
+  renderer.autoClear = auto;
 }
 
 // ============================================================ GPU timing and benchmark
@@ -4733,8 +4866,17 @@ applyGfx();
 resetWorld(SEED);
 setTool('axe');
 lockUi();
+// the help card names the near views (its own rows for the bow show only with combat on)
+{
+  const dl = document.querySelector('#help dl'), at = dl && [...dl.children].find((n) => n.tagName === 'DT' && n.textContent === '1 to 4');
+  if (dl) {
+    const row = (k, v) => { const t = document.createElement('dt'), d = document.createElement('dd'); t.textContent = k; d.textContent = v; dl.insertBefore(t, at || null); dl.insertBefore(d, at || null); };
+    if (!COMBAT) row('Hold right', 'Look around up close. Wheel: nearer or farther');
+    row('V', 'Change the view: overhead, close behind you, first person. In the close view, wheel all the way in for first person');
+  }
+}
 window.__game = {
-  pm, get seed() { return SEED; }, get nightF() { return SKYK.night; },
+  pm, get seed() { return SEED; }, get nightF() { return SKYK.night; }, camView,
   stepHooks,
   get sim() { return sim; }, setYearDays: (d) => { sim.setYearDays(d); saveGame(); }, savedBuilds: () => simCtl.builds, powerAvailable: (minW = 1) => powerNear(sim.state, player.x, player.z, 30, minW),
   stock: {
@@ -4743,6 +4885,8 @@ window.__game = {
     do: (name, payload) => { const r = runStockCommand(sim, name, payload); hudDirty = true; return r; },
   },
   saveGame, saveData: () => saveData(), setSpeed,
+  // test hook: advance n fixed-length frames (update + one draw) synchronously, no wall-clock wait; smokes use it instead of sleeps
+  stepFrames: (n = 1, dt = 1 / 60) => { for (let i = 0; i < n; i++) step(dt); render(); return n; },
   // what a save costs: bytes as stored (earthwork grids packed) and as plain JSON
   saveSize: () => { const d = saveData(true); return { bytes: stringifySave(d).length, plainBytes: JSON.stringify(d).length }; }, get speed() { return simCtl.speed; },
   enemies, spawnEnemy, arrows, fireArrow, MOVES, startMove, juice, updateHud, waveHeight, depthState, lockQuality: () => { autoDropped = true; }, world, player, cam, keys, mouse, cursor, step, render, heightAt, fellTree, applyBrush, setQuality, renderer, THREE,
@@ -4759,10 +4903,18 @@ window.__game = {
     toneMap: (v) => { if (['aces', 'agxlook', 'agx', 'neutral'].includes(v)) setLook('toneMap', v); return LOOK.toneMap; },
     // the sky: __game.look.sky({ model: 'physical'|'painted', clouds: 'layered'|'heaped'|'off', night: 'real'|'simple'|'off',
     //   farLand: bool, openSea: bool, haze: 'light'|'normal'|'heavy' }); returns the current settings
-    sky: (o = {}) => { const map = { cloudStyle: 'cloudStyle', cloudRes: 'cloudRes', model: 'skyModel', clouds: 'skyClouds', night: 'nightSky', farLand: 'farLand', openSea: 'openSea', haze: 'haze' }; for (const k in o) if (map[k]) setLook(map[k], o[k]); return { model: LOOK.skyModel, clouds: LOOK.skyClouds, night: LOOK.nightSky, farLand: LOOK.farLand, openSea: LOOK.openSea, haze: LOOK.haze }; },
+    sky: (o = {}) => { const map = { starField: 'starField', cloudStyle: 'cloudStyle', cloudRes: 'cloudRes', model: 'skyModel', clouds: 'skyClouds', night: 'nightSky', farLand: 'farLand', openSea: 'openSea', haze: 'haze' }; for (const k in o) if (map[k]) setLook(map[k], o[k]); return { model: LOOK.skyModel, clouds: LOOK.skyClouds, night: LOOK.nightSky, farLand: LOOK.farLand, openSea: LOOK.openSea, haze: LOOK.haze }; },
     // stand the camera at [x, y, z] looking at [x, y, z] (6 numbers), or null to give it back
     debugView: (v) => { debugView = v && v.length === 6 ? v.slice() : null; },
-    skyFrame: () => ({ moon: SKYF.moon.toArray(), age: SKYF.age, eqInv: SKYF.eqInv.toArray() }),
+    // the sky's frame and moon for the present moment (worked out fresh, so a test can step the clock and read it)
+    skyFrame: () => {
+      const wx = sim.state.sys.weather, site = (wx && wx.site) || SKY.site;
+      const f = skyFrame(sim.calendarT(), site.latitudeDeg, { eq: new THREE.Matrix3(), eqNow: new THREE.Matrix3(), eqInv: new THREE.Matrix3(), moon: new THREE.Vector4() }, performance.now() / 1000);
+      return { moon: f.moon.toArray(), age: f.age, eqInv: f.eqInv.toArray(), moonSize: f.moonSize, eclipse: f.eclipse, days: f.days };
+    },
+    meteorNow: () => nightSky.meteorNow(SKYF),
+    // which of the night sky's layers (stars, planets, shooting stars) are showing
+    skyLayers: () => skyOverlay.children.map((o) => o.visible),
     streamReflections: (v) => { if (['probe', 'full', 'simple'].includes(v)) setLook('waterReflect', v); return LOOK.waterReflect; },
     waterStyle: (v) => { if (['smooth', 'fine', 'ground'].includes(v)) setLook('waterTexel', v); return LOOK.waterTexel; },
     farGrass: (v) => { if (['off', 'normal', 'aggressive'].includes(v)) setLook('farGrass', v); return LOOK.farGrass; },

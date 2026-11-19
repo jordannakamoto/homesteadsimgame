@@ -277,3 +277,33 @@ test('the blade pushed further in takes more; patted, loose earth goes smooth an
   for (let i = 88; i < 114; i++) for (let j = 15; j < 26; j++) { const h = reliefAt(g(), i / 10, j / 10), hx = reliefAt(g(), (i + 1) / 10, j / 10), hz = reliefAt(g(), i / 10, (j + 1) / 10); steep = Math.max(steep, Math.abs(hx - h) / 0.1, Math.abs(hz - h) / 0.1); }
   { let w = ''; for (let i = 88; i < 114; i++) for (let j = 15; j < 26; j++) { const h = reliefAt(g(), i / 10, j / 10), hx = reliefAt(g(), (i + 1) / 10, j / 10), hz = reliefAt(g(), i / 10, (j + 1) / 10); if (Math.max(Math.abs(hx - h), Math.abs(hz - h)) / 0.1 > 1) w += ' ' + i + ',' + j + ':' + h.toFixed(2) + '/' + hx.toFixed(2) + '/' + hz.toFixed(2); } assert.ok(steep < 1.0, 'no spires: steepest ' + steep.toFixed(2) + w); }
 });
+
+test('the blade: holds only so much (the rest spills to the sides), and stops at the firm wall of a hole', () => {
+  const sim = makeSim();
+  const g = () => L(sim).grid;
+  for (let k = 0; k < 8; k++) { c(sim, 'landscape.dig', { x: 12, z: 2 }); c(sim, 'landscape.dump', { x: 10, z: 2 }); }
+  const net0 = netVolume(g());
+  for (let x = 9.2; x < 11; x += 0.1) c(sim, 'landscape.push', { x0: x, z0: 2, x1: x + 0.1, z1: 2, level: 0 });
+  assert.ok(reliefAt(g(), 10, 2.45) > 0.03, 'spilt to the side: ' + reliefAt(g(), 10, 2.45));
+  assert.ok(Math.abs(netVolume(g()) - net0) < 1e-6, 'conserved');
+  // inside the hole, at its floor: pushing toward the wall stops at the wall
+  const floor = reliefAt(g(), 12, 2);
+  let blocked = false;
+  for (let x = 11.95; x < 12.6 && !blocked; x += 0.05) blocked = !!c(sim, 'landscape.push', { x0: x, z0: 2, x1: x + 0.05, z1: 2, level: floor - 0.04 }).blocked;
+  assert.ok(blocked, 'the wall of the hole stops the blade');
+});
+
+test('the garden builds on shovel work: thrown earth hoes into a bed at once, and the hoe keeps its shape', () => {
+  const sim = makeSim();
+  for (let k = 0; k < 3; k++) { c(sim, 'landscape.dig', { x: 2, z: 2 }); c(sim, 'landscape.dump', { x: 4.05, z: 4.05 }); }
+  const gx = Math.floor(4.05 / 0.3), gz = Math.floor(4.05 / 0.3);
+  const r = c(sim, 'garden.till', { cells: [[gx, gz]] });
+  assert.ok(r.ok && r.worked === 1, 'one stroke works loose thrown earth: ' + JSON.stringify(r));
+  // grass needs more than one
+  const r2 = c(sim, 'garden.till', { cells: [[gx + 20, gz + 20]] });
+  assert.ok(r2.ok && r2.worked === 0);
+  // the hoe's tilth smooths but keeps the heap a heap, and loose
+  const h0 = reliefAt(L(sim).grid, 4.05, 4.05);
+  assert.ok(c(sim, 'landscape.tilth', { x: 4.05, z: 4.05 }).ok);
+  assert.ok(reliefAt(L(sim).grid, 4.05, 4.05) > h0 * 0.7, 'still a heap');
+});

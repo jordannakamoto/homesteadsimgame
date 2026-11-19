@@ -9,6 +9,7 @@
   const canvas = G.renderer.domElement;
 
   const OP = window.__openings;
+  const EXT = window.__buildExt; // the extension point (src/build-ext.js): decks, porches, lofts... in files of their own
   const WALL_H = 2.7,
     FLOOR_T = 0.12,
     EAVE = 2.84,
@@ -128,6 +129,8 @@
     found: "pier-blocks",
     ins: null,
     lining: "boards",
+    // the finishes new buildings get (docs/design/interior-finishes.md): null, or { walls, faces, trim, items }
+    deco: null,
     cmode: false,
     gstage: null,
     dirty: new Set(),
@@ -189,6 +192,8 @@
     gable: col(0x86663f),
   };
 
+  // inside a framed wall, between the studs: the back of the sheathing (src/build.js wall body, EK < 1)
+  const OSB_PAL = { name: "Sheathing", plank: col(0xc9a468), beam: col(0xb48f58), stone: col(0xb48f58) };
   const WALLS = {
     timber: { name: "Timber", plank: C.plank, beam: C.beam, stone: C.stone },
     stone: { name: "Stone", plank: col(0x8f8c84), beam: col(0x6d6a62), stone: col(0x77746c), courses: true },
@@ -612,7 +617,8 @@
     };
     const ob = (t0, t1, ya, yb, off, half, colr) => (d === 0 ? g.abox(i + t0, ya, j + off - half, i + t1, yb, j + off + half, colr) : g.abox(i + off - half, ya, j + t0, i + off + half, yb, j + t1, colr));
     const sc = PAL.courses ? PAL.plank : PAL.stone;
-    const foot = () => ebox(g, i, j, d, 0, 1, -depth, 0.3, 0.13, shade(PAL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
+    // the foot of the wall; behind a framed wall's lining and siding (EK < 1) it stays in, clear of the baseboard
+    const foot = () => ebox(g, i, j, d, 0, 1, -depth, 0.3, EK < 1 ? 0.075 : 0.13, shade(PAL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
     const cap = () => ebox(g, i, j, d, 0, 1, WALL_H, EAVE, 0.095, PAL.beam);
     if (type === "railgate") {
       ebox(g, i, j, d, 0, 1, -depth, 0.04, 0.1, PAL.stone);
@@ -663,7 +669,7 @@
       return;
     }
     if (type === "window2") {
-      ebox(g, i, j, d, 0, 1, -depth, 0.3, 0.13, shade(PAL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
+      ebox(g, i, j, d, 0, 1, -depth, 0.3, EK < 1 ? 0.075 : 0.13, shade(PAL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
       planks(0.3, 0.8);
       ebox(g, i, j, d, 0, 0.24, 0.8, WALL_H, 0.07, shade(PAL.plank, hs(0)));
       ebox(g, i, j, d, 0.76, 1, 0.8, WALL_H, 0.07, shade(PAL.plank, hs(3)));
@@ -704,7 +710,7 @@
       ebox(g, i, j, d, 0, 1, 2.04, 2.14, 0.1, PAL.beam);
       planks(2.14, WALL_H);
     } else {
-      ebox(g, i, j, d, 0, 1, -depth, 0.3, 0.13, shade(PAL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
+      ebox(g, i, j, d, 0, 1, -depth, 0.3, EK < 1 ? 0.075 : 0.13, shade(PAL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
       if (type === "window") {
         planks(0.3, 1.05);
         planks(1.95, WALL_H);
@@ -1194,8 +1200,9 @@
         const L = Math.hypot(q.b[0] - q.a[0], q.b[1] - q.a[1]) || 1,
           nx = -(q.b[1] - q.a[1]) / L,
           nz = (q.b[0] - q.a[0]) / L,
-          gc = shade(C.gable, 0.95);
-        for (const off of [-0.07, 0.07]) {
+          gc = shade(C.gable, 0.95),
+          o7 = EK < 1 ? 0.04 : 0.07;        // a framed gable: in behind its sheathing and siding, which are the gable you see
+        for (const off of [-o7, o7]) {
           const V = q.outline.map((p) => [p[0] + nx * off, p[1], p[2] + nz * off]);
           for (let i = 1; i + 1 < V.length; i++) g.tri(V[0], V[i], V[i + 1], [nx * Math.sign(off), 0, nz * Math.sign(off)], gc);
         }
@@ -3271,13 +3278,13 @@
       const mid = (ta + tb) / 2,
         c = cuts.find((q) => mid > q.t0 && mid < q.t1);
       if (!c) {
-        ebox(g, i, j, d, ta, tb, -depth, 0.3, 0.13, shade(PL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
+        ebox(g, i, j, d, ta, tb, -depth, 0.3, EK < 1 ? 0.075 : 0.13, shade(PL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
         planks(ta, tb, 0.3, WALL_H, n);
         continue;
       }
-      if (c.y0 < 0.3) ebox(g, i, j, d, ta, tb, -depth, Math.max(0.02, c.y0), 0.13, shade(PL.stone, 0.92));
+      if (c.y0 < 0.3) ebox(g, i, j, d, ta, tb, -depth, Math.max(0.02, c.y0), EK < 1 ? 0.075 : 0.13, shade(PL.stone, 0.92));
       else {
-        ebox(g, i, j, d, ta, tb, -depth, 0.3, 0.13, shade(PL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
+        ebox(g, i, j, d, ta, tb, -depth, 0.3, EK < 1 ? 0.075 : 0.13, shade(PL.stone, 0.92 + 0.16 * hash(i, j, d + 9)));
         c.y0 > 0.31 && planks(ta, tb, 0.3, c.y0, n);
       }
       WALL_H - c.y1 > 0.01 && planks(ta, tb, c.y1, WALL_H, n + 5);
@@ -3333,7 +3340,8 @@
       const wm = (D.wmat && D.wmat.get(k)) || "timber";
       PAL = raised ? woodFoot(wm) : WALLS[wm];
       const cuts = type === "wall" ? freeCuts(D, i, j, d) : [];
-      EK = type === "wall" && stickWall("wall", wm) ? 0.7 : 1;
+      EK = type === "wall" && stickWall("wall", wm) ? 0.5 : 1;   // a framed wall: the old body stays in behind the stud faces, so studs and batts show while it is open
+      if (EK < 1) PAL = OSB_PAL;           // and what shows between the studs is the back of the sheathing
       if (cuts.length) holedWall(g, i, j, d, depth, cuts, PAL);
       else wallPieces(isLow(type) ? late : g, i, j, d, type, depth);
       EK = 1;
@@ -3356,17 +3364,21 @@
       else if (!(ds.length === 2 && ds[0] === ds[1])) { const h = stickWall("wall", vmat.get(k) || "timber") ? 0.042 : 0.12; g.abox(i - h, -depth, j - h, i + h, EAVE + 0.03, j + h, pb); }   // a sided corner hides its post inside the trim
     }
     rg.yo = (hs - 1) * EAVE;
+    // a framed building's gables are its sheathing and siding (drawn as members): the roof's own gable infill stays in behind them
+    EK = [...vmat.values()].some((m) => stickWall("wall", m)) ? 0.5 : 1;
     for (const r of D.roofs) {
       RPAL = roofCol(r);
       roofPieces(rg, r, full);
     }
+    EK = 1;
     const ends = new Set();
     (D.segs || []).forEach((sg, n) => {
       const low = isLow(sg[4]);
       if (D.id && inRings(D, (sg[0] + sg[2]) / 2, (sg[1] + sg[3]) / 2)) return;
       PAL = raised ? woodFoot(sg[5] || "timber") : WALLS[sg[5] || "timber"];
       const cuts = sg[4] === "wall" ? segCuts(D, sg) : null, clad = sg[4] === "wall" && stickWall("wall", sg[5] || "timber");
-      EK = clad ? 0.7 : 1;
+      EK = clad ? 0.5 : 1;
+      if (EK < 1) PAL = OSB_PAL;
       if (cuts && cuts.length) {
         // a plain angled wall with doors or windows in it: the same wall with their rough openings cut out
         const dx = sg[2] - sg[0],
@@ -3618,6 +3630,8 @@
       near: new T.Plane(new T.Vector3(0, 0, 1), 1e5),
       sideA: new T.Plane(new T.Vector3(1, 0, 0), -1e5),
       sideB: new T.Plane(new T.Vector3(-1, 0, 0), -1e5),
+      // the dollhouse caps: shown only where the walls are cut (near, sideA and sideB all clip), so these are those planes reversed
+      capPl: [new T.Plane(), new T.Plane(), new T.Plane()],
       cutH: 99,
       stairs: [],
       polyRoofs: [],
@@ -3649,6 +3663,7 @@
       found: F.found || "plinth",
       ins: F.ins || null,
       lining: F.lining === undefined ? "boards" : F.lining,
+      deco: F.deco ? JSON.parse(JSON.stringify(F.deco)) : null,
       plan: new Set(),
       known: F.fresh ? new Set() : null,
       sitePlanned: !!F.fresh && B.cmode,
@@ -4830,7 +4845,9 @@
     if (S.found !== "plinth") data.found = S.found;
     if (S.ins) data.ins = S.ins;
     if (S.lining !== "boards") data.lining = S.lining;
+    if (S.deco) data.deco = JSON.parse(JSON.stringify(S.deco));
     if (S.plan.size) data.plan = [...S.plan].sort();
+    if (S.ext && Object.keys(S.ext).length) data.ext = JSON.parse(JSON.stringify(S.ext)); // extensions' own data (src/build-ext.js)
     S.ser = { ver: S.ver, data };
     return data;
   }
@@ -4862,6 +4879,8 @@
     S.found = d.found || "plinth";
     S.ins = d.ins || null;
     S.lining = d.lining === undefined ? "boards" : d.lining;
+    S.deco = d.deco ? JSON.parse(JSON.stringify(d.deco)) : null;
+    S.ext = d.ext ? JSON.parse(JSON.stringify(d.ext)) : {};
     // a copy is a new plan: unbuilt where plans start unbuilt, built otherwise
     S.plan = new Set(fresh ? [] : d.plan || []);
     S.known = fresh ? new Set() : null;
@@ -5130,7 +5149,7 @@
   function applyOp(op, noUndo) {
     if (!op || !op.valid) return null;
     noUndo || pushUndo();
-    let S = op.F.isNew ? newStruct({ ox: op.F.ox, oz: op.F.oz, yaw: op.F.yaw, y0: op.y0, level: op.F.level || 0, hs: op.F.hs || B.hs, lift: op.F.lift || 0, po: op.addPaths.length > 0 || op.addDecor.length > 0, found: B.found, ins: B.ins, lining: B.lining, fresh: true }) : op.F;
+    let S = op.F.isNew ? newStruct({ ox: op.F.ox, oz: op.F.oz, yaw: op.F.yaw, y0: op.y0, level: op.F.level || 0, hs: op.F.hs || B.hs, lift: op.F.lift || 0, po: op.addPaths.length > 0 || op.addDecor.length > 0, found: B.found, ins: B.ins, lining: B.lining, deco: B.deco, fresh: true }) : op.F;
     let refund = 0;
     if (op.delFree.length) S.free = S.free.filter((f) => !op.delFree.includes(f.id));
     if (op.moveFree) for (const f of S.free) if (f.d === op.moveFree.d && f.line === op.moveFree.from && f.pos >= op.moveFree.t0 - 1e-6 && f.pos <= op.moveFree.t1 + 1e-6) f.line = op.moveFree.to;
@@ -6898,6 +6917,7 @@
     }
     if (B.tool === "copy") return copyPreview(h);
     if (B.tool === "equip") return fxPreview();
+    if (EXT.isTool(B.tool)) return void ((ghostGroup.visible = gridGroup.visible = false), (B.op = null), EXT.hover(B.tool, h), hint());
     const F = h.F,
       d = B.drag,
       ty = B.typed;
@@ -7177,6 +7197,7 @@
     }
     updateHover();
     const h = B.hover;
+    if (EXT.isTool(B.tool)) return void (h && EXT.down(B.tool, h, e)); // an extension's tool acts on its own
     if (B.tapMode === "paint") {
       B.painting = { fresh: true };
       return paint(B.painting);
@@ -7541,10 +7562,44 @@
   const FOUND_ITEMS = ["pier-blocks", "skids", "piers", "stemwall", "slab", "plinth"].map((v) => ({ v, name: window.__framing.FOUNDATIONS[v].name })),
     INS_ITEMS = [{ v: null, name: "None" }, { v: "fibreglass_batt", name: "Fibreglass batts" }, { v: "mineral_wool", name: "Mineral wool" }, { v: "sheep_wool", name: "Sheep's wool" }],
     LIN_ITEMS = [{ v: null, name: "None" }, { v: "boards", name: "Pine boards" }, { v: "gypsum", name: "Drywall" }];
-  const makeUp = (g, pre, f, i, l) => {
+  // the wall paints and sheens, from the simulation's content (docs/design/interior-finishes.md)
+  const decoC = () => {
+    const y = G.sim && G.sim.systems.find((x) => x.name === "construction");
+    return y && y.api.content;
+  };
+  const hex6 = (n) => "#" + n.toString(16).padStart(6, "0");
+  const DECO_ITEMS = (none) => {
+    const c = decoC();
+    return [{ v: null, name: none, sw: ["bare", "#e7e3da", "#b9b2a4"] }].concat(c ? c.PAINTS.map((p) => ({ v: p[0], name: p[1], sw: ["dye", hex6(p[2]), hex6(p[2])] })) : []);
+  };
+  const SHEEN_ITEMS = () => {
+    const c = decoC();
+    return c ? Object.keys(c.SHEENS).filter((v) => v !== "semigloss").map((v) => ({ v, name: c.SHEENS[v].name })) : [];
+  };
+  // a building's finishes, by surface (src/framing.js finFor): { walls, faces, trim, items }, each "<colour>_<sheen>"
+  const finParts = (fin, sheen) => {
+    const [c, sh] = String(fin || "").split("_");
+    return { colour: c || null, sheen: sh || sheen };
+  };
+  const decoWith = (d, id, v) => {
+    const o = JSON.parse(JSON.stringify(d || {})),
+      w = finParts(o.walls, "eggshell");
+    if (id === "deco") o.walls = v ? v + "_" + w.sheen : null;
+    else if (id === "sheen") o.walls = w.colour ? w.colour + "_" + v : null;
+    else if (id === "trim") o.trim = v ? v + "_semigloss" : null;
+    for (const k of Object.keys(o)) if (!o[k] || (typeof o[k] === "object" && !Object.keys(o[k]).length)) delete o[k];
+    return Object.keys(o).length ? o : null;
+  };
+  const makeUp = (g, pre, f, i, l, d) => {
     g.push(G_.select(pre + "found", "Stands on", FOUND_ITEMS, f, (window.__framing.FOUNDATIONS[f] || {}).note));
     g.push(G_.select(pre + "ins", "Insulation", INS_ITEMS, i, "What fills the spaces between studs, joists and rafters"));
     g.push(G_.select(pre + "lining", "Inside", LIN_ITEMS, l, "What covers the inside of the walls"));
+    if (l) {
+      const q = finParts(d && d.walls, "eggshell");
+      g.push(G_.sw(pre + "deco", "Walls", DECO_ITEMS("Bare"), q.colour, "deco"));
+      if (q.colour) g.push(G_.select(pre + "sheen", "Paint finish", SHEEN_ITEMS(), q.sheen, "Matte hides a wall's bumps; satin wipes clean"));
+    }
+    g.push(G_.sw(pre + "trim", "Trim", DECO_ITEMS("As it comes"), finParts(d && d.trim).colour, "trim"));
   };
   // the shopping list as the Schedule panel shows it: by stage, with what each line costs and how far along it is
   function schedule() {
@@ -7661,7 +7716,7 @@
       const S0 = groupOf(refs[0].S).find((O) => O.level === 0) || refs[0].S,
         left = groupOf(S0).reduce((a, O) => a + O.plan.size, 0);
       if (left) g.push(G_.info("Being built", plural(left, "piece") + " still to build"));
-      makeUp(g, "s:", S0.found, S0.ins, S0.lining);
+      makeUp(g, "s:", S0.found, S0.ins, S0.lining, S0.deco);
     }
     g.push(G_.act("s:all", "Whole building", "building"));
     if (one) g.push(G_.act("s:pick", "More like this", "pick", "I"));
@@ -7727,7 +7782,7 @@
       ceil();
       lift();
       t === "room" && wing();
-      t === "room" && makeUp(g, "", B.found, B.ins, B.lining);
+      t === "room" && makeUp(g, "", B.found, B.ins, B.lining, B.deco);
     } else if (t === "wall") {
       g.push(G_.tiles("style", "Style", tiles(STYLE_SHORT, "w-"), B.style, "Shift wheel"));
       g.push(G_.sw("wmat", "Material", SW.wall, B.wmat, "M"));
@@ -7740,7 +7795,7 @@
       g.push(...PAINT());
       lift();
       wing();
-      makeUp(g, "", B.found, B.ins, B.lining);
+      makeUp(g, "", B.found, B.ins, B.lining, B.deco);
     } else if (t === "roof") {
       g.push(G_.tiles("rshape", "Shape", tiles(ROOF_SHAPES, "r-"), B.rsh, "Shift wheel"));
       if (TURNS[B.rsh]) g.push(G_.act("rturn", "Turn", "turn"));
@@ -7777,9 +7832,10 @@
         g.push(G_.act("mclear", "Clear all", "bin"));
       }
     } else if (t === "copy") g.push(G_.act("turn", "Turn", "turn", "Shift wheel"));
+    EXT.view(t, g, G_); // an extension's tool options, or its inspector
     const busy = B.move ? "move" : B.drag && B.drag.mode === "click" ? "chain" : B.tapMode ? B.tapMode : B.measA ? "measure" : t === "copy" ? "copy" : "";
     const oneRoof = t === "select" && B.sel.length === 1 && (selRefs()[0] || {}).kind === "roof";
-    return { designTitle: (t === "window" || t === "door") && freeTool() ? (B.fsel ? "Editing the selected " + t : "Designing the next " + t) : t === "roof" ? "Planning the next roof" : oneRoof ? "The selected roof" : "", tool: t, top: t === "tower" ? "room" : t === "copy" ? "select" : t, tools: TOOLS, groups: g, hint: B.hintText, undo: B.undo.length, redo: B.redo.length, snap: B.snap, free: B.free, level: B.level, levelName: LEVEL_NAME(B.level), busy, sel: B.sel.length, fold: B.fold, sched: B.sched ? schedule() : null };
+    return { designTitle: (t === "window" || t === "door") && freeTool() ? (B.fsel ? "Editing the selected " + t : "Designing the next " + t) : t === "roof" ? "Planning the next roof" : oneRoof ? "The selected roof" : "", tool: t, top: t === "tower" ? "room" : t === "copy" ? "select" : t, tools: TOOLS.concat(EXT.tools()), groups: g, hint: B.hintText, undo: B.undo.length, redo: B.redo.length, snap: B.snap, free: B.free, level: B.level, levelName: LEVEL_NAME(B.level), busy, sel: B.sel.length, fold: B.fold, sched: B.sched ? schedule() : null };
   }
   // ---- a door or window in the view: the gaps either side of it, its sizes, and handles on its edges to resize it
   // the clear gaps from a unit to what stands either side of it along its wall (or the wall's end), as live sizes
@@ -8326,11 +8382,22 @@
     });
   }
   function choose(id, v) {
+    if (EXT.choose(id, v)) return touchUi(); // "x:<tool>:<key>": an extension's option
     if (id === "shape") return setTool(v);
     if (id === "roofall") return roofBuilding();
     if (/^(s:)?(rshape|rturn|pitch|pitchn|eave|rake|gutters|rcolor)$/.test(id)) return roofChoose(id, v);
     if (id.startsWith("fx:")) fxChoose(id, v);
     else if (id === "found" || id === "ins" || id === "lining") B[id] = v;
+    else if (id === "deco" || id === "sheen" || id === "trim") B.deco = decoWith(B.deco, id, v);
+    else if (id === "s:deco" || id === "s:sheen" || id === "s:trim") {
+      const q = selRefs()[0];
+      if (q) {
+        pushUndo();
+        const d = decoWith(q.S.deco, id.slice(2), v);
+        for (const O of groupOf(q.S)) ((O.deco = d && JSON.parse(JSON.stringify(d))), O.ver++);
+        for (const O of groupOf(q.S)) rebuild(O);
+      }
+    }
     else if (id === "sched") B.sched = !B.sched;
     else if (id === "s:found") {
       const q = selRefs()[0];
@@ -8990,7 +9057,7 @@
     FOUNDATIONS = FR.FOUNDATIONS,
     STAGES = FR.STAGES,
     CONCRETE = col(0xb5b2aa),
-    MEMBER_EXTRA = ["area", "thickness", "volume", "size", "plies", "roof", "opening", "height"];
+    MEMBER_EXTRA = ["area", "thickness", "volume", "size", "plies", "roof", "opening", "height", "fin", "face", "surface", "ends", "profile"];
   const Lz = (material, thickness, role) => Object.freeze({ material, thickness, role });
   const footPal = new Map();
   function woodFoot(wm) {
@@ -9007,7 +9074,7 @@
       kS = (H - 0.3) / (EAVE - 0.3),
       up = (y) => (y <= 0.3 ? y : 0.3 + (y - 0.3) * kS),
       yo = (S.hs - 1) * EAVE,
-      desc = { found: S.level === 0 ? S.found : S.found === "plinth" ? "plinth" : "upper", spec: { ins: S.ins, lining: S.lining }, floors: [], walls: [], roofs: [] },
+      desc = { found: S.level === 0 ? S.found : S.found === "plinth" ? "plinth" : "upper", spec: { ins: S.ins, lining: S.lining, deco: S.deco }, floors: [], walls: [], roofs: [] },
       groundY = (x, z) => {
         const [wx, wz] = toWorld(S, x, z);
         return G.heightAt(wx, wz) - S.y0;
@@ -9084,6 +9151,7 @@
         desc.roofs.push(R);
       }
     }
+    EXT.describe(S, desc, { H, yo, up, groundY, toWorld: (x, z) => toWorld(S, x, z) }); // extensions add to desc (desc.extras)
     const list = FR.generate(desc),
       byParent = new Map(),
       byId = new Map();
@@ -9145,7 +9213,7 @@
         opens.push({ id: q.id, stage: "openings", kind: q.kind, parent: w.id, a: [w.a[0] + ux * c, q.sill, w.a[1] + uz * c], b: [w.a[0] + ux * c, q.sill + q.height, w.a[1] + uz * c], n: [-uz, 0, ux], section: { b: q.width, d: q.kind === "door" ? 0.05 : 0.04 }, col: q.kind === "door" ? "timber" : "wrap" });
       }
     }
-    return (S.mem = { ver: S.ver, list, byParent, byId, polys, opens, roofs: desc.roofs, planes: new Map(desc.roofs.map((R) => [R.id, R.planes.map((p) => p.id)])) });
+    return (S.mem = { ver: S.ver, list, byParent, byId, polys, opens, walls: desc.walls, roofs: desc.roofs, planes: new Map(desc.roofs.map((R) => [R.id, R.planes.map((p) => p.id)])) });
   }
   // every id of a structure that can be planned or built on its own: members, doors and windows, and the pieces
   // that are not made of members (stone walls, round rooms, stairs, pillars)
@@ -9193,7 +9261,8 @@
     if (st.all) return st;
     const P = (id) => S.plan.has(id),
       kids = (id) => mem.byParent.get(id),
-      fin = (id, tail) => (kids(id) ? (tail === ".cl" ? !kids(id).some((m) => m.kind === "cladding" && P(m.id)) : !P(id + tail)) : !P(id)),
+      // a wall is closed in once its siding and its lining are on: until then its frame, and the batts going in, are what you see
+      fin = (id, tail) => (kids(id) ? (tail === ".cl" ? !kids(id).some((m) => (m.kind === "cladding" || m.kind === "lining") && P(m.id)) : !P(id + tail)) : !P(id)),
       bare = (id) => (kids(id) ? kids(id).every((m) => P(m.id)) : true),
       Db = { ...S, floors: new Set(), walls: new Map(), segs: [], polys: [], roofs: [], rings: [], stairs: [], pillars: [], free: [] },
       Ds = { ...Db, floors: new Set(), walls: new Map(), segs: [], polys: [], roofs: [], rings: [], stairs: [], pillars: [], decor: [], paths: [], polyRoofs: [], free: [] };
@@ -9307,16 +9376,30 @@
   // lap siding: each board is a flat box one course tall; on its face the material paints what the lap does in life. Under
   // the butt edge of the course above, a shadow line falls on the top of this board (darkest right under it, a soft fall
   // below); the board's own bottom edge, standing proud, catches the light. Only the face and back (local z) get it.
-  const makeLapMat = (planes) => {
+  // ch: the height of one course (m): a piece taller than that is several courses (siding goes up three at a time, boards four),
+  // counted from the instance's height. groove: tongue-and-groove boards inside (a fine V line) instead of lapped siding
+  const makeLapMat = (planes, ch = 0.18, groove = false) => {
   const lapMat = new T.MeshLambertMaterial({ color: 0xffffff, clippingPlanes: planes || null, clipIntersection: !!planes, clipShadows: !!planes });
   lapMat.onBeforeCompile = (sh) => {
-    sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nvarying vec2 vLapUv; varying float vLapF;").replace("#include <begin_vertex>", "#include <begin_vertex>\n vLapUv = uv; vLapF = step(0.5, abs(normal.z));");
-    sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nvarying vec2 vLapUv; varying float vLapF;").replace("#include <color_fragment>", "#include <color_fragment>\n { float y = vLapUv.y; float shade = 1.0 - 0.42 * smoothstep(0.86, 0.985, y) - 0.12 * smoothstep(0.6, 0.86, y); float lit = 1.0 + 0.12 * (1.0 - smoothstep(0.0, 0.07, y)); diffuseColor.rgb *= mix(1.0, shade * lit, vLapF); }");
+    sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nvarying vec2 vLapUv; varying float vLapF;").replace("#include <begin_vertex>", "#include <begin_vertex>\n vLapUv = uv; vLapF = step(0.5, abs(normal.z));\n #ifdef USE_INSTANCING\n vLapUv.y *= max(1.0, floor(length(instanceMatrix[1].xyz) / " + ch.toFixed(3) + " + 0.5));\n #endif");
+    sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nvarying vec2 vLapUv; varying float vLapF;").replace("#include <color_fragment>", "#include <color_fragment>\n { float y = fract(vLapUv.y); float row = floor(vLapUv.y); " + (groove ? "float shade = 1.0 - 0.32 * (1.0 - smoothstep(0.0, 0.035, y)) - 0.18 * smoothstep(0.975, 1.0, y) + 0.05 * (fract(sin(row * 12.9898) * 43758.5453) - 0.5); float lit = 1.0;" : "float shade = 1.0 - 0.42 * smoothstep(0.86, 0.985, y) - 0.12 * smoothstep(0.6, 0.86, y); float lit = 1.0 + 0.12 * (1.0 - smoothstep(0.0, 0.07, y));") + " diffuseColor.rgb *= mix(1.0, shade * lit, vLapF); }");
   };
-  lapMat.customProgramCacheKey = () => "lapSiding";
+  lapMat.customProgramCacheKey = () => (groove ? "grooveBoards" : "lapSiding") + ch;
   return lapMat;
   };
-  const lapMat = makeLapMat(null);
+  const lapMat = makeLapMat(null), grvMat = makeLapMat(null, 0.14, true);
+  // insulation batts: soft and fibrous, pillowed between the studs (darker where they press against the framing), with fine
+  // streaks of fibre along their length; the piece's own size sets the scale of the fibres
+  const makeBattMat = (planes) => {
+    const m = new T.MeshLambertMaterial({ color: 0xffffff, clippingPlanes: planes || null, clipIntersection: !!planes, clipShadows: !!planes });
+    m.onBeforeCompile = (sh) => {
+      sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nvarying vec2 vBUv; varying vec2 vBSz; varying float vBF;").replace("#include <begin_vertex>", "#include <begin_vertex>\n vBUv = uv; vBF = step(0.5, abs(normal.z)); vBSz = vec2(1.0);\n #ifdef USE_INSTANCING\n vBSz = vec2(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz));\n #endif");
+      sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nvarying vec2 vBUv; varying vec2 vBSz; varying float vBF;\nfloat bh(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }").replace("#include <color_fragment>", "#include <color_fragment>\n { vec2 q = vBUv * vBSz; float fib = 0.55 * bh(floor(vec2(q.x / 0.05, q.y / 0.004))) + 0.45 * bh(floor(vec2(q.x / 0.012, q.y / 0.002)) + 7.0); float px = sin(3.14159 * clamp(vBUv.x, 0.0, 1.0)), py = sin(3.14159 * clamp(vBUv.y, 0.0, 1.0)); float pillow = 0.72 + 0.28 * pow(px, 0.25) * pow(py, 0.6); diffuseColor.rgb *= mix(0.92 + 0.12 * fib, (0.88 + 0.18 * fib) * pillow, vBF); }");
+    };
+    m.customProgramCacheKey = () => "battFibre";
+    return m;
+  };
+  const battMat = makeBattMat(null);
   // a building's own copies of the member materials, cut by its dollhouse planes like its walls: the siding (drawn as
   // boards, the whole outside of a sided wall) opens with the wall when you are inside
   // where the cut opens a piece you look into the box from inside: its back faces are drawn as a flat dark section, so a
@@ -9328,12 +9411,104 @@
     m.customProgramCacheKey = () => (key || "") + "|capped";
     return m;
   };
-  const memberMats = (planes) => ({ mem: capped(Object.assign(memMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })), lap: capped(makeLapMat(planes)), wrap: capped(Object.assign(wrapMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })) });
+  const memberMats = (planes) => ({ mem: capped(Object.assign(memMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })), lap: capped(makeLapMat(planes)), grv: capped(makeLapMat(planes, 0.14, true)), bat: capped(makeBattMat(planes)), wrap: capped(Object.assign(wrapMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })), shp: capped(Object.assign(memMat.clone(), { vertexColors: true, clippingPlanes: planes, clipIntersection: true, clipShadows: true })) });
+  // trim with mitered ends (docs/design/carpentry.md) is drawn as its real shape, not a box: each end cut at 45 degrees
+  // across the face, the long point on the side away from the opening (m.long, along m.n). One small mesh per building
+  const shpMat = new T.MeshLambertMaterial({ vertexColors: true });
+  const isShaped = (m) => !!(m.ends && m.long && m.ends.includes("m45"));
+  function shapedGeo(list, colorOf) {
+    const pos = [], colA = [];
+    const V = (o, u, n, t, x, y, z) => [o[0] + u[0] * x + n[0] * y + t[0] * z, o[1] + u[1] * x + n[1] * y + t[1] * z, o[2] + u[2] * x + n[2] * y + t[2] * z];
+    for (const m of list) {
+      const ax = m.b[0] - m.a[0], ay = m.b[1] - m.a[1], az = m.b[2] - m.a[2], L = Math.hypot(ax, ay, az) || 1, u = [ax / L, ay / L, az / L], n = m.n;
+      const t = [u[1] * n[2] - u[2] * n[1], u[2] * n[0] - u[0] * n[2], u[0] * n[1] - u[1] * n[0]], o = [(m.a[0] + m.b[0]) / 2, (m.a[1] + m.b[1]) / 2, (m.a[2] + m.b[2]) / 2];
+      const d = m.section.d / 2, b = m.section.b / 2, c = colorOf(m);
+      // along the piece at end s (-1 at a, +1 at b) and across it at v: a miter takes the width off the short side
+      const X = (s, v) => s * (L / 2 - (m.ends[s < 0 ? 0 : 1] === "m45" && v * m.long < 0 ? 2 * d : 0));
+      const P = (s, v, w) => V(o, u, n, t, X(s, v), v, w);
+      const quad = (p0, p1, p2, p3) => { for (const q of [p0, p1, p2, p0, p2, p3]) (pos.push(q[0], q[1], q[2]), colA.push(c[0], c[1], c[2])); };
+      for (const w of [-b, b]) { const f = w > 0; const q = [P(-1, -d, w), P(1, -d, w), P(1, d, w), P(-1, d, w)]; f ? quad(...q) : quad(q[0], q[3], q[2], q[1]); }
+      for (const v of [-d, d]) { const q = [P(-1, v, -b), P(-1, v, b), P(1, v, b), P(1, v, -b)]; v > 0 ? quad(...q) : quad(q[0], q[3], q[2], q[1]); }
+      for (const s2 of [-1, 1]) { const q = [P(s2, -d, -b), P(s2, d, -b), P(s2, d, b), P(s2, -d, b)]; s2 > 0 ? quad(...q) : quad(q[0], q[3], q[2], q[1]); }
+    }
+    const g = new T.BufferGeometry();
+    g.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+    g.setAttribute("color", new T.Float32BufferAttribute(colA, 3));
+    g.computeVertexNormals();
+    return g;
+  }
   const isLap = (m) => /^siding/.test(m.col || "") && m.type === "boards";
-  const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), siding: col(0xb8beb1), sidingDark: col(0x5d4a3b), trim: col(0xefece4), gypsum: col(0xe3e3de), pine: col(0xd8b583), concrete: CONCRETE, gravel: col(0x8f8b82) };
+  const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf4b9a8), siding: col(0xb8beb1), sidingDark: col(0x5d4a3b), trim: col(0xefece4), gypsum: col(0xe3e3de), primer: col(0xf4f3ef), pine: col(0xd8b583), concrete: CONCRETE, gravel: col(0x8f8b82) };
   for (const [k, h] of Object.entries(FR.ROOF_COLORS || {})) MCOL[k] = col(h); // the roofing layers while they go on (src/framing.js)
+  // a wall paint's colour, from its finish key ("sage_eggshell"; src/sim/content/decor.js)
+  const FINCOL = new Map(),
+    finCol = (fin) => {
+      if (!FINCOL.has(fin)) {
+        const c = decoC(),
+          p = c && c.finishOf(fin);
+        FINCOL.set(fin, p ? col(p.hex) : MCOL.primer);
+      }
+      return FINCOL.get(fin);
+    };
   const _m4 = new T.Matrix4(),
     _c = new T.Color();
+  // ---- dollhouse caps. Where the cut opens a framed wall, a flat cap at the cut height covers its whole thickness (lining to
+  // siding), as a cutaway drawing fills its sections: no studs, batts or hollows show. Only walls that are finished get one
+  // (one under construction is meant to be seen into); openings the cut passes through are left open
+  // the cap shows the wall in section, as one solid thing: the room's colour (lining, or its paint) on the inside, a pale
+  // timber core, the siding's colour on the outside
+  const capMat = (S) => S.capMat || (S.capMat = new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide, clippingPlanes: S.capPl, clipIntersection: false }));
+  const CAP_CORE = col(0xd9c6a3);
+  const CAP_SKIP = new Set(["casing", "base", "stool", "caulk", "paint", "prime", "joint", "batt", "wiring", "pipe", "box"]);
+  function capWalls(S) {
+    const on = S.cutH < 99 && S.mem && S.mem.walls && S.mem.walls.length;
+    if (!on) { if (S.capMesh) S.capMesh.visible = false; return; }
+    const h = S.cutH, opensAt = [];
+    for (const w of S.mem.walls) for (const q of w.openings || []) if (w.y0 + q.sill < h && w.y0 + q.sill + q.height > h) opensAt.push(q.id);
+    const key = S.mem.ver + "|" + S.plan.size + "|" + opensAt.join() + "|" + S.mem.walls.filter((w) => w.y0 + (w.h || 0) > h && w.y0 < h).length;
+    if (S.capKey !== key) {
+      S.capKey = key;
+      if (S.capMesh) (S.group.remove(S.capMesh), S.capMesh.geometry.dispose(), (S.capMesh = null));
+      const pos = [], cols = [];
+      for (const w of S.mem.walls) {
+        if (w.y0 + (w.h || 0) <= h || w.y0 >= h) continue;
+        const ms = (S.mem.byParent.get(w.id) || []).filter((m) => m.draw !== 0 && !CAP_SKIP.has(m.kind) && !(m.kind === "cladding" && m.type === "trim") && m.section && m.stage !== "foundation" && m.stage !== "floor-frame" && m.stage !== "subfloor");
+        if (!ms.length || ms.some((m) => S.plan.has(m.id))) continue;          // still being built: leave it open to see
+        const L = Math.hypot(w.b[0] - w.a[0], w.b[1] - w.a[1]) || 1, ux = (w.b[0] - w.a[0]) / L, uz = (w.b[1] - w.a[1]) / L, N = [-uz, 0, ux];
+        let lo = 1e9, hi = -1e9;
+        const strips = [];      // [from, to, colour] across the wall: the faces you see in the cut
+        const all = S.mem.byParent.get(w.id) || [], paintOf = (fc) => { const p2 = all.find((q) => q.kind === "paint" && q.surface === "walls" && q.face === fc && !S.plan.has(q.id)); return p2 ? finCol(p2.fin) : null; };
+        for (const m of ms) {
+          const ax = m.b[0] - m.a[0], ay = m.b[1] - m.a[1], az = m.b[2] - m.a[2], ml = Math.hypot(ax, ay, az) || 1, u = [ax / ml, ay / ml, az / ml], n = m.n;
+          const t = [u[1] * n[2] - u[2] * n[1], u[2] * n[0] - u[0] * n[2], u[0] * n[1] - u[1] * n[0]], dot = (v) => Math.abs(v[0] * N[0] + v[2] * N[2]);
+          const c = ((m.a[0] + m.b[0]) / 2 - w.a[0]) * N[0] + ((m.a[2] + m.b[2]) / 2 - w.a[1]) * N[2], half = (dot(t) * m.section.b + dot(n) * m.section.d + dot(u) * ml) / 2;
+          if (half > 0.4) continue;      // a piece lying across the wall is not the wall
+          lo = Math.min(lo, c - half); hi = Math.max(hi, c + half);
+          if (m.kind === "lining") strips.push([c - half, c + half, paintOf(m.face) || MCOL[m.col] || MCOL.gypsum]);
+          else if (m.kind === "cladding") strips.push([c - half, c + half, MCOL[m.col || "siding"] || MCOL.siding]);
+        }
+        if (!(hi > lo)) continue;
+        // along the wall, less the openings the cut passes through
+        const gaps = (w.openings || []).filter((q) => opensAt.includes(q.id)).map((q) => [q.offset, q.offset + q.width]).sort((p, q) => p[0] - q[0]);
+        let x = 0;
+        // the core across the whole thickness, then each face's strip a hair above it
+        const band = (xa, xb, o0, o1, y, c) => { const P = (s2, o) => [w.a[0] + ux * s2 + N[0] * o, y, w.a[1] + uz * s2 + N[2] * o]; for (const q of [P(xa, o0), P(xb, o0), P(xb, o1), P(xa, o0), P(xb, o1), P(xa, o1)]) (pos.push(...q), cols.push(c[0], c[1], c[2])); };
+        const quad = (xa, xb) => { band(xa, xb, lo, hi, 0, CAP_CORE); for (const [o0, o1, c] of strips) band(xa, xb, o0, o1, 0.002, c); };
+        for (const [ga, gb] of gaps) { if (ga - x > 0.01) quad(x, ga); x = Math.max(x, gb); }
+        if (L - x > 0.01) quad(x, L);
+      }
+      if (pos.length) {
+        const g = new T.BufferGeometry();
+        g.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+        g.setAttribute("color", new T.Float32BufferAttribute(cols, 3));
+        g.computeVertexNormals();
+        S.capMesh = new T.Mesh(g, capMat(S));
+        S.capMesh.receiveShadow = true;
+        S.group.add(S.capMesh);
+      }
+    }
+    if (S.capMesh) ((S.capMesh.visible = true), (S.capMesh.position.y = h - 0.0005));   // at the cut: nothing of the cut pieces shows above it
+  }
   function dropMembers(S) {
     for (const m of S.memMeshes) {
       S.group.remove(m);
@@ -9378,11 +9553,16 @@
         ghostAdd(m, top);
         continue;
       }
+      // paint on the walls (docs/design/interior-finishes.md): the colour once it is on; primer only where no colour covers it
+      if (m.kind === "paint" || m.kind === "prime") {
+        if (m.kind === "paint" || P(m.id.replace(".pr", ".pt"))) sets[0].push(m);
+        continue;
+      }
       if (m.draw === 0) continue;
       if (m.stage === "foundation" || m.stage === "floor-frame") sets[0].push(m);
-      else if (roofId) (st.all || st.finRoof.has(roofId)) || sets[1].push(m);
+      else if (roofId) ((st.all || st.finRoof.has(roofId)) && m.kind !== "cladding") || sets[1].push(m);     // the gable's siding stays drawn, like the walls'
       else if (m.stage === "subfloor" || m.type === "floor-batt") (st.all || st.finFloor.has(m.parent)) || sets[0].push(m);
-      else if (m.kind === "cladding" || (m.kind === "lining" && (m.type === "gypsum" || m.type === "boards"))) sets[0].push(m); // siding outside and drywall or boards inside stay drawn, even once the wall is finished
+      else if (m.kind === "cladding" || m.kind === "casing" || m.kind === "base" || (m.kind === "lining" && (m.type === "gypsum" || m.type === "boards"))) sets[0].push(m); // and the trim inside // siding outside and drywall or boards inside stay drawn, even once the wall is finished
       else (st.all || st.finRun.has(m.parent)) || sets[0].push(m);
     }
     for (const m of mem.opens) P(m.id) && ghostAdd(m, 0);
@@ -9418,8 +9598,8 @@
         _m4.set(ax, nx * d, (ay * nz - az * ny) * b, (m.a[0] + m.b[0]) / 2, ay, ny * d, (az * nx - ax * nz) * b, (m.a[1] + m.b[1]) / 2, az, nz * d, (ax * ny - ay * nx) * b, (m.a[2] + m.b[2]) / 2, 0, 0, 0, 1);
         mesh.setMatrixAt(n, _m4);
         if (solid) {
-          const c = MCOL[m.col || "timber"],
-            v = /^siding/.test(m.col || "") ? 0.975 + 0.05 * hash(n, list.length, 7) : 0.9 + 0.2 * hash(n, list.length, 7);
+          const c = m.kind === "paint" ? finCol(m.fin) : m.kind === "prime" ? MCOL.primer : MCOL[m.col || "timber"],
+            v = m.kind === "paint" || m.kind === "prime" ? 1 : /^siding/.test(m.col || "") ? 0.975 + 0.05 * hash(n, list.length, 7) : 0.9 + 0.2 * hash(n, list.length, 7);
           mesh.setColorAt(n, _c.setRGB(c[0] * v, c[1] * v, c[2] * v));
         }
       });
@@ -9432,13 +9612,21 @@
       S.group.add(mesh);
       S.memMeshes.push(mesh);
     };
+    // mitered trim out of the boxes, into its own shaped mesh
+    const shaped = [];
+    for (let k = 0; k < sets.length; k++) if (sets[k].some(isShaped)) ((shaped.push(...sets[k].filter(isShaped))), (sets[k] = sets[k].filter((m) => !isShaped(m))));
+    if (shaped.length) {
+      const mesh = new T.Mesh(shapedGeo(shaped, (m) => (m.kind === "paint" ? finCol(m.fin) : MCOL[m.col || "timber"])), (S.memMats && S.memMats.shp) || shpMat);
+      mesh.userData.own = true;
+      add(mesh, false, true);
+    }
     sets.forEach((list, k) => {
       if (!list.length) return;
-      for (const wr of [0, 1, 2]) {      // 0 everything, 1 house wrap, 2 lap siding
-        const part = list.filter((m) => (m.col === "wrap" && m.kind === "membrane" ? 1 : isLap(m) ? 2 : 0) === wr);
+      for (const wr of [0, 1, 2, 3, 4]) {      // 0 everything, 1 house wrap, 2 lap siding, 3 board lining (tongue and groove), 4 insulation batts
+        const part = list.filter((m) => (m.col === "wrap" && m.kind === "membrane" ? 1 : isLap(m) ? 2 : m.kind === "lining" && m.type === "boards" ? 3 : m.kind === "insulation" ? 4 : 0) === wr);
         if (!part.length) continue;
-        const MM = S.memMats || { mem: memMat, lap: lapMat, wrap: wrapMat };
-        const mesh = new T.InstancedMesh(boxGeo, wr === 1 ? MM.wrap : wr === 2 ? MM.lap : MM.mem, part.length);
+        const MM = S.memMats || { mem: memMat, lap: lapMat, wrap: wrapMat, grv: grvMat, bat: battMat };
+        const mesh = new T.InstancedMesh(boxGeo, wr === 1 ? MM.wrap : wr === 2 ? MM.lap : wr === 3 ? MM.grv : wr === 4 ? MM.bat : MM.mem, part.length);
         place(mesh, part, k, true);
         mesh.instanceMatrix.needsUpdate = true;
         add(mesh, k === 1, true);
@@ -9517,6 +9705,8 @@
       S.group.add(mesh, rm);
       S.memMeshes.push(mesh, rm);
     }
+    // extensions draw what is not plain members (a deck's boards as one surface...); each mesh's geometry is its own, disposed on redraw
+    EXT.draw(S, (mesh, roof) => ((mesh.userData.own = true), (mesh.userData.roof = !!roof), S.group.add(mesh), S.memMeshes.push(mesh), mesh), mem, st);
   }
   // what a framed wall is made of right now, from the outside in: only the layers that are built
   function builtWallLayers(S, id, mat, kids) {
@@ -9632,7 +9822,7 @@
     const pl = PLANS[id] && over ? { ...PLANS[id], ...over } : PLANS[id];
     if (!pl) return null;
     pushUndo();
-    const S = newStruct({ ox: x, oz: z, yaw: yawRad || 0, y0: G.heightAt(x, z) + FOUNDATIONS[pl.found].drop - 0.05, level: 0, hs: 1, found: pl.found, ins: pl.ins, lining: pl.lining, fresh: true }),
+    const S = newStruct({ ox: x, oz: z, yaw: yawRad || 0, y0: G.heightAt(x, z) + FOUNDATIONS[pl.found].drop - 0.05, level: 0, hs: 1, found: pl.found, ins: pl.ins, lining: pl.lining, deco: pl.deco || null, fresh: true }),
       hw = pl.w / 2,
       hl = pl.l / 2,
       cs = [[-hw, -hl], [hw, -hl], [hw, hl], [-hw, hl]];
@@ -10538,6 +10728,7 @@
         c = W2(it[0], it[1]);
       out.push({ ...head(it[5], "fixture", it[2], "mixed"), name: def.name, a: c, b: c, y0: y0 + y, y1: y0 + y + bb.h, height: bb.h, width: bb.w, depth: bb.d, rotationRad: S.yaw + ((it[3] || 0) * Math.PI) / 4, colour: DYES[it[4] || 0][0], light: !!def.light, cosy: def.cosy || 0 });
     }
+    EXT.pieces(S, out, { head, W2, loop, y0, H, up }); // extensions' own pieces (src/build-ext.js), before members are attached
     // every member of the construction, as a piece of its own; what it belongs to lists it and is built when they all are
     for (const p of out) {
       const k = kids(p.id);
@@ -10617,6 +10808,27 @@
     }
     return false;
   }
+  // the extension point (src/build-ext.js): S.ext[id] is an extension's own data on a structure, plain JSON, saved and
+  // undone with it. null removes it.
+  function setExt(structId, id, data) {
+    const S = B.structs.find((O) => O.id === structId);
+    if (!S || !EXT.get(id)) return false;
+    pushUndo();
+    S.ext || (S.ext = {});
+    if (data === null || data === undefined) delete S.ext[id];
+    else S.ext[id] = JSON.parse(JSON.stringify(data));
+    S.ver++;
+    S.pc = null;
+    rebuild(S);
+    touchUi();
+    return true;
+  }
+  EXT.bind({ hints: HINTS, tools: TOOLS, touch: touchUi, selecting: () => B.sel.length > 0,
+    refresh() {
+      for (const S of B.structs) ((S.ver++), (S.pc = null), B.dirty.add(S));
+      B.version++;
+      touchUi();
+    } });
   const changeFns = [];
   let changeV = 0;
   window.__build = {
@@ -10639,6 +10851,14 @@
     restore: restoreAll,
     ensureLoaded,
     setLayers,
+    // the extension point (ARCHITECTURE.md, "Adding to build mode"): extend(spec), setExt(structId, id, data), getExt(structId, id)
+    extend: EXT.extend,
+    setExt,
+    getExt(structId, id) {
+      const S = B.structs.find((O) => O.id === structId);
+      return S && S.ext && S.ext[id] !== undefined ? JSON.parse(JSON.stringify(S.ext[id])) : null;
+    },
+    extSelect: EXT.select,
     // construction (docs/CONSTRUCTION.md): stages, built state, the shopping list and ready-made plans
     STAGES,
     FOUNDATIONS,
@@ -10686,6 +10906,14 @@
     materialsList,
     plans: planList,
     placePlan,
+    // a building's finishes (docs/design/interior-finishes.md): null, or { walls, faces, trim, items }, each "<colour>_<sheen>"
+    setDeco(structId, deco) {
+      const S = B.structs.find((O) => O.id === structId);
+      if (!S) return false;
+      for (const O of groupOf(S)) ((O.deco = deco ? JSON.parse(JSON.stringify(deco)) : null), O.ver++);
+      for (const O of groupOf(S)) rebuild(O);
+      return true;
+    },
     // roofs: the one geometry (see roofParts), what a roof measures, the roofer's warnings, and the coverings
     roofParts,
     roofStats,
@@ -10854,6 +11082,7 @@
         }
       }
       fadeRB.value = homeY !== null ? 1e-4 : G.fadeR ? G.fadeR.value : 1;
+      const firstPerson = !!(G.camView && G.camView() === "first");
       for (const S of B.structs) {
         const [lx, lz] = toLocal(S, P.x, P.z);
         const sameHome = homeY !== null && Math.abs(S.y0 - homeY) < 0.4 && Math.hypot(P.x - S.cx, P.z - S.cz) < S.rad + 5;
@@ -10881,7 +11110,7 @@
           // open the building up while you stand in it, so rooms read like a floor plan
           const onFloor = sameHome;
           const full = EAVE * S.hs * S.rings.reduce((m, r) => Math.max(m, r.h), 1) + 0.4;
-          const cutT = onFloor ? 1.15 : inTower ? P.y - S.y0 + 1.05 : 0;
+          const cutT = firstPerson ? 0 : onFloor ? 1.15 : inTower ? P.y - S.y0 + 1.05 : 0; // first person: the rooms stay whole
           if (!B.on && cutT && !(P.dead > 0)) {
             const cur = Math.min(S.cutH, full);
             S.cutH = cur > cutT ? Math.max(cutT, cur - dt * 9) : Math.min(cutT, cur + dt * 9);
@@ -10904,6 +11133,8 @@
           S.sideA.constant = -rp - CUT_W;
           S.sideB.normal.set(fz, 0, -fx);
           S.sideB.constant = rp - CUT_W;
+          S.capPl[0].copy(S.near).negate(); S.capPl[1].copy(S.sideA).negate(); S.capPl[2].copy(S.sideB).negate();
+          capWalls(S);
           for (const dr of S.doors) {
             const [wx, wz] = toWorld(S, dr.mx, dr.mz);
             dr.mesh.visible = S.cutH > 2.2 || fx * (wx - P.x) + fz * (wz - P.z) > -0.15 || Math.abs(-fz * (wx - P.x) + fx * (wz - P.z)) > CUT_W;
@@ -10916,7 +11147,7 @@
         const inRing = ri >= 0 && Math.abs(P.y - S.y0) < headroom;
         const underAny = under || inPoly || (inRing && S.rings[ri].roof) || inTower || (sameHome && homeUnder);
         if (inRing && S.rings[ri].roof && S.rings[ri].sides.every((t) => t) && Math.abs(P.y - (S.y0 + FLOOR_T)) < 0.5) ((sheltered = true), (cosy = Math.max(cosy, S.ringCosy[ri] || 0)));
-        const target = B.on ? (roofsShown() ? 1 : 0) : underAny ? 0 : 1;
+        const target = B.on ? (roofsShown() ? 1 : 0) : underAny && !firstPerson ? 0 : 1;
         if (S.roofOp !== target) {
           S.roofOp = clamp(S.roofOp + Math.sign(target - S.roofOp) * dt * 4, 0, 1);
           S.roofMat.opacity = S.roofOp;

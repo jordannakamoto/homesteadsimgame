@@ -4,8 +4,8 @@
    Pure arithmetic: no DOM, no three.js. The page reads it as window.__framing; tests read globalThis.__framing. */
 (() => {
   // the order a building is raised in (docs/CONSTRUCTION.md)
-  const STAGES = ["site", "foundation", "floor-frame", "subfloor", "wall-frame", "top-plates", "roof-frame", "roof-deck", "dry-in", "roofing", "sheathing", "wrap", "openings", "cladding", "gutters", "rough-in", "insulation", "lining", "finish", "trim-out", "services"];
-  const STAGE_NAME = { site: "Site", foundation: "Foundation", "floor-frame": "Floor frame", subfloor: "Subfloor", "wall-frame": "Wall frames", "top-plates": "Top plates", "roof-frame": "Roof frame", "roof-deck": "Roof deck", "dry-in": "Dry-in", roofing: "Roofing", sheathing: "Sheathing", wrap: "Wrap", openings: "Windows and doors", cladding: "Cladding", gutters: "Gutters", "rough-in": "Rough-in", insulation: "Insulation", lining: "Lining", finish: "Tape and mud", "trim-out": "Trim-out", services: "Services" };
+  const STAGES = ["site", "foundation", "floor-frame", "subfloor", "wall-frame", "top-plates", "roof-frame", "roof-deck", "dry-in", "roofing", "sheathing", "wrap", "openings", "cladding", "gutters", "rough-in", "insulation", "lining", "finish", "carpentry", "decorate", "trim-out", "services"];
+  const STAGE_NAME = { site: "Site", foundation: "Foundation", "floor-frame": "Floor frame", subfloor: "Subfloor", "wall-frame": "Wall frames", "top-plates": "Top plates", "roof-frame": "Roof frame", "roof-deck": "Roof deck", "dry-in": "Dry-in", roofing: "Roofing", sheathing: "Sheathing", wrap: "Wrap", openings: "Windows and doors", cladding: "Cladding", gutters: "Gutters", "rough-in": "Rough-in", insulation: "Insulation", lining: "Lining", finish: "Tape and mud", carpentry: "Trim carpentry", decorate: "Paint", "trim-out": "Trim-out", services: "Services" };
   // actual (not nominal) sizes of North American lumber, metres: [breadth, depth]
   const LUMBER = { "2x4": [0.038, 0.089], "2x6": [0.038, 0.14], "2x8": [0.038, 0.184], "2x10": [0.038, 0.235], "2x12": [0.038, 0.286], glulam: [0.09, 0.225], "4x4": [0.089, 0.089], "6x6": [0.14, 0.14] };
   const SHEET = { w: 1.22, l: 2.44 };
@@ -248,17 +248,26 @@
       }
       return;
     }
-    let row = 0;
-    for (let y = c.y0; y < c.y1 - 0.05; y += CH, row++) {
-      const ya = y,
-        yb = Math.min(c.y1, y + CH);
-      for (const [xa, xb] of c.spans(ya, yb, row)) {
+    // courses go up a few at a time (docs/design/carpentry.md: pace): up to three neighbouring courses that run the same
+    // spans (clear of windows, under the rake) are one piece; a course that runs round a window, or steps up a gable, is its own.
+    // The siding shader draws each course of a piece (src/build.js makeLapMat counts them from its height)
+    const rowsS = [];
+    for (let y = c.y0; y < c.y1 - 0.05; y += CH) rowsS.push([y, Math.min(c.y1, y + CH)]);
+    const spanKey = (i) => JSON.stringify(c.spans(rowsS[i][0], rowsS[i][1], i).map((q) => q.map((v) => Math.round(v * 1000))));
+    for (let i = 0, row = 0; i < rowsS.length; row++) {
+      let k = 1;
+      const k0 = spanKey(i);
+      while (k < 3 && i + k < rowsS.length && rowsS[i + k][1] - rowsS[i + k][0] > CH - 1e-6 && spanKey(i + k) === k0) k++;
+      const ya = rowsS[i][0],
+        yb = rowsS[i + k - 1][1], i0 = i;
+      i += k;
+      for (const [xa, xb] of c.spans(ya, yb, i0)) {
         const tw = c.trim === false ? 0 : TRIM_W, sa = Math.max(xa, tw), sb = Math.min(xb, c.L - tw);
         if (sb - sa < 0.1) continue;
         const ym = (ya + yb) / 2;
         // a thin lapped board: it overlaps the course below by 25 mm and only its bottom edge stands off the wall, so the shadow line carries the look
-        const lap = row && c.spans(ya - LAP, ya, row - 1).some(([x0, x1]) => x0 <= sa + 1e-6 && x1 >= sb - 1e-6) ? LAP : 0;
-        M(out, id("cl"), "cladding", "boards", "cladding", c.parent, c.mat || "timber", 0.007, yb - ya + lap, c.at(sa, ym - lap / 2, c.off), c.at(sb, ym - lap / 2, c.off), upV, { ...common, area: r3((sb - sa) * (yb - ya)), row });
+        const lap = i0 && c.spans(ya - LAP, ya, i0 - 1).some(([x0, x1]) => x0 <= sa + 1e-6 && x1 >= sb - 1e-6) ? LAP : 0;
+        M(out, id("cl"), "cladding", "boards", "cladding", c.parent, c.mat || "timber", 0.007, yb - ya + lap, c.at(sa, ym - lap / 2, c.off), c.at(sb, ym - lap / 2, c.off), upV, { ...common, area: r3((sb - sa) * (yb - ya)), row, ...(k > 1 ? { courses: k } : {}) });
       }
     }
   }
@@ -461,7 +470,88 @@
           // inside corners: where this face meets the next wall (both ends of a partition, the start of an outside wall)
           for (const x of o ? [0.02] : [0.02, L - 0.02]) joint("corner", at(x, yb + 0.012, joff), at(x, yt, joff), [ux, 0, uz], yt - yb - 0.012);
         }
-        else { let row = 0; for (let y = yb + 0.01; y < yt - 0.03; y += 0.14, row++) lay(y, Math.min(yt, y + 0.14), row, 3.6, "boards"); }
+        else {
+          // boards go up four at a time, tongue into groove (a panel's worth), where four neighbouring rows run the same
+          // spans; rows that run round a window go up one at a time
+          const ys = [];
+          for (let y = yb + 0.01; y < yt - 0.03; y += 0.14) ys.push([y, Math.min(yt, y + 0.14)]);
+          const sig = (r) => JSON.stringify(bandFree(r[0], r[1]).map((q) => [q[0], q[1]].map((v) => Math.round(v * 1000))));
+          for (let i = 0, row = 0; i < ys.length; row++) {
+            let k = 1;
+            while (k < 4 && i + k < ys.length && ys[i + k][1] - ys[i + k][0] > 0.139 && sig(ys[i + k]) === sig(ys[i])) k++;
+            lay(ys[i][0], ys[i + k - 1][1], row, 3.6, "boards");
+            i += k;
+          }
+        }
+        // trim carpentry (docs/design/carpentry.md): casings round the openings, then baseboard along the floor, each part
+        // with the cut at its ends. The casing's inner edge stands JI in from the rough opening: the jamb, less the reveal
+        if (spec.trimIn !== false) {
+          const CW = 0.057, CT = 0.0175, BH = 0.083, BT = 0.014, JI = 0.03 - 0.005, MAXL = 4.8;
+          const offC = sg * (face + th + CT / 2), offB = sg * (face + th + BT / 2);
+          let kc = 0, kb = 0, ks = 0;
+          const i0 = out.length;
+          // long: which side of a mitered piece is the long point, along its n (+1 or -1): the side away from the opening
+          const cas = (a, b, n2, ends, q, long, type = "colonial") => M(out, w.id + ".cs" + fc + "." + kc++, "casing", type, "carpentry", w.id, "pine", CT, CW, a, b, n2, { face: fc, ends, long, opening: q.id, col: "trim", profile: "casing" });
+          const gaps = [], frame = spec.winTrim === "frame";
+          for (const q of opens) {
+            const e1 = q.pocket || q.s1, xa = q.s0 + JI, xb = e1 - JI, top = q.y1 - JI, bot = q.door ? yb : q.y0 + JI;
+            if (xb - xa < 0.1) continue;
+            // a window's stool and apron (unless it is cased as a picture frame): the stool a shelf on the sill, its horns
+            // past the casing, standing proud of the wall; the apron a length of casing under it
+            const stool = !q.door && !frame, ST = 0.022, HORN = 0.02;
+            if (stool) {
+              const o0 = sg * (face - 0.03), o1 = sg * (face + th + CT + 0.02), om = (o0 + o1) / 2, nIn = [nrm[0] * sg, 0, nrm[2] * sg];
+              M(out, w.id + ".st" + fc + "." + ks++, "stool", "stool", "carpentry", w.id, "pine", ST, Math.abs(o1 - o0), at(xa - CW - HORN, bot - ST / 2, om), at(xb + CW + HORN, bot - ST / 2, om), nIn, { face: fc, ends: ["notch", "notch"], opening: q.id, col: "trim", profile: "stool" });
+              cas(at(xa - CW, bot - ST - CW / 2, offC), at(xb + CW, bot - ST - CW / 2, offC), UP, ["sq", "sq"], q, 0, "apron");
+            }
+            // the legs: to the floor at a door and onto the stool at a window (square there), mitered where they meet the head
+            // (and the bottom piece of a picture frame)
+            for (const [xc, lg] of [[xa - CW / 2, -1], [xb + CW / 2, 1]]) cas(at(xc, q.door || stool ? bot : bot - CW, offC), at(xc, top + CW, offC), [ux, 0, uz], q.door || stool ? ["sq", "m45"] : ["m45", "m45"], q, lg);
+            cas(at(xa - CW, top + CW / 2, offC), at(xb + CW, top + CW / 2, offC), UP, ["m45", "m45"], q, 1);
+            if (!q.door && !stool) cas(at(xa - CW, bot - CW / 2, offC), at(xb + CW, bot - CW / 2, offC), UP, ["m45", "m45"], q, -1);
+            const low = stool ? bot - ST - CW : bot - CW;
+            if (low < yb + BH + 0.01) gaps.push([xa - CW - (stool ? HORN : 0), xb + CW + (stool ? HORN : 0)]);      // the base stops at the casing
+          }
+          // the baseboard: corner to corner, stopping at door casings (square); into a corner square at one end and coped
+          // over the other at the other; a run longer than a stock length joined with a scarf
+          gaps.sort((p2, q2) => p2[0] - q2[0]);
+          const runs = [];
+          let x = 0, e0 = "cope";
+          for (const [ga, gb] of gaps) { if (ga - x > 0.05) runs.push([x, ga, e0, "sq"]); x = Math.max(x, gb); e0 = "sq"; }
+          if (L - x > 0.05) runs.push([x, L, e0, "sq"]);
+          for (const [ra, rb, ea, eb] of runs) {
+            const n3 = Math.ceil((rb - ra) / MAXL - 1e-9);
+            for (let i = 0; i < n3; i++) {
+              const xa = ra + ((rb - ra) * i) / n3, xb = ra + ((rb - ra) * (i + 1)) / n3;
+              M(out, w.id + ".bs" + fc + "." + kb++, "base", "colonial", "carpentry", w.id, "pine", BT, BH, at(xa, yb + BH / 2, offB), at(xb, yb + BH / 2, offB), UP, { face: fc, ends: [i ? "scarf" : ea, i < n3 - 1 ? "scarf" : eb], col: "trim", profile: "base" });
+            }
+          }
+          // caulk: a bead where each piece meets the wall (the outer edge of a casing, the top of the base, under the
+          // apron), so the gap disappears under the paint. draw 0: the view draws it going on
+          if (spec.caulk !== false) for (const m of out.slice(i0)) {
+            if (m.kind !== "casing" && m.kind !== "base") continue;
+            const L2 = hyp(m.b[0] - m.a[0], m.b[1] - m.a[1], m.b[2] - m.a[2]), e = m.kind === "base" ? 1 : m.type === "apron" ? -1 : m.long || 0;
+            if (!e || L2 < 0.05) continue;
+            const sh = (p2) => p2.map((v, k) => v + m.n[k] * e * (m.section.d / 2));
+            M(out, m.id + ".ck", "caulk", "acrylic", "carpentry", w.id, "caulk", 0.004, 0.006, sh(m.a), sh(m.b), m.n, { draw: 0, face: fc, of: m.id });
+          }
+        }
+        // paint (docs/design/interior-finishes.md): over the lining, a coat of primer then the colour, worked a
+        // rectangle at a time: the face clear of the openings in widths of 1.2 m (a roller's reach from one spot).
+        // draw 0: the view draws each coat as a thin skin as it goes on
+        const fin = finFor(spec.deco, "walls", w.id + "|" + fc);
+        if (fin) {
+          let k2 = 0;
+          for (const [x0, x1, ya, yb2] of bandFree(gyp ? yb + 0.012 : yb + 0.01, yt)) {
+            const n2 = Math.max(1, Math.round((x1 - x0) / 1.2));
+            for (let i = 0; i < n2; i++) {
+              const xa = x0 + ((x1 - x0) * i) / n2, xb = x0 + ((x1 - x0) * (i + 1)) / n2, ym = (ya + yb2) / 2, area = r3((xb - xa) * (yb2 - ya)), k3 = k2++;
+              if (xb - xa < 0.04 || yb2 - ya < 0.04) continue;
+              M(out, w.id + ".pr" + fc + "." + k3, "prime", gyp ? "pva" : "knot", "decorate", w.id, "primer", 0.001, yb2 - ya, at(xa, ym, sg * (face + th + 0.0045)), at(xb, ym, sg * (face + th + 0.0045)), UP, { draw: 0, area, face: fc, surface: "walls" });
+              M(out, w.id + ".pt" + fc + "." + k3, "paint", "paint", "decorate", w.id, "paint", 0.001, yb2 - ya, at(xa, ym, sg * (face + th + 0.0058)), at(xb, ym, sg * (face + th + 0.0058)), UP, { draw: 0, area, face: fc, fin, surface: "walls" });
+            }
+          }
+        }
       }
     }
   }
@@ -745,13 +835,49 @@
   }
 
   // desc: { found, spec: { ins, lining, studs, joists, rafters }, floors, walls, roofs } -> members
+  // ---- finishes (docs/design/interior-finishes.md). A building's finishes are one record of surfaces, each painted its own
+  // colour: { walls: fin, faces: { "<wall>|<face>": fin }, trim: fin, items: { "<piece id>": fin } }, a fin being
+  // "<colour>_<sheen>". Walls get primer and paint rectangles where they are lined (wallMembers); anything else that
+  // takes paint names its surface in PAINTABLE and gets a skin of paint a little larger than itself, two coats, over
+  // stock that comes primed (trim boards now; cabinets and furniture add their kinds here as they are made)
+  function finFor(deco, surface, key) {
+    if (!deco) return null;
+    if (surface === "walls") return (deco.faces && deco.faces[key]) || deco.walls || null;
+    return (deco.items && deco.items[key]) || deco[surface] || null;
+  }
+  const PAINTABLE = [{ surface: "trim", is: (m) => (m.kind === "cladding" && m.type === "trim") || m.kind === "casing" || m.kind === "base" || m.kind === "stool" }];
+  function paintOver(out, deco) {
+    if (!deco) return;
+    const n0 = out.length;
+    for (let i = 0; i < n0; i++) {
+      const m = out[i], P = PAINTABLE.find((q) => q.is(m)), fin = P && finFor(deco, P.surface, m.id);
+      if (!fin) continue;
+      // the skin: 1 mm proud of every face, and 1 mm past each end
+      const L = hyp(m.b[0] - m.a[0], m.b[1] - m.a[1], m.b[2] - m.a[2]) || 1, e = 0.001 / L, ext = (p, q) => p.map((v, k) => v + (v - q[k]) * e);
+      M(out, m.id + ".pt", "paint", "paint", "decorate", m.parent, "paint", m.section.b + 0.002, m.section.d + 0.002, ext(m.a, m.b), ext(m.b, m.a), m.n, { draw: 0, area: r3((m.area || m.length * m.section.d) * 1.2), fin, surface: P.surface, of: m.id, ...(m.roof ? { roof: m.roof } : {}), ...(m.ends ? { ends: m.ends, long: m.long } : {}) });
+    }
+  }
   function generate(desc) {
     const out = [],
       spec = desc.spec || {};
     for (const f of desc.floors || []) floorMembers(out, f, desc.found || "plinth", spec);
     for (const w of desc.walls || []) wallMembers(out, w, spec);
     for (const r of desc.roofs || []) roofMembers(out, r, spec);
+    // building elements added by other files (decks, porches, lofts...): desc.extras, each { kind, id, ... } drawn by its kind
+    for (const x of desc.extras || []) {
+      const fn = EXTRA.get(x.kind);
+      fn && fn(out, x, desc, HELP);
+    }
+    paintOver(out, spec.deco);
     return out;
+  }
+  // register(kind, fn(out, el, desc, h)): fn pushes the members of one desc.extras element of that kind; h holds the
+  // same helpers the walls, floors and roofs use (M makes a member, see above). See ARCHITECTURE.md "Adding to build mode".
+  const EXTRA = new Map(),
+    HELP = Object.freeze({ M, LUMBER, SHEET, FLOOR_T, splice, sheetRows, spans, STAGES });
+  function register(kind, fn) {
+    if (typeof fn !== "function") throw new Error("framing.register: " + kind + " needs a function");
+    EXTRA.set(kind, fn);
   }
 
   /* ---------- what to buy ---------- */
@@ -798,6 +924,12 @@
       const f = FLOOR_ITEM[m.material];
       return ["floor" + m.material, f ? f[0] : null, f ? f[1] : "m2", f && f[1] === "m" ? m.area / 0.14 : m.area, "Flooring", "The finished floor you walk on.", f ? undefined : "flooring: " + m.material];
     }
+    if (k === "stool") return ["stool", "trim_stool", "m", m.length, "Window stools", "A shelf of board under each window, notched round the casing at its ends. The casing legs stand on it."];
+    if (k === "caulk") return ["caulk", "caulk_acrylic", "L", (m.length * 0.3) / 9, "Caulk", "A bead of acrylic caulk where the trim meets the wall, smoothed with a finger, so the joint vanishes under the paint."];
+    if (k === "casing") return ["casing", "trim_casing", "m", m.length, "Casing", "Moulding round the doors and windows, cut to fit with miters at the corners. It covers the gap between the wall and the frame."];
+    if (k === "base") return ["base", "trim_base", "m", m.length, "Baseboard", "Moulding along the foot of the walls, coped into the corners. It covers the gap at the floor and takes the knocks."];
+    if (k === "prime") return ["primer", "primer_pva", "L", m.area / 10, "Primer", "A coat of primer on the new walls, so the paint goes on even."];
+    if (k === "paint") return ["paint" + m.fin, "paint_" + m.fin, "L", (m.area * 2) / 12, "Paint", "Two coats of colour: rolled on the walls a section at a time, brushed on the trim board by board."];
     if (k === "joint") return ["mud", "joint_compound", "kg", (m.len || m.length) * 0.3, "Joint compound and tape", "Tape over every drywall seam and three coats of compound, sanded smooth, so the joints vanish."];
     if (k === "lining") return t === "gypsum" ? ["gyp", "gypsum_13", "sheet", m.area, "Wall panels", "Panels on the inside of the walls. They cover the insulation and finish the room."] : ["lin", "board_pine_1x6", "m", m.area / 0.14, "Lining boards", "Boards on the inside of the walls and ceiling. They cover the insulation and finish the room."];
     if ((k === "door" || k === "window") && m.unit) return ["u" + m.unit, m.unit, "each", 1, m.unitName || (k === "door" ? "Door" : "Window"), "A ready-made " + k + " in its frame. It is carried in, set into its rough opening and nailed through the frame."];
@@ -848,17 +980,18 @@
       let ln = lines.get(key);
       if (!ln) lines.set(key, (ln = { key, stage: m.stage, itemId: q[1], qty: 0, unit: q[2], label: q[4], why: q[5], count: 0, members: [] }));
       ln.members.push([m.id, r3(q[3])]);
-      if (q[2] === "m" && /^lumber_/.test(q[1] || "")) (ln.pieces || (ln.pieces = [])).push(...Array(m.plies || 1).fill(m.length));
+      if (q[2] === "m" && /^(lumber|trim)_/.test(q[1] || "")) (ln.pieces || (ln.pieces = [])).push(...Array(m.plies || 1).fill(m.length));
       if (q[6]) ln.missing = q[6];
       ln.qty += q[3];
       ln.count++;
       // fasteners: about 25 g of nails for each metre of framing, 60 g of screws for each square metre of sheet
       if (q[2] === "m" && /^lumber_/.test(q[1] || "")) nails.set(m.stage + "|nails_framing", (nails.get(m.stage + "|nails_framing") || 0) + m.length * 0.025);
+      else if (q[2] === "m" && /^trim_/.test(q[1] || "")) nails.set(m.stage + "|nails_finish", (nails.get(m.stage + "|nails_finish") || 0) + m.length * 0.008);
       else if (q[2] === "sheet") nails.set(m.stage + "|screws_wood", (nails.get(m.stage + "|screws_wood") || 0) + m.area * 0.06);
     }
     for (const [key, kg] of nails) {
       const [stage, item] = key.split("|");
-      lines.set(key, { key, members: [], stage, itemId: item, qty: kg, unit: "kg", label: item === "nails_framing" ? "Framing nails" : "Screws", why: item === "nails_framing" ? "Hold the frame together. Bought by weight and used up as you build." : "Fix the sheets down. Bought by weight and used up as you build.", count: 0 });
+      lines.set(key, { key, members: [], stage, itemId: item, qty: kg, unit: "kg", label: item === "nails_framing" ? "Framing nails" : item === "nails_finish" ? "Finish nails" : "Screws", why: item === "nails_framing" ? "Hold the frame together. Bought by weight and used up as you build." : item === "nails_finish" ? "Thin nails with small heads that hold the trim; the holes are filled and painted over." : "Fix the sheets down. Bought by weight and used up as you build.", count: 0 });
     }
     const out = [...lines.values()];
     for (const ln of out) {
@@ -871,5 +1004,5 @@
     return out.sort((p, q) => STAGES.indexOf(p.stage) - STAGES.indexOf(q.stage) || (p.label < q.label ? -1 : 1));
   }
 
-  globalThis.__framing = { planeFrame, COVERING, coveringOf, ROOF_COLORS, packSheets, packSticks, STOCK, MAX_RUN, splice, STAGES, STAGE_NAME, LUMBER, SHEET, FOUNDATIONS, generate, materialsList, floorMembers, wallMembers, roofMembers, FLOOR_T };
+  globalThis.__framing = { planeFrame, COVERING, coveringOf, ROOF_COLORS, packSheets, packSticks, STOCK, MAX_RUN, splice, STAGES, STAGE_NAME, LUMBER, SHEET, FOUNDATIONS, generate, register, materialsList, floorMembers, wallMembers, roofMembers, FLOOR_T };
 })();

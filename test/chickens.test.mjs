@@ -6,6 +6,7 @@ import { createSim, createGameSim, GAME_SYSTEMS, DAY, HOUR, calendar, stockSyste
 import { BREEDS, makeBird, makeOffspring, initChickens, haveItem, TRAIT_SPECS, pointOfLayWeeks } from '../src/sim/chickens.js';
 import { stream } from '../src/sim/rng.js';
 import { setSite, fixture } from './helpers/pieces.mjs';
+import { BENCH, benchOnly } from './helpers/bench.mjs';
 
 const C = (sim) => sim.state.sys.chickens;
 const hens = (sim) => Object.values(C(sim).birds);
@@ -294,7 +295,7 @@ test('saving and loading continues the flock exactly; old saves without chickens
   now.runDays(1);
 });
 
-test('thirty birds cost well under 0.05 ms per physiology step', () => {
+test('thirty birds cost well under 0.05 ms per physiology step', benchOnly, () => {
   const sim = createGameSim(41);
   sim.commandNow('chickens.placeStarter', { x: 0, z: 0 });
   sim.commandNow('chickens.placeStarter', { x: 6, z: 0 });

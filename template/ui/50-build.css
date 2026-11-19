@@ -1,0 +1,345 @@
+/* ui: build mode. The bar reads like a game's build menu: a hint pill, the options as a card above, then one row of
+   chunky piece slots with the aids (snap, storey, list, free, undo, redo, done) at its right end. The schedule and the
+   window/door designer are side drawers. The instruments drawn over the view (dimensions, snap marks, handles,
+   measurements, ports) keep the --cad look in both skins.
+   Selectors mirror head.html's legacy build rules where they override them, so source order decides on desktop and
+   head.html's body.touch rules keep winning on a phone (S10 deletes the legacy rules later). */
+
+#buildbar { --slot-size: 56px; --bb-r: calc(var(--r-slot) + 8px); }
+
+/* ---------- the build bar replaces the hotbar row (20-hud.css hides the dock, quest card and vitals) ---------- */
+body.building #ui-lane-bottom > #tools, body.building #tools { display: none; }
+
+/* ---------- the container: no surface of its own, its rows carry the surfaces ---------- */
+#buildbar {
+  bottom: calc(var(--lane-edge) + var(--sa-b));
+  max-width: calc(100% - 2 * var(--lane-edge));
+  padding: 0; gap: 6px; align-items: center;
+  background: none; border: 0; border-radius: 0; box-shadow: none;
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  z-index: 11;
+  pointer-events: none;
+}
+#buildbar > * { pointer-events: auto; max-width: 100%; box-sizing: border-box; }
+#buildbar button:disabled { opacity: .4; }
+
+/* ---------- hint pill: what the tool does, what can be done to the selection, fold ---------- */
+#bhead {
+  min-height: 40px; gap: var(--sp-2);
+  padding: 4px 5px 4px 16px;
+  background: var(--surface-2); color: var(--ink);
+  border: var(--border-w) solid var(--edge); border-radius: var(--r-pill);
+  box-shadow: var(--shadow-1);
+}
+#bhead { max-width: min(920px, 100%); }
+/* long hints wrap to a second line instead of running the pill across the screen */
+#bhint {
+  font-size: var(--fs-sm); font-weight: var(--fw-strong); line-height: 1.3; color: var(--ink); padding-left: 0;
+  white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+}
+#bhead .grow { flex: 1 1 0; min-width: 0; }
+#bacts { gap: 4px; }
+#bacts .bchip, #bstop {
+  min-height: 30px; padding: 0 12px 0 9px; gap: 6px;
+  font-size: var(--fs-sm); border-radius: var(--r-pill);
+}
+#bacts .bchip svg, #bstop svg { width: 16px; height: 16px; }
+#bacts .danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 55%, var(--edge)); }
+#bstop { background: var(--accent); color: var(--accent-ink); border-color: var(--accent-edge); box-shadow: var(--lip-accent); }
+#bstop kbd { background: transparent; color: inherit; border-color: currentColor; opacity: .8; }
+#bfold {
+  min-height: 30px; padding: 0 8px 0 12px; gap: 4px;
+  font-size: var(--fs-xs); font-weight: var(--fw-strong); color: var(--ink-dim);
+  text-transform: var(--label-transform); letter-spacing: var(--label-track);
+  background: transparent; border-color: transparent; box-shadow: none; border-radius: var(--r-pill);
+}
+#bfold:hover { background: var(--surface-hover); color: var(--ink); }
+#bfold svg { width: 16px; height: 16px; transition: transform var(--t) var(--ease); }
+
+/* ---------- options: a card above the bar (second row: a second card) ---------- */
+#bopts, #bdecor {
+  gap: 10px 18px; align-items: flex-end;
+  padding: 10px 16px 12px;
+  max-width: min(1248px, 100%);
+  color: var(--ink); background: var(--surface-2);
+  border: var(--border-w) solid var(--edge); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+}
+#bdecor { margin-top: 0; padding-top: 10px; align-items: stretch; }
+.bgroup { gap: 5px; }
+.blab {
+  display: flex; align-items: center; gap: 4px;
+  height: 16px; line-height: 16px;
+  font-size: var(--fs-xs); font-weight: var(--fw-strong);
+  text-transform: var(--label-transform); letter-spacing: var(--label-track);
+  color: var(--ink-dim);
+}
+.blab .bval { margin-left: 2px; font-size: var(--fs-xs); font-weight: var(--fw-strong); letter-spacing: 0; text-transform: none; color: var(--ink); }
+#buildbar .blab kbd, #bdesign .blab kbd {
+  height: 15px; min-width: 15px; margin-left: 2px; padding: 0 3px;
+  font: var(--fw-strong) 9px var(--font-body); color: var(--ink-dim);
+  background: var(--well); border: 1px solid var(--edge); border-radius: 4px;
+}
+.bitems { gap: 4px; min-height: 36px; }
+
+/* material swatches: chunky rounded tiles; the chosen one lifts with a ring */
+.bsw {
+  width: 30px; height: 30px; min-height: 0; padding: 0;
+  border: var(--border-w) solid var(--edge); border-radius: calc(var(--r-sm) * .6);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+.bsw:hover { translate: 0 var(--hover-y); }
+.bsw[aria-pressed="true"] {
+  outline: 3px solid var(--accent-edge); outline-offset: 1px;
+  border-color: var(--surface-3); translate: 0 -2px;
+}
+
+/* tiles and chips that pick one of several sit in a .ui-seg well */
+.ui-seg > .btile, .ui-seg > .bchip {
+  flex: 0 0 auto; min-height: 32px; min-width: 36px; height: auto; padding: 0 10px; gap: 4px;
+  font-size: var(--fs-sm); white-space: nowrap;
+}
+.ui-seg > .btile svg { width: 20px; height: 20px; }
+.bitems.ui-seg { padding: 2px; gap: 2px; }
+
+/* lone tiles (toggles, actions) and chips: plain kit buttons */
+.btile { min-height: 36px; height: auto; min-width: 36px; padding: 0 12px; gap: 6px; font-size: var(--fs-sm); }
+.btile svg { width: 18px; height: 18px; }
+.bchip { min-height: 32px; padding: 0 10px; font-size: var(--fs-sm); }
+.btile.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 55%, var(--edge)); }
+.bitems:not(.ui-seg) > .btile[aria-pressed="true"], #bacts .bchip[aria-pressed="true"] {
+  background: var(--accent-soft); border-color: var(--accent-edge); color: var(--pressed-ink);
+}
+
+/* numbers: the kit stepper (minus, value you can type into, unit, plus) */
+.bnumi, .bstep { gap: 2px; padding: 3px; background: var(--well); border: 0; border-radius: var(--r-pill); }
+.bnumi:focus-within { box-shadow: 0 0 0 2px var(--accent-edge); }
+.bnumi .bchip, .bstep .bchip {
+  width: 30px; min-width: 30px; height: 30px; min-height: 30px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--r-pill); background: var(--surface-3); border: var(--border-w) solid var(--edge); box-shadow: var(--lip);
+}
+.bnumi .bchip:hover, .bstep .bchip:hover { background: var(--surface-hover); }
+.bnumi .bchip svg, .bstep .bchip svg { width: 14px; height: 14px; }
+#buildbar .bnumi input, #bdesign .bnumi input {
+  width: 52px; min-width: 0; min-height: 0; padding: 0 2px; margin: 0;
+  font: var(--fw-display) var(--fs-md) var(--font-display); font-variant-numeric: tabular-nums;
+  text-align: right; color: var(--ink);
+  background: transparent; border: 0; outline: none;
+}
+.bnumi .bu { padding: 0 4px 0 1px; font-size: var(--fs-xs); color: var(--ink-dim); }
+.bstep .bnum { min-width: 48px; width: auto; padding: 0 6px; font: var(--fw-display) var(--fs-md) var(--font-display); text-align: center; font-variant-numeric: tabular-nums; }
+.bnote { font-size: var(--fs-xs); color: var(--ink-dim); }
+.bnote.bad { color: var(--danger); }
+
+/* typed fields and drop-downs: a well */
+.bfield {
+  min-height: 36px; height: auto; padding: 0 10px 0 4px; gap: 2px;
+  font-size: var(--fs-xs); color: var(--ink-dim);
+  background: var(--well); border: var(--border-w) solid var(--edge); border-radius: var(--r-sm);
+}
+.bfield:focus-within { border-color: var(--accent-edge); }
+#buildbar .bfield input, #bdesign .bfield input {
+  width: 52px; min-height: 0; padding: 0 3px; margin: 0;
+  font: var(--fw-strong) var(--fs-sm) var(--font-body); font-variant-numeric: tabular-nums;
+  text-align: right; color: var(--ink); background: transparent; border: 0; outline: none;
+}
+#buildbar .bfield select, #bdesign .bfield select {
+  min-height: 32px; padding: 0 4px; max-width: 170px;
+  font: var(--fw-strong) var(--fs-sm) var(--font-body); color: var(--ink);
+  background: transparent; border: 0; outline: none;
+}
+.bfield select option { background: var(--surface-2); color: var(--ink); }
+
+/* boxed sections (a group of options under one name) */
+.bsec.ui-card {
+  gap: 4px; padding: 6px 10px 8px;
+  background: var(--surface-3); border: var(--border-w) solid var(--edge); border-radius: var(--r-md);
+  box-shadow: none;
+}
+.bsech {
+  font: var(--fw-display) var(--fs-xs) var(--font-display);
+  text-transform: var(--label-transform); letter-spacing: var(--label-track);
+  color: var(--accent-edge); opacity: 1;
+}
+:root[data-skin="minimal"] .bsech { color: var(--accent); }
+.bsecb { gap: 6px 12px; }
+
+/* a piece's facts: title and a line, and its badges */
+.binfo { gap: 2px; padding-right: 6px; }
+.binfo .btitle { font: var(--fw-display) var(--fs-md) var(--font-display); color: var(--ink); }
+.binfo .bnum { font-size: var(--fs-sm); color: var(--ink-dim); }
+.bbadges { gap: 4px; max-width: 360px; }
+.bbadge.ui-tag { font-size: var(--fs-xs); padding: 3px 9px; color: var(--tone, var(--ink-dim)); background: color-mix(in srgb, var(--tone, var(--ink-dim)) 13%, transparent); border: 1px solid color-mix(in srgb, var(--tone, var(--ink-dim)) 32%, transparent); }
+.bbadge.ui-tag.k-price { --tone: var(--money); }
+.bbadge.ui-tag.k-mto { --tone: var(--info); }
+.bbadge.ui-tag.k-std { --tone: var(--good); }
+.bbadge.ui-tag.k-bad { --tone: var(--danger); white-space: normal; }
+
+/* ---------- the bar: piece slots, then the aids ---------- */
+#bmain {
+  gap: 10px; align-items: center; justify-content: center;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border: var(--border-w) solid var(--edge); border-radius: var(--bb-r);
+  box-shadow: var(--shadow-2), var(--inner-hi);
+}
+/* cozy: room above the bar for the lifted slot's diamond */
+:root:not([data-skin="minimal"]) #bmain { margin-top: 12px; }
+#bpieces { gap: 5px; align-items: center; }
+#bpieces .sep { width: var(--border-w); align-self: stretch; margin: 10px 3px; background: var(--edge); border-radius: 1px; }
+#bpieces button > svg, #baids .ui-slot > svg { width: 24px; height: 24px; }
+#bpieces button .name, #baids .ui-slot .name {
+  font-family: var(--font-display); font-weight: var(--fw-display); font-size: 11.5px; line-height: 1.1;
+  text-transform: var(--label-transform); letter-spacing: var(--label-track);
+  max-width: calc(var(--slot-w) - 4px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* icon a little lower, clear of the keycap */
+#bpieces button, #baids .ui-slot { padding: 9px 2px 5px; }
+:root[data-skin="minimal"] :is(#bpieces button .name, #baids .ui-slot .name) { font-size: 9.5px; }
+#buildbar .key {
+  position: absolute; left: 2px; top: 2px; right: auto;
+  min-width: 13px; height: 13px; padding: 0 2px; font-size: 8.5px; opacity: 1;
+  color: var(--ink-dim); background: var(--well); border: 1px solid var(--edge); border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center; line-height: 1;
+}
+#buildbar [aria-pressed="true"] > .key { color: currentColor; background: transparent; border-color: currentColor; }
+
+#baids { gap: 6px; align-items: center; padding-left: 12px; border-left: var(--border-w) solid var(--edge); }
+/* Snap, List and Done are slots too; Snap and List are toggles, so no lift and no marker when on */
+#baids .ui-slot {
+  display: flex; flex-direction: column; justify-items: initial; align-content: initial;
+  width: var(--slot-w); min-width: var(--slot-w); height: var(--slot-w); gap: 2px;
+}
+#baids .ui-slot[aria-pressed="true"] {
+  background: var(--accent-soft); border-color: var(--accent-edge); color: var(--pressed-ink);
+  translate: none; box-shadow: var(--shadow-1);
+}
+#baids .ui-slot[aria-pressed="true"]:active { translate: 0 var(--press-y); }
+#baids .ui-slot::after { display: none; }
+#baids #bdone { background: var(--accent); color: var(--accent-ink); border-color: var(--accent-edge); box-shadow: var(--lip-accent), var(--shadow-1); }
+#baids #bdone:hover { background: color-mix(in srgb, var(--accent) 88%, white); }
+#baids #bdone .key { color: inherit; background: transparent; border-color: currentColor; opacity: .75; }
+
+/* storey: a stepper pill (down, name, up) */
+#blevel {
+  align-items: center; gap: 2px; padding: 3px;
+  font-size: var(--fs-sm); color: var(--ink);
+  background: var(--well); border: 0; border-radius: var(--r-pill);
+}
+#blevel button {
+  width: 30px; min-width: 30px; height: 30px; min-height: 30px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface-3); border: var(--border-w) solid var(--edge); border-radius: var(--r-pill); box-shadow: var(--lip);
+}
+#blevel button:hover { background: var(--surface-hover); }
+#blevel button svg { width: 16px; height: 16px; }
+#blevel #blname { min-width: 58px; width: auto; padding: 0 4px; font: var(--fw-display) var(--fs-sm) var(--font-display); text-align: center; }
+
+#bfree { align-self: center; min-height: 36px; padding: 0 12px; font-size: var(--fs-sm); border-radius: var(--r-pill); }
+#bundo, #bredo { width: 36px; min-width: 36px; height: 36px; padding: 0; border-radius: var(--r-pill); justify-content: center; }
+#bundo svg, #bredo svg { width: 18px; height: 18px; margin: 0; }
+
+/* ---------- side drawers: the schedule and the window/door designer ---------- */
+/* buildui.js sets `bottom` inline (above the bar). With `top` under the HUD, a content height and a max-height that
+   fills the space between the two insets, they hug short content and scroll long content without covering the bar. */
+#bschedp, #bdesign {
+  top: calc(var(--hud-top-h) + var(--sa-t)); right: calc(var(--lane-edge) + var(--sa-r)); left: auto;
+  height: fit-content; max-height: -webkit-fill-available; max-height: stretch;
+  padding: 0; overflow-y: auto; overscroll-behavior: contain;
+  z-index: 20;
+}
+#bschedp { width: 400px; font-size: var(--fs-sm); }
+#bdesign { width: 360px; gap: 10px; padding: 0 0 14px; }
+/* end both just above the whole bar, options card included (buildui.js's inline bottom is the fallback) */
+@supports (anchor-name: --a) {
+  #buildbar { anchor-name: --hs-buildbar; }
+  #bschedp, #bdesign { bottom: calc(anchor(--hs-buildbar top) + var(--sp-2)) !important; }
+}
+/* both open: the schedule steps left of the designer */
+body:has(#bdesign:not([hidden])) #bschedp { right: calc(var(--lane-edge) + var(--sa-r) + 360px + var(--sp-3)); }
+
+#bschedp h2 {
+  position: sticky; top: 0; z-index: 1;
+  display: flex; align-items: baseline; gap: var(--sp-3); justify-content: space-between;
+  margin: 0; padding: 14px 16px 10px;
+  font: var(--fw-display) var(--fs-xl) var(--font-display); color: var(--ink);
+  background: var(--surface-2); border-bottom: 1px solid var(--edge);
+}
+:root[data-skin="minimal"] #bschedp h2 { font-size: var(--fs-lg); }
+#bschedp h2 small { font: var(--fw-body) var(--fs-xs) var(--font-body); color: var(--ink-dim); text-align: right; }
+#bschedp section { margin: 8px 12px 0; padding: 8px 10px; background: var(--surface-3); border-radius: var(--r-md); }
+:root[data-skin="minimal"] #bschedp section { background: transparent; border-top: 1px solid var(--edge); border-radius: 0; margin: 0 16px; padding: 8px 0; }
+#bschedp h3 {
+  margin: 0 0 4px; padding: 0; border: 0; gap: 8px;
+  font: var(--fw-display) var(--fs-md) var(--font-display); color: var(--ink);
+}
+#bschedp h3 small { font: var(--fw-body) var(--fs-xs) var(--font-body); color: var(--ink-dim); }
+#bschedp h3 b, #bschedp .tot b { color: var(--money); }
+#bschedp .ln { column-gap: 8px; padding: 3px 0; border-top: 1px dashed color-mix(in srgb, var(--edge) 70%, transparent); }
+#bschedp .ln:first-of-type { border-top: 0; }
+#bschedp .ln i { color: var(--ink-dim); }
+#bschedp .ln em { font-size: var(--fs-xs); color: var(--ink-dim); }
+#bschedp .tot {
+  position: sticky; bottom: 0;
+  margin: 10px 0 0; padding: 10px 16px 12px;
+  font: var(--fw-display) var(--fs-lg) var(--font-display);
+  background: var(--surface-2); border-top: 1px solid var(--edge);
+}
+#bschedp .none { margin: 12px 16px 16px; color: var(--ink-dim); }
+
+#bdesign .bdtitle {
+  position: sticky; top: 0; z-index: 1;
+  padding: 14px 16px 10px;
+  font: var(--fw-display) var(--fs-xl) var(--font-display); color: var(--ink);
+  background: var(--surface-2); border-bottom: 1px solid var(--edge);
+}
+:root[data-skin="minimal"] #bdesign .bdtitle { font-size: var(--fs-lg); }
+#bdesign > .bgroup, #bdesign > .bsec { margin: 0 14px; }
+#bdesign .bsec { padding: 8px 10px 10px; }
+#bdesign .bitems { flex-wrap: wrap; }
+#bdesign .bwinprev { align-self: center; }
+#bdesign .bwinprev .bwp { width: 320px; }
+
+/* ---------- instruments: the --cad look in both skins ---------- */
+#bover, .bwinprev .bwp { --cad-font: "Inter", "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", Roboto, system-ui, sans-serif; }
+/* the window preview is a drawing: dark board, light lines, cad dimensions */
+.bwinprev .bwp { background: var(--cad-bg); color: var(--cad-ink); border-radius: var(--r-sm); font-family: var(--cad-font); }
+.bdim { font-family: var(--cad-font); border-radius: 6px; }
+#bover .bdim input {
+  display: none; width: 46px; min-height: 0; padding: 0 2px; margin: 0;
+  font: inherit; color: #fff; text-align: right;
+  background: color-mix(in srgb, var(--cad) 14%, transparent);
+  border: 0; border-bottom: 1px dashed var(--cad); border-radius: 3px 3px 0 0; outline: none;
+}
+#bover .bdim.field input { display: block; }
+#bover .bdim input:focus { background: color-mix(in srgb, var(--cad) 30%, transparent); border-bottom-style: solid; }
+.bdim em { font-family: var(--cad-font); color: color-mix(in srgb, var(--cad) 80%, var(--cad-ink)); }
+#bsnapm { font-family: var(--cad-font); }
+.bhandle { background: var(--cad-ink); border-color: var(--cad); }
+.bmeas { font-family: var(--cad-font); }
+#bover .bmeas button {
+  min-height: 0; width: auto; height: auto; padding: 3px;
+  color: var(--cad-ink); background: transparent; border: 0; border-radius: 50%; box-shadow: none;
+}
+#bover .bmeas button:hover { background: color-mix(in srgb, var(--cad) 25%, transparent); }
+#bover .bmeas button svg { width: 12px; height: 12px; }
+.bport.t-link { font-family: var(--cad-font); }
+#blabel { font-family: var(--font-body); color: var(--ink); background: var(--surface-2); border: var(--border-w) solid var(--edge); border-radius: var(--r-sm); box-shadow: var(--shadow-1); }
+#blabel.bad { color: var(--danger); border-color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--surface-2)); }
+
+/* ---------- phone: one row each, scrolled sideways (S9 owns the rest of the touch frame) ---------- */
+body.touch #buildbar { align-items: stretch; gap: 4px; padding: 0; }
+body.touch #bhead { border-radius: var(--r-md); padding: 4px 6px 4px 12px; max-width: none; }
+/* hint first, the fold beside it; selection actions wrap under */
+body.touch #bhint { order: 0; flex: 1 1 180px; font-size: var(--fs-xs); }
+body.touch #bhead .grow { display: none; }
+body.touch #bfold { order: 1; }
+body.touch #bacts, body.touch #bstop { order: 2; }
+body.touch #bopts, body.touch #bdecor { padding: 6px 8px; border-radius: var(--r-md); }
+body.touch #bmain { margin-top: 0; padding: 6px; border-radius: var(--r-md); }
+/* the scrolling row would clip a lifted slot and its marker: show the choice by colour only */
+body.touch #bpieces button[aria-pressed="true"] { translate: none; }
+body.touch #bpieces button::after { display: none; }
+body.touch #baids { padding-left: 8px; }

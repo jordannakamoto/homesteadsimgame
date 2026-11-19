@@ -1,6 +1,7 @@
 // Services rough-in by hand, with real pointer input: node test/services.smoke.mjs  (needs dist/index.html and Playwright)
 // A cabin set down, one outlet circuit planned along a wall (console), then by hand: nail a box (two clicks), drill the
-// holes in one sweep, pull the cable along the run, clamp both ends. Screenshots go to /tmp/sv-*.png.
+// holes in one sweep, pull the cable along the run, clamp both ends. Then trim-out by hand (S9b): a switch stripped, landed
+// and folded in, a breaker pressed in, the main thrown, the light on, the switch, the tester, a trip reset. Screenshots go to /tmp/sv-*.png.
 import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
 const file = 'file://' + process.cwd() + '/dist/index.html';
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'] });
@@ -109,6 +110,108 @@ const st = await G((id) => { const r = __game.sim.state.sys.routes.runs[id]; ret
 check('both ends clamped: the run is roughed in', st.joined.a && st.joined.b && st.state === 'roughed', JSON.stringify(st));
 check('the box, the cable, staples and plates were drawn from the stacks; the books balance', await G(() => { const s = __game.sim.state.sys.construction, pr = Object.values(s.progress).find((p) => Object.values(p.lines).some((l) => l.ext)), u = (it) => Object.values(pr.lines).filter((l) => l.itemId === it).reduce((n, l) => n + l.used, 0); return u('elec_box_wall') === 2 && u('nm_cable_14_2') > 2 && u('cable_staple') > 0 && Object.keys(__game.sim.systems.find((q) => q.name === 'construction').api.imbalance(s)).length === 0; }));
 await shot('3-roughed');
+
+// ---------------------------------------------------------------- trim-out by hand (S9b)
+// a generator and a 100 A panel on the wall (console), one circuit from it: a switch box, a ceiling light after it and the
+// outlet box roughed in above (all already roughed in, console); then by hand: strip, land and fold the switch, press the
+// breaker, throw the main, the light comes on; the switch puts it out; the tester passes; a tripped breaker is reset.
+const TR = await G(() => {
+  const sim = __game.sim, R = sim.state.sys.routes, A = sim.systems.find((q) => q.name === 'routes').api;
+  const run0 = Object.values(R.runs)[0], frame = run0.frame, f = R.frames[frame], ch = __game.routes.channelsFor(frame), w = ch.walls[0];
+  const inX = -w.n[0] * w.out, inZ = -w.n[1] * w.out, off = (w.SD || 0.09) / 2 + (w.finish || 0) - 0.035;
+  const at = (d, h, k = off) => [w.o[0] + w.u[0] * d + inX * k, w.yb + h, w.o[1] + w.u[1] * d + inZ * k];
+  const toW = (p) => A.worldOf(R, frame, p), yaw = Math.atan2(inX * Math.cos(f.yaw) + inZ * Math.sin(f.yaw), -inX * Math.sin(f.yaw) + inZ * Math.cos(f.yaw));
+  const pw = toW(at(0.25, 1.0, 0.11));
+  const [gen, pnl] = __build.addFixtures([{ fixture: 'gen_petrol_5500w', x: pw[0] + Math.sin(yaw) * 4, z: pw[2] + Math.cos(yaw) * 4 }, { fixture: 'panel_ac_100a', x: pw[0], z: pw[2], y: pw[1], yawRad: yaw, mount: 'wall' }]);
+  const cn = __build.connect(gen, 'ac', pnl, 'main', { gauge: 6 });
+  sim.commandNow('construction.setOption', { key: 'instant', value: true });
+  const c = (n, p) => sim.commandNow('routes.' + n, p);
+  const slotAt = at(0.25, 1.3, 0.11), swAt = at(1.0, 1.2), lampAt = [...at(1.2, 0, 1.0)]; lampAt[1] = ch.attic ? ch.attic.y - 0.05 : w.yb + 2.3;
+  const slot = c('addNode', { kind: 'slot', frame, at: slotAt, ref: { piece: pnl, port: 'b1' } }).id;
+  const sw = c('addNode', { kind: 'box', frame, at: swAt, host: { parent: w.id }, state: 'set', set: { preset: 'switch' } }).id;
+  const lamp = c('addNode', { kind: 'box_ceiling', frame, at: lampAt, state: 'set' }).id;
+  const boxA = run0.a;
+  c('addRun', { cls: 'cable', spec: 'cable_nm_14_2', frame, a: slot, b: sw, path: [slotAt, swAt], hosts: [w.id], state: 'done' });
+  c('addRun', { cls: 'cable', spec: 'cable_nm_14_2', frame, a: sw, b: lamp, path: [swAt, [swAt[0], lampAt[1], swAt[2]], lampAt], state: 'done' });
+  c('addRun', { cls: 'cable', spec: 'cable_nm_14_2', frame, a: sw, b: boxA, path: [swAt, [swAt[0], 0.4 + w.yb, swAt[2]], R.nodes[boxA].at], hosts: [w.id], state: 'done' });
+  sim.commandNow('services.sync');
+  const o = sim.commandNow('construction.order', { structId: frame, stage: 'trim-out' });
+  return { frame, slot, sw, lamp, boxA, gen, pnl, conn: cn && cn.ok, order: o.ok, reason: o.reason };
+});
+check('a panel on the wall, one circuit roughed in, the trim-out ordered', TR.conn && TR.order, JSON.stringify(TR));
+await frames(6);
+check('the generator runs', await until((g) => { const E = __game.sim.state.sys.electrical, x = E.sources && E.sources[g]; if (x) __game.sim.commandNow('electrical.switch', { pieceId: g, on: true }); return !!(x && x.running); }, TR.gen, 100));
+const trimAt = async (kind, node) => { const t = await G(([k, n]) => (__servicesTrim.targets()[k] || []).findIndex((q) => !n || q.node === n), [kind, node]); return t < 0 ? null : G(([k, i]) => __servicesTrim.where(k, i), [kind, t]); };
+const tsw = await trimAt('trim', TR.sw);
+check('the switch box waits for its device', !!tsw && tsw.next === 'strip' && tsw.device === 'switch_single', JSON.stringify(tsw));
+await page.mouse.move(tsw.screen.x, tsw.screen.y); await frames(3);
+check('aiming at it says click to strip', /strip the cable ends/.test(await hint()), await hint());
+await page.mouse.down(); await page.mouse.up(); await frames(2);
+let ti = await G((n) => __game.sim.systems.find((q) => q.name === 'services').api.trimInfo(__game.sim.state.sys.routes, __game.sim.state.sys.routes.nodes[n]), TR.sw);
+check('one click strips the three ends (3x)', ti.done.strip === 3 && ti.next === 'land', JSON.stringify(ti.done));
+await page.mouse.move(tsw.screen.x, tsw.screen.y); await frames(3);
+check('then it says drag to land', /Drag/.test(await hint()), await hint());
+await page.mouse.down();
+for (let i = 1; i <= 6; i++) { await page.mouse.move(tsw.screen.x + i * 8, tsw.screen.y + i * 3); await frames(1); }
+await shot('4-landing');
+await page.mouse.up(); await frames(2);
+ti = await G((n) => __game.sim.systems.find((q) => q.name === 'services').api.trimInfo(__game.sim.state.sys.routes, __game.sim.state.sys.routes.nodes[n]), TR.sw);
+check('one drag lands the wires on the switch', ti.done.land === 3 && ti.next === 'fold', JSON.stringify(ti.done));
+await page.mouse.move(tsw.screen.x, tsw.screen.y); await frames(3);
+await page.mouse.down(); await page.mouse.up(); await frames(6);
+check('a click folds it in and puts the plate on', await G((n) => __game.sim.state.sys.routes.nodes[n].state === 'trimmed', TR.sw));
+// the light and the outlet: the same steps, from the console
+await G((ids) => { for (const n of [ids.lamp, ids.boxA]) for (let i = 0; i < 4; i++) __game.sim.commandNow('services.trim', { node: n, n: 4 }); }, TR);
+check('the light and the outlet are in', await G((ids) => [ids.lamp, ids.boxA].every((n) => __game.sim.state.sys.routes.nodes[n].state === 'trimmed'), TR));
+// the breaker
+await frames(3);
+const tsl = await trimAt('slot');
+check('the empty slot on the panel is a target', !!tsl, JSON.stringify(await G(() => __servicesTrim.targets())));
+await page.mouse.move(tsl.screen.x, tsl.screen.y); await frames(3);
+check('aiming at it says press a breaker in', /breaker into the panel/.test(await hint()), await hint());
+await page.mouse.down(); await page.mouse.up(); await frames(3);
+check('a click presses the breaker in; the main goes off', await G((ids) => __game.sim.state.sys.routes.nodes[ids.slot].state === 'trimmed' && __game.sim.state.sys.services.mains[ids.pnl] === false, TR));
+await page.waitForTimeout(1500);
+check('main off: the light is dark', (await G(() => __servicesTrim.lamps()))[0].glow === 0, JSON.stringify(await G(() => __servicesTrim.lamps())));
+const tm = await G(() => __servicesTrim.where('main'));
+await page.mouse.move(tm.screen.x, tm.screen.y); await frames(3);
+check('aiming at the main says drag it up', /Drag.*up/.test(await hint()), await hint());
+await page.mouse.down();
+for (let i = 1; i <= 5; i++) { await page.mouse.move(tm.screen.x, tm.screen.y - i * 6); await frames(1); }
+await page.mouse.up(); await frames(2);
+check('dragging the handle up throws the main', await G((ids) => __game.sim.state.sys.services.mains[ids.pnl] === true, TR));
+const lit = await until(() => __servicesTrim.lamps()[0].glow >= 1, null, 200);
+await shot('5-lit');
+check('the light comes on', lit, JSON.stringify(await G(() => ({ lamps: __servicesTrim.lamps(), light: __servicesTrim.light() }))));
+check('one pooled point light at it', (await G(() => __servicesTrim.light().intensity)) > 0);
+// the wall switch
+const ts = await trimAt('switch', TR.sw);
+await page.mouse.move(ts.screen.x, ts.screen.y); await frames(3);
+check('aiming at the switch says click', /switch: off/.test(await hint()), await hint());
+await page.mouse.down(); await page.mouse.up();
+check('clicking the switch puts the light out', await until(() => __servicesTrim.lamps()[0].glow === 0, null, 100));
+await page.mouse.down(); await page.mouse.up();
+check('and on again', await until(() => __servicesTrim.lamps()[0].glow >= 1, null, 200));
+// the tester
+const tt = await G(() => __servicesTrim.where('tester'));
+await page.mouse.move(tt.screen.x, tt.screen.y); await frames(3);
+check('aiming at the tester says hold', /Hold.*test/.test(await hint()), await hint());
+await page.mouse.down();
+await until(() => __servicesTrim.busy === 'test', null, 60);
+await page.mouse.up();
+await until(() => !__servicesTrim.busy, null, 200);
+check('the tester walks the circuit and passes: a green tag', await G((f) => { const c = __game.sim.state.sys.services.checks[f]; return !!(c && c.power && c.power.pass) && __servicesTrim.targets().tester[0].tag; }, TR.frame));
+// overload the outlet: the breaker trips, says why, and a click resets it
+await G((ids) => { const sim = __game.sim; sim.commandNow('electrical.setLoad', { id: 'smoke-heater', pieceId: 'sv:' + ids.boxA, ratedW: 4000, on: true }); sim.runTicks(30); }, TR);
+check('the breaker trips', await until(() => __servicesTrim.targets().breaker[0].tripped, null, 50));
+await G(() => __game.sim.commandNow('electrical.removeLoad', { id: 'smoke-heater' }));
+const tb = await G(() => __servicesTrim.where('breaker'));
+await page.mouse.move(tb.screen.x, tb.screen.y); await frames(3);
+check('hovering the tripped breaker names the cause', /Tripped.*drew \d+ A/.test(await hint()), await hint());
+await page.mouse.down(); await page.mouse.up(); await frames(3);
+check('a click resets it and the light comes back', await until(() => !__servicesTrim.targets().breaker[0].tripped && __servicesTrim.lamps()[0].glow >= 1, null, 200));
+check('the devices, plate and breaker came off the stacks; the books balance', await G((f) => { const s = __game.sim.state.sys.construction, pr = s.progress[f], u = (it) => Object.values(pr.lines).filter((l) => l.itemId === it).reduce((n, l) => n + l.used, 0); return u('elec_switch') === 1 && u('elec_plate_switch') === 1 && u('elec_light_ceiling') === 1 && u('elec_breaker_15') === 1 && Object.keys(__game.sim.systems.find((q) => q.name === 'construction').api.imbalance(s)).length === 0; }, TR.frame));
+await shot('6-trimmed');
 check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 await browser.close();
 console.log(fails.length ? fails.length + ' FAILED' : 'all ok');

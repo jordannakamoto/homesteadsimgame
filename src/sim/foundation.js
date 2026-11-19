@@ -32,6 +32,7 @@
 //         cover: null | 'plastic' | 'blanket', wetUntil: sim seconds | 0, stripped: 0 | 1 }
 // element = { id, kind, memberIds, w, botY, topY, volM3, dig, base, forms, rebar, bolts, pour, finish, cure }
 // events: 'foundation.gate' { jobId, gate } when a gate opens; 'foundation.cured' { jobId } when it is followed no more.
+import { kept } from './core/keep.js';
 import * as CU from './core/cure.js';
 import * as CC from './content/concrete.js';
 import * as EW from './core/earthwork.js';
@@ -126,7 +127,7 @@ function applyHolds(ctx, job, release = false) {
   if (!pr) return;
   const want = wantHolds(job), byReason = new Map();
   for (const st in want) {
-    const r = release ? null : want[st], have = (pr.hold && pr.hold[st]) || null;
+    const r = release ? null : want[st], have = (kept(pr, 'hold') || {})[st] || null;
     if (r === have) continue;
     if (!byReason.has(r)) byReason.set(r, []);
     byReason.get(r).push(st);

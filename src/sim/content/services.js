@@ -178,9 +178,21 @@ export const ITEMS_SERVICES = Object.freeze([
   { id: 'nail_plate', name: 'Steel nail plate', category: 'fasteners', unit: 'each', massKg: 0.03, priceUsd: 0.6, blurb: 'Over a hole near the face of a stud, so a drywall screw cannot reach the cable or pipe' },
   { id: 'crimp_ring_12', name: 'Copper crimp rings, 1/2 in', category: 'plumbing', unit: 'each', massKg: 0.004, priceUsd: 0.25, blurb: 'Squeezed over PEX on a fitting with the crimp tool' },
   { id: 'crimp_ring_20', name: 'Copper crimp rings, 20 mm', category: 'plumbing', unit: 'each', massKg: 0.006, priceUsd: 0.35, blurb: 'The same for 20 mm PEX' },
+  // trim-out (S9b): what goes into the boxes and the panel once the walls are finished
+  { id: 'elec_receptacle', name: 'Duplex outlet, 15 A', category: 'electrical', unit: 'each', massKg: 0.09, priceUsd: 1.8, blurb: 'Two sockets; the wires land on its screws, then it folds into the box' },
+  { id: 'elec_switch', name: 'Wall switch, single pole, 15 A', category: 'electrical', unit: 'each', massKg: 0.07, priceUsd: 1.6, blurb: 'Breaks the hot wire to the lights after it' },
+  { id: 'elec_light_ceiling', name: 'LED ceiling light, flush mount', category: 'electrical', unit: 'each', massKg: 0.6, priceUsd: 22, blurb: 'Screws to a ceiling box; about 800 lumens on 9 W' },
+  { id: 'elec_light_wall', name: 'LED wall light', category: 'electrical', unit: 'each', massKg: 0.45, priceUsd: 20, blurb: 'A sconce on a wall box' },
+  { id: 'elec_plate_outlet', name: 'Outlet cover plate', category: 'electrical', unit: 'each', massKg: 0.02, priceUsd: 0.6, blurb: 'Covers the box around an outlet' },
+  { id: 'elec_plate_switch', name: 'Switch cover plate', category: 'electrical', unit: 'each', massKg: 0.02, priceUsd: 0.6, blurb: 'Covers the box around a switch' },
+  { id: 'elec_breaker_15', name: 'Breaker, 15 A single pole', category: 'electrical', unit: 'each', massKg: 0.15, priceUsd: 9, blurb: 'Snaps onto the panel\'s bus bar; protects a 14/2 circuit' },
+  { id: 'elec_breaker_20', name: 'Breaker, 20 A single pole', category: 'electrical', unit: 'each', massKg: 0.15, priceUsd: 9, blurb: 'For a 12/2 circuit' },
+  { id: 'elec_breaker_30', name: 'Breaker, 30 A double pole', category: 'electrical', unit: 'each', massKg: 0.3, priceUsd: 16, blurb: 'For a 10/3 circuit: a dryer, a water heater' },
 ]);
+// the trim-out items: small, boxed, kept by the stacks (never carried one by one)
+export const TRIM_SUPPLY = Object.freeze(['elec_receptacle', 'elec_switch', 'elec_light_ceiling', 'elec_light_wall', 'elec_plate_outlet', 'elec_plate_switch', 'elec_breaker_15', 'elec_breaker_20', 'elec_breaker_30']);
 // used up by the stacks, never carried
-export const SERVICE_SUPPLY = Object.freeze(['cable_staple', 'pex_staple', 'nail_plate', 'crimp_ring_12', 'crimp_ring_20']);
+export const SERVICE_SUPPLY = Object.freeze(['cable_staple', 'pex_staple', 'nail_plate', 'crimp_ring_12', 'crimp_ring_20', ...TRIM_SUPPLY]);
 // what a run of each spec is bought as, and the ring that closes each end of it
 export const SPEC_ITEM = Object.freeze({ cable_nm_14_2: 'nm_cable_14_2', cable_nm_12_2: 'nm_cable_12_2', cable_nm_10_3: 'nm_cable_10_3', pex_12_blue: 'pex_coil_12_blue', pex_12_red: 'pex_coil_12_red', pex_20: 'pex_coil_20' });
 export const SPEC_RING = Object.freeze({ pex_12_blue: 'crimp_ring_12', pex_12_red: 'crimp_ring_12', pex_20: 'crimp_ring_20' });
@@ -205,7 +217,50 @@ export const SERVICE_LINES = Object.freeze({
   nail_plate: { label: 'Nail plates', why: 'Guard holes near the face of a stud from the screws of the wall boards.' },
   crimp_ring_12: { label: 'Crimp rings', why: 'One at each end of a PEX run.' },
   crimp_ring_20: { label: 'Crimp rings, 20 mm', why: 'One at each end of a 20 mm run.' },
+  elec_receptacle: { label: 'Outlets', why: 'One in each outlet box.' },
+  elec_switch: { label: 'Switches', why: 'One in each switch box.' },
+  elec_light_ceiling: { label: 'Ceiling lights', why: 'One on each ceiling box.' },
+  elec_light_wall: { label: 'Wall lights', why: 'One on each wall-light box.' },
+  elec_plate_outlet: { label: 'Outlet plates', why: 'Cover each outlet box.' },
+  elec_plate_switch: { label: 'Switch plates', why: 'Cover each switch box.' },
+  elec_breaker_15: { label: '15 A breakers', why: 'One in the panel for each 14/2 circuit.' },
+  elec_breaker_20: { label: '20 A breakers', why: 'One in the panel for each 12/2 circuit.' },
+  elec_breaker_30: { label: '30 A breakers', why: 'One in the panel for each 10/3 circuit.' },
 });
+
+// ------------------------------------------------------------------------------------------- trim-out (S9b)
+// A box at trim-out: strip each cable end, land its wires on the device (one drag each), fold the device into the box
+// and screw it, then the plate (a light: its shade). A panel slot: the breaker pressed onto the bus bar. What each takes:
+// the device at the first wire landed, the plate at the plate; the breaker as it goes in.
+export const DEVICE_ITEM = Object.freeze({
+  outlet_120v: { item: 'elec_receptacle', plate: 'elec_plate_outlet', fits: ['box'] },
+  switch_single: { item: 'elec_switch', plate: 'elec_plate_switch', fits: ['box'] },
+  light_wall: { item: 'elec_light_wall', fits: ['box'] },
+  light_ceiling: { item: 'elec_light_ceiling', fits: ['box_ceiling'] },
+});
+export const DEFAULT_DEVICE = Object.freeze({ box: 'outlet_120v', box_ceiling: 'light_ceiling' });
+// what a planned box was planned as (services-plan presets) -> the device it gets at trim-out
+export const PRESET_DEVICE = Object.freeze({ outlet: 'outlet_120v', counter: 'outlet_120v', switch: 'switch_single', light: 'light_ceiling' });
+export const BREAKER_ITEM = Object.freeze({ breaker_15a: 'elec_breaker_15', breaker_20a: 'elec_breaker_20', breaker_30a: 'elec_breaker_30' });
+// the steps in order; strip and land are one per cable end in the box, fold and plate one each, press one per slot
+export const TRIM_STEPS = Object.freeze({ box: ['strip', 'land', 'fold', 'plate'], box_ceiling: ['strip', 'land', 'fold', 'plate'], slot: ['press'] });
+export const TRIM_TEXT = Object.freeze({
+  steps: { strip: 'strip the cable ends', land: 'land the wires on the device', fold: 'fold it in and screw it', plate: 'put the plate on', press: 'press the breaker in' },
+  lightPlate: 'put the shade on',
+  notReady: { planned: 'Nail the box to the stud first.', runs: 'The cable to this box is not roughed in yet.', none: 'No cable comes to this box.', stray: 'What it was fixed to is gone.' },
+  faults: { bore: 'holes not drilled through to here', pull: 'cable not pulled through to here', join: 'cable not clamped in this box', box: 'box not fixed to the stud', loose: 'not joined to the panel: plan a run from the panel to it' },
+});
+const isLight = (dev) => dev === 'light_ceiling' || dev === 'light_wall';
+export const deviceIsLight = isLight;
+// what one step at a node takes: { [itemId]: qty }. done: the trim state before the step.
+export function trimCost(kind, dev, step, units, done = {}, breaker = null) {
+  const out = {}, d = DEVICE_ITEM[dev] || {};
+  if (!(units > 0)) return out;
+  if (step === 'land' && !(done.land > 0) && d.item) out[d.item] = 1;
+  if (step === 'plate' && d.plate) out[d.plate] = 1;
+  if (step === 'press' && breaker && BREAKER_ITEM[breaker]) out[BREAKER_ITEM[breaker]] = units;
+  return out;
+}
 
 // a path's running lengths, and how far along it the point nearest q is
 function cumOf(path) { const c = [0]; for (let i = 1; i < path.length; i++) c.push(c[i - 1] + Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1], path[i][2] - path[i - 1][2])); return c; }

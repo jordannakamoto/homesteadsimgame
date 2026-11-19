@@ -105,7 +105,7 @@ await step('old save', async () => {
 await step('reload and new world', async () => {
   await G(() => __game.saveGame()); await page.reload({ waitUntil: 'domcontentloaded', timeout: 180000 }); await boot(); await tick(10);
   const s = await S(); check('after the reload there is a stage hint and no stale glow', typeof s.hint === 'string' && (s.glow === '' || s.glow === undefined || s.ctx), 'hint=' + s.hint);
-  await page.click('#newworld'); await page.waitForTimeout(500); await boot().catch(() => {}); await tick(10);
+  await page.evaluate(() => document.getElementById('newworld').click()); await page.waitForTimeout(500); await boot().catch(() => {}); await tick(10);
   const n = await S();
   check('a new world has no ladder, no load, nothing climbing, no glow', !n.ladder && !n.carried && !n.climbing && n.climbY == null && !n.glow, JSON.stringify({ l: n.ladder, c: n.carried, g: n.glow }));
   check('and the construction card is back to the first shed', await G(() => __game.sim.state.sys.stock.projects.some((p) => p.id === 'first-shed')));
