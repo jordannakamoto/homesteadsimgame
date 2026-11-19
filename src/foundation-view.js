@@ -269,18 +269,20 @@
 
   /* ================= the bar ================= */
   const css = document.createElement('style');
-  css.textContent = '#fbar{position:fixed;bottom:92px;left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100vw - 20px);display:flex;flex-direction:column;gap:6px;padding:8px 10px;z-index:6}#fbar[hidden]{display:none}' +
-    '#fbar .gtools{display:flex;gap:6px;justify-content:center}#fbar .hslot{position:relative;display:flex;flex-direction:column;align-items:center;gap:1px;width:70px;padding:7px 2px 6px;border-radius:12px;background:rgba(255,248,228,.06);border-width:2px;transition:transform .12s}' +
-    '#fbar .hslot svg{width:36px;height:36px}#fbar .hslot .nm{font-family:var(--font-display);font-size:14px;white-space:nowrap}#fbar .hslot .key{position:absolute;left:5px;top:3px;font-size:11px;font-weight:700;color:var(--ink-dim)}' +
-    '#fbar .hslot .bdg{position:absolute;right:4px;top:3px;font-size:10px;color:var(--ink-dim)}#fbar .hslot.dim svg,#fbar .hslot.dim .nm{opacity:.45}#fbar .hslot[aria-pressed="true"]{border-color:var(--accent);background:rgba(226,182,90,.22);transform:translateY(-5px) scale(1.06)}' +
-    '#fbar .hslot .mtr{display:block;width:46px;height:5px;border-radius:3px;background:rgba(255,255,255,.12);overflow:hidden}#fbar .hslot .mtr i{display:block;height:100%;background:linear-gradient(90deg,#e0a020,#ffd23a)}' +
-    '#fbar .ghint{text-align:center;font-size:15px;color:var(--ink);min-height:20px;max-width:640px;margin:0 auto;line-height:1.35}#fbar .ghint b{color:var(--accent)}';
+  css.textContent = '#fbar .hslot .mtr>i{background:var(--warn)}';   // the slots' look is shared (template/ui/10-kit.css, 30-hotbar.css)
   document.head.appendChild(css);
   const bar = document.createElement('div');
   bar.id = 'fbar'; bar.className = 'panel'; bar.hidden = true; bar.setAttribute('role', 'group'); bar.setAttribute('aria-label', 'Site');
   bar.innerHTML = '<div class="ghint" aria-live="polite"></div><div class="gtools"></div>';
   document.body.appendChild(bar);
   const hintEl = bar.querySelector('.ghint'), toolsEl = bar.querySelector('.gtools');
+  // the bar sits in the bottom lane beside the mode chip; its hint stacks above it in the prompt place (template/ui/30-hotbar.css)
+  if (window.__ui) {
+    const ctx = document.createElement('div'); ctx.className = 'gctx'; ctx.append(hintEl); bar.insertBefore(ctx, toolsEl);
+    toolsEl.classList.add('panel'); hintEl.classList.add('panel'); bar.classList.remove('panel');
+    window.__ui.mount(bar, 'bottom', { order: 2 });
+    new ResizeObserver(() => document.body.style.setProperty('--fbar-ctx', ctx.offsetHeight + 'px')).observe(ctx);
+  }
   // a button on the tool strip, beside the Yard
   const tb = $('tools'), yardBtn = tb && tb.querySelector('[data-tool="hands"]');
   if (tb) {
@@ -294,8 +296,8 @@
   const say = (m, secs = 4) => { if (!m) return; sayMsg = m; sayT = secs; hintEl.innerHTML = m; };
   const I = (p) => '<svg viewBox="0 0 36 36" fill="none" stroke-linecap="round" stroke-linejoin="round">' + p + '</svg>';
   const ICONS = {
-    kit: I('<path d="M7 30V12M29 30V12" stroke="#c8a36a" stroke-width="3"/><path d="M4 13h28" stroke="#c8a36a" stroke-width="3"/><path d="M7 16L29 16" stroke="#ff4fa3" stroke-width="1.6"/><path d="M15 9l6-5 2 2-6 5z" fill="#9aa4ab"/><path d="M18 8l-4 4" stroke="#8a6a40" stroke-width="2"/>'),
-    shovel: I('<path d="M27 5l-9 17" stroke="#d8b585" stroke-width="2.6"/><path d="M24 4l6 3" stroke="#3a3a3a" stroke-width="3"/><path d="M15 20l7 4-3 9c-1 2-4 2-6 1s-3-3-2-5z" fill="#9aa4ab" stroke="#cfd6dc"/><path d="M6 34c4-3 9-3 14-1" stroke="#ffb020" stroke-width="2"/>'),
+    kit: I('<path d="M7 30V12M29 30V12" stroke="var(--ic-wood)" stroke-width="3"/><path d="M4 13h28" stroke="var(--ic-wood)" stroke-width="3"/><path d="M7 16L29 16" stroke="var(--ic-warn)" stroke-width="1.6"/><path d="M15 9l6-5 2 2-6 5z" fill="var(--ic-steel)"/><path d="M18 8l-4 4" stroke="var(--ic-wood)" stroke-width="2"/>'),
+    shovel: I('<path d="M27 5l-9 17" stroke="var(--ic-wood)" stroke-width="2.6"/><path d="M24 4l6 3" stroke="var(--ic-steel)" stroke-width="3"/><path d="M15 20l7 4-3 9c-1 2-4 2-6 1s-3-3-2-5z" fill="var(--ic-steel)" stroke="var(--ic-outline)"/><path d="M6 34c4-3 9-3 14-1" stroke="var(--ic-warn)" stroke-width="2"/>'),
   };
 
   /* ================= the layout kit: a hammer and a bundle of stakes ================= */

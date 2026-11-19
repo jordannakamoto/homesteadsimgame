@@ -10,6 +10,7 @@
     $ = (id) => document.getElementById(id),
     canvas = $("view"),
     clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const peaceful = document.body.classList.contains("peaceful"); // combat off: the bow button is the view button
   let on = false,
     rx = 0,
     ry = 0;
@@ -21,7 +22,7 @@
     '<div class="stick" id="tsl" role="group" aria-label="Move"><div class="nub"></div></div>' +
     '<div class="stick" id="tsr" role="group" aria-label="Turn the view"><div class="nub"></div></div>' +
     '<div id="tact" role="group" aria-label="Actions">' +
-    '<button type="button" id="tbow">Bow</button><button type="button" id="tkick">Kick</button><button type="button" id="tparry">Parry</button>' +
+    '<button type="button" id="tbow">' + (peaceful ? "Look" : "Bow") + '</button><button type="button" id="tkick">Kick</button><button type="button" id="tparry">Parry</button>' +
     '<button type="button" id="tdash">Dash</button><button type="button" id="tjump">Jump</button><button type="button" id="troll">Roll</button>' +
     "</div>" +
     '<button type="button" id="tatk">Attack</button>';
@@ -141,7 +142,7 @@
       setTimeout(() => (K.AltLeft = false), 140);
     },
   );
-  hold($("tbow"), () => (M.right = !M.right));
+  hold($("tbow"), () => (peaceful && G.camView ? G.camView("next") : (M.right = !M.right)));
 
   /* ---------- touches on the view, outside build mode ---------- */
   // Dragging turns the camera. With a terrain tool in hand, a touch works the ground there instead.
@@ -181,7 +182,7 @@
       q.x = e.clientX;
       q.y = e.clientY;
       c.yaw -= dx * 0.0062;
-      if (c.aimK > 0.5) c.aimPitch = clamp(c.aimPitch + dy * 0.004, -0.28, 0.9);
+      if (c.aimK > 0.5) c.aimPitch = clamp(c.aimPitch + dy * 0.004, c.aimLo ?? -0.28, c.aimHi ?? 0.9);
       else c.pitch = clamp(c.pitch + dy * 0.004, 0.5, 1.35);
     },
     true,
@@ -215,7 +216,7 @@
         }
       } else {
         c.yaw -= rx * 2.9 * dt;
-        if (c.aimK > 0.5) c.aimPitch = clamp(c.aimPitch + ry * 1.1 * dt, -0.28, 0.9);
+        if (c.aimK > 0.5) c.aimPitch = clamp(c.aimPitch + ry * 1.1 * dt, c.aimLo ?? -0.28, c.aimHi ?? 0.9);
         else c.pitch = clamp(c.pitch + ry * 0.9 * dt, 0.5, 1.35);
       }
       M.inside = false;
@@ -230,7 +231,7 @@
         const bar = B.on ? $("buildbar") : $("tools"),
           r = bar.getBoundingClientRect();
         ui.style.setProperty("--lift", Math.max(8, window.innerHeight - r.top + 8) + "px");
-        $("tbow").classList.toggle("lit", !!M.right);
+        $("tbow").classList.toggle("lit", peaceful ? !!c.view : !!M.right);
         $("tatk").textContent = M.right ? "Loose" : "Attack";
       }
     }
