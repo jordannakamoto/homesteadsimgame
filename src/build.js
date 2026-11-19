@@ -3153,7 +3153,7 @@
     for (const o of S.fopen) {
       if (!st.all && S.plan.has(o.f.id)) continue;
       const parts = [];
-      unitGeo(null, fF(o.f), o.sp, !!o.f.flip, parts, o.f.out || 1);
+      unitGeo(null, fF(o.f), o.sp, !!o.f.flip, parts, o.f.oside || 1);
       for (const p of parts) {
         const mesh = new T.Mesh(p.geo.build(), S.wallMat);
         mesh.castShadow = mesh.receiveShadow = true;
@@ -3374,7 +3374,7 @@
     // the units of free openings that stand
     for (const f of D.free || []) {
       const sp = f.built === false ? null : OP.freeSpec(f);
-      sp && unitGeo(g, fF(f), sp, !!f.flip, f.ghost ? "all" : "static", f.out || 1);
+      sp && unitGeo(g, fF(f), sp, !!f.flip, f.ghost ? "all" : "static", f.oside || 1);
     }
     for (const [k, ds] of verts) {
       const [i, j] = parse(k);
@@ -4631,6 +4631,7 @@
       if (!run) {
         op.marker = [vtx.i, vtx.j];
         op.note = hit && hit.kind === "ring" ? "Round walls take the rustic styles" : "Doors and windows go in walls";
+        if (hit && hit.kind === "ring") op.ofit = { ok: false, text: op.note, fixes: [{ label: "Show rustic", rustic: true }] };
         return finishOp(op);
       }
       F = S = hit.S;
@@ -4658,8 +4659,8 @@
         // the window follows the pointer up and down too: centred on it, pulled to its usual sill, kept inside the wall
         base = mine ? mine.sill : f0.sill,
         py = door ? null : hit.y !== undefined ? hit.y : wp ? wp.y : null,
-        loS = 0.1,
-        hiS = Hh - 0.19 - spec.h - OP.ROUGH_GAP;
+        loS = OP.MIN_SILL,
+        hiS = Math.max(loS, Hh - OP.TOP_PLATE - spec.h - OP.ROUGH_GAP);
       let want = base,
         vsnap = "";
       if (py !== undefined && py !== null && (!mine || d)) {
@@ -4667,26 +4668,31 @@
         want = !snapping ? Math.round(c * 100) / 100 : Math.abs(c - base) < 0.18 ? base : Math.round(c * 20) / 20;
         if (snapping && want === base && Math.abs(c - base) > 0.01) vsnap = mine ? "Same height as before" : "Usual sill height";
       }
-      const sn = OP.snapFree({ L, at: along - ax.t0, w: spec.w, h: spec.h, sill: Math.max(loS, Math.min(hiS, want)), others: runOthers(S, run, mine && mine.id), snap: snapping }),
-        f = { id: mine ? mine.id : null, typeId: mine ? mine.typeId : B.otype, sizeIdx: mine ? mine.sizeIdx : B.osize, ...ax.at(ax.t0 + sn.offset), sill: door ? 0 : Math.round(Math.max(loS, Math.min(hiS, sn.sill)) * 1000) / 1000, flip: mine ? !!mine.flip : B.oflip, ...(mine ? keepDesign(mine) : { ...designOf(), ...nextDesign() }) },
-        sp = OP.freeSpec(f);
-      f.out = freeOut(S, f, sp.w);
-      let ok = sn.ok,
-        why = sn.reason;
+      const Wl = wallOf(S, run, mine && mine.id),
+        sn = OP.snapFree({ L, at: along - ax.t0, w: spec.w, h: spec.h, sill: Math.max(loS, Math.min(hiS, want)), others: Wl.others, snap: snapping }),
+        f0p = { id: mine ? mine.id : null, typeId: mine ? mine.typeId : B.otype, sizeIdx: mine ? mine.sizeIdx : B.osize, ...ax.at(ax.t0 + sn.offset), sill: door ? 0 : Math.round(Math.max(loS, Math.min(hiS, sn.sill)) * 1000) / 1000, flip: mine ? !!mine.flip : B.oflip, ...((mine ? mine.out : B.oout) ? { out: true } : {}), ...(mine ? keepDesign(mine) : { ...designOf(), ...nextDesign() }) },
+        // nothing is refused silently: a unit that does not fit comes down, slides along, or is made smaller, and says so
+        fp = fitPlace(Wl, f0p),
+        f = fp.f,
+        sp = fp.sp;
+      f.oside = freeOut(S, f, sp.w);
+      let ok = fp.ok,
+        why = fp.why;
       const a = f.pos - OP.ROUGH_GAP,
         b = f.pos + sp.w + OP.ROUGH_GAP;
       if (ok && run.cls !== "wall") ((ok = false), (why = "Needs a plain wall"));
       if (ok && (run.free ? run.mods.some((q) => q.s + q.len > a + 1e-6 && q.s < b - 1e-6 && q.type !== "wall") : run.m.some((e) => e.t + 1 > a && e.t < b && e.type !== "wall"))) ((ok = false), (why = "A rustic door or window is in the way"));
-      if (ok && sp.rough.sill + sp.rough.height + 0.19 > Hh + 1e-6) ((ok = false), (why = (door ? "This door" : "This window") + " is " + fmtM(sp.h) + " tall; this wall takes up to " + fmtM(Math.max(0, Hh - 0.19 - (door ? 0.02 + 2 * OP.ROUGH_GAP : loS + OP.ROUGH_GAP)) ) + ". Make it shorter in the designer"));
       op.label = sp.type.name + " " + fmtM(sp.w) + " × " + fmtM(sp.h) + (door ? "" : " · sill " + fmtM(sp.sill));
       if (mine) op.delFree.push(mine.id);
       op.addFree.push(f);
-      const notes = [sn.snap, sn.headLine ? "Head in line with its neighbour" : vsnap];
-      if (!door && hiS >= loS && (want > hiS + 0.02 || want < loS - 0.02)) notes.push(want > hiS ? "Up against the top plate" : "Down at the floor");
+      op.ofit = fitLine(fp);
+      op.owall = Wl;
+      const notes = [fp.done.length ? fp.done.join(", ").replace(/^./, (c) => c.toUpperCase()) : "", sn.snap, sn.headLine ? "Head in line with its neighbour" : vsnap];
+      if (!door && !fp.done.length && (want > hiS + 0.02 || want < loS - 0.02)) notes.push(want > hiS ? "Up against the top plate" : "Down at the floor");
       if (notes.some(Boolean)) op.note = notes.filter(Boolean).join(" · ");
       if (!run.free && sn.guides.some((q) => q.y !== undefined)) op.hline = { d: run.d, line: run.line, a: run.t0, b: run.t1, y: sn.guides.find((q) => q.y !== undefined).y };
       for (const q of sn.guides) {
-        if (q.x === undefined) continue;
+        if (q.x === undefined || fp.slid) continue;
         const p0 = P3(ax.F0, ax.t0 + q.x, 0, -0.7),
           p1 = P3(ax.F0, ax.t0 + q.x, 0, 0.7);
         op.guides.push([p0[0], p0[2], p1[0], p1[2]]);
@@ -4694,9 +4700,9 @@
       // live sizes on the ghost: its gaps to what is either side, and its sill
       const gaps = gapsBeside(S, run, f, sp);
       for (const q of gaps) op.dims.push(q);
-      if (mine && Math.abs(mine.pos - f.pos) < 1e-6 && Math.abs(mine.sill - f.sill) < 1e-6 && mine.d === f.d && mine.line === f.line && mine.gx === f.gx && mine.gz === f.gz) ((op.addFree.length = op.delFree.length = 0), (op.idle = true), (op.valid = false), (op.note = ""));
+      if (mine && Math.abs(mine.pos - f.pos) < 1e-6 && Math.abs(mine.sill - f.sill) < 1e-6 && (mine.w || 0) === (f.w || 0) && (mine.h || 0) === (f.h || 0) && mine.d === f.d && mine.line === f.line && mine.gx === f.gx && mine.gz === f.gz) ((op.addFree.length = op.delFree.length = 0), (op.idle = true), (op.valid = false), (op.note = ""), (op.ofit = null));
       finishOp(op);
-      if (!ok) ((op.valid = false), (op.reason = why), (op.idle = false));
+      if (!ok) ((op.valid = false), (op.reason = why), (op.idle = false), op.ofit && op.ofit.ok && (op.ofit = { ok: false, text: why, fixes: [] }));
       return op;
     }
     if (t === "door" || t === "window") {
@@ -5172,7 +5178,7 @@
     if (op.delFree.length) S.free = S.free.filter((f) => !op.delFree.includes(f.id));
     if (op.moveFree) for (const f of S.free) if (f.d === op.moveFree.d && f.line === op.moveFree.from && f.pos >= op.moveFree.t0 - 1e-6 && f.pos <= op.moveFree.t1 + 1e-6) f.line = op.moveFree.to;
     for (const f of op.addFree) {
-      const { out, ...rest } = f;
+      const { oside, ...rest } = f;
       S.free.push(rest);
     }
     for (const idx of [...op.delRoofs].sort((a, b) => b - a)) {
@@ -6858,7 +6864,7 @@
     Dl.pillars = S ? op.delPillars.map((idx) => S.pillars[idx]) : [];
     Dl.paths = S ? op.delPaths.map((idx) => S.paths[idx]) : [];
     Dl.decor = S ? op.delDecor.map((idx) => S.decor[idx]) : [];
-    Dl.free = S ? S.free.filter((f) => op.delFree.includes(f.id)).map((f) => ({ ...f, out: f.out, built: true, ghost: true })) : [];
+    Dl.free = S ? S.free.filter((f) => op.delFree.includes(f.id)).map((f) => ({ ...f, oside: f.oside, built: true, ghost: true })) : [];
     Dl.base = S;
     Dl.frame = F;
     Dl.hs = S ? S.hs : 1;
@@ -7095,6 +7101,8 @@
     const end = op.end,
       a = d && d.a;
     drawOp(op, op.F, d);
+    // a new door or window placed: its design goes to the front of the tool's Recent cards
+    if (freeTool() && op.addFree.length && !op.delFree.length) recentAdd(op.addFree[0]);
     const S = applyOp(op);
     settleFx();
     typedClear();
@@ -7897,9 +7905,9 @@
     stairs: ["turn"],
     pillar: ["pkind", "wmat", "gap", "paint", "pick"],
     path: ["pwidth", "pmat", "paint", "pick"],
-    // until the door and window rules (P5) sort their own: the catalogue in the tray, the rest in the designer
-    door: ["otype", "gap", "paint", "pick"],
-    window: ["otype", "gap", "paint", "pick"],
+    // Door and Window: Recent and the catalogue's family groups in the tray (rustic: gap and Pick); the designer is the inspector
+    door: ["o:recent", "otype", "gap", "pick"],
+    window: ["o:recent", "otype", "gap", "pick"],
   };
   TRAY.tower = TRAY.room;
   const SEC_OF = { hs: "Level", lift: "Level", wing: "Level", tshape: "On a round room", "s:hs": "Level", "s:levels": "Level", "s:width": "Size", "s:x": "Position", "s:z": "Position", "rbadges": "Pitch", "s:rbadges": "Pitch", "w:prev": "Size", roofs: "View" };
@@ -8084,7 +8092,8 @@
       { ...P(sp.w / 2, y0 + sp.h + 0.18), field: "a", val: lw, unit: "m wide" },
       { ...P(sp.w + 0.05, y0 + sp.h / 2), field: "b", val: lh, unit: "m high" },
     ];
-    if (run)
+    // the gaps beside it and its sill only while an edge is being dragged (the exact place is in the designer)
+    if (run && B.ores)
       for (const g of gapsBeside(S, run, f, sp)) {
         const [x, z] = toWorld(S, g.lx, g.lz);
         out.push({ x, y: S.y0 + g.y, z, text: g.text });
@@ -8239,102 +8248,346 @@
     if (o.look && Object.keys(o.look).length) out.look = { ...o.look };
     return out;
   }
-  const MODERN_W = new Set(["full_panel", "window_wall", "slot", "ribbon", "tilt_turn"]);
   const finHex = (k) => "#" + OP.FINISHES[k].hex.toString(16).padStart(6, "0");
   const money = (v) => "$" + Math.round(v).toLocaleString("en-US");
+  // ---- the fit rule (plan-mode-redesign 3.3): nothing is refused silently. A unit that does not fit its wall is put
+  // as near as it will go: a window's sill comes down (to 0.10 m), the unit slides along the wall, and only then is it
+  // made smaller. The fit line says what was done and offers the other choices (OP.fitReport's fixes).
+  const r3 = (v) => Math.round(v * 1000) / 1000,
+    ofl = (v) => Math.floor(v * 100 + 1e-6) / 100;
+  // a designed door's sidelights and transom: how much wider and taller the whole unit is than its leaf
+  const extOf = (sp) => ({ ew: sp.leaf ? r3(sp.w - (sp.leaf.b - sp.leaf.a)) : 0, eh: sp.leaf ? r3(sp.h - sp.leaf.h) : 0 }),
+    leafOf = (sp) => [sp.leaf ? sp.leaf.b - sp.leaf.a : sp.w, sp.leaf ? sp.leaf.h : sp.h];
+  // the type as the fit report sees it: a designed door's made sizes grow by its sidelights and transom
+  function fitType(sp) {
+    const { ew, eh } = extOf(sp),
+      r = sp.type.range;
+    return ew || eh ? { ...sp.type, range: { w: [r.w[0] + ew, r.w[1] + ew], h: [r.h[0] + eh, r.h[1] + eh] } } : sp.type;
+  }
+  // a wall run as the fit rule sees it: its length, height, where it starts, and the rough extents of what else is in it
+  function wallOf(S, run, skipId) {
+    const ax = runAx(S, run);
+    return { L: ax.t1 - ax.t0, H: EAVE * S.hs, t0: ax.t0, others: runOthers(S, run, skipId) };
+  }
+  // the wall the designer draws on when no wall is in play: 4 m long, at the ceiling height in hand
+  const wallNone = () => ({ L: 4, H: EAVE * B.hs, t0: 0, others: [], none: true });
+  function fitOf(W, f) {
+    const sp = OP.freeSpec(f),
+      at = f.pos - W.t0 + sp.w / 2;
+    return { sp, at, rep: OP.fitReport({ type: fitType(sp), w: sp.w, h: sp.h, sill: sp.sill, at, L: W.L, wallH: W.H, others: W.others }) };
+  }
+  // the clear stretches of a run where a rough opening may stand, [a, b] along it
+  function gapsOf(W) {
+    const os = W.others.slice().sort((p, q) => p.a - q.a),
+      out = [];
+    let a = OP.END_GAP;
+    for (const q of os) {
+      q.a - OP.OPEN_GAP > a + 1e-9 && out.push([a, q.a - OP.OPEN_GAP]);
+      a = Math.max(a, q.b + OP.OPEN_GAP);
+    }
+    W.L - OP.END_GAP > a + 1e-9 && out.push([a, W.L - OP.END_GAP]);
+    return out;
+  }
+  // the nearest place along the run where a unit w wide fits, as its left edge (relative to the run), or null
+  function slideTo(W, w, at) {
+    const rw = w + 2 * OP.ROUGH_GAP;
+    let best = null;
+    for (const [a, b] of gapsOf(W)) {
+      if (b - a < rw - 1e-9) continue;
+      const lo = a + rw / 2,
+        hi = b - rw / 2,
+        c = clamp(at, lo, hi);
+      // rounded to the millimetre, inward
+      const pos = c === lo ? Math.ceil((c - w / 2) * 1000 - 1e-6) / 1000 : c === hi ? Math.floor((c - w / 2) * 1000 + 1e-6) / 1000 : c - w / 2;
+      if (best === null || Math.abs(c - at) < Math.abs(best.c - at)) best = { c, pos };
+    }
+    return best;
+  }
+  // the clear stretch the unit stands in (or the nearest), [a, b]
+  function gapAround(W, at) {
+    let best = null,
+      bd = 1e9;
+    for (const g of gapsOf(W)) {
+      const dd = at < g[0] ? g[0] - at : at > g[1] ? at - g[1] : 0;
+      if (dd < bd) ((bd = dd), (best = g));
+    }
+    return best;
+  }
+  const ISSUE = { tall: (by) => fmt(by) + " m too tall for this wall", wide: (by) => fmt(by) + " m too wide for this wall", end: () => "Too close to the end of the wall", overlap: () => "Overlaps the opening beside it", range: () => "Outside the sizes it is made in" };
+  // put record f0 on wall W as near as it will go. Returns { ok, f, sp, done: [what was changed], slid, rep, asked, why }
+  function fitPlace(W, f0) {
+    const f = { ...f0 },
+      done = [];
+    let { sp, at, rep } = fitOf(W, f);
+    const asked = { f: f0, at, rep, W },
+      t = sp.type,
+      door = t.kind === "door",
+      { ew, eh } = extOf(sp),
+      has = (c) => rep.issues.some((i) => i.code === c),
+      again = () => ({ sp, at, rep } = fitOf(W, f));
+    let slid = false;
+    const slide = () => {
+      if (rep.ok || !(has("end") || has("overlap"))) return;
+      const c = slideTo(W, sp.w, at);
+      if (!c) return;
+      const dd = c.c - at;
+      f.pos = W.t0 + c.pos;
+      Math.abs(dd) > 0.005 && !slid && done.push("slid " + fmt(Math.abs(dd)) + " m " + (dd < 0 ? "left" : "right"));
+      slid = true;
+      again();
+    };
+    // 1. too tall: a window's sill comes down first
+    if (!rep.ok && has("tall") && !door) {
+      const s = Math.max(OP.MIN_SILL, ofl(W.H - OP.TOP_PLATE - OP.ROUGH_GAP - sp.h));
+      if (s < sp.sill - 1e-6) ((f.sill = s), done.push("sill down to " + fmt(s) + " m"), again());
+    }
+    // 2. too near an end or a neighbour: it slides along the wall
+    slide();
+    // 3. then it is made smaller: shorter under the top plate, narrower in the stretch it stands in
+    if (!rep.ok && has("tall")) {
+      const top = ofl(W.H - OP.TOP_PLATE - OP.ROUGH_GAP - (door ? 2 * OP.FLOOR_GAP : sp.sill)),
+        lh = r3(top - eh);
+      if (lh >= t.range.h[0] - 1e-6) ((f.w = leafOf(sp)[0]), (f.h = lh), done.push("cut to " + fmt(top) + " m high"), again(), slide());
+    }
+    if (!rep.ok && (has("wide") || has("end") || has("overlap"))) {
+      const gp = gapAround(W, at),
+        uw = gp ? Math.min(sp.w, ofl(gp[1] - gp[0] - 2 * OP.ROUGH_GAP - 0.002)) : 0,
+        lw = r3(uw - ew);
+      if (gp && lw >= t.range.w[0] - 1e-6) ((f.w = lw), (f.h = leafOf(sp)[1]), (f.pos = r3(W.t0 + (gp[0] + gp[1]) / 2 - uw / 2)), done.push("narrowed to " + fmt(uw) + " m"), again());
+    }
+    const i0 = rep.issues[0];
+    return { ok: rep.ok, f, sp, done, slid, rep, asked, why: rep.ok ? "" : ISSUE[i0.code](i0.by) };
+  }
+  // record f with a fit fix's patch ({ w, h, sill, at } of the whole unit) applied, on wall W; at0 is f's centre
+  function patchRec(f, patch, W, at0) {
+    const g = { ...f },
+      sp = OP.freeSpec(f),
+      { ew, eh } = extOf(sp);
+    if (f.look) g.look = { ...f.look };
+    if (patch.w !== undefined || patch.h !== undefined) ((g.w = r3((patch.w !== undefined ? patch.w : sp.w) - ew)), (g.h = r3((patch.h !== undefined ? patch.h : sp.h) - eh)));
+    if (patch.sill !== undefined) g.sill = patch.sill;
+    g.pos = W.t0 + (patch.at !== undefined ? patch.at : at0) - (patch.w !== undefined ? patch.w : sp.w) / 2;
+    return g;
+  }
+  const sameFit = (a, b) => {
+    const p = OP.freeSpec(a),
+      q = OP.freeSpec(b);
+    return Math.abs(a.pos - b.pos) < 1e-3 && Math.abs(p.sill - q.sill) < 1e-3 && Math.abs(p.w - q.w) < 1e-3 && Math.abs(p.h - q.h) < 1e-3;
+  };
+  // the fit line: one row. Fits: "Fits · store size · $235"; put right: what was done; does not fit: what is wrong.
+  // fixes are the other choices: [{ label, rec }] where rec is the whole record the choice gives
+  function fitLine(fp) {
+    const sp = fp.sp,
+      A = fp.asked,
+      fixes = [];
+    for (const x of A.rep.fixes) {
+      const g = patchRec(A.f, x.patch, A.W, A.at);
+      sameFit(g, fp.f) || fixes.push({ label: x.label, code: x.code, rec: g });
+    }
+    if (!fp.ok) return { ok: false, text: fp.why, fixes };
+    const it = OP.openingItem(sp.type, sp.w, sp.h),
+      good = "Fits · " + (it && it.madeToOrder ? "made to order" : "store size") + (it ? " · " + money(it.priceUsd) : "");
+    if (!fp.done.length) return { ok: true, text: good, fixes: [] };
+    const what = fp.done.join(", ");
+    return { ok: true, adjusted: true, text: (A.W.none ? "On a " + fmt(A.W.H) + " m wall: " : "Fits: ") + what, fixes };
+  }
+  // ---- the height anchor (sill, head or centre): which line stays put when the height changes. Kept for the session,
+  // per unit; a window whose head is in line with a neighbour's or with a door head starts anchored to the head.
+  const ANCHORS = { sill: "Sill", head: "Head", centre: "Centre" };
+  function anchorNow(q) {
+    if (!q) return B.oancNext || "sill";
+    const set = B.oanc && B.oanc.get(q.f.id);
+    if (set) return set;
+    if (q.sp.type.kind === "door") return "sill";
+    const head = q.sp.head,
+      os = q.g ? runOthers(q.S, q.g, q.f.id) : [];
+    return Math.abs(head - 2.03) < 0.15 || os.some((o) => o.sill > 0.1 && Math.abs(o.head - head) < 0.15) ? "head" : "sill";
+  }
+  const SILL_SETS = [
+    { k: "standard", name: "Standard", anchor: "sill", y: 0.9 },
+    { k: "counter", name: "Counter", anchor: "sill", y: 1.07 },
+    { k: "low", name: "Low", anchor: "sill", y: 0.45 },
+    { k: "high", name: "High", anchor: "sill", y: 1.5 },
+    { k: "floor", name: "Floor", anchor: "sill", y: 0.1 },
+    { k: "doorhead", name: "Door head", anchor: "head", y: 2.03 },
+  ];
+  // the record the Window or Door tool would place next, at the middle of wall W
+  function nextRec(W) {
+    const f = { id: null, typeId: B.otype, sizeIdx: B.osize, sill: OP.sillFor(B.otype, B.osill), flip: !!B.oflip, ...(B.oout ? { out: true } : {}), ...designOf(), ...nextDesign() },
+      sp = OP.freeSpec(f);
+    f.pos = W.t0 + W.L / 2 - sp.w / 2;
+    return f;
+  }
+  // which ways a door can be hung, for the Opens row: [{ v: { flip, out }, name }]
+  function handItems(rec) {
+    const P = window.__openingPreview,
+      list = P && P.hands ? P.hands(rec) : [{ flip: false, out: false, label: "Hinge left, opens in" }, { flip: true, out: false, label: "Hinge right, opens in" }, { flip: false, out: true, label: "Hinge left, opens out" }, { flip: true, out: true, label: "Hinge right, opens out" }];
+    return list.map((x) => ({ v: { flip: x.flip, out: x.out }, name: x.label }));
+  }
+  // ---- recent designs: the last four placed with each tool (type, size, look, finish), in localStorage
+  const RECENT_KEY = (kind) => "build:od:recent:" + kind;
+  function recents(kind) {
+    try {
+      const l = JSON.parse(localStorage.getItem(RECENT_KEY(kind)) || "[]");
+      return Array.isArray(l) ? l.filter((d) => d && OP.openingType(d.typeId) && OP.openingType(d.typeId).kind === kind) : [];
+    } catch {
+      return [];
+    }
+  }
+  function recentAdd(f) {
+    const t = OP.openingType(f.typeId);
+    if (!t) return;
+    const d = { typeId: f.typeId, sizeIdx: f.sizeIdx | 0 };
+    if (f.w > 0 && f.h > 0) ((d.w = f.w), (d.h = f.h));
+    if (f.look && Object.keys(f.look).length) d.look = f.look;
+    if (f.finish) d.finish = f.finish;
+    if (t.kind === "window") d.sill = f.sill;
+    if (f.out) d.out = true;
+    const key = JSON.stringify(d),
+      list = [d, ...recents(t.kind).filter((x) => JSON.stringify(x) !== key)].slice(0, 4);
+    try {
+      localStorage.setItem(RECENT_KEY(t.kind), JSON.stringify(list));
+    } catch {}
+  }
+  function recentUse(n) {
+    const kind = B.tool === "window" ? "window" : "door",
+      d = recents(kind)[n];
+    if (!d) return;
+    if (kind === "window") ((B.owin = d.typeId), (B.wleg = false));
+    else ((B.odoor = d.typeId), (B.dleg = false));
+    if (B.fsel && fselOpen())
+      return designSet((f) => {
+        for (const k of ["w", "h", "look", "finish"]) delete f[k];
+        Object.assign(f, JSON.parse(JSON.stringify(d)));
+        if (!d.out) delete f.out;
+        if (kind === "door") f.sill = 0;
+      });
+    B.otype = d.typeId;
+    B.osize = Math.min(d.sizeIdx | 0, OP.openingSizes(d.typeId).length - 1);
+    B.osill = kind === "window" && typeof d.sill === "number" ? d.sill : "auto";
+    B.oout = !!d.out;
+    if (kind === "window") B.od = { w: d.w || null, h: d.h || null, finish: d.finish || null, look: d.look ? JSON.parse(JSON.stringify(d.look)) : {} };
+    else ((B.od = { w: d.w || null, h: d.h || null, finish: null, look: {} }), (B.dlook = d.look ? { ...d.look } : {}), (B.dfin = d.finish || null));
+  }
+  // ---- the Window and Door tools in view(): the catalogue in the tray (Recent, then one group per family), and the
+  // designer in the inspector: the stage, then Size & place, Style and Finish. view().fit is the fit line.
   function openingView(g) {
     const win = B.tool === "window",
+      kind = win ? "window" : "door",
       leg = win ? B.wleg : B.dleg,
       sel = !leg && B.fsel ? fselOpen() : null,
       typeId = sel ? sel.f.typeId : B.otype,
-      t = OP.openingType(typeId),
-      kinds = OP.OPENING_TYPES.filter((x) => x.kind === (win ? "window" : "door")),
-      tilesOf = (list) => list.map((x) => ({ v: x.id, name: x.name, icon: "o-" + x.id })),
-      cur = (list, v) => (list.some((x) => x.v === v) ? v : undefined),
-      groups = win
-        ? [["Classic", tilesOf(kinds.filter((x) => !MODERN_W.has(x.id)))], ["Modern", tilesOf(kinds.filter((x) => MODERN_W.has(x.id)))], ["Rustic", Object.keys(WIN_SHORT).map((k) => ({ v: "m:" + k, name: WIN_NAME[k] + " (rustic, fits angled walls)", icon: "n-" + k }))]]
-        : [["Hinged", tilesOf(kinds.filter((x) => OP.designable(x)))], ["Sliding and folding", tilesOf(kinds.filter((x) => !OP.designable(x)))], ["Rustic", Object.keys(DOOR_SHORT).map((k) => ({ v: "m:" + k, name: DOOR_NAME[k] + " (rustic, fits angled walls)", icon: "d-" + k }))]];
-    const pick = leg ? "m:" + (win ? B.wstyle : B.dstyle) : typeId;
-    for (const [name, items] of groups) g.push(G_.tiles("otype", name, items, cur(items, pick), name === groups[0][0] ? "Shift wheel" : undefined));
+      kinds = OP.OPENING_TYPES.filter((x) => x.kind === kind),
+      FAM = win ? OP.WINDOW_FAMILIES : OP.DOOR_FAMILIES,
+      pick = leg ? "m:" + (win ? B.wstyle : B.dstyle) : typeId;
+    // the tray: Recent, then a group of type cards per family (each card can be drawn by __openingPreview from thumb)
+    const rec = recents(kind);
+    rec.length && g.push({ ...G_.tiles("o:recent", "Recent", rec.map((d, n) => { const sp = OP.freeSpec({ ...d, sill: d.sill || 0 }); return { v: n, name: sp.type.name + " " + fmt(sp.w) + " × " + fmt(sp.h), icon: "o-" + d.typeId, thumb: d.typeId, spec: d }; }), undefined) });
+    for (const fam of Object.keys(FAM)) {
+      const items =
+        fam === "rustic"
+          ? Object.keys(win ? WIN_SHORT : DOOR_SHORT).map((k) => ({ v: "m:" + k, name: (win ? WIN_NAME : DOOR_NAME)[k], icon: (win ? "n-" : "d-") + k }))
+          : kinds.filter((x) => x.family === fam).map((x) => ({ v: x.id, name: x.name, icon: "o-" + x.id, thumb: x.id }));
+      if (!items.length) continue;
+      const on = items.some((x) => x.v === pick);
+      g.push({ ...G_.tiles("otype", FAM[fam], items, on ? pick : undefined, fam === "classic" || fam === "entry" ? "Shift wheel" : undefined), fam, tab: true, cur: on, note: fam === "rustic" ? "For angled and round walls" : "" });
+    }
     if (leg) {
       g.push(G_.chips("gap", "In a row, one every", gapItems(), B.gap));
       g.push(...PAINT().slice(1));
       return;
     }
-    const sp = sel ? sel.sp : OP.freeSpec({ typeId, sizeIdx: B.osize, sill: OP.sillFor(typeId, B.osill), ...designOf(), ...nextDesign() }),
-      hd = sp.header,
-      it = G.stock && G.stock.ITEMS ? G.stock.ITEMS[sp.itemId] : null,
-      mto = !!(it && it.madeToOrder);
-    g.push(G_.info((sel ? "Selected: " : "Next: ") + sp.type.name, sp.type.blurb || OP.OPERATION[sp.type.op]));
-    g.push({
-      type: "badges",
-      id: "o:badges",
-      items: [
-        it ? { text: money(it.priceUsd), k: "price", title: it.name } : null,
-        { text: mto ? "Made to order" : "Store size", k: mto ? "mto" : "std", title: mto ? "Not a stock size: a fifth dearer" : "Sold off the shelf" },
-        { text: OP.OPERATION[sp.type.op], title: "How it opens" },
-        { text: "Header " + (hd.engineered ? "glulam" : hd.plies + "×" + hd.size), title: "Rough opening " + fmtM(sp.rough.width) + " × " + fmtM(sp.rough.height) + (hd.engineered ? ", a glulam beam on double jacks" : ", " + hd.plies + " boards of " + hd.size.replace("x", " x ") + " on edge") },
-        B.wnote ? { text: B.wnote, k: "bad" } : null,
-        B.dnote ? { text: "Won't fit: " + B.dnote, k: "bad" } : null,
-      ].filter(Boolean),
-    });
-    g.push(G_.act("oflip", sel ? "Flip" : B.oflip ? "Flipped" : "Flip", "turn", "F"));
-    sel && g.push(G_.act("odel", "Delete", "bin", "Del", true));
-    // the designer, on the second row: the size, then the look
-    const row = (x, sec) => ((x.row = "d"), sec && (x.sec = sec), g.push(x)),
-      bw = sp.leaf ? sp.leaf.b - sp.leaf.a : sp.w,
-      bh = sp.leaf ? sp.leaf.h : sp.h,
-      rg = sp.type.range;
-    if (win) row({ type: "winprev", id: "w:prev", label: "", w: sp.w, h: sp.h, sill: sp.sill, wallH: EAVE, look: sp.look, finish: finHex(sp.finish), op: sp.type.op });
-    row({ type: "num", id: "w:w", label: "Width", value: fmt(bw), unit: "m", note: fmt(rg.w[0]) + "–" + fmt(rg.w[1]) }, "Size");
-    row({ type: "num", id: "w:h", label: "Height", value: fmt(bh), unit: "m", note: fmt(rg.h[0]) + "–" + fmt(rg.h[1]) }, "Size");
-    if (win) row({ type: "num", id: "w:sill", label: "Sill", value: fmt(sp.sill), unit: "m", note: "above the floor" }, "Size");
+    // the unit and its wall: the selected one where it stands; the next one on the wall under the pointer, or a 4 m wall
+    const op = B.op && B.op.addFree && B.op.addFree.length && !B.op.delFree.length ? B.op : null,
+      W = sel ? (sel.g ? wallOf(sel.S, sel.g, sel.f.id) : wallNone()) : op && op.owall ? op.owall : wallNone(),
+      f = sel ? sel.f : nextRec(W),
+      fp = fitPlace(W, f),
+      // the numbers are the design's; the stage shows the unit where it would land (the ghost's record over a wall)
+      sp = OP.freeSpec(f),
+      pf = sel ? f : op && op.owall ? op.addFree[0] : fp.f,
+      t = sp.type,
+      door = t.kind === "door",
+      anchor = anchorNow(sel),
+      at = pf.pos - W.t0 + OP.freeSpec(pf).w / 2,
+      hand = { flip: !!(sel ? sel.f.flip : B.oflip), out: !!(sel ? sel.f.out : B.oout) },
+      spec = { typeId: pf.typeId, sizeIdx: pf.sizeIdx, sill: pf.sill, flip: hand.flip, out: hand.out, ...designOf(pf) };
+    // the fit line: what the last change did (if it is still the current state), else how the unit sits now
+    let line;
+    if (sel && B.oadj && B.oadj.id === sel.f.id && B.oadj.ver === sel.S.ver) line = B.oadj.line;
+    else if (sel) {
+      const r0 = fp.asked.rep,
+        i0 = r0.issues[0];
+      line = r0.ok ? fitLine({ ...fp, done: [] }) : fitLine({ ...fp, ok: false, why: ISSUE[i0.code](i0.by), f: sel.f });
+    } else if (B.op && B.op.ofit && (op || !B.op.valid)) line = B.op.ofit;
+    else line = fitLine(fp);
+    // the next unit's fixes change its size or sill; where along a wall it goes is the pointer's business
+    if (!sel && line.fixes.some((x) => x.code === "slide")) line = { ...line, fixes: line.fixes.filter((x) => x.code !== "slide") };
+    B.ofix = line.fixes;
+    B.fit = { ok: line.ok, text: line.text, adjusted: !!line.adjusted, fixes: line.fixes.map((x, n) => ({ id: n, label: x.label, code: x.code || (x.rustic ? "rustic" : "") })) };
+    const S1 = "Size & place",
+      put = (x, sec) => g.push({ ...x, sec });
+    // the stage: the unit drawn to scale on its wall run (__openingPreview.draw(spec, { wall, at, hand, anchor }))
+    put({ type: "stage", id: "o:stage", label: "", kind, mode: sel ? "sel" : "next", spec, wall: { L: r3(W.L), H: r3(W.H), others: W.others }, at: r3(at), hand, anchor, blurb: t.blurb || OP.OPERATION[t.op], how: OP.OPERATION[t.op], plan: door }, "Preview");
+    const hd = sp.header,
+      it = OP.openingItem(t, sp.w, sp.h);
+    put({ type: "badges", id: "o:badges", items: [it ? { text: money(it.priceUsd), k: "price", title: it.name } : null, { text: it && it.madeToOrder ? "Made to order" : "Store size", k: it && it.madeToOrder ? "mto" : "std", title: it && it.madeToOrder ? "Not a stock size: a fifth dearer" : "Sold off the shelf" }, { text: OP.OPERATION[t.op], title: "How it opens" }, { text: "Header " + (hd.engineered ? "glulam" : hd.plies + "×" + hd.size), title: "Rough opening " + fmtM(sp.rough.width) + " × " + fmtM(sp.rough.height) + (hd.engineered ? ", a glulam beam on double jacks" : ", " + hd.plies + " boards of " + hd.size.replace("x", " x ") + " on edge") }].filter(Boolean) }, "Preview");
+    // Size & place
+    const [bw, bh] = leafOf(sp),
+      rg = t.range;
+    put({ type: "num", id: "w:w", label: "Width", value: fmt(bw), unit: "m", note: fmt(rg.w[0]) + "–" + fmt(rg.w[1]) }, S1);
+    put({ type: "num", id: "w:h", label: "Height", value: fmt(bh), unit: "m", note: fmt(rg.h[0]) + "–" + fmt(rg.h[1]) }, S1);
     const stdN = OP.openingSizes(typeId),
       stdAt = stdN.findIndex((z) => Math.abs(z.w - bw) < 1e-3 && Math.abs(z.h - bh) < 1e-3);
-    row(G_.chips("osize", "Store sizes", stdN.map((z, n) => ({ v: n, name: fmt(z.w) + " × " + fmt(z.h) })), stdAt), "Size");
-    if (win) {
+    put(G_.chips("osize", "Store sizes", stdN.map((z, n) => ({ v: n, name: fmt(z.w) + " × " + fmt(z.h) })), stdAt), S1);
+    if (!door) {
+      put({ ...G_.chips("o:anchor", "Height on the wall", Object.keys(ANCHORS).map((k) => ({ v: k, name: ANCHORS[k] })), anchor), group: "height" }, S1);
+      put({ type: "num", id: "o:y", label: ANCHORS[anchor] + " height", value: fmt(OP.anchorY(sp, anchor)), unit: "m", note: "above the floor", group: "height" }, S1);
+      const pre = SILL_SETS.map((x) => ({ v: x, name: x.name + " " + fmt(x.y), note: x.anchor === "head" ? "head at " + fmt(x.y) + " m" : "sill at " + fmt(x.y) + " m" })),
+        preOn = pre.find((x) => Math.abs((x.v.anchor === "head" ? sp.head : sp.sill) - x.v.y) < 0.005);
+      put({ ...G_.chips("o:y", "", pre, preOn ? preOn.v : undefined), group: "height" }, S1);
+    }
+    if (sel && sel.g) {
+      put({ type: "num", id: "o:pos", label: "From the left end", value: fmt(f.pos - W.t0), unit: "m", note: "to its left edge", group: "along" }, S1);
+      put({ ...G_.chips("o:align", "Along the wall", [{ v: "centre", name: "Centre on wall" }, { v: "between", name: "Centre between" }, { v: "equal", name: "Equal spacing" }], undefined), group: "along" }, S1);
+    }
+    if (door && t.op !== "open" && t.op !== "roll") {
+      const hs = handItems(spec),
+        on = hs.find((x) => (x.v.flip === null || x.v.flip === undefined || !!x.v.flip === hand.flip) && (x.v.out === null || x.v.out === undefined || !!x.v.out === hand.out));
+      hs.length && put(G_.chips("o:hand", "Opens", hs, on ? on.v : undefined), S1);
+    }
+    // Style and Finish
+    if (!door) {
       const L = sp.look,
         lookNow = Object.keys(OP.LOOKS).find((k) => {
           const o = OP.LOOKS[k];
           return o.grille === L.grille && o.finish === sp.finish && (o.grille === "none" || o.grille === "prairie" || (o.grid[0] === L.grid[0] && o.grid[1] === L.grid[1]));
         });
-      row(G_.chips("w:look", "Whole look", Object.keys(OP.LOOKS).map((k) => ({ v: k, name: OP.LOOKS[k].name })), lookNow || null), "Style");
-      row(G_.tiles("w:shape", "Shape", Object.keys(OP.SHAPES).map((k) => ({ v: k, name: OP.SHAPES[k] + (k !== "rect" && sp.type.op !== "fixed" ? " (does not open)" : ""), icon: "sh-" + k })), L.shape || "rect"), "Style");
-      row(G_.tiles("w:grille", "Grille", Object.keys(OP.GRILLES).map((k) => ({ v: k, name: OP.GRILLES[k], icon: "gr-" + k })), L.grille), "Glass");
+      put(G_.chips("w:look", "Whole look", Object.keys(OP.LOOKS).map((k) => ({ v: k, name: OP.LOOKS[k].name })), lookNow || null), "Style");
+      put(G_.tiles("w:shape", "Shape", Object.keys(OP.SHAPES).map((k) => ({ v: k, name: OP.SHAPES[k] + (k !== "rect" && t.op !== "fixed" ? " (does not open)" : ""), icon: "sh-" + k })), L.shape || "rect"), "Style");
+      put(G_.tiles("w:grille", "Grille", Object.keys(OP.GRILLES).map((k) => ({ v: k, name: OP.GRILLES[k], icon: "gr-" + k })), L.grille), "Style");
       if (/colonial|cottage|craftsman|diamond|sunburst/.test(L.grille)) {
-        row(G_.step("w:gx", L.grille === "sunburst" ? "Rays" : "Bars across", String(L.grid[0])), "Glass");
-        L.grille === "sunburst" || row(G_.step("w:gy", "Bars down", String(L.grid[1])), "Glass");
+        put(G_.step("w:gx", L.grille === "sunburst" ? "Rays" : "Bars across", String(L.grid[0])), "Style");
+        L.grille === "sunburst" || put(G_.step("w:gy", "Bars down", String(L.grid[1])), "Style");
       }
-      row(G_.step("w:lx", "Panes across", String(L.lites[0])), "Glass");
-      row(G_.step("w:ly", "Panes high", String(L.lites[1])), "Glass");
-      row(G_.sw("w:finish", "Frame", Object.keys(OP.FINISHES).map((k) => ({ v: k, name: OP.FINISHES[k].name, sw: ["flat", finHex(k), finHex(k)] })), sp.finish), "Frame");
-    } else {
-      const n0 = g.length;
-      doorDesignerView(g);
-      const SEC = { "d:face": "Face", "d:glass": "Face", "d:bars": "Face", "d:side": "Around it", "d:transom": "Around it", "d:fin": "Finish", "d:hw": "Finish", "d:metal": "Finish", "d:reset": "Finish" };
-      for (let n = n0; n < g.length; n++) ((g[n].row = "d"), SEC[g[n].id] && (g[n].sec = SEC[g[n].id]));
-    }
+      put(G_.step("w:lx", "Panes across", String(L.lites[0])), "Style");
+      put(G_.step("w:ly", "Panes high", String(L.lites[1])), "Style");
+      put(G_.sw("w:finish", "Frame", Object.keys(OP.FINISHES).map((k) => ({ v: k, name: OP.FINISHES[k].name, sw: ["flat", finHex(k), finHex(k)] })), sp.finish), "Finish");
+      put(G_.info("Shutters", "Shutters are hung later, in Furnish"), "Finish");
+    } else doorDesignerView(g, sel, sp);
+    // the foot: Flip and Delete for the selected unit
+    put({ ...G_.act("oflip", sel ? "Flip" : B.oflip ? "Flipped" : "Flip", "turn", "F"), foot: true }, "Actions");
+    sel && put({ ...G_.act("odel", "Delete", "bin", "Del", true), foot: true }, "Actions");
   }
-  // apply a designer change to the selected window, or to the next one
+  // apply a designer change to the selected unit (as near as it fits, and said on the fit line), or to the next one
   function designSet(fn) {
     const q = B.fsel ? fselOpen() : null;
     B.wnote = "";
     if (q) {
-      // try it on a copy first: a window that grows taller drops its sill to fit, one that cannot fit is left as it was
       const f2 = { ...q.f, look: { ...(q.f.look || {}) } };
+      if (!q.f.look) delete f2.look;
       fn(f2, q.sp);
-      const sp2 = OP.freeSpec(f2);
-      if (sp2.type.kind === "window") {
-        const hi = EAVE * q.S.hs - 0.19 - sp2.h - OP.ROUGH_GAP;
-        if (f2.sill > hi) f2.sill = Math.round(Math.max(0.1, hi) * 1000) / 1000;
-      }
-      const fit = doorFits(q, f2);
-      if (!fit.ok) return void ((B.wnote = "Won't fit: " + fit.why.toLowerCase()), (B.key = ""), touchUi());
-      return selFree((f) => {
-        for (const k of Object.keys(f)) k in f2 || delete f[k];
-        Object.assign(f, f2);
-        f.pos = fit.pos;
-      });
+      if (f2.look && !Object.keys(f2.look).length) delete f2.look;
+      return fitApply(q, f2);
     }
     const sp = OP.freeSpec({ typeId: B.otype, sizeIdx: B.osize, sill: OP.sillFor(B.otype, B.osill), ...designOf(), ...nextDesign() });
     B.od.look = { ...(B.od.look || {}) };
@@ -8342,18 +8595,50 @@
     B.key = "";
     touchUi();
   }
+  // put f2 in place of the selected unit q as near as it fits: it grows about its centre, then the fit rule. A change
+  // that cannot fit at all leaves the unit as it was, and the fit line says why with the fixes it has.
+  function fitApply(q, f2, exact) {
+    const sp2 = OP.freeSpec(f2);
+    if (!sp2) return false;
+    if (!exact) f2.pos = q.f.pos + q.sp.w / 2 - sp2.w / 2;
+    const W = q.g ? wallOf(q.S, q.g, q.f.id) : wallNone();
+    if (W.none) W.t0 = q.f.pos + q.sp.w / 2 - W.L / 2;
+    const fp = fitPlace(W, f2),
+      line = fitLine(fp);
+    if (!fp.ok) {
+      B.oadj = { id: q.f.id, ver: q.S.ver, line };
+      B.key = "";
+      touchUi();
+      return false;
+    }
+    if (fp.f.sill !== undefined) fp.f.sill = r3(fp.f.sill);
+    fp.f.pos = r3(fp.f.pos);
+    selFree((f) => {
+      for (const k of Object.keys(f)) k in fp.f || delete f[k];
+      Object.assign(f, fp.f);
+    });
+    B.oadj = { id: q.f.id, ver: q.S.ver, line };
+    return true;
+  }
   function designChoose(id, v) {
     const k = id.slice(2),
-      st = (a, d, lo, hi) => Math.max(lo, Math.min(hi, (a | 0) + d));
+      st = (a, d, lo, hi) => Math.max(lo, Math.min(hi, (a | 0) + d)),
+      q = B.fsel ? fselOpen() : null,
+      an = anchorNow(q);
     designSet((o, sp) => {
       const L = sp.look;
-      const bw = sp.leaf ? sp.leaf.b - sp.leaf.a : sp.w,
-        bh = sp.leaf ? sp.leaf.h : sp.h;
+      const [bw, bh] = leafOf(sp);
       if (v && typeof v === "object" && v.step !== undefined) v = (k === "w" ? bw : k === "h" ? bh : sp.sill) + 0.05 * v.step;
       if (k === "w" || k === "h") {
         const z = OP.fitSize(sp.type, k === "w" ? v : bw, k === "h" ? v : bh);
         o.w = z.w;
         o.h = z.h;
+        // the height grows from the line the player anchored: with Head the sill moves, with Sill the head
+        if (k === "h" && sp.type.kind === "window" && an !== "sill") {
+          const s = Math.max(OP.MIN_SILL, OP.fromAnchor(sp.type, z.h, an, OP.anchorY(sp, an)));
+          if (o === B.od) B.osill = s;
+          else o.sill = s;
+        }
       } else if (k === "sill") {
         const y = Math.round(Math.max(0.05, Math.min(EAVE - 0.4, v)) * 100) / 100;
         if (o === B.od) B.osill = y;
@@ -8371,11 +8656,103 @@
       else if (k === "finish") o.finish = v;
     });
   }
-  // ---- the door designer (OP.designable doors): panels, glass, sidelights, transom, colour and handle. With a placed
-  // door selected it edits that door (undoable); otherwise it shapes the next one. Choices live in f.look and f.finish.
+  // the designer's place and fit ids: o:anchor, o:y, o:pos, o:align, o:hand, o:fix, o:recent
+  function openingChoose(id, v) {
+    const q = B.fsel ? fselOpen() : null,
+      num = (cur) => (v && typeof v === "object" && v.step !== undefined ? cur + 0.05 * v.step : +v);
+    if (id === "o:recent") return void recentUse(+v);
+    if (id === "o:anchor") {
+      if (!ANCHORS[v]) return;
+      if (q) (B.oanc || (B.oanc = new Map())).set(q.f.id, v);
+      else B.oancNext = v;
+      return;
+    }
+    if (id === "o:y") {
+      const sp = q ? q.sp : OP.freeSpec(nextRec(wallNone()));
+      if (sp.type.kind === "door") return;
+      let an = anchorNow(q);
+      if (v && typeof v === "object" && v.anchor) {
+        an = ANCHORS[v.anchor] ? v.anchor : an;
+        q ? (B.oanc || (B.oanc = new Map())).set(q.f.id, an) : (B.oancNext = an);
+      }
+      const y = v && typeof v === "object" && v.y !== undefined ? +v.y : num(OP.anchorY(sp, an));
+      if (!Number.isFinite(y)) return;
+      const s = r3(Math.max(OP.MIN_SILL, OP.fromAnchor(sp.type, sp.h, an, Math.round(y * 100) / 100)));
+      return void designSet((o) => (o === B.od ? (B.osill = s) : (o.sill = s)));
+    }
+    if (id === "o:hand") {
+      if (!v || typeof v !== "object") return;
+      const set = (o) => {
+        if (v.flip !== null && v.flip !== undefined) o.flip = !!v.flip;
+        if (v.out !== null && v.out !== undefined) v.out ? (o.out = true) : delete o.out;
+      };
+      if (q) return void selFree(set);
+      if (v.flip !== null && v.flip !== undefined) B.oflip = !!v.flip;
+      if (v.out !== null && v.out !== undefined) B.oout = !!v.out;
+      return;
+    }
+    if (id === "o:fix") {
+      const x = (B.ofix || [])[+v];
+      if (!x) return;
+      if (x.rustic) return void choose("otype", B.tool === "window" ? "m:window" : "m:door");
+      if (q) return void fitApply(q, { ...x.rec }, true);
+      // the next unit: its size and sill (where along a wall is the pointer's business)
+      const r = x.rec;
+      if (r.w > 0 && r.h > 0) ((B.od.w = r.w), (B.od.h = r.h));
+      if (OP.openingType(r.typeId).kind === "window" && r.sill !== undefined) B.osill = r.sill;
+      return;
+    }
+    if (!q || !q.g) return;
+    const W = wallOf(q.S, q.g, q.f.id),
+      at = q.f.pos - W.t0 + q.sp.w / 2;
+    if (id === "o:pos") {
+      const p = num(q.f.pos - W.t0);
+      if (!Number.isFinite(p)) return;
+      return void fitApply(q, { ...q.f, pos: W.t0 + Math.round(p * 1000) / 1000 }, true);
+    }
+    if (id === "o:align") {
+      let c = at;
+      if (v === "centre") c = W.L / 2;
+      else if (v === "equal" && equalSpace(q, W)) return;
+      else {
+        // centre between what stands either side (or the wall's ends)
+        let l = OP.END_GAP,
+          r = W.L - OP.END_GAP;
+        for (const o of W.others) {
+          if (o.b <= at) l = Math.max(l, o.b);
+          if (o.a >= at) r = Math.min(r, o.a);
+        }
+        c = (l + r) / 2;
+      }
+      fitApply(q, { ...q.f, pos: W.t0 + c - q.sp.w / 2 }, true);
+    }
+  }
+  // equal spacing: the free units in the selected one's wall are spaced with equal gaps between them and the ends.
+  // Only where nothing else stands in the wall and the gaps keep their minimums; otherwise false.
+  function equalSpace(q, W) {
+    const os = q.S.fopen.filter((o) => o.g === q.g).sort((a, b) => a.f.pos - b.f.pos);
+    if (runOthers(q.S, q.g, null).length !== os.length || os.length < 1) return false;
+    const rw = os.reduce((a, o) => a + o.sp.w + 2 * OP.ROUGH_GAP, 0),
+      gap = (W.L - rw) / (os.length + 1);
+    if (gap < Math.max(OP.END_GAP, OP.OPEN_GAP)) return false;
+    pushUndo();
+    let x = gap;
+    for (const o of os) ((o.f.pos = r3(W.t0 + x + OP.ROUGH_GAP)), (x += o.sp.w + 2 * OP.ROUGH_GAP + gap));
+    q.S.ver++;
+    rebuild(q.S);
+    saveBuilds();
+    B.oadj = null;
+    touchUi();
+    return true;
+  }
+  // ---- the door designer: what each door type takes (its opts): panels, glass, bars, sidelights, transom, leaves,
+  // colour, handle and metal. With a placed door selected it edits that door (undoable); otherwise the next one.
   const DOOR_FIN = ["white", "cream", "black", "charcoal", "sage", "green", "blue", "red", "mustard", "oak", "wood", "walnut"];
+  const LEAVES = { door_bifold: ["Leaves", [2, 4, 6]], door_patio: ["Panels", [2, 3, 4]], door_garage: ["Panel rows", [3, 4, 5, 6]] };
+  const doorOpts = (t) => (t && t.kind === "door" ? t.opts || [] : []);
   const nextDesign = () => {
-    if (!OP.designable(OP.openingType(B.otype))) return {};
+    const t = OP.openingType(B.otype);
+    if (!t || t.kind !== "door") return {};
     const o = {};
     if (Object.keys(B.dlook).length) o.look = { ...B.dlook };
     if (B.dfin) o.finish = B.dfin;
@@ -8386,57 +8763,48 @@
     for (const k of ["look", "finish", "w", "h"]) if (f[k] !== undefined) o[k] = f[k];
     return o;
   };
-  function doorDesignerView(g) {
-    const sel = B.fsel ? fselOpen() : null,
-      t = OP.openingType(sel ? sel.f.typeId : B.otype);
-    if (!OP.designable(t)) return;
-    const K = sel ? sel.sp.look : OP.lookOf(t, { look: B.dlook }),
-      fin = sel ? sel.sp.finish : B.dfin || t.finish,
-      own = sel ? !!(sel.f.look || sel.f.finish) : !!(Object.keys(B.dlook).length || B.dfin);
-    g.push(G_.tiles("d:face", "Panels", Object.keys(OP.DOOR_FACES).map((k) => ({ v: k, name: OP.DOOR_FACES[k], icon: "df-" + k })), K.face));
-    g.push(G_.tiles("d:glass", "Glass", Object.keys(OP.DOOR_GLASS).map((k) => ({ v: k, name: OP.DOOR_GLASS[k], icon: "dg-" + k })), K.glass));
-    if (K.glass !== "none" && K.glass !== "craft" && K.glass !== "slot") g.push(G_.toggle("d:bars", "Bars", !!K.bars, "dg-bars", "Divide the glass into small lites with muntins"));
-    g.push(G_.chips("d:side", "Sidelights", Object.keys(OP.DOOR_SIDES).map((k) => ({ v: k, name: OP.DOOR_SIDES[k], note: k === "none" ? "" : "+" + fmtM(OP.SIDE_W * (k === "both" ? 2 : 1)) + " wide" })), K.side));
-    g.push(G_.toggle("d:transom", "Transom", !!K.transom, "dg-transom", "A glass lite over the door, inside the same rough opening (+" + fmtM(OP.TRANSOM_H) + ")"));
-    g.push(G_.sw("d:fin", "Colour", DOOR_FIN.filter((k) => OP.FINISHES[k]).map((k) => ({ v: k, name: OP.FINISHES[k].name, sw: [k === "oak" || k === "wood" || k === "walnut" ? "planks" : "plain", "#" + OP.FINISHES[k].hex.toString(16).padStart(6, "0"), "#" + new T.Color(OP.FINISHES[k].hex).multiplyScalar(0.7).getHexString()] })), fin));
-    g.push(G_.chips("d:hw", "Handle", Object.keys(OP.DOOR_HW).map((k) => ({ v: k, name: OP.DOOR_HW[k] })), K.hw));
-    g.push(G_.sw("d:metal", "Metal", Object.keys(OP.DOOR_METALS).map((k) => ({ v: k, name: OP.DOOR_METALS[k].name, sw: ["plain", "#" + OP.DOOR_METALS[k].hex.toString(16).padStart(6, "0"), "#000000"] })), K.metal));
-    own && g.push(G_.act("d:reset", "As sold", "turn", "", false));
-  }
-  // a selected door grown by sidelights or a transom must still fit its wall: it grows about its centre
-  function doorFits(q, f2) {
-    const sp = OP.freeSpec(f2),
-      run = q.g,
-      ax = runAx(q.S, run),
-      L = ax.t1 - ax.t0,
-      c = q.f.pos + q.sp.w / 2 - ax.t0,
-      sn = OP.snapFree({ L, at: c, w: sp.w, h: sp.h, sill: 0, others: runOthers(q.S, run, q.f.id), snap: false, wantSill: false });
-    if (!sn.ok) return { ok: false, why: sn.reason };
-    if (sp.rough.sill + sp.rough.height + 0.19 > EAVE * q.S.hs) return { ok: false, why: "Too tall for this wall" };
-    return { ok: true, pos: ax.t0 + sn.offset };
+  function doorDesignerView(g, sel, sp) {
+    const t = sp.type,
+      O = doorOpts(t),
+      K = sp.look,
+      fin = sp.finish,
+      own = sel ? !!(sel.f.look || sel.f.finish) : !!(Object.keys(B.dlook).length || B.dfin),
+      put = (x, sec) => g.push({ ...x, sec }),
+      has = (k) => O.includes(k);
+    if (has("leaves") && LEAVES[t.id]) {
+      const [lab, ns] = LEAVES[t.id],
+        cur = K.leaves || (t.id === "door_garage" ? (t.look.grid || [1, 4])[1] : t.look.panels || ns[0]);
+      put(G_.chips("d:leaves", lab, ns.map((n) => ({ v: n, name: String(n) })), cur), "Style");
+    }
+    has("face") && put(G_.tiles("d:face", "Panels", Object.keys(OP.DOOR_FACES).map((k) => ({ v: k, name: OP.DOOR_FACES[k], icon: "df-" + k })), K.face || "flush"), "Style");
+    has("glass") && put(G_.tiles("d:glass", "Glass", Object.keys(OP.DOOR_GLASS).map((k) => ({ v: k, name: OP.DOOR_GLASS[k], icon: "dg-" + k })), K.glass || "none"), "Style");
+    has("bars") && K.glass && K.glass !== "none" && K.glass !== "craft" && K.glass !== "slot" && put(G_.toggle("d:bars", "Bars", !!K.bars, "dg-bars", "Divide the glass into small lites with muntins"), "Style");
+    if (OP.designable(t)) {
+      has("side") && put(G_.chips("d:side", "Sidelights", Object.keys(OP.DOOR_SIDES).map((k) => ({ v: k, name: OP.DOOR_SIDES[k], note: k === "none" ? "" : "+" + fmtM(OP.SIDE_W * (k === "both" ? 2 : 1)) + " wide" })), K.side), "Style");
+      has("transom") && put(G_.toggle("d:transom", "Transom", !!K.transom, "dg-transom", "A glass lite over the door, inside the same rough opening (+" + fmtM(OP.TRANSOM_H) + ")"), "Style");
+    }
+    has("finish") && put(G_.sw("d:fin", "Colour", DOOR_FIN.filter((k) => OP.FINISHES[k]).map((k) => ({ v: k, name: OP.FINISHES[k].name, sw: [k === "oak" || k === "wood" || k === "walnut" ? "planks" : "plain", "#" + OP.FINISHES[k].hex.toString(16).padStart(6, "0"), "#" + new T.Color(OP.FINISHES[k].hex).multiplyScalar(0.7).getHexString()] })), fin), "Finish");
+    has("hw") && put(G_.chips("d:hw", "Handle", Object.keys(OP.DOOR_HW).map((k) => ({ v: k, name: OP.DOOR_HW[k] })), K.hw), "Finish");
+    has("metal") && put(G_.sw("d:metal", "Metal", Object.keys(OP.DOOR_METALS).map((k) => ({ v: k, name: OP.DOOR_METALS[k].name, sw: ["plain", "#" + OP.DOOR_METALS[k].hex.toString(16).padStart(6, "0"), "#000000"] })), K.metal), "Finish");
+    own && put(G_.act("d:reset", "As sold", "turn", "", false), "Finish");
   }
   function doorChoose(k, v) {
-    const q = B.fsel ? fselOpen() : null;
+    const q = B.fsel ? fselOpen() : null,
+      t = q ? q.sp.type : OP.openingType(B.otype),
+      O = doorOpts(t);
     B.dnote = "";
-    if (q && !OP.designable(q.sp.type)) return;
-    if (!q && !OP.designable(OP.openingType(B.otype))) return;
+    if (!t || t.kind !== "door") return;
+    if (k !== "reset" && !O.includes(k === "fin" ? "finish" : k)) return;
     if (k === "reset") {
-      if (q) {
-        const f2 = { ...q.f, look: undefined, finish: undefined },
-          fit = doorFits(q, f2);
-        if (!fit.ok) return void (B.dnote = fit.why);
-        selFree((f) => (delete f.look, delete f.finish, (f.pos = fit.pos)));
-      } else ((B.dlook = {}), (B.dfin = null));
+      if (q) designSet((f) => (delete f.look, delete f.finish));
+      else ((B.dlook = {}), (B.dfin = null));
     } else if (k === "fin") q ? selFree((f) => (f.finish = v)) : (B.dfin = v);
     else {
-      const cur = q ? q.sp.look : OP.lookOf(OP.openingType(B.otype), { look: B.dlook }),
-        val = k === "bars" || k === "transom" ? !cur[k] : v;
-      if (q) {
-        const look = { ...(q.f.look || {}), [k]: val },
-          fit = k === "side" || k === "transom" ? doorFits(q, { ...q.f, look }) : { ok: true, pos: q.f.pos };
-        if (!fit.ok) return void ((B.dnote = (k === "side" ? "Sidelights: " : "Transom: ") + fit.why.toLowerCase()), touchUi());
-        selFree((f) => ((f.look = look), (f.pos = fit.pos)));
-      } else B.dlook = { ...B.dlook, [k]: val };
+      const cur = q ? q.sp.look : OP.lookOf(t, { look: B.dlook }),
+        val = k === "bars" || k === "transom" ? !cur[k] : k === "leaves" ? +v : v;
+      // sidelights and a transom make the unit bigger: it grows about its centre and is fitted like any other change
+      if (q) designSet((f) => (f.look = { ...(q.f.look || {}), [k]: val }));
+      else B.dlook = { ...B.dlook, [k]: val };
     }
     B.key = "";
   }
@@ -8632,10 +9000,11 @@
       if (B.fsel && fselOpen()) designSet((f) => ((f.sizeIdx = v), delete f.w, delete f.h));
       else ((B.osize = v), (B.od.w = B.od.h = null));
     } else if (id.startsWith("w:")) designChoose(id, v);
+    else if (id.startsWith("o:")) openingChoose(id, v);
     else if (id.startsWith("d:")) doorChoose(id.slice(2), v);
     else if (id === "osill") {
-      B.osill = v;
-      B.fsel && selFree((f) => (f.sill = OP.sillFor(f.typeId, v)));
+      if (B.fsel && fselOpen()) designSet((f) => (f.sill = OP.sillFor(f.typeId, v)));
+      else B.osill = v;
     } else if (id === "oflip") flipFree();
     else if (id === "odel") delFree();
     else if (id === "turn") cycleStyle(false);
@@ -9142,7 +9511,7 @@
         g = runs.find((r) => r.d === f.d && r.line === f.line && a >= r.t0 - 1e-6 && b <= r.t1 + 1e-6);
       if (!g || g.cls !== "wall" || g.m.some((e) => e.t + 1 > a && e.t < b && e.type !== "wall")) continue;
       f.id = own(f.id);
-      Object.defineProperty(f, "out", { value: freeOut(S, f, sp.w), writable: true, enumerable: false, configurable: true });
+      Object.defineProperty(f, "oside", { value: freeOut(S, f, sp.w), writable: true, enumerable: false, configurable: true });
       keepFree.push(f);
       S.fopen.push({ f, g, off: f.pos - g.t0, sp });
     }
@@ -9202,7 +9571,7 @@
       Object.assign(f, { gx: g.x0, gz: g.z0, ux: g.ux, uz: g.uz, pos: Math.round(pos * 1000) / 1000 });
       if (rev) f.flip = !f.flip;
       f.id = own(f.id);
-      Object.defineProperty(f, "out", { value: freeOut(S, f, sp.w), writable: true, enumerable: false, configurable: true });
+      Object.defineProperty(f, "oside", { value: freeOut(S, f, sp.w), writable: true, enumerable: false, configurable: true });
       keepFree.push(f);
       S.fopen.push({ f, g, off: f.pos, sp });
     }
@@ -9501,14 +9870,14 @@
         D = f ? Db : bare(g.id) ? Ds : null;
       f && st.finRun.add(g.id);
       if (D) for (const e of g.m) D.walls.set(e.k, e.type);
-      if (D) for (const o of S.fopen) o.g === g && D.free.push({ ...o.f, out: o.f.out, built: D === Db && !P(o.f.id) });
+      if (D) for (const o of S.fopen) o.g === g && D.free.push({ ...o.f, oside: o.f.oside, built: D === Db && !P(o.f.id) });
     }
     for (const g of S.fruns) {
       const f = fin(g.id, ".cl"),
         D = f ? Db : bare(g.id) ? Ds : null;
       f && st.finRun.add(g.id);
       if (D) for (const n of g.m) D.segs.push(S.segs[n]);
-      if (D) for (const o of S.fopen) o.g === g && D.free.push({ ...o.f, out: o.f.out, built: D === Db && !P(o.f.id) });
+      if (D) for (const o of S.fopen) o.g === g && D.free.push({ ...o.f, oside: o.f.oside, built: D === Db && !P(o.f.id) });
     }
     for (const g of S.regs) {
       const f = fin(g.id, ".fl"),
