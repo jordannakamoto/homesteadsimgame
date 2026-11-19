@@ -1,16 +1,40 @@
 # Run status
 
-The single place to see where the V1 run stands. Updated by the orchestrator at every merge.
+Where the game stands, as of 19 Nov 2026 (`main` 7d33931, save version 3). Update it when a wave lands. History, wave by wave, is in `docs/PLAYTEST.md`; the plan is `docs/V1_PLAN.md`; the design round is in `docs/design/` (with the save-version ledger).
 
-**Standing orders (set 14 Nov 2026, 19:20 Pacific): expired 14 Nov.** They said the owner was away for about 8 hours and to work through waves without waiting for approval. The owner is back and is playtesting; do not rely on them.
-
-**18 Nov 2026: new design round.** Ground and foundations, services rough-in, and vehicles. Design docs will land in `docs/design/` (the folder does not exist yet).
+The old standing orders (14 Nov) expired; the owner is playtesting and the coordinator lands branches one at a time. In wave 2 implementers push only their own branch.
 
 ## How to playtest and critique
 
-- The live page always holds the newest merged wave. Each wave is also a commit on `main` listed below, so any wave can be rebuilt (`git checkout <commit> && npm install && sh build.sh`).
-- `docs/PLAYTEST.md` has one section per wave: what is new, what to try, known gaps.
-- Write critiques in `docs/FEEDBACK.md` (a template is there), or just say them in chat. Feedback is read before each wave starts and answered in the next wave's playtest notes.
+- The live page holds the newest published build of `main`. Any commit can be rebuilt (`git checkout <commit> && npm install && sh build.sh`).
+- `docs/PLAYTEST.md` has one section per change: what is new, what to try, what is weak.
+- Write critiques in `docs/FEEDBACK.md`, or say them in chat.
+
+## What is in the game now
+
+- **Spine (held since 15 Nov):** the first shed from bare ground to dried in, by hand or guided. `test/shed.e2e.mjs` passes on `main` 5040672 (hands-on and guided); it is the gate before publishing.
+- **Build mode, construction and finishing:** stick framing as real members, stages from site to trim-out (23 in `__framing.STAGES`: dry-in, gutters, rough-in, tape and mud, trim carpentry and paint were added since 15 Nov), drywall hung sheet by sheet or boards by course, taping, paint, casings and baseboard with real miters.
+- **Weather you can see, heat, power, water, garden, chickens, kitchen, the Yard (shovel, paths, stone, pond), night sky and soft clouds.**
+- **Wave 1 (17-18 Nov), the design round:**
+  - Ground: one ground for every system that cuts and fills (`sys.ground`, macro 1 m + fine 10 cm), packed earthwork in saves (about ten times smaller), build sites prepared through it (A1-A3).
+  - Foundations: lay out with strings, dig to the line, gravel base, forms, barrow concrete and screed, cure by temperature with covers, anchor bolts and stripping (B1-B5).
+  - Services: cable and pipe planned in two clicks through the frame, rough-in by hand (drill, boxes, pull, clamp, crimp), Rough-in and Trim-out as stages, Power and Water overlays (S1-S8).
+  - Vehicles: the ATV with a drive model, fuel, a possession stack for the seat, a trailer, hauling lumber to the build (V0-V8).
+- **Wave 2 (18-19 Nov):** build extension point X1 (nothing on screen yet), one bag for what other systems keep on a building X2, key map and controls sheet on ? / F1 (K1), shared page test helper and `stepFrames` (T1), electrical trim-out by hand (outlets, switches, lights, breakers, tester), supply plumbing by hand (PEX manifold, pressure test, fixtures on stubs), poured piers and stem walls by hand with the post-hole digger (B-1), the UI redesign (game HUD, Cozy and Minimal skins, close third-person and first-person views), trim slice 2, cabin feedback. Tests run about 45 s (the sim ticks about five times faster).
+- **This docs slice (D0):** ARCHITECTURE and the CLAUDE.md code map made true to the code; the Steam and co-op plan renamed `docs/PLATFORM.md`.
+
+## Known gaps
+
+- Three interaction grammars for one job (construct-view L/E, Site on key 7, Hands F); several barrows (construction, landscape, foundation) and a duplicate `wheelbarrow` item; the fine grid is still owned by landscape; legacy abstract wire and pipe links in build mode; nine hint and prompt implementations; five buy flows; about ten private rAF loops. Each has a slice in the coordinator's cohesion-wave2 plan (outside the repo) (problems 1 to 13).
+- Not yet: drains and vents by hand, no grid service entrance for electrical, no machines beyond the ATV, no decks, porches, lofts, skylights, chimneys or greenhouse, no rebar or mixer, no masonry.
+- Camp and journal, contractors, goats, dairy and the plan book beyond the shed and cabin are not started. The engine and game folder tidy-up is deferred.
+
+## What is next (lanes in the coordinator's cohesion-wave2 plan, outside the repo)
+
+- **Ground and machines:** G-1 = A5 (fine grid into `sys.ground.fine`, save v4); G-2 = one barrow as a vehicles unit kind; G-3 = the drive model on a non-homestead fixture (per-wheel loads, hitch sway, skid-steer tracks); then V6 and V9 touch and HUD, a skid steer, the excavator arm.
+- **Services:** S-1 trim-out by hand (landed), S-2 supply fixtures and pressure test (landed), S-3 = S4 legacy links to routes (save v5) plus a grid service entrance, after G-1 and X1; then drains and vents.
+- **Building elements:** B-1 piers and stem walls (landed), B-2 deck, B-3 porch, rails and stairs, then skylight, loft, flue chimney, greenhouse, masonry chimney, all through the extension point.
+- **Cohesion:** K1b one notice module (hint, prompt, toast), K3 one Buy action, P1 `G.frameHooks` with per-hook cost, T1 follow-ups, V11 fold `reach.js` onto `hands.js`.
 
 ## Landing rules (set 14 Nov after the owner said: "the current workload is quite massive, make sure it lands well")
 
@@ -27,26 +51,6 @@ The scope roughly doubled after the first playtest. These rules put landing each
 7. **An independent review per wave.** A fresh agent that did not write the code plays the build and reports what is confusing, broken or dull. Its findings are fixed or written into the playtest notes.
 8. **Cut line.** If time or usage runs short, things are dropped in this order, last first: rented machines, septic and groundworks, hydroponics, goats, contractors, dairy. The shed, the cabin, weather you can see, heat, power, water, a garden and chickens are the V1 that must land.
 
-## Waves
-
-| Wave | Iterations | State | Commit on `main` |
-|---|---|---|---|
-| A | 0 simulation spine | Merged | `68c7226` (not in the shallow history; check `git log`) |
-| B | 1 weather, 2 materials, 2a build mode (first half) | Merged | see `git log` for "Wave B complete" |
-| C | 3 structure, 4 thermal, 6 electrical, 7 water, 13 chickens, 2a build mode (second half) | Merged | |
-| C-int | Real equipment catalog in the Equip tool, power and water running in play, a Home panel | Partly merged. Still owed: store pricing for equipment, overlays in the world (`src/overlays.js` does not exist), the engine and game folder tidy-up (not done) | |
-| F2 | Garden controls rebuilt in the body with hands-on gestures | Merged | |
-| F1 | Farming, first playable: soil water, growth model, twelve crops, beds, sowing, watering, harvest, the first-salad card (`docs/FARMING.md`) | Merged | |
-| D1 | 2c construction and 2d store and plan book: the first shed, end to end | Merged (known gaps in `docs/PLAYTEST.md`) | |
-| D1b | 6a hook-ups: intuitive wiring and piping | Partly merged: hands-on water (First Water) is in; electrical has no hands-on path | |
-| D2 | 1a weather you can see, 5 heating and moisture, 5b camp and journal | Partly merged: weather you can see and heat are in; camp and journal are not | |
-| D3 | 7a groundworks, 7b rented machines, 8 soil and irrigation, 14 chicken lifecycle | Partly merged: digging and landscaping (the Yard) are in; rented machines are not | |
-| D4 | 5a interiors, 18 salvage and renovation | Not started (a `flooring` branch is unmerged) | |
-| E | 9 crops, 19 contractors, 20 automation | Not started (the twelve crops came with F1) | |
-| F | 10 soil and compost, 11 greenhouse, 12 hydroponics, 15 goats, 16 kitchen | Partly merged: the kitchen (key K) came from another session; the rest is not started | |
-| G | 17 dairy and workshop, 21 inspector and blueprints | Not started | |
-| H | 22 integration | Not started | |
-
 ## Open questions for the owner
 
 Things decided on the owner's behalf that are easy to reverse. Say so if any is wrong.
@@ -55,32 +59,3 @@ Things decided on the owner's behalf that are easy to reverse. Say so if any is 
 - Log and timber-frame construction are in V1; stone masonry, cob, earthbag and yurts are deferred.
 - The default climate is temperate at about 45 degrees north, so there are four real seasons with snow. Other climates exist as presets.
 - Starting money is a placeholder until prices and the pace of play can be felt.
-
-## Deviations from the plan
-
-- **The run sat idle from about 03:00 to 11:15 on 15 Nov.** The usage limit stopped the three running agents at about 03:00, and the orchestrator had not scheduled a check-in past 03:10, so nothing restarted them at the 06:30 reset. Rule from now on: a check-in is always scheduled before a turn ends, and one is always set for just after the next usage reset.
-
-- The run stopped from about 7:25pm to 8:35pm Pacific on 14 Nov when the usage limit was reached, then restarted itself.
-- Another session pushed two fixes to `main` during wave B (dollhouse view, potted plant on High); they are merged in.
-
-- Wave tags could not be pushed from the build environment; waves are identified by commit instead.
-- Iteration 2a was split across waves B and C.
-
-## Orchestrator notes (for resuming the run)
-
-State at 02:10 Pacific, 15 Nov. Usage window runs to 06:30. Keep at most four agents running. Resume a stopped agent with SendMessage to its id; each works in `/home/claude/wt-<name>` on branch `iter/<name>`.
-
-| Iteration | Worktree | Agent id | State |
-|---|---|---|---|
-| 7 water | `wt-07-water` | `a794eb67a6f7cff9d` | Merged (headless) |
-| 6 electrical | `wt-06-electrical` | `a8d26ca299cbd8bc9` | Merged (headless) |
-| 13 chickens | `wt-13-chickens` | `a194e2272cd6e5656` | Merged, live |
-| 2a second half (framing, stages, materials list, plans, fixtures) | `wt-02b-build` | `a4d4f2abc82ad3b82` | Merged, live. Not done: log, timber frame, A-frame, 2D plan view, placing single members by hand |
-| F1 farming | `wt-f1-farming` | `aff01250a5f1dc736` | Running |
-| 4 thermal | `wt-04-thermal` | `a1ed4e1a9cafe5d67` | Merged (headless) |
-| 3 structure | `wt-03-structure` | `ac42fcd07389e8bfb` | Finished 11:35; to merge |
-| 2c construction and 2d store: the first shed | `wt-2c-construction` | `a167a5466628b76ba` | Started 02:45 |
-
-Also on `main` from other sessions: the kitchen (cooking, key K, `docs/COOKING.md`), terrain streaming and save fixes, `docs/FOUNDATIONS.md` (Steam and co-op plan). Unmerged branch `renderer-low-memory` is left for the owner to decide.
-
-Owed by the orchestrator once wave C agents finish: fixture catalogs merged into `src/sim/fixtures.js` and the store; the catalog passed to build mode; `__game.addFixtures`; `src/overlays.js`; weather rainfall recalibration (yearly totals run low and swing too much); files moved into engine and game folders; the fun check; wave C playtest notes; then D1 (construction and store: the first shed).

@@ -1,4 +1,4 @@
-# Steam and co-op foundations
+# Steam and co-op platform plan
 
 Audit baseline: `main` at `f644069`. The build remains a self-contained HTML page, bundled by esbuild. This plan works alongside the first-shed milestone in [STATUS.md](STATUS.md) and the construction sequence in [CONSTRUCTION.md](CONSTRUCTION.md).
 
