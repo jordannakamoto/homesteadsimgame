@@ -13,6 +13,7 @@
 //     bedPoint(id, out), nearest(x, z, r) -> id | null, spawn(kind, x?, z?, yaw?) -> id (debug and tests),
 //     findSpot(x, z, { rMin, rMax, rad, away }) -> { x, z, yaw } | null   a clear, dry, flat place near a point
 //     unstick(id), stats(),
+//     status() -> { seated, id, kmh, gear, fuelL, tankL, loadKg, hitched, tips, warn, canUnhitch } (touch layout and the HUD chip), dismount()
 //     towing: hitch(id?) (the driven unit to the nearest towed unit in reach), unhitch() (hold R while seated and stopped),
 //     cargo:  setCargo(id, groups, kg)  what lies on a unit's bed: groups = [{ n, w, h, l, color }] (pieces, metres,
 //             laid along the bed, layer on layer); kg is what it weighs (the drive model tows it),
@@ -37,7 +38,7 @@
   if (!G || !G.control || !G.vehicleCore) return;
   const T = G.THREE, VC = G.vehicleCore, control = G.control, P = G.player, pm = G.pm, SUB = VC.SUB;
   const canvas = G.renderer.domElement;
-  const MAX_SUB = 4, SYNC_S = 0.5, HOP_S = 0.3, OFF_MPS = 1.5, ZONE_HOLD_S = 0.25, TIP_WARN = 0.8, TIP_OVER_S = 0.35, UNHITCH_HOLD_S = 0.6;
+  const MAX_SUB = 4, SYNC_S = 0.5, HOP_S = 0.3, OFF_MPS = 1.5, ZONE_HOLD_S = 0.25, TIP_WARN = 0.8, TIP_OVER_S = 0.35, UNHITCH_HOLD_S = 0.6, SPUTTER_L = 0.05;
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const sysDef = () => G.sim.systems.find((s) => s.name === 'vehicles') || null;
   const S = () => G.sim.state.sys.vehicles || null;
@@ -67,6 +68,40 @@
     if (sayT > 0) return;
     line.innerHTML = html; line.style.display = 'block'; hintOn = true;
   }
+
+  // ---------------------------------------------------------------- the HUD chip (V6): speed, gear, fuel, load and a hitch warning while seated
+  // One .ui-chip in the kit's context lane. Each part is written only when its rounded value changes, so nothing is
+  // laid out per frame. The touch layout reads the same numbers through status().
+  const chip = document.createElement('div');
+  chip.id = 'veh'; chip.className = 'ui-chip'; chip.hidden = true; chip.setAttribute('role', 'status'); chip.setAttribute('aria-label', 'Vehicle');
+  chip.innerHTML = '<span class="v" data-k="spd">0</span><span class="u">km/h</span><span class="sep" data-k="gearw"><span class="u">gear</span> <span class="v" data-k="gear">N</span></span>' +
+    '<span class="sep" data-k="fuelw"><span class="v" data-k="fuel">0</span><span class="u">L</span></span><span class="sep" data-k="loadw"><span class="v" data-k="load">0</span><span class="u">kg</span></span><span class="tag" data-k="warn"></span>';
+  document.body.appendChild(chip);
+  if (window.__ui && window.__ui.mount) window.__ui.mount(chip, 'context', { order: 5 });
+  const chipEl = {}, chipLast = {};
+  for (const e of chip.querySelectorAll('[data-k]')) chipEl[e.dataset.k] = e;
+  function chipSet(k, v) { if (chipLast[k] !== v) { chipLast[k] = v; chipEl[k].textContent = v; } }
+  function chipFlag(k, on) { const f = k + '?'; if (chipLast[f] !== on) { chipLast[f] = on; chipEl[k].hidden = !on; } }
+  const JACK_WARN = 0.8 * VC.ARTIC_MAX;
+  function readout(L) {
+    const b = L.body, k = L.kind, Lt = L.towL, tank = k.fuel ? k.fuel.tankL : 0;
+    const warn = k.fuel && b.stalled === 'fuel' ? 'Out of fuel' : k.fuel && b.fuelL < 1 ? 'Fuel low' : Lt && (b.jack || Math.abs(Lt.body.artic) > JACK_WARN) ? 'Jackknife' : Lt ? 'Hitched' : '';
+    return { kmh: Math.round(Math.abs(b.u) * 3.6), gear: b.gear < 0 ? 'R' : b.gear > 0 ? String(b.gear) : 'N', fuelL: Math.round(b.fuelL * 10) / 10, tankL: tank,
+      loadKg: Lt ? Math.round(Lt.loadKg) : 0, hitched: !!Lt, tips: !!(Lt && Lt.kind.cargo && Lt.kind.cargo.tips), warn, canUnhitch: !!Lt && Math.abs(b.u) <= 0.5 };
+  }
+  function chipTick() {
+    if (!seat) { if (!chip.hidden) chip.hidden = true; return; }
+    const r = readout(seat.L), k = seat.L.kind;
+    if (chip.hidden) chip.hidden = false;
+    chipSet('spd', String(r.kmh)); chipSet('gear', k.gears || k.engine ? r.gear : '');
+    chipFlag('gearw', !!(k.gears || k.engine)); chipFlag('fuelw', !!k.fuel); chipFlag('loadw', r.hitched && !!(L_cargo(seat.L)));
+    if (k.fuel) chipSet('fuel', r.fuelL.toFixed(1));
+    chipSet('load', String(r.loadKg));
+    chipSet('warn', r.warn); chipFlag('warn', !!r.warn);
+    const tone = r.warn === 'Out of fuel' || r.warn === 'Jackknife' ? 'bad' : r.warn === 'Fuel low' ? 'warn' : '';
+    if (chipLast.tone !== tone) { chipLast.tone = tone; chip.classList.toggle('is-bad', tone === 'bad'); chip.classList.toggle('is-warn', tone === 'warn'); }
+  }
+  const L_cargo = (L) => !!(L.towL && L.towL.kind.cargo);
 
   // ---------------------------------------------------------------- models
   const lambert = () => new T.MeshLambertMaterial({ vertexColors: true });
@@ -527,6 +562,12 @@
     if (input.joy || heading()) drive = VC.headingControl(b, k, input.mx, input.mz, { gentle: input.shift });
     else drive = VC.carControl(b, k, seat.pedal || (seat.pedal = {}), { fwd: input.kz, turn: input.kx, brake: false, gentle: input.shift }, dt);
     if (input.brake) { drive.brake = 1; drive.throttle = 0; }
+    // a nearly dry tank sputters: the throttle cuts in and out a few times a second before the engine stops
+    if (k.fuel && b.fuelL > 0 && b.fuelL < SPUTTER_L && drive.throttle > 0.05) {
+      seat.sput = (seat.sput || 0) + dt;
+      if (seat.sput % 0.4 > 0.26) drive.throttle = 0;
+      if (sayT <= 0 && warnT <= 0) { say('The engine is sputtering: nearly out of fuel.', 2); warnT = 4; }
+    }
     {                                                      // what it tows: the sim says; the live body follows the ball
       const u = S().units[L.id], Lt = u && u.towing ? live.get(u.towing) || null : null;
       if (Lt !== L.towL) { L.towL = Lt; if (Lt) wakeTowed(L, Lt); }
@@ -634,6 +675,7 @@
       const u = s.units[id], L = live.get(id);
       if (!L) { create(u); continue; }
       const driven = seat && (seat.L === L || seat.L.towL === L);
+      if (!driven) L.body.fuelL = u.fuelL;                 // a pour or a top-up reaches the tank while it is parked
       if (!driven && !L.wake && !L.tip && (Math.abs(u.x - L.parked.x) > 1e-3 || Math.abs(u.z - L.parked.z) > 1e-3 || Math.abs(VC.wrap(u.yaw - L.parked.yaw)) > 1e-3)) park(L, u);
     }
     for (const L of [...live.values()]) if (!s.units[L.id]) { if (seat && seat.L === L) reset(); else destroy(L); }
@@ -697,6 +739,7 @@
     settleUnits(dt);
     if (sayT > 0) { sayT -= dt; if (sayT <= 0) say(''); }
     if (warnT > 0) warnT -= dt;
+    chipTick();
     stat.frames++;
   });
 
@@ -804,6 +847,7 @@
       return Lt && latch(L, Lt) ? { ok: true } : { ok: false, reason: 'nothing in reach' };
     },
     unhitch,
+    status() { return seat ? { seated: true, id: seat.L.id, ...readout(seat.L) } : { seated: false }; },
     setCargo(id, groups, kg = 0) {
       const L = live.get(id);
       if (!L || !L.cg) return false;

@@ -190,7 +190,7 @@
       const q = isTool(it) ? 1 : qty[id] || 1,
         r = S.do('stock.buy', { id, qty: q });
       if (r.ok) {
-        say('Bought ' + (isTool(it) ? '' : num(q) + unitLabel(it) + ' of ') + it.name + ' for ' + money(r.costUsd) + '. It is in your inventory.', 'good');
+        say('Bought ' + (isTool(it) ? '' : num(q) + unitLabel(it) + ' of ') + it.name + ' for ' + money(r.costUsd) + (it.delivered ? '. It will be delivered to the drop point.' : '. It is in your inventory.'), 'good');
         pop();
         if (id.startsWith('lumber_')) S.do('projects.done', { id: 'lumber' });
       } else say(r.reason === 'not enough money' ? 'Not enough money for that yet.' : 'Could not buy: ' + r.reason + '.', 'bad');

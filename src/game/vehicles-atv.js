@@ -1,11 +1,11 @@
 // The homestead's vehicles as the player sees them: the utility ATV's procedural model (proportions of a mid-size 4x4
 // utility quad: 2.15 m long, 1.20 m wide, seat at 0.89 m, 24 in tyres, racks front and rear), what the ground under a
 // wheel is called (for grip: dry or wet grass, packed or loose dirt, mud, gravel, mulch, sand, snow, water, floors),
-// and the starter ATV parked by the old well, once per world. Registers with window.__vehicles (src/engine/vehicles.js).
+// the starter ATV parked by the old well, once per world, the trailer delivered from the Supplier, delivery fuel top-ups and
+// pouring from the fuel can (hold R beside the ATV). Registers with window.__vehicles (src/engine/vehicles.js).
 // The small utility trailer: its model (a steel dump bed on an A-frame, two wheels), the lumber on its bed (construction
 // stacks flagged `carrier`, drawn through __vehicles.setCargo and kept under the trailer with construction.carrierMove),
-// tipping the load off (construction.carrierUnload), and for now one trailer given with the ATV (V9 moves it to the
-// supplier).
+// tipping the load off (construction.carrierUnload).
 (() => {
   const G = window.__game, V = window.__vehicles;
   if (!G || !V) return;
@@ -218,28 +218,98 @@
     if (!spot) { given = null; wait = 2; return; }     // nowhere clear yet: try again in a moment
     sim.commandNow('vehicles.add', { kind: 'atv', x: spot.x, z: spot.z, yaw: spot.yaw, starter: true });
   });
-  // ---- for now the small trailer comes with the ATV (new worlds and old saves, once): loose, parked alongside it on
-  // the side away from you, so swinging round and backing onto it is the first thing to try. V9 moves it to the supplier.
-  let gifted = null, giftWait = 0;
-  G.stepHooks.push((dt) => {
-    const sim = G.sim, s = sim.state.sys.vehicles;
-    if (!s || !s.starter || (s.once && s.once.trailer) || gifted === sim || (giftWait -= dt) > 0) return;
-    const atvId = Object.keys(s.units).find((id) => s.units[id].kind === 'atv' && !s.units[id].towing);
-    if (!atvId || V.driven() === atvId) { giftWait = 2; return; }
-    gifted = sim;
-    const a = s.units[atvId], P = G.player, from = Math.hypot(P.x - a.x, P.z - a.z) > 1 ? { x: P.x, z: P.z } : { x: a.x - Math.sin(a.yaw), z: a.z - Math.cos(a.yaw) };
-    // alongside the ATV on its far side from you and a little ahead, parallel to it: clear of its path, of where you
-    // start and of a first building's deliveries
-    const fx = Math.sin(a.yaw), fz = Math.cos(a.yaw), rx = Math.cos(a.yaw), rz = -Math.sin(a.yaw);
-    const side = (a.x - from.x) * rx + (a.z - from.z) * rz >= 0 ? 1 : -1;
-    let spot = null;
-    for (const [lat, fwd] of [[3.5, 2], [3.5, 0.5], [5, 2], [5, 3.5], [3.5, 3.5], [6.5, 1]]) {
-      const x = a.x + rx * side * lat + fx * fwd, z = a.z + rz * side * lat + fz * fwd;
-      if ((spot = V.findSpot(x, z, { rMin: 0, rMax: 0.01, rad: 1.0, n: 1 }))) { spot.yaw = a.yaw; break; }
+  // ---- the trailer is bought at the Supplier (U): the purchase sits in stock for a few seconds, then arrives at the drop point
+  // (where the lumber lands; by the ATV when nothing has been ordered yet) as a unit of its own. Old saves keep the trailer
+  // they were given; none is given any more.
+  const ARRIVE_S = 4;
+  let deliverWait = 0;
+  function deliverBought(dt) {
+    const sim = G.sim, st = sim.state.sys.stock, s = sim.state.sys.vehicles;
+    if (!st || !s || !((st.items.trailer_small || 0) >= 1)) { deliverWait = 0; return; }
+    if ((deliverWait += dt) < ARRIVE_S) return;
+    const cs = sim.state.sys.construction, drop = cs && cs.dropPoint, P = G.player;
+    const atv = Object.values(s.units).find((u) => u.kind === 'atv');
+    const c = drop || (atv ? { x: atv.x, z: atv.z } : { x: P.x, z: P.z });
+    // beside the drop point, clear of the stacks that run along +x from it
+    const spot = V.findSpot(c.x, c.z + 3, { rMin: 0, rMax: 7, rad: 1.2, n: 48 }) || V.findSpot(P.x, P.z, { rMin: 4, rMax: 14, rad: 1.2 });
+    if (!spot) { deliverWait = ARRIVE_S - 2; return; }
+    const r = sim.commandNow('vehicles.deliver', { kind: 'trailer_small', x: spot.x, z: spot.z, yaw: atv ? atv.yaw : spot.yaw });
+    deliverWait = 0;
+    if (r.ok) V.say(drop ? 'Your trailer has been delivered to the drop point.' : 'Your trailer has been delivered.', 5);
+  }
+  // ---- fuel: a delivery tops the tank up (a setting, on unless switched off: __vehicles.topUp(false)); a can pours the rest
+  let listening = null, topPending = false;
+  function listen() {
+    if (listening === G.sim) return;
+    listening = G.sim;
+    G.sim.listen((type) => { if (type === 'construction.delivered' || type === 'vehicles.delivered') topPending = true; });
+  }
+  function topUp() {
+    if (!topPending) return;
+    topPending = false;
+    const r = G.sim.commandNow('vehicles.topUp', {});
+    if (r && r.litres > 0) V.say('The delivery driver topped up the ATV: ' + r.litres.toFixed(1) + ' L.', 4);
+  }
+  V.topUp = (on) => { const r = G.sim.commandNow('vehicles.setOption', { topUp: !!on }); return r.ok ? !!on : r; };
+  V.topUpOn = () => { const o = G.sim.state.sys.vehicles.options; return !(o && o.topUp === false); };
+
+  // Pouring: on foot with the axe, the fuel can owned and gasoline in stock, stand beside the ATV and hold R (touch: the
+  // "Pour fuel" button). The can's spout runs at kind.fuel.pourLps litres a second, taken from stock through vehicles.refuel
+  // in 0.1 s portions, so the stock, the tank and the fuel books all move together; the prompt shows the litres.
+  let pourKey = false, pourBtn = false, pourAcc = 0, pourT = 0, poured = 0, pourSay = 0, near = null, pouring = false;
+  const REACH_M = 1.6;                                       // from the body's edge
+  function nearFuelUnit() {
+    if (V.driven() || !G.control.walking() || G.player.tool !== 'axe' || (window.__build && window.__build.state.on)) return null;
+    const s = G.sim.state.sys.vehicles, P = G.player, K = V.kinds();
+    let best = null, bd = Infinity;
+    for (const u of Object.values(s.units)) {
+      const k = K[u.kind];
+      if (!k.fuel || u.owner !== 'own') continue;
+      const d = Math.hypot(P.x - u.x, P.z - u.z) - Math.min(k.dims.l, k.dims.w * 1.4) / 2;
+      if (d < REACH_M && d < bd) { bd = d; best = u; }
     }
-    spot = spot || V.findSpot(a.x, a.z, { rMin: 4, rMax: 12, rad: 0.9 });
-    if (!spot) { gifted = null; giftWait = 3; return; }
-    const r = sim.commandNow('vehicles.add', { kind: 'trailer_small', x: spot.x, z: spot.z, yaw: spot.yaw, once: 'trailer' });
-    if (r.ok && !localStorage.getItem('veh:toldTrailer')) { localStorage.setItem('veh:toldTrailer', '1'); V.say('A small trailer came with the ATV. Back the ATV onto its tongue to hitch it.', 5); }
+    return best;
+  }
+  function pourTick(dt) {
+    const P = window.__ui && window.__ui.prompt;
+    near = nearFuelUnit();
+    const held = pourKey || pourBtn;
+    if (!near) { if (pouring) { pouring = false; poured = 0; } if (P && P.hide) P.hide('fuel'); return; }
+    const st = G.sim.state.sys.stock, k = V.kinds()[near.kind], room = k.fuel.tankL - near.fuelL, gas = st.items.gasoline || 0, can = st.tools.includes('fuel_can');
+    if (pourSay > 0) pourSay -= dt;
+    const full = room <= 0.05;
+    if (!held) {
+      if (pouring) { pouring = false; if (poured > 0.05) V.say('Poured ' + poured.toFixed(1) + ' L. The tank has ' + near.fuelL.toFixed(1) + ' L.', 3); poured = 0; }
+      if (P && P.show) {
+        if (!can) P.hide('fuel');
+        else if (full) P.show({ text: 'The tank is full: ' + near.fuelL.toFixed(1) + ' L', owner: 'fuel' });
+        else P.show({ key: 'R', text: gas > 0 ? 'Hold to pour fuel (' + near.fuelL.toFixed(1) + ' / ' + k.fuel.tankL + ' L)' : 'No gasoline: buy some at the Supplier (U)', owner: 'fuel' });
+      }
+      return;
+    }
+    if (!can) { if (pourSay <= 0) { V.say('You need a fuel can: the Supplier (U) sells one.', 3); pourSay = 3; } return; }
+    if (full) { if (pouring) { pouring = false; V.say('The tank is full: ' + near.fuelL.toFixed(1) + ' L.', 3); poured = 0; } return; }
+    if (gas <= 0) { if (pourSay <= 0) { V.say('No gasoline in stock: buy some at the Supplier (U).', 3); pourSay = 3; } pouring = false; return; }
+    pouring = true; pourAcc += (k.fuel.pourLps || 0.4) * dt; pourT += dt;
+    if (pourT >= 0.1 || pourAcc >= room) {
+      pourT = 0;
+      const want = Math.min(pourAcc, room, gas), r = G.sim.commandNow('vehicles.refuel', { id: near.id, litres: want });
+      if (r.ok) { poured += r.litres; pourAcc = Math.max(0, pourAcc - r.litres); } else pourAcc = 0;
+    }
+    if (P && P.show) P.show({ key: 'R', text: 'Pouring ' + near.fuelL.toFixed(1) + ' / ' + k.fuel.tankL + ' L', progress: Math.min(1, near.fuelL / k.fuel.tankL), owner: 'fuel' });
+  }
+  window.addEventListener('keydown', (e) => {
+    if (e.code !== 'KeyR' || V.driven()) return;
+    const t = e.target && e.target.tagName;
+    if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return;
+    pourKey = true;
+  });
+  window.addEventListener('keyup', (e) => { if (e.code === 'KeyR') pourKey = false; });
+  window.addEventListener('blur', () => { pourKey = false; pourBtn = false; });
+  window.__fuel = { press: (on) => { pourBtn = !!on; }, ready: () => !!near && (near.fuelL < V.kinds()[near.kind].fuel.tankL - 0.05), unit: () => near && near.id };
+
+  G.stepHooks.push((dt) => {
+    if (!G.sim.state.sys.vehicles) return;
+    listen(); deliverBought(dt); topUp(); pourTick(dt);
   });
 })();

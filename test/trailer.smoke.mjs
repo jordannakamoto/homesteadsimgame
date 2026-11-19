@@ -1,5 +1,5 @@
 // Browser smoke test of the trailer: node test/trailer.smoke.mjs  (needs dist/index.html and Playwright)
-// A trailer comes with the starter ATV; backing the ball onto its tongue hitches it; it follows and swings behind;
+// The trailer is bought at the Supplier and delivered to the drop point (not given with the ATV); backing the ball onto its tongue hitches it; it follows and swings behind;
 // holding R unhitches while seated; lumber loads onto its bed by holding at a pile, rides with it, the build can draw from it,
 // and holding the left button tips the load off as a pile on the ground. The construction ledger balances throughout.
 import { openPage } from './helpers/page.mjs';
@@ -9,9 +9,15 @@ const frames = async (n) => { const f0 = await G(() => __game.renderer.info.rend
 
 await T.load();   // waits for the game object, not a fixed 8 s
 await frames(40);
+const none = await G(() => Object.values(__game.sim.state.sys.vehicles.units).filter((q) => q.kind === 'trailer_small').length);
+check('a new world gives no trailer with the ATV', none === 0, 'trailers: ' + none);
+await G(() => { __game.sim.commandNow('stock.buy', { id: 'trailer_small', qty: 1 }); });
+let tr0 = null;
+for (let i = 0; i < 40 && !tr0; i++) { await page.waitForTimeout(500); tr0 = await G(() => Object.values(__game.sim.state.sys.vehicles.units).find((q) => q.kind === 'trailer_small') || null); }
+check('a bought trailer is delivered a few seconds later, and is gone from stock', !!tr0 && (await G(() => !__game.sim.state.sys.stock.items.trailer_small)), JSON.stringify(tr0));
+await frames(20);
 const st = await G(() => { const u = __game.sim.state.sys.vehicles.units; return Object.values(u).map((q) => ({ id: q.id, kind: q.kind, x: q.x, z: q.z, yaw: q.yaw })); });
 const atv = st.find((q) => q.kind === 'atv'), tr = st.find((q) => q.kind === 'trailer_small');
-check('a trailer comes with the starter ATV', !!atv && !!tr, JSON.stringify(st));
 if (!atv || !tr) { console.log(errors); process.exit(1); }
 
 // get on, then back onto the tongue: put the ATV a metre in front of the tongue, lined up, and reverse
