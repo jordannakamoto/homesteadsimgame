@@ -398,7 +398,7 @@ Water, electricity and room heat are merged and tested headlessly. They become p
 - The cut always happens near you: at the horses when they are close, else on the deck. The character does not walk to the horses.
 - Scaffold bays are one bay long (2.6 m); a long wall takes moving it. The frames are not solid to walk into.
 - A save from before this branch keeps any lumber line it had started by the metre; new lines are bought in sticks.
-- `test/shed.e2e.mjs` was already failing on `main` before this branch (the wheelbarrow's prompt takes the pointer near the stacks); `test/construction-tools.smoke.mjs` covers the new tools in the page.
+- `test/shed.e2e.mjs` was failing on `main` when this branch landed (the wheelbarrow's prompt took the pointer near the stacks). Fixed since (see "Shed by hand again"); it passes on `main` 5040672, hands-on and guided. `test/construction-tools.smoke.mjs` covers the new tools in the page.
 
 ## Digging and landscaping (Yard, key 6)
 
@@ -681,7 +681,7 @@ Try: lay the subfloor by hand from the default camera; nail a wall frame lying o
 - Spools are drawn from the stacks wherever you stand, like nails; carrying one only decides where it comes from.
 - Floors do not cover runs (a crawl space is reachable from below); a ceiling's lining does.
 - Drains and vents have no lines and no hands yet (S11): "Do it for me" fits them.
-- The shed gate (`test/shed.e2e.mjs`) fails on current `main` and on this branch alike (the hand-building loop keeps picking up the wrong stack at the foundation, 10 checks); it is not caused by S8.
+- The shed gate (`test/shed.e2e.mjs`) failed on `main` and on this branch alike when S8 landed (the hand-building loop kept picking up the wrong stack at the foundation); not caused by S8, and fixed since: it passes on `main` 5040672.
 
 ## Ground A3 and foundations B1 — sites through the ground, concrete that cures (branch `ground-a3b1`)
 
@@ -882,7 +882,7 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - A finished room shows its drywall or boards, not the old plank-and-post faces; no screws or nails show once the walls are finished.
 - To try it: in plan options choose Inside: Drywall (the cabin defaults to pine boards). `__build.placePlan('cabin', x, z, yaw, { lining: 'gypsum' })` does it from the console.
 - Old saves: a wall lined in one piece before this change counts its new sheets and seams as in, so finished buildings stay finished.
-- Known: `test/shed.e2e.mjs` still fails at the foundation (the pointer picks a neighbouring stack and puts it back), as noted above; not from this branch.
+- `test/shed.e2e.mjs` no longer fails at the foundation: the fix is in "Shed by hand again" above, and the gate passes on `main` 5040672 (hands-on and guided). The older notes that say it fails are history.
 
 ## Key map, help on ? / F1, X means overlays (branch `wave2-k1-keys`)
 - **New:** `src/game/keymap.js` is one table of every key by context; the Controls sheet is drawn from it (combat rows only with `localStorage.combat`), and `__keymap.chip('E')` gives key chips for prompts. The sheet opens on `?` or F1 (H is the Hens'). Unhitching a trailer is now hold R while stopped (a prompt shows; X is overlays everywhere). The 2/3/4 terrain brush needs `localStorage.sandbox = '1'` (its buttons are hidden otherwise). Site and Foundation notes name "Site (7)" for slab, stem wall and pier foundations. Esc also leaves the terrain brush.
