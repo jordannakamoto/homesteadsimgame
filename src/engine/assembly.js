@@ -12,6 +12,8 @@
       farMat = new T.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.16, depthWrite: false, fog: false }),
       things = new Map(),
       dotGeo = new T.BoxGeometry(1, 1, 1), dotMat = new T.MeshBasicMaterial({ color: 0xffffff, fog: false }),
+      // the nails are cut by the dollhouse planes like the pieces they are in: a material per building that has planes
+      dotMatFor = (t) => { const pl = t.mats && t.mats.mat && t.mats.mat.clippingPlanes; if (!pl) return dotMat; if (!t.dotMat || t.dotMat.clippingPlanes !== pl) t.dotMat = new T.MeshBasicMaterial({ color: 0xffffff, fog: false, clippingPlanes: pl, clipIntersection: t.mats.mat.clipIntersection }); return t.dotMat; },
       m4 = new T.Matrix4(), m4b = new T.Matrix4(), v = new T.Vector3(), c = new T.Color(), up = new T.Vector3(0, 1, 0);
     let pulse = 0;
     // the box that is a member: columns along it, across its depth, across its breadth (the same as its owner draws it)
@@ -62,7 +64,7 @@
         const t = thing(key);
         if (t.mats === mats || (t.mats && mats && t.mats.mat === mats.mat && t.mats.alt === mats.alt)) return;
         t.mats = mats;
-        for (const L of t.layers.values()) { L.solid.material = (mats && mats.mat) || look.mat; if (L.alt) L.alt.material = (mats && mats.alt) || look.alt.mat; }
+        for (const L of t.layers.values()) { L.solid.material = (mats && mats.mat) || look.mat; if (L.alt) L.alt.material = (mats && mats.alt) || look.alt.mat; if (L.dots) L.dots.material = dotMatFor(t); }
       },
       setFrame(key, matrix) { const t = thing(key); t.root.matrix.copy(matrix); t.root.matrixWorldNeedsUpdate = true; },
       remove(key) { const t = things.get(key); if (!t) return; for (const id of [...t.layers.keys()]) dropLayer(t, id); G.scene.remove(t.root); things.delete(key); },
@@ -128,13 +130,13 @@
         if (!L.dots || L.dots.instanceMatrix.count < list.length) {
           if (L.dots) { L.group.remove(L.dots); L.dots.dispose(); }
           if (!list.length) return;
-          L.dots = new T.InstancedMesh(dotGeo, dotMat, Math.max(256, list.length * 2));
+          L.dots = new T.InstancedMesh(dotGeo, dotMatFor(thing(key)), Math.max(256, list.length * 2));
           L.dots.frustumCulled = false; L.dots.renderOrder = 5;
           L.group.add(L.dots);
         }
         if (!L.dots) return;
         list.forEach((d, n) => {
-          const sz = d.k ? 0.034 : 0.05;
+          const sz = d.k ? 0.014 : 0.05;      // a driven nail's head, small; one still to drive, a bright marker
           const h = d.h || 0;
           L.dots.setMatrixAt(n, m4.makeScale(sz, sz, sz).setPosition(d.p[0] + L.lift.x * h - L.pivot.x, d.p[1] + L.lift.y * h - L.pivot.y, d.p[2] + L.lift.z * h - L.pivot.z));
           L.dots.setColorAt(n, d.k ? c.setRGB(0.1, 0.09, 0.08) : c.setRGB(1, 0.86, 0.3));

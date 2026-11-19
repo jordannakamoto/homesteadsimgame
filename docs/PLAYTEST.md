@@ -982,3 +982,9 @@ Nothing new to see yet: this is the plumbing decks, porches, lofts, skylights an
 
 - A finished wall's doors and windows are lined with jamb boards across the whole wall thickness (a board up each side, a head, and a sill under a window), primed white or the building's trim colour, so an opening shows finished wood from any side and in the dollhouse cut.
 - The dollhouse cut's cap sits a hair above the cut, so the cut ends of studs and plates no longer poke through it as little bumps: the wall tops read level. The cap runs over the jambs at an opening, and the cut's sides cap the wall round an opening up to the clear opening.
+
+## Dollhouse cut on buildings still in progress; windows and doors in section (branch `open-fills2`)
+
+- A wall counts as closed in once its shell is on (frame, sheathing, wrap, siding, lining): the cut's caps and the jamb boards in its openings appear then, not only once everything (trim, paint, wiring, plumbing) is done. Before, a building built by hand with later stages to go showed none of it.
+- Where the cut passes through a window, it shows the window in section: a solid white frame across the wall with a pale line for the glass, instead of a notch; through a door, its frame posts are solid and the doorway stays open.
+- Nails: a closed-in wall shows no nail heads; the nail marks are cut by the dollhouse like the pieces they are in (none float above a cut wall); driven nails are drawn small.
