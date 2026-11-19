@@ -18,6 +18,7 @@
 
 import { hitchPose, towPoint, wrap, ARTIC_MAX } from './vehicles-drive.js';
 export * from './vehicles-drive.js';
+export * from './vehicles-keys.js';
 
 const round6 = (x) => Math.round(x * 1e6) / 1e6;
 const cents = (x) => Math.round(x * 100) / 100;

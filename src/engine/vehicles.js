@@ -437,7 +437,7 @@
     const r = G.sim.commandNow('vehicles.sit', { id, seat: seatId, actor: 'player' });
     if (!r.ok) { say(r.reason === 'seat taken' ? 'Someone is on it.' : 'Cannot get on: ' + r.reason + '.'); return r; }
     enterSeat(L, r.seat, { x: P.x, y: P.y, z: P.z });
-    if (!localStorage.getItem('veh:told')) { say('Push where you want to go. Space brakes, Shift is gentle throttle, E gets off.', 5); localStorage.setItem('veh:told', '1'); }
+    if (!localStorage.getItem('veh:told')) { say('W drives, S brakes then reverses, A and D steer, Space brakes, Shift is gentle throttle, E gets off.', 5); localStorage.setItem('veh:told', '1'); }
     return { ok: true };
   }
   function enterSeat(L, seatId, from) {
@@ -491,6 +491,9 @@
     }
     return null;
   }
+  const heading = () => { try { return localStorage.getItem('driveScheme') === 'heading'; } catch (e) { return false; } };
+  const camFollow = () => { try { return localStorage.getItem('driveCamFollow') === '1'; } catch (e) { return false; } };
+  const wrapA = (a) => Math.atan2(Math.sin(a), Math.cos(a));
   function ride(dt, input) {
     const L = seat.L, b = L.body, k = L.kind;
     seat.t += dt;
@@ -512,7 +515,10 @@
       if (f >= 1) finishOff();
       return;
     }
-    drive = VC.headingControl(b, k, input.mx, input.mz, { gentle: input.shift });
+    // keys drive like a car (W throttle, S brake then reverse, A/D steer the vehicle); a touch stick, or localStorage.driveScheme =
+    // 'heading', keeps "push where you want to go" on screen
+    if (input.joy || heading()) drive = VC.headingControl(b, k, input.mx, input.mz, { gentle: input.shift });
+    else drive = VC.carControl(b, k, seat.pedal || (seat.pedal = {}), { fwd: input.kz, turn: input.kx, brake: false, gentle: input.shift }, dt);
     if (input.brake) { drive.brake = 1; drive.throttle = 0; }
     {                                                      // what it tows: the sim says; the live body follows the ball
       const u = S().units[L.id], Lt = u && u.towing ? live.get(u.towing) || null : null;
@@ -537,6 +543,17 @@
     }
     stepUnit(L, dt, drive);
     poseRider(L, null);
+    // optional follow-behind camera (localStorage.driveCamFollow = '1', default off): the orbit eases round behind the nose while
+    // driving, and lets go for two seconds whenever the player has turned the camera by hand
+    if (camFollow() && seat.phase === 'ride') {
+      if (seat.camSet != null && Math.abs(wrapA(G.cam.yaw - seat.camSet)) > 1e-4) seat.camHold = 2;
+      seat.camHold = Math.max(0, (seat.camHold || 0) - dt);
+      if (!seat.camHold && Math.abs(b.u) > 1) {
+        G.cam.yaw += wrapA(b.yaw + Math.PI - G.cam.yaw) * Math.min(1, 1.2 * dt * Math.min(1, Math.abs(b.u) / 4));
+        if (G.cam.prevYaw != null) G.cam.prevYaw = G.cam.yaw;
+      }
+      seat.camSet = G.cam.yaw;
+    }
     // the camera: a little further out with speed; a shake on a hard landing or a knock
     seat.poss.cam.distK = 1 + 0.15 * Math.min(1, Math.abs(b.u) / k.topMps);
     if (L.land > 0.8) { G.cam.shake = Math.min(0.55, G.cam.shake + 0.06 * L.land); landPuff(L); }
