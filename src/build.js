@@ -16,23 +16,44 @@
   const COST = { wall: 2, floor: 1, roof: 1, door: 2, window: 1 };
   const UNDO_DEPTH = 200;
   // Top-level tools, in the groups the bar shows them in. "tower" (a round room) is reached from Room's shape
-  // option and "copy" from Select, so neither has a button of its own.
+  // option and "copy" from Select, so neither has a button of its own. cat is the bar slot a tool lives in
+  // (select|shell|door|window|more|inside|remove: "more" and "inside" are group slots with a flyout), letter its
+  // letter key, tip the longer explanation for the slot's title (the hint row keeps to one short sentence).
   const TOOLS = [
-    { id: "select", name: "Select", key: "1", code: "Digit1", group: 0 },
-    { id: "room", name: "Room", key: "2", code: "Digit2", group: 1 },
-    { id: "wall", name: "Wall", key: "3", code: "Digit3", group: 1 },
-    { id: "floor", name: "Floor", key: "4", code: "Digit4", group: 1 },
-    { id: "roof", name: "Roof", key: "5", code: "Digit5", group: 1 },
-    { id: "door", name: "Door", key: "6", code: "Digit6", group: 2 },
-    { id: "window", name: "Window", key: "7", code: "Digit7", group: 2 },
-    { id: "stairs", name: "Stairs", key: "8", code: "Digit8", group: 2 },
-    { id: "pillar", name: "Pillar", key: "9", code: "Digit9", group: 2 },
-    { id: "path", name: "Path", key: "0", code: "Digit0", group: 3 },
-    { id: "decor", name: "Furnish", key: "F", code: "KeyF", group: 3 },
-    { id: "equip", name: "Equip", key: "E", code: "", group: 3 },
-    { id: "measure", name: "Measure", key: "U", code: "KeyU", group: 4 },
-    { id: "erase", name: "Remove", key: "X", code: "KeyX", group: 4 },
+    { id: "select", name: "Select", key: "1", code: "Digit1", group: 0, cat: "select", letter: "V" },
+    { id: "room", name: "Room", key: "2", code: "Digit2", group: 1, cat: "shell", letter: "R" },
+    { id: "wall", name: "Wall", key: "3", code: "Digit3", group: 1, cat: "shell", letter: "N" },
+    { id: "floor", name: "Floor", key: "4", code: "Digit4", group: 1, cat: "more", letter: "F" },
+    { id: "roof", name: "Roof", key: "5", code: "Digit5", group: 1, cat: "shell", letter: "O" },
+    { id: "door", name: "Door", key: "6", code: "Digit6", group: 2, cat: "door", letter: "J" },
+    { id: "window", name: "Window", key: "7", code: "Digit7", group: 2, cat: "window", letter: "U" },
+    { id: "stairs", name: "Stairs", key: "8", code: "Digit8", group: 2, cat: "more", letter: "Z" },
+    { id: "pillar", name: "Pillar", key: "9", code: "Digit9", group: 2, cat: "more", letter: "P" },
+    { id: "path", name: "Path", key: "0", code: "Digit0", group: 3, cat: "more", letter: "L" },
+    { id: "decor", name: "Furnish", key: "F", code: "KeyF", group: 3, cat: "inside", letter: "C" },
+    { id: "equip", name: "Equip", key: "E", code: "", group: 3, cat: "inside", letter: "E" },
+    { id: "measure", name: "Measure", key: "U", code: "KeyU", group: 4, cat: "more", letter: "Y" },
+    { id: "erase", name: "Remove", key: "X", code: "KeyX", group: 4, cat: "remove", letter: "X" },
   ];
+  {
+    const TIPS = {
+      select: "Click a piece to select it. Shift-click adds, drag on open ground selects an area, drag a piece to move it. Double-click opens its details.",
+      room: "Drag out a room: floor and walls in one go. Or click corner to corner. Type a number for an exact size.",
+      wall: "Drag a wall at any angle, or click point to point. Drawing over a wall restyles it.",
+      floor: "Drag out floor. Laying it over an old floor replaces the surface.",
+      roof: "Click a room to roof it, or drag a rectangle. Click a roof to change it to this one. Enter roofs the whole building under the cursor.",
+      door: "Point at a wall: the door follows along it and snaps to the centre and between openings. Click to hang it. Click one to select it, then drag its edges to resize or drag it to move. F flips the swing, Delete removes it.",
+      window: "Point at a wall: the window follows the pointer, up and down too, and snaps to the usual sill, the centre and its neighbours' heads. Click to place. Click one to select it, then drag its edges to resize or drag it to move. Delete removes it.",
+      stairs: "Drag from the foot of the stairs the way they should climb.",
+      pillar: "Click to stand a pillar, or drag for an evenly spaced row. Pillars close together are joined by a beam.",
+      path: "Drag a path over the ground, or click point to point.",
+      decor: "Pick a piece, then click to place it. Wall pieces snap to walls.",
+      equip: "Pick a piece of equipment and click to place it: on the ground, a floor, a wall or a roof. Drag from one port dot to another to run a wire or pipe.",
+      measure: "Click two points to measure between them. Measurements stay until you clear them.",
+      erase: "Click a piece to remove it, or drag a box to clear an area.",
+    };
+    for (const t of TOOLS) t.tip = TIPS[t.id];
+  }
 
   const B = {
     on: false,
@@ -6935,30 +6956,48 @@
     B.ovVer++;
   }
   const TOUCH = () => document.body.classList.contains("touch");
+  // one sentence per tool, verb first, at most 70 characters; the longer explanation is the tool's tip (TOOLS)
   const HINTS = {
-    select: "Click a piece to select it. Shift-click adds, drag on open ground selects an area, drag a piece to move it.",
-    room: "Drag out a room: floor and walls in one go. Or click corner to corner.",
-    tower: "Drag outward from the middle of a round room.",
-    wall: "Drag a wall at any angle, or click point to point. Drawing over a wall restyles it.",
-    floor: "Drag out floor. Laying it over an old floor replaces the surface.",
-    roof: "Click a room to roof it, or drag a rectangle. Click a roof to change it to this one. Enter roofs the whole building under the cursor.",
-    door: "Point at a wall: the door follows along it and snaps to the centre and between openings. Click to hang it. Click one to select it, then drag its edges to resize or drag it to move. F flips the swing, Delete removes it.",
-    window: "Point at a wall: the window follows the pointer, up and down too, and snaps to the usual sill, the centre and its neighbours' heads. Click to place. Click one to select it, then drag its edges to resize or drag it to move. Delete removes it.",
-    stairs: "Drag from the foot of the stairs the way they should climb.",
-    pillar: "Click to stand a pillar, or drag for an evenly spaced row. Pillars close together are joined by a beam.",
+    select: "Click a piece to select it, or drag it to move it.",
+    room: "Drag out a room. Type a number for an exact size.",
+    tower: "Drag out from the middle of a round room.",
+    wall: "Drag a wall, or click point to point. Drawing over a wall restyles it.",
+    floor: "Drag out floor. Laying it over a floor changes its surface.",
+    roof: "Click a room to roof it, or drag a rectangle. Enter roofs it all.",
+    door: "Click a wall to hang the door. Drag it to slide.",
+    window: "Click a wall to place the window. Drag an edge to resize.",
+    stairs: "Drag from the foot of the stairs the way they climb.",
+    pillar: "Click to stand a pillar, or drag for an evenly spaced row.",
     path: "Drag a path over the ground, or click point to point.",
     decor: "Pick a piece, then click to place it. Wall pieces snap to walls.",
-    measure: "Click two points to measure between them. Measurements stay until you clear them.",
+    measure: "Click two points to measure between them.",
     erase: "Click a piece to remove it, or drag a box to clear an area.",
-    equip: "Pick a piece of equipment and click to place it: on the ground, a floor, a wall or a roof. Drag from one port dot to another to run a wire or pipe.",
+    equip: "Pick equipment, then click to place it. Drag port to port to wire.",
     copy: "Click where you want a copy.",
   };
+  // the room under the cursor, for the Roof and Select trays: what it measures and whether it is closed in
+  function roomFacts() {
+    const h = B.hover,
+      on = h && !h.F.isNew && (B.tool === "roof" || (B.tool === "select" && !B.sel.length)),
+      room = on ? h.F.cellRoom.get(ck(Math.floor(h.lx), Math.floor(h.lz))) : null,
+      key = room && room.cells.length > 1 ? h.F.id + "|" + room.i0 + "," + room.j0 + "," + room.i1 + "," + room.j1 + "|" + B.version : "";
+    if (key === B.roomKey) return;
+    B.roomKey = key;
+    let f = null;
+    if (key) {
+      const w = room.i1 - room.i0 + 1,
+        l = room.j1 - room.j0 + 1;
+      f = { title: "Room " + w + " × " + l + " m", text: fmtA(room.cells.length) + " · " + (room.enclosed ? (room.roofed ? "walled and roofed" : "walled in, no roof yet") : plural(room.gaps.length, "open edge") + " marked in amber") };
+    }
+    B.roomFacts = f;
+    B.uiVer++;
+  }
   function hint() {
     let text = HINTS[B.tool] || "";
-    if ((B.tool === "window" && B.wleg) || (B.tool === "door" && B.dleg)) text = B.tool === "door" ? "Click a wall to hang a rustic door. Drag along the wall for a row." : "Click a wall for a rustic window. Drag along the wall for an evenly spaced row.";
-    if (B.ores) text = "Drag to resize. Snaps every 5 cm and to the store's sizes; Ctrl for free sizes.";
-    const h = B.hover,
-      d = B.drag;
+    if ((B.tool === "window" && B.wleg) || (B.tool === "door" && B.dleg)) text = B.tool === "door" ? "Click a wall to hang a rustic door. Drag along the wall for a row." : "Click a wall for a rustic window. Drag along it for a row.";
+    else if (B.fsel && (B.tool === "door" || B.tool === "window")) text = B.tool === "door" ? "Drag an edge to resize, or the middle to slide it. F flips it." : "Drag an edge to resize, or the middle to move it. Delete removes it.";
+    if (B.ores) text = "Drag to resize. Snaps every 5 cm and to store sizes; Ctrl is free.";
+    const d = B.drag;
     if (B.tapMode === "pick") text = "Click any piece to take its style and material in hand.";
     else if (B.tapMode === "paint") text = "Click or drag across pieces to give them the material in hand.";
     else if (B.move) text = B.move.hand ? "Click to place a copy. Esc puts it down." : "Release to place. Esc cancels.";
@@ -6968,17 +7007,10 @@
     else if (d) text = "Release to place. Esc cancels.";
     else if (B.tool === "copy" && !B.clipb) text = "Click a building to pick it up.";
     else if (B.tool === "select" && B.sel.length) text = B.sel.length === 1 ? "Drag it to move it, or change it below. Delete removes it." : "Drag to move them together, or change them below. Delete removes them.";
-    else if (h && !h.F.isNew && B.tool !== "select" && B.tool !== "measure") {
-      // over a room: what it measures and whether it is closed in, without being asked
-      const room = h.F.cellRoom.get(ck(Math.floor(h.lx), Math.floor(h.lz)));
-      if (room && room.cells.length > 1) {
-        const w = room.i1 - room.i0 + 1,
-          l = room.j1 - room.j0 + 1;
-        text = "Room " + w + " × " + l + " m · " + fmtA(room.cells.length) + " · " + (room.enclosed ? (room.roofed ? "walled and roofed" : "walled in, no roof yet") : plural(room.gaps.length, "open edge") + " marked in amber");
-      }
-    }
+    // room facts no longer replace the hint: they are an info group in the Roof and Select trays
+    roomFacts();
     if (B.flash && performance.now() < B.flash.until) text = B.flash.text;
-    if (TOUCH()) text = text.replace(/\bShift-click adds, /, "").replace(/\bClick\b/g, "Tap").replace(/\bclick\b/g, "tap").replace(/ Esc (stops|cancels|puts it down)\./, "").replace(/ Type a number for an exact size\./, " Tap the size to type it.").replace(" Delete removes it.", "").replace(" Delete removes them.", "");
+    if (TOUCH()) text = text.replace(/\bClick\b/g, "Tap").replace(/\bclick\b/g, "tap").replace(/ Esc (stops|cancels|puts it down)\./, "").replace(/ Type a number for an exact size\./, " Tap the size to type it.").replace(" Delete removes it.", "").replace(" Delete removes them.", "").replace(" F flips it.", "");
     if (text !== B.hintText) ((B.hintText = text), B.uiVer++);
   }
 
@@ -7197,7 +7229,7 @@
       const now = performance.now(),
         id = B.hoverId,
         hd = handleAt();
-      B.press = { x: e.clientX, y: e.clientY, id: hd ? B.sel[0] : id, hd, shift: e.shiftKey, o: ray.ray.origin.clone(), dir: ray.ray.direction.clone() };
+      B.press = { x: e.clientX, y: e.clientY, id: hd ? B.sel[0] : id, hd, shift: e.shiftKey, o: ray.ray.origin.clone(), dir: ray.ray.direction.clone(), fo: hd || e.shiftKey ? null : freeOpenAt() };
       B.press.dbl = !!(id && !hd && B.lastClick && B.lastClick.id === id && now - B.lastClick.t < 380);
       B.lastClick = { id, t: now };
       return;
@@ -7266,7 +7298,8 @@
       } else if (!pr.go) {
         // a plain click: select, add to or drop from the selection, or clear it on open ground
         if (pr.hd) {
-        } else if (pr.dbl) (selSet([pr.id]), selBuilding());   // a double click takes the whole building
+        } else if (pr.fo) return void (openFree(pr.fo), touch && setPtr(e, false));   // a door or window: its own tool, with it selected
+        else if (pr.dbl) (selSet([pr.id]), (B.inspNow = true), (B.uiVer++));   // a double click opens the inspector on it
         else if (!pr.id) pr.shift || selSet([]);
         else if (pr.shift) selSet(B.sel.includes(pr.id) ? B.sel.filter((x) => x !== pr.id) : [...B.sel, pr.id]);
         else {
@@ -7306,6 +7339,28 @@
     commit();
     if (touch) setPtr(e, false);
   });
+  // the free door or window under the pointer, for Select (pickAt finds the wall it is in)
+  function freeOpenAt() {
+    const pk = pickAt(ANY_PIECE);
+    if (!pk || pk.kind !== "wall" || !pk.run || pk.u === undefined) return null;
+    const ax = runAx(pk.S, pk.run),
+      along = ax.t0 + pk.u * (ax.t1 - ax.t0),
+      o = pk.S.fopen.find((q) => q.g === pk.run && along >= q.f.pos - 0.05 && along <= q.f.pos + q.sp.w + 0.05 && (pk.y === undefined || (pk.y >= q.sp.sill - 0.1 && pk.y <= q.sp.head + 0.1)));
+    return o ? { id: o.f.id, kind: o.sp.type.kind } : null;
+  }
+  // Select on a free door or window: one way to edit an opening. Its own tool comes up with it selected and the
+  // designer open; Esc goes back to Select.
+  function openFree(fo) {
+    selSet([]);
+    setTool(fo.kind);
+    if (fo.kind === "window") B.wleg = false;
+    else B.dleg = false;
+    B.fsel = fo.id;
+    B.fromSel = true;
+    B.key = "";
+    hint();
+    touchUi();
+  }
   // put down what is in hand: a stroke, a copy, a measurement half taken. With nothing in hand, go home to Select.
   function putDown(home) {
     if (B.typed.a !== null || B.typed.b !== null) return (typedClear(), true);
@@ -7316,6 +7371,7 @@
     if (B.tapMode) return ((B.tapMode = ""), (B.key = ""), touchUi(), true);
     if (B.measA) return ((B.measA = null), (B.key = ""), measDraw(null), touchUi(), true);
     if (B.tool === "copy" && B.clipb) return ((B.clipb = null), setTool("select"), true);
+    if (B.fromSel && (B.tool === "door" || B.tool === "window")) return (setTool("select"), true);
     if (home && B.tool !== "select") return (setTool("select"), true);
     if (B.tool === "select" && B.sel.length) return (selSet([]), true);
     return false;
@@ -7337,8 +7393,73 @@
   /* ---------- tools and their options ---------- */
   // The interface (src/buildui.js) draws what view() describes and reports clicks through choose(). With a drawing
   // tool the options are those of the NEXT piece; with a selection they are the selected pieces' own properties.
+  // what the player left as they liked it: whether the inspector is open, and whether the first-run chips are done
+  function prefsLoad() {
+    if (B.insp !== undefined) return;
+    try {
+      B.insp = localStorage.getItem("build:insp") === "1";
+      B.coached = localStorage.getItem("build:coached") === "1";
+    } catch {
+      B.insp = B.coached = false;
+    }
+  }
+  const prefSave = (k, on) => {
+    try {
+      localStorage.setItem(k, on ? "1" : "");
+    } catch {}
+  };
+  const sandboxOn = () => {
+    const c = G.sim && G.sim.state && G.sim.state.sys && G.sim.state.sys.construction;
+    return !c || !!(c.options && c.options.sandbox);
+  };
+  // the first-run chips: a room, a door, a roof, then Done. Worked out once per change to the plan.
+  const COACH = { v: -1, steps: null };
+  function coachSteps() {
+    if (COACH.v === B.version && COACH.steps) return COACH.steps;
+    const q = quantities(),
+      room = q.floorArea > 0 && q.wallLength > 0,
+      door = room && q.doors > 0,
+      roof = room && q.roofArea > 0;
+    COACH.v = B.version;
+    return (COACH.steps = [
+      { id: "room", text: "Room", done: room, tool: "room" },
+      { id: "door", text: "Door", done: door, tool: "door" },
+      { id: "roof", text: "Roof", done: roof, tool: "roof" },
+      { id: "done", text: "Done", done: false, tool: null },
+    ]);
+  }
+  function coachEnd() {
+    B.coached = true;
+    prefSave("build:coached", true);
+  }
+  // the plan's cost, for the Materials button (null in sandbox, where nothing is bought)
+  const TOTAL = { v: -1, total: 0 };
+  function planTotal() {
+    if (sandboxOn()) return null;
+    if (TOTAL.v === B.version) return TOTAL.total;
+    const items = G.stock && G.stock.ITEMS;
+    let total = 0;
+    for (const ln of FR.materialsList(listPieces().filter((p) => p.stage))) if (ln.itemId && items && items[ln.itemId]) total += items[ln.itemId].priceUsd * ln.qty;
+    TOTAL.v = B.version;
+    return (TOTAL.total = Math.round(total));
+  }
+  // the storeys as chips: the cellar (dim until one is dug), each storey that exists, and one empty one above the top
+  function levelChips() {
+    const has = new Set();
+    for (const S of B.structs) S.po || has.add(S.level);
+    let top = 0;
+    for (const l of has) top = Math.max(top, l);
+    const out = [{ l: -1, name: "Cellar", has: has.has(-1), cur: B.level === -1 }];
+    for (let l = 0; l <= Math.min(3, Math.max(top + 1, B.level)); l++) out.push({ l, name: l === 0 ? "Ground" : l > top && l !== B.level ? "+" : String(l + 1), has: has.has(l), cur: B.level === l });
+    return out;
+  }
   function setTool(id) {
     if (B.tool !== id && (B.tool === "select" || id !== "select")) B.showRoofs = B.selRoofAuto = false;
+    if (B.tool !== id) {
+      // Door and Window open the inspector (their designer); other tools leave it as the player last had it
+      B.inspNow = id === "window" || id === "door" ? true : null;
+      B.fromSel = false;
+    }
     if (B.tool !== id && (id === "window" || id === "door")) {
       const was = OP.openingType(B.otype);
       if (was) B.odSave[was.kind] = B.od;
@@ -7475,6 +7596,9 @@
   }
   function enter() {
     B.on = true;
+    prefsLoad();
+    // a player whose first building already has a room, a door and a roof is not coached
+    if (!B.coached && coachSteps().every((c) => c.done || c.id === "done")) coachEnd();
     for (const S of B.structs) B.dirty.add(S);
     // building wants a free cursor and a higher, steadier view
     try {
@@ -7494,7 +7618,14 @@
     touchUi();
   }
   function exit() {
+    const was = B.on;
     B.on = false;
+    if (was) {
+      // what happens after planning: the plan waits for its materials (sandbox builds as it is drawn)
+      const left = listPieces().filter((p) => p.built === false && (!p.parent || p.kind === "door" || p.kind === "window")).length;
+      if (left && !sandboxOn() && window.__ui && window.__ui.toast) window.__ui.toast("Plan saved: " + plural(left, "piece") + " to build. Open Build (L) to order materials.", { tone: "info", seconds: 5 });
+      if (!B.coached && coachSteps().every((c) => c.done || c.id === "done")) coachEnd();
+    }
     { const dp = document.getElementById("bdesign"); if (dp) dp.hidden = true; }   // the designer panel goes with build mode
     for (const S of B.structs) B.dirty.add(S);
     if (B.camSaved) {
@@ -7575,16 +7706,18 @@
     for (const k of Object.keys(o)) if (!o[k] || (typeof o[k] === "object" && !Object.keys(o[k]).length)) delete o[k];
     return Object.keys(o).length ? o : null;
   };
+  // a building's make-up, in the inspector: what it stands on and is made of (Construction), then its paint (Finish)
   const makeUp = (g, pre, f, i, l, d) => {
-    g.push(G_.select(pre + "found", "Stands on", FOUND_ITEMS, f, (window.__framing.FOUNDATIONS[f] || {}).note));
-    g.push(G_.select(pre + "ins", "Insulation", INS_ITEMS, i, "What fills the spaces between studs, joists and rafters"));
-    g.push(G_.select(pre + "lining", "Inside", LIN_ITEMS, l, "What covers the inside of the walls"));
+    const put = (x, sec) => g.push(((x.sec = sec), x));
+    put(G_.select(pre + "found", "Stands on", FOUND_ITEMS, f, (window.__framing.FOUNDATIONS[f] || {}).note), "Construction");
+    put(G_.select(pre + "ins", "Insulation", INS_ITEMS, i, "What fills the spaces between studs, joists and rafters"), "Construction");
+    put(G_.select(pre + "lining", "Inside", LIN_ITEMS, l, "What covers the inside of the walls"), "Construction");
     if (l) {
       const q = finParts(d && d.walls, "eggshell");
-      g.push(G_.sw(pre + "deco", "Walls", DECO_ITEMS("Bare"), q.colour, "deco"));
-      if (q.colour) g.push(G_.select(pre + "sheen", "Paint finish", SHEEN_ITEMS(), q.sheen, "Matte hides a wall's bumps; satin wipes clean"));
+      put(G_.sw(pre + "deco", "Walls", DECO_ITEMS("Bare"), q.colour, "deco"), "Finish");
+      if (q.colour) put(G_.select(pre + "sheen", "Paint finish", SHEEN_ITEMS(), q.sheen, "Matte hides a wall's bumps; satin wipes clean"), "Finish");
     }
-    g.push(G_.sw(pre + "trim", "Trim", DECO_ITEMS("As it comes"), finParts(d && d.trim).colour, "trim"));
+    put(G_.sw(pre + "trim", "Trim", DECO_ITEMS("As it comes"), finParts(d && d.trim).colour, "trim"), "Finish");
   };
   // the shopping list as the Schedule panel shows it: by stage, with what each line costs and how far along it is
   function schedule() {
@@ -7708,12 +7841,11 @@
     g.push(G_.act("s:dup", "Copy", "copy", "Ctrl D"));
     g.push(G_.act("s:del", "Delete", "bin", "Del", true));
   }
-  // roofing swatches, classic and modern
+  // roofing swatches: one group, classic then modern (each item's grp says which)
   function roofSwatches(g, id, value, key) {
-    for (const [grp, name] of [["classic", "Classic"], ["modern", "Modern"]]) {
-      const items = SW.roof.filter((x) => (ROOFS[x.v].group || "classic") === grp);
-      g.push(G_.sw(id, name + " roofing", items, items.some((x) => x.v === value) ? value : value === null ? null : undefined, grp === "classic" ? key : undefined));
-    }
+    const items = [];
+    for (const grp of ["classic", "modern"]) for (const x of SW.roof) (ROOFS[x.v].group || "classic") === grp && items.push({ ...x, grp });
+    g.push(G_.sw(id, "Roofing", items, value, key));
   }
   const PITCH_CHIPS = [3, 4, 6, 8, 10, 12];
   // the plan of a roof, in the designer panel: what it measures and what to watch, its pitch, overhangs and finish.
@@ -7745,16 +7877,87 @@
     row(G_.toggle(pre + "gutters", "Gutters", !!cur.gutters, "roofs", "K-style gutters along every eave, with downspouts to the ground"), "Finish");
     if (M.colors) row(G_.chips(pre + "rcolor", "Colour", [{ v: null, name: "Standard" }, ...M.colors.map((c) => ({ v: c, name: ROOF_COLORS[c][0] }))], M.colors.includes(cur.color) ? cur.color : null), "Finish");
   }
+  // Where each group of view() goes: tier 1 is the tray (what the next click draws), everything else the inspector
+  // under its sec. Selection actions (s:all s:pick s:dup s:del) carry acts: true and sit beside the hint.
+  const TRAY = {
+    room: ["shape", "levels", "wmat", "fmat", "paint", "pick"],
+    wall: ["style", "wmat", "paint", "pick"],
+    floor: ["fmat", "paint", "pick"],
+    roof: ["rshape", "rturn", "rmat", "roofall", "facts", "paint", "pick"],
+    stairs: ["turn"],
+    pillar: ["pkind", "wmat", "gap", "paint", "pick"],
+    path: ["pwidth", "pmat", "paint", "pick"],
+    // until the door and window rules (P5) sort their own: the catalogue in the tray, the rest in the designer
+    door: ["otype", "gap", "paint", "pick"],
+    window: ["otype", "gap", "paint", "pick"],
+  };
+  TRAY.tower = TRAY.room;
+  const SEC_OF = { hs: "Level", lift: "Level", wing: "Level", tshape: "On a round room", "s:hs": "Level", "s:levels": "Level", "s:width": "Size", "s:x": "Position", "s:z": "Position", "rbadges": "Pitch", "s:rbadges": "Pitch", "w:prev": "Size", roofs: "View" };
+  const SEL_STYLE = new Set(["s:style", "s:otype", "s:rshape", "s:rturn", "s:pkind", "s:pwidth", "s:top", "s:turn", "s:len"]),
+    SEL_MAT = new Set(["s:wmat", "s:fmat", "s:rmat", "s:pmat", "s:dcol"]),
+    SEL_ACTS = new Set(["s:all", "s:pick", "s:dup", "s:del"]);
+  function tierOf(t, g) {
+    const all = t === "decor" || t === "equip" || t === "measure" || t === "copy" || (t === "select" && !B.sel.length),
+      tray = TRAY[t];
+    let mat = false;
+    g.forEach((x, n) => {
+      let on = all || (tray && tray.includes(x.id));
+      if (t === "select" && B.sel.length) {
+        if (SEL_ACTS.has(x.id)) x.acts = true;
+        // the selection's tray: what it is, its style, its first material, its length
+        on = n === 0 || SEL_ACTS.has(x.id) || SEL_STYLE.has(x.id) || (SEL_MAT.has(x.id) && !mat && (mat = true));
+        if (!on && x.type === "info") x.sec = x.sec || "Construction";
+        if (!on && SEL_MAT.has(x.id)) x.sec = x.sec || "Material";
+      }
+      if (all && x.id === "roofs") on = false;
+      if (on) x.tier = 1;
+      else x.sec = x.sec || SEC_OF[x.id] || (t === "door" || t === "window" ? "Unit" : "More");
+    });
+  }
+  const SEL_ICON = { run: "wall", frun: "wall", floor: "floor", poly: "floor", roof: "roof", polyroof: "roof", ring: "room", stair: "stairs", pillar: "pillar", path: "path", decor: "decor" };
+  const NEXT_NAME = { room: "room", tower: "round room", wall: "wall", floor: "floor", roof: "roof", stairs: "stairs", path: "path", decor: "piece", equip: "equipment", copy: "copy" };
+  // the inspector's head: the same drawer for the next piece and for the selected one
+  function inspectorOf(t, g) {
+    const any = g.some((x) => !x.tier),
+      opening = t === "door" || t === "window",
+      fs = opening && B.fsel && ((t === "window" && !B.wleg) || (t === "door" && !B.dleg)) ? fselOpen() : null,
+      sel = t === "select" && B.sel.length > 0,
+      open = any && !!(B.inspNow !== null && B.inspNow !== undefined ? B.inspNow : B.insp);
+    if (opening) {
+      const leg = t === "window" ? B.wleg : B.dleg,
+        ty = OP.openingType(fs ? fs.f.typeId : B.otype);
+      return { open, has: any, title: (fs ? "Selected " : "Next ") + t, sub: leg ? (t === "window" ? WIN_NAME[B.wstyle] : DOOR_NAME[B.dstyle]) || "Rustic" : ty ? ty.name : "", icon: t, mode: fs ? "sel" : "next" };
+    }
+    if (sel) {
+      const q = selRefs(),
+        k = q.length === 1 ? q[0].kind : null,
+        ty = k === "open" ? q[0].S.walls.get(q[0].k) : k === "sopen" ? q[0].sg[4] : null;
+      return { open, has: any, title: (g[0] && g[0].title) || "Selection", sub: (g[0] && g[0].text) || "", icon: ty ? (isDoor(ty) ? "door" : "window") : SEL_ICON[k] || "select", mode: "sel" };
+    }
+    const sub =
+      t === "room" || t === "tower" ? WALLS[B.wmat].name + " walls · " + FLOORS[B.fmat].name.toLowerCase() + " floor"
+      : t === "wall" ? STYLE_SHORT[B.style] + " · " + WALLS[B.wmat].name
+      : t === "floor" ? FLOORS[B.fmat].name
+      : t === "roof" ? ROOF_SHAPES[B.rsh] + " · " + ROOFS[B.rmat].name
+      : t === "pillar" ? (B.pkind === "chimney" ? "Chimney" : "Pillar") + " · " + WALLS[B.wmat].name
+      : t === "path" ? PATHS[B.pmat].name + " · " + B.pwidth + " m wide"
+      : t === "decor" ? DECOR[B.dkind].name
+      : "";
+    return { open, has: any, title: NEXT_NAME[t] ? "Next " + NEXT_NAME[t] : (TOOLS.find((x) => x.id === t) || { name: "Build" }).name, sub, icon: t === "tower" ? "room" : t === "copy" ? "select" : t, mode: "next" };
+  }
   function view() {
     const t = B.tool,
       g = [];
     const lift = () => g.push(G_.step("lift", "Raise", (B.lift > 0 ? "+" : "") + fmt(B.lift) + " m", "+ −"));
     const ceil = (label) => g.push(G_.chips("hs", label || "Ceiling", hsItems(), B.hs, "{ }"));
     const wing = () => g.push(G_.toggle("wing", "Split level", !!B.wingNext, "wing", "Start the next piece as its own level beside the floor under the cursor, at the raised height (or hold Shift)"));
+    const facts = () => B.roomFacts && g.push({ ...G_.info(B.roomFacts.title, B.roomFacts.text), id: "facts" });
+    B.fit = null;   // the door and window rules (openingView) fill it in
     if (t === "select") {
       if (B.sel.length) selGroups(g);
       else {
         g.push(G_.toggle("roofs", "Show roofs", B.showRoofs, "roofs", "Roofs are lifted away so you can reach inside. Show them to select one."));
+        facts();
         const q = quantities();
         if (q.pieces) g.push(G_.info("Everything built", quantText(q)));
       }
@@ -7787,6 +7990,7 @@
       roofSwatches(g, "rmat", B.rmat, "M");
       g.push(...PAINT());
       g.push({ ...G_.act("roofall", "Roof the building", "roofs", "Enter"), title: "Cover every floor of the building under the cursor: one roof per rectangle, with this shape's pitch, roofing and overhangs" });
+      facts();
       const hov = B.op && B.op.addRoofs && B.op.addRoofs[0];
       roofPlanView(g, "", { shape: B.rsh, pitch12: B.pitch12, eave: B.eave, rake: B.rake, gutters: B.gutters, color: B.rcolor, mat: B.rmat }, hov || null);
       g.push(G_.tiles("tshape", "On a round room", tiles(TOP_SHORT, "t-"), B.tshape));
@@ -7819,7 +8023,12 @@
     } else if (t === "copy") g.push(G_.act("turn", "Turn", "turn", "Shift wheel"));
     const busy = B.move ? "move" : B.drag && B.drag.mode === "click" ? "chain" : B.tapMode ? B.tapMode : B.measA ? "measure" : t === "copy" ? "copy" : "";
     const oneRoof = t === "select" && B.sel.length === 1 && (selRefs()[0] || {}).kind === "roof";
-    return { designTitle: (t === "window" || t === "door") && freeTool() ? (B.fsel ? "Editing the selected " + t : "Designing the next " + t) : t === "roof" ? "Planning the next roof" : oneRoof ? "The selected roof" : "", tool: t, top: t === "tower" ? "room" : t === "copy" ? "select" : t, tools: TOOLS, groups: g, hint: B.hintText, undo: B.undo.length, redo: B.redo.length, snap: B.snap, free: B.free, level: B.level, levelName: LEVEL_NAME(B.level), busy, sel: B.sel.length, fold: B.fold, sched: B.sched ? schedule() : null };
+    tierOf(t, g);
+    prefsLoad();
+    // the inspector's groups are listed only while it is open (row "d" keeps the old interface's side panel working)
+    const insp = inspectorOf(t, g),
+      shown = insp.open ? g.map((x) => (x.tier ? x : ((x.row = "d"), x))) : g.filter((x) => x.tier);
+    return { inspector: insp, levels: levelChips(), coach: B.coached ? null : coachSteps(), total: planTotal(), fit: B.fit || null, roofs: !!B.showRoofs, sandbox: sandboxOn(), designTitle: (t === "window" || t === "door") && freeTool() ? (B.fsel ? "Editing the selected " + t : "Designing the next " + t) : t === "roof" ? "Planning the next roof" : oneRoof ? "The selected roof" : insp.title, tool: t, top: t === "tower" ? "room" : t === "copy" ? "select" : t, tools: TOOLS, groups: shown, hint: B.hintText, undo: B.undo.length, redo: B.redo.length, snap: B.snap, free: B.free, level: B.level, levelName: LEVEL_NAME(B.level), busy, sel: B.sel.length, fold: B.fold, sched: B.sched ? schedule() : null };
   }
   // ---- a door or window in the view: the gaps either side of it, its sizes, and handles on its edges to resize it
   // the clear gaps from a unit to what stands either side of it along its wall (or the wall's end), as live sizes
@@ -8444,6 +8653,15 @@
       } catch {}
     } else if (id === "free") B.free = !B.free;
     else if (id === "level") return setLevel(B.level + v);
+    else if (id === "level:set") return setLevel(+v);
+    else if (id === "insp") {
+      // the inspector: Door and Window (and a double click) open it for now; elsewhere it stays as the player left it
+      prefsLoad();
+      const now = B.inspNow !== null && B.inspNow !== undefined ? B.inspNow : B.insp;
+      if (B.tool === "door" || B.tool === "window") B.inspNow = !now;
+      else (prefSave("build:insp", (B.insp = !now)), (B.inspNow = null));
+      B.uiVer++;
+    }
     else if (id === "undo") return undo();
     else if (id === "redo") return redo();
     else if (id === "stop") putDown(false);
