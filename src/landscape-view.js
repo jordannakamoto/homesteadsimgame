@@ -1190,31 +1190,39 @@
   const bar = $('lbar');
   if (!bar) return;
   const hint = bar.querySelector('.ghint'), toolsEl = bar.querySelector('.gtools'), storeEl = bar.querySelector('.gseeds');
+  // the bar sits in the bottom lane beside the mode chip; its hint and store stack above it in the prompt and context places (template/ui/30-hotbar.css)
+  if (window.__ui) {
+    const ctx = document.createElement('div'); ctx.className = 'gctx'; ctx.append(hint, storeEl); bar.insertBefore(ctx, toolsEl);
+    for (const el of [toolsEl, hint, storeEl]) el.classList.add('panel');
+    bar.classList.remove('panel');
+    window.__ui.mount(bar, 'bottom', { order: 2 });
+    new ResizeObserver(() => document.body.style.setProperty('--lbar-ctx', ctx.offsetHeight + 'px')).observe(ctx);
+  }
   const label = $('glabel');
-  const I = (body) => '<svg viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="#f1ead6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' + body + '</svg>';
+  const I = (body) => '<svg viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="var(--ic-outline)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' + body + '</svg>';
   const ICONS = {
-    hands: I('<path d="M12 22v-9a2 2 0 0 1 4 0v6M16 18v-8a2 2 0 0 1 4 0v8M20 18v-7a2 2 0 0 1 4 0v8M24 19v-4a2 2 0 0 1 4 0v9c0 6-3 10-9 10-4 0-6-2-8-5l-4-7c-1-2 1-4 3-2l2 3" fill="#e9b88f" stroke="#f6dcc0"/>'),
-    shovel: I('<path d="M27 5l-9 17" stroke="#d8b585" stroke-width="2.6"/><path d="M24 4l6 3" stroke="#3a3a3a" stroke-width="3"/><path d="M15 20l7 4-3 9c-1 2-4 2-6 1s-3-3-2-5z" fill="#9aa4ab" stroke="#cfd6dc"/><path d="M6 34c4-3 9-3 14-1" stroke="#a3784e" stroke-width="2"/>'),
-    sod: I('<path d="M30 6L17 21" stroke="#d8b585" stroke-width="2.6"/><path d="M13 19l7 5-5 6c-2 1-5 0-6-2z" fill="#9aa4ab" stroke="#cfd6dc"/><path d="M4 31c8 2 14 2 20-1" stroke="#7aa053" stroke-width="3"/><path d="M24 30c3-1 6 0 8 2" stroke="#a3784e" stroke-width="2"/>'),
-    rake: I('<path d="M29 5L15 27" stroke="#d8b585" stroke-width="2.6"/><path d="M7 25l14 9" stroke="#b9c2c9" stroke-width="2.6"/><path d="M8 26l-2 4M11 28l-2 4M14 30l-2 4M17 32l-2 4M20 34l-2 3" stroke="#b9c2c9" stroke-width="1.8"/>'),
-    bucket: (hex) => I('<path d="M9 15h22l-3 19H12z" fill="#6e7b52" stroke="#d3dcb5"/><path d="M9 15c2-6 20-6 22 0" stroke="#d3dcb5"/><ellipse cx="20" cy="15" rx="10" ry="3" fill="' + hex + '" stroke="none"/>'),
-    stone: (hex, w, h) => I('<path d="M' + (20 - w) + ' ' + (28) + 'q2-' + h + ' ' + w + '-' + h + 't' + w + ' ' + h + 'z" fill="' + hex + '" stroke="#efe6d2"/><path d="M5 30h30" stroke="#a3784e" stroke-width="2"/>'),
-    wall: I('<path d="M6 32h12v-7H6zM20 32h14v-7H20zM10 25h14v-7H10zM26 25h8v-7h-8z" fill="#8f887a" stroke="#efe6d2" stroke-width="1.6"/>'),
-    pot: (hex) => I('<path d="M13 24h14l-2 11H15z" fill="#9a5a3a" stroke="#f0c8a8"/><circle cx="20" cy="15" r="8" fill="' + hex + '" stroke="#e8f0d8"/><path d="M20 23v-6" stroke="#6f9a3a"/>'),
-    barrow: I('<path d="M6 14h20l-4 10H11z" fill="#2f6e8e" stroke="#cfe4ee"/><circle cx="25" cy="29" r="4" fill="#222" stroke="#ddd"/><path d="M8 24l-3 8M21 24l4 2M26 14l9-4" stroke="#d8b585" stroke-width="2"/>'),
-    can: I('<path d="M10 16h16v16H10z" fill="#5f8a6a" stroke="#d6eadb"/><path d="M26 19l9-7" stroke="#d6eadb" stroke-width="3"/><path d="M12 16c0-6 12-6 12 0" stroke="#d6eadb"/>'),
-    hose: I('<circle cx="20" cy="20" r="11" stroke="#58b064" stroke-width="3.2"/><circle cx="20" cy="20" r="6" stroke="#58b064" stroke-width="3"/><path d="M31 20h5" stroke="#58b064" stroke-width="3"/>'),
-    liner: I('<rect x="8" y="10" width="24" height="8" rx="4" fill="#2a2c2d" stroke="#bbb"/><path d="M10 18c0 8 20 8 20 0" fill="#3a6a8a" stroke="#bfe0f0"/>'),
-    tamper: I('<path d="M20 5v24" stroke="#bbb" stroke-width="2.6"/><path d="M15 5h10" stroke="#888" stroke-width="3"/><path d="M11 29h18v4H11z" fill="#7d8287" stroke="#ddd"/><path d="M6 35h28" stroke="#a3784e" stroke-width="2" stroke-dasharray="2 2"/>'),
-    fabric: I('<rect x="7" y="9" width="26" height="9" rx="4.5" fill="#2e2f2c" stroke="#bbb"/><path d="M9 18l-2 15h26l-2-15" fill="#3a3b37" stroke="#aaa"/><path d="M11 22h18M10 26h20M9 30h22" stroke="#666" stroke-width="1"/>'),
-    gbox: I('<path d="M5 20l15-7 15 7-15 7z" fill="#5e4632" stroke="#e8d0b0"/><path d="M5 20v8l15 7 15-7v-8" fill="#a8683f" stroke="#e8d0b0"/><path d="M20 27v8" stroke="#e8d0b0"/>'),
-    ashlar: I('<path d="M5 32h14v-7H5zM19 32h16v-7H19zM9 25h16v-7H9zM25 25h10v-7H25zM5 25h4v-7H5z" fill="#c2a77e" stroke="#f3ead8" stroke-width="1.5"/>'),
-    cobble: I('<path d="M6 12h8v8H6zM16 12h8v8h-8zM26 12h8v8h-8zM11 22h8v8h-8zM21 22h8v8h-8z" fill="#8d8a85" stroke="#eee" stroke-width="1.4"/>'),
-    cap: I('<path d="M5 18h30v5H5z" fill="#c9b08a" stroke="#f3ead8" stroke-width="1.6"/><path d="M8 23h24v10H8z" fill="#8f887a" stroke="#efe6d2" stroke-width="1.4"/>'),
-    curb: I('<path d="M4 20h32v8H4z" fill="#8f8f8c" stroke="#eee" stroke-width="1.6"/><path d="M4 28c6-3 26-3 32 0" stroke="#7aa053" stroke-width="2"/>'),
-    timber: I('<path d="M5 24h30v6H5zM8 18h24v6H8z" fill="#8d7152" stroke="#efe6d2" stroke-width="1.6"/>'),
-    light: I('<path d="M20 16v18" stroke="#888" stroke-width="2.4"/><path d="M14 12h12l-2 5h-8z" fill="#ffd98a" stroke="#efe6d2"/><circle cx="20" cy="9" r="2" fill="#fff3c0" stroke="none"/>'),
-    store: I('<path d="M5 16l3-8h24l3 8z" fill="#7e9b5a" stroke="#e8f0d8"/><path d="M7 16v17h26V16" stroke="#efe6d2"/><path d="M16 33v-9h8v9" fill="#8a6238" stroke="#efe6d2"/>'),
+    hands: I('<path d="M12 22v-9a2 2 0 0 1 4 0v6M16 18v-8a2 2 0 0 1 4 0v8M20 18v-7a2 2 0 0 1 4 0v8M24 19v-4a2 2 0 0 1 4 0v9c0 6-3 10-9 10-4 0-6-2-8-5l-4-7c-1-2 1-4 3-2l2 3" fill="var(--ic-skin)" stroke="var(--ic-outline)"/>'),
+    shovel: I('<path d="M27 5l-9 17" stroke="var(--ic-wood)" stroke-width="2.6"/><path d="M24 4l6 3" stroke="var(--ic-steel)" stroke-width="3"/><path d="M15 20l7 4-3 9c-1 2-4 2-6 1s-3-3-2-5z" fill="var(--ic-steel)" stroke="var(--ic-outline)"/><path d="M6 34c4-3 9-3 14-1" stroke="var(--ic-soil)" stroke-width="2"/>'),
+    sod: I('<path d="M30 6L17 21" stroke="var(--ic-wood)" stroke-width="2.6"/><path d="M13 19l7 5-5 6c-2 1-5 0-6-2z" fill="var(--ic-steel)" stroke="var(--ic-outline)"/><path d="M4 31c8 2 14 2 20-1" stroke="var(--ic-leaf)" stroke-width="3"/><path d="M24 30c3-1 6 0 8 2" stroke="var(--ic-soil)" stroke-width="2"/>'),
+    rake: I('<path d="M29 5L15 27" stroke="var(--ic-wood)" stroke-width="2.6"/><path d="M7 25l14 9" stroke="var(--ic-steel)" stroke-width="2.6"/><path d="M8 26l-2 4M11 28l-2 4M14 30l-2 4M17 32l-2 4M20 34l-2 3" stroke="var(--ic-steel)" stroke-width="1.8"/>'),
+    bucket: (hex) => I('<path d="M9 15h22l-3 19H12z" fill="var(--ic-leaf)" stroke="var(--ic-outline)"/><path d="M9 15c2-6 20-6 22 0" stroke="var(--ic-outline)"/><ellipse cx="20" cy="15" rx="10" ry="3" fill="' + hex + '" stroke="none"/>'),
+    stone: (hex, w, h) => I('<path d="M' + (20 - w) + ' ' + (28) + 'q2-' + h + ' ' + w + '-' + h + 't' + w + ' ' + h + 'z" fill="' + hex + '" stroke="var(--ic-outline)"/><path d="M5 30h30" stroke="var(--ic-soil)" stroke-width="2"/>'),
+    wall: I('<path d="M6 32h12v-7H6zM20 32h14v-7H20zM10 25h14v-7H10zM26 25h8v-7h-8z" fill="var(--ic-stone)" stroke="var(--ic-outline)" stroke-width="1.6"/>'),
+    pot: (hex) => I('<path d="M13 24h14l-2 11H15z" fill="var(--ic-soil)" stroke="var(--ic-outline)"/><circle cx="20" cy="15" r="8" fill="' + hex + '" stroke="var(--ic-outline)"/><path d="M20 23v-6" stroke="var(--ic-leaf)"/>'),
+    barrow: I('<path d="M6 14h20l-4 10H11z" fill="var(--ic-water)" stroke="var(--ic-outline)"/><circle cx="25" cy="29" r="4" fill="var(--ic-steel)" stroke="var(--ic-outline)"/><path d="M8 24l-3 8M21 24l4 2M26 14l9-4" stroke="var(--ic-wood)" stroke-width="2"/>'),
+    can: I('<path d="M10 16h16v16H10z" fill="var(--ic-leaf)" stroke="var(--ic-outline)"/><path d="M26 19l9-7" stroke="var(--ic-outline)" stroke-width="3"/><path d="M12 16c0-6 12-6 12 0" stroke="var(--ic-outline)"/>'),
+    hose: I('<circle cx="20" cy="20" r="11" stroke="var(--ic-leaf)" stroke-width="3.2"/><circle cx="20" cy="20" r="6" stroke="var(--ic-leaf)" stroke-width="3"/><path d="M31 20h5" stroke="var(--ic-leaf)" stroke-width="3"/>'),
+    liner: I('<rect x="8" y="10" width="24" height="8" rx="4" fill="var(--ic-steel)" stroke="var(--ic-outline)"/><path d="M10 18c0 8 20 8 20 0" fill="var(--ic-water)" stroke="var(--ic-outline)"/>'),
+    tamper: I('<path d="M20 5v24" stroke="var(--ic-outline)" stroke-width="2.6"/><path d="M15 5h10" stroke="var(--ic-steel)" stroke-width="3"/><path d="M11 29h18v4H11z" fill="var(--ic-steel)" stroke="var(--ic-outline)"/><path d="M6 35h28" stroke="var(--ic-soil)" stroke-width="2" stroke-dasharray="2 2"/>'),
+    fabric: I('<rect x="7" y="9" width="26" height="9" rx="4.5" fill="var(--ic-steel)" stroke="var(--ic-outline)"/><path d="M9 18l-2 15h26l-2-15" fill="var(--ic-steel)" stroke="var(--ic-outline)"/><path d="M11 22h18M10 26h20M9 30h22" stroke="var(--ic-steel)" stroke-width="1"/>'),
+    gbox: I('<path d="M5 20l15-7 15 7-15 7z" fill="var(--ic-wood)" stroke="var(--ic-outline)"/><path d="M5 20v8l15 7 15-7v-8" fill="var(--ic-wood)" stroke="var(--ic-outline)"/><path d="M20 27v8" stroke="var(--ic-outline)"/>'),
+    ashlar: I('<path d="M5 32h14v-7H5zM19 32h16v-7H19zM9 25h16v-7H9zM25 25h10v-7H25zM5 25h4v-7H5z" fill="var(--ic-stone)" stroke="var(--ic-outline)" stroke-width="1.5"/>'),
+    cobble: I('<path d="M6 12h8v8H6zM16 12h8v8h-8zM26 12h8v8h-8zM11 22h8v8h-8zM21 22h8v8h-8z" fill="var(--ic-stone)" stroke="var(--ic-outline)" stroke-width="1.4"/>'),
+    cap: I('<path d="M5 18h30v5H5z" fill="var(--ic-stone)" stroke="var(--ic-outline)" stroke-width="1.6"/><path d="M8 23h24v10H8z" fill="var(--ic-stone)" stroke="var(--ic-outline)" stroke-width="1.4"/>'),
+    curb: I('<path d="M4 20h32v8H4z" fill="var(--ic-stone)" stroke="var(--ic-outline)" stroke-width="1.6"/><path d="M4 28c6-3 26-3 32 0" stroke="var(--ic-leaf)" stroke-width="2"/>'),
+    timber: I('<path d="M5 24h30v6H5zM8 18h24v6H8z" fill="var(--ic-wood)" stroke="var(--ic-outline)" stroke-width="1.6"/>'),
+    light: I('<path d="M20 16v18" stroke="var(--ic-steel)" stroke-width="2.4"/><path d="M14 12h12l-2 5h-8z" fill="var(--ic-warn)" stroke="var(--ic-outline)"/><circle cx="20" cy="9" r="2" fill="var(--ic-paper)" stroke="none"/>'),
+    store: I('<path d="M5 16l3-8h24l3 8z" fill="var(--ic-leaf)" stroke="var(--ic-outline)"/><path d="M7 16v17h26V16" stroke="var(--ic-outline)"/><path d="M16 33v-9h8v9" fill="var(--ic-wood)" stroke="var(--ic-outline)"/>'),
   };
   const PLANT_HEX = { lavender: '#8b6fc4', coneflower: '#e8b52a', grass: '#b7a26a', boxwood: '#3d6a31', hydrangea: '#f1f0e2', rose: '#c4243a', maple: '#9b2226', blueberry: '#4a5a9c', apple: '#c0392b', iris: '#f2d02a' };
   const LAYER_ITEM = { bedmix: 'raised_bed_mix', gravel: 'gravel', crushed: 'crushed_stone', dg: 'decomposed_granite', slate: 'slate_chips', marble: 'marble_chips', lava: 'lava_rock', riverrock: 'river_rock', woodchips: 'wood_chips', bark: 'bark_mulch', sand: 'sand', seed: 'grass_seed' };

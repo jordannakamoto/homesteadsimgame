@@ -9378,7 +9378,32 @@
     m.customProgramCacheKey = () => (key || "") + "|capped";
     return m;
   };
-  const memberMats = (planes) => ({ mem: capped(Object.assign(memMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })), lap: capped(makeLapMat(planes)), wrap: capped(Object.assign(wrapMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })) });
+  const memberMats = (planes) => ({ mem: capped(Object.assign(memMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })), lap: capped(makeLapMat(planes)), wrap: capped(Object.assign(wrapMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })), shp: capped(Object.assign(memMat.clone(), { vertexColors: true, clippingPlanes: planes, clipIntersection: true, clipShadows: true })) });
+  // trim with mitered ends (docs/design/carpentry.md) is drawn as its real shape, not a box: each end cut at 45 degrees
+  // across the face, the long point on the side away from the opening (m.long, along m.n). One small mesh per building
+  const shpMat = new T.MeshLambertMaterial({ vertexColors: true });
+  const isShaped = (m) => !!(m.ends && m.long && m.ends.includes("m45"));
+  function shapedGeo(list, colorOf) {
+    const pos = [], colA = [];
+    const V = (o, u, n, t, x, y, z) => [o[0] + u[0] * x + n[0] * y + t[0] * z, o[1] + u[1] * x + n[1] * y + t[1] * z, o[2] + u[2] * x + n[2] * y + t[2] * z];
+    for (const m of list) {
+      const ax = m.b[0] - m.a[0], ay = m.b[1] - m.a[1], az = m.b[2] - m.a[2], L = Math.hypot(ax, ay, az) || 1, u = [ax / L, ay / L, az / L], n = m.n;
+      const t = [u[1] * n[2] - u[2] * n[1], u[2] * n[0] - u[0] * n[2], u[0] * n[1] - u[1] * n[0]], o = [(m.a[0] + m.b[0]) / 2, (m.a[1] + m.b[1]) / 2, (m.a[2] + m.b[2]) / 2];
+      const d = m.section.d / 2, b = m.section.b / 2, c = colorOf(m);
+      // along the piece at end s (-1 at a, +1 at b) and across it at v: a miter takes the width off the short side
+      const X = (s, v) => s * (L / 2 - (m.ends[s < 0 ? 0 : 1] === "m45" && v * m.long < 0 ? 2 * d : 0));
+      const P = (s, v, w) => V(o, u, n, t, X(s, v), v, w);
+      const quad = (p0, p1, p2, p3) => { for (const q of [p0, p1, p2, p0, p2, p3]) (pos.push(q[0], q[1], q[2]), colA.push(c[0], c[1], c[2])); };
+      for (const w of [-b, b]) { const f = w > 0; const q = [P(-1, -d, w), P(1, -d, w), P(1, d, w), P(-1, d, w)]; f ? quad(...q) : quad(q[0], q[3], q[2], q[1]); }
+      for (const v of [-d, d]) { const q = [P(-1, v, -b), P(-1, v, b), P(1, v, b), P(1, v, -b)]; v > 0 ? quad(...q) : quad(q[0], q[3], q[2], q[1]); }
+      for (const s2 of [-1, 1]) { const q = [P(s2, -d, -b), P(s2, d, -b), P(s2, d, b), P(s2, -d, b)]; s2 > 0 ? quad(...q) : quad(q[0], q[3], q[2], q[1]); }
+    }
+    const g = new T.BufferGeometry();
+    g.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+    g.setAttribute("color", new T.Float32BufferAttribute(colA, 3));
+    g.computeVertexNormals();
+    return g;
+  }
   const isLap = (m) => /^siding/.test(m.col || "") && m.type === "boards";
   const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), siding: col(0xb8beb1), sidingDark: col(0x5d4a3b), trim: col(0xefece4), gypsum: col(0xe3e3de), primer: col(0xf4f3ef), pine: col(0xd8b583), concrete: CONCRETE, gravel: col(0x8f8b82) };
   for (const [k, h] of Object.entries(FR.ROOF_COLORS || {})) MCOL[k] = col(h); // the roofing layers while they go on (src/framing.js)
@@ -9497,6 +9522,14 @@
       S.group.add(mesh);
       S.memMeshes.push(mesh);
     };
+    // mitered trim out of the boxes, into its own shaped mesh
+    const shaped = [];
+    for (let k = 0; k < sets.length; k++) if (sets[k].some(isShaped)) ((shaped.push(...sets[k].filter(isShaped))), (sets[k] = sets[k].filter((m) => !isShaped(m))));
+    if (shaped.length) {
+      const mesh = new T.Mesh(shapedGeo(shaped, (m) => (m.kind === "paint" ? finCol(m.fin) : MCOL[m.col || "timber"])), (S.memMats && S.memMats.shp) || shpMat);
+      mesh.userData.own = true;
+      add(mesh, false, true);
+    }
     sets.forEach((list, k) => {
       if (!list.length) return;
       for (const wr of [0, 1, 2]) {      // 0 everything, 1 house wrap, 2 lap siding
@@ -10927,6 +10960,7 @@
         }
       }
       fadeRB.value = homeY !== null ? 1e-4 : G.fadeR ? G.fadeR.value : 1;
+      const firstPerson = !!(G.camView && G.camView() === "first");
       for (const S of B.structs) {
         const [lx, lz] = toLocal(S, P.x, P.z);
         const sameHome = homeY !== null && Math.abs(S.y0 - homeY) < 0.4 && Math.hypot(P.x - S.cx, P.z - S.cz) < S.rad + 5;
@@ -10954,7 +10988,7 @@
           // open the building up while you stand in it, so rooms read like a floor plan
           const onFloor = sameHome;
           const full = EAVE * S.hs * S.rings.reduce((m, r) => Math.max(m, r.h), 1) + 0.4;
-          const cutT = onFloor ? 1.15 : inTower ? P.y - S.y0 + 1.05 : 0;
+          const cutT = firstPerson ? 0 : onFloor ? 1.15 : inTower ? P.y - S.y0 + 1.05 : 0; // first person: the rooms stay whole
           if (!B.on && cutT && !(P.dead > 0)) {
             const cur = Math.min(S.cutH, full);
             S.cutH = cur > cutT ? Math.max(cutT, cur - dt * 9) : Math.min(cutT, cur + dt * 9);
@@ -10989,7 +11023,7 @@
         const inRing = ri >= 0 && Math.abs(P.y - S.y0) < headroom;
         const underAny = under || inPoly || (inRing && S.rings[ri].roof) || inTower || (sameHome && homeUnder);
         if (inRing && S.rings[ri].roof && S.rings[ri].sides.every((t) => t) && Math.abs(P.y - (S.y0 + FLOOR_T)) < 0.5) ((sheltered = true), (cosy = Math.max(cosy, S.ringCosy[ri] || 0)));
-        const target = B.on ? (roofsShown() ? 1 : 0) : underAny ? 0 : 1;
+        const target = B.on ? (roofsShown() ? 1 : 0) : underAny && !firstPerson ? 0 : 1;
         if (S.roofOp !== target) {
           S.roofOp = clamp(S.roofOp + Math.sign(target - S.roofOp) * dt * 4, 0, 1);
           S.roofMat.opacity = S.roofOp;

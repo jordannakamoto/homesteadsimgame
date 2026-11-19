@@ -15,8 +15,11 @@ const cs = (sim) => sim.state.sys.construction;
 test('casings frame every opening on each lined face: a window in four mitered pieces, a door in three, legs to the floor', () => {
   const mem = F.generate(room()), cas = mem.filter((m) => m.kind === 'casing');
   const of = (q, fc) => cas.filter((m) => m.opening === q && m.face === fc);
-  assert.equal(of('o', 'i').length, 4);
-  assert.ok(of('o', 'i').every((m) => m.ends.join() === 'm45,m45'));
+  assert.equal(of('o', 'i').length, 4, 'a stool and apron: two legs, a head, the apron');
+  assert.deepEqual(of('o', 'i').map((m) => m.type + ':' + m.ends.join()).sort(), ['apron:sq,sq', 'colonial:m45,m45', 'colonial:sq,m45', 'colonial:sq,m45']);
+  assert.equal(mem.filter((m) => m.kind === 'stool' && m.opening === 'o').length, 1);
+  const pf = F.generate(room({ winTrim: 'frame' })).filter((m) => m.kind === 'casing' && m.opening === 'o');
+  assert.ok(pf.length === 4 && pf.every((m) => m.ends.join() === 'm45,m45'), 'or a picture frame, mitered all round');
   for (const fc of ['a', 'b']) {
     const d = of('d', fc), legs = d.filter((m) => m.ends[0] === 'sq');
     assert.equal(d.length, 3);
@@ -42,7 +45,7 @@ test('baseboard runs corner to corner, stops at the door casings, copes into a c
 
 test('the order: casing and base in stock lengths, finish nails; no lining, no trim', () => {
   const ml = F.materialsList(F.generate(room()).map((m) => ({ ...m, struct: 1 }))).filter((l) => l.stage === 'carpentry');
-  assert.deepEqual(ml.map((l) => l.itemId).sort(), ['nails_finish', 'trim_base', 'trim_casing']);
+  assert.deepEqual(ml.map((l) => l.itemId).sort(), ['caulk_acrylic', 'nails_finish', 'trim_base', 'trim_casing', 'trim_stool']);
   assert.ok(ml.every((l) => l.qty > 0));
   assert.ok(!F.generate(room({ lining: null })).some((m) => m.stage === 'carpentry'));
   assert.ok(!F.generate(room({ trimIn: false })).some((m) => m.stage === 'carpentry'));
@@ -60,7 +63,9 @@ test('trim goes up after the taping and before the paint, cut at the sawhorses p
   assert.ok(K.stageOpen(pr, 'carpentry') && !K.stageOpen(pr, 'decorate'));
   assert.ok(sim.commandNow('construction.order', { structId: 's1', stage: 'carpentry' }).ok);
   sim.commandNow('construction.deliverNow', {});
-  const ids = Object.keys(pr.members).filter((id) => pr.members[id].stage === 'carpentry');
+  const all = Object.keys(pr.members).filter((id) => pr.members[id].stage === 'carpentry'), ids = all.filter((id) => pr.members[id].kind !== 'caulk'), beads = all.filter((id) => pr.members[id].kind === 'caulk');
+  assert.ok(beads.length >= ids.length - 4, 'a bead of caulk along most pieces');
+  assert.equal(sim.commandNow('construction.install', { structId: 's1', memberIds: [beads[0]], from: 'stacks' }).refused[0].reason, 'set the trim first');
   for (const id of ids) {
     const m = pr.members[id];
     assert.ok(m.site, id + ' is cut on site');
@@ -70,6 +75,8 @@ test('trim goes up after the taping and before the paint, cut at the sawhorses p
     for (let k = 0; k < 20 && r.ok && !pr.members[id].built; k++) r = sim.commandNow('construction.install', { structId: 's1', memberIds: [id], from: 'carried' });
     assert.ok(pr.members[id].built, id + ': ' + JSON.stringify(r.refused || r.reason));
   }
+  assert.ok(!K.stageComplete(pr, 'carpentry'), 'not before the caulk');
+  for (const id of beads) assert.ok(sim.commandNow('construction.install', { structId: 's1', memberIds: [id], from: 'stacks' }).ok && pr.members[id].built, id);
   assert.ok(K.stageComplete(pr, 'carpentry') && K.stageOpen(pr, 'decorate'));
   const used = (it) => Object.values(pr.lines).filter((l) => l.itemId === it).reduce((t, l) => t + l.used, 0);
   assert.ok(used('trim_casing') > 0 && used('trim_base') > 0);

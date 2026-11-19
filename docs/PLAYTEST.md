@@ -914,6 +914,14 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - Ordered as Casing, Baseboard and Finish nails. The guide no longer asks to reorder when every stick has been cut into pieces still to set.
 - Weak: miters and copes are drawn as square ends; window trim is a picture frame (stool and apron later); no caulk yet; the aim can pick a neighbouring piece first at a corner.
 
+## Trim slice 2: stool and apron, real miters, caulk, miter saw (branch `trim2`)
+
+- Windows get a **stool** (a shelf on the sill, its horns notched round the casing, standing proud of the wall) and an **apron** under it; the legs stand on the stool. The picture frame stays as an option (`spec.winTrim: 'frame'`).
+- Mitered casings are drawn with real 45 degree ends, the long point on the outside, in build mode (and their paint follows the same shape).
+- **Caulk**: after the trim is nailed, a bead where each casing and the base meet the wall (E with the caulk to hand); it dries in about half an hour, and the stage is done when it is all on. Bought in litres (300 ml tubes, about 9 m of bead each).
+- **Miter saw**: a power tool ($180, 1500 W). With it and power, trim is cut on it, quicker; without it, a hand saw in a miter box. The cut note says which.
+- Opening a wall for services takes its trim and caulk off too.
+
 ## Wave 2 B-1: poured piers and stem walls by hand (branch `wave2-b1-piers`, design `ground-foundations.md` B8)
 - The foundation job is made by the simulation, not the page: build mode's foundation members carry their shape (`geo`) into `construction.setPlan`, which calls `foundation.followPlan`; the job, its corners, trenches and holes are worked out there (a headless test builds piers with no page). Removing a building or changing it to a foundation that is not poured drops the job. Sandbox builds and older saves dug the old way get none, as before.
 - Frost: footings go to the frost line of the site's climate (`FROST_DEPTH_M`: temperate 1.2 m (Vermont's 48 in), cold continental 1.35 m, Mediterranean 0.45 m), or the plan's depth if deeper. The Site bar says so, and that the holes take more concrete than the plan showed. A trench is not taken deeper than a shovel throws earth (1.2 m) at its high end.
