@@ -343,95 +343,6 @@
     cvb && (!cv || cv.hidden) && cvb.click();
   });
 
-  /* ---------- the window designer's drawing: the window to scale on its wall, floor to eave ---------- */
-  function winPreview(g) {
-    const H = 128,
-      W = 176,
-      k = Math.min((H - 22) / Math.max(g.wallH, g.h + g.sill + 0.2), (W - 48) / Math.max(g.w, 0.5)),
-      L = g.look,
-      ww = g.w * k,
-      wh = g.h * k,
-      x0 = (W - ww) / 2,
-      yF = H - 6,
-      y0 = yF - (g.sill + g.h) * k,
-      y1 = yF - g.sill * k,
-      fw = Math.max(1.5, (L.slim ? 0.04 : 0.055) * k),
-      gx0 = x0 + fw,
-      gx1 = x0 + ww - fw,
-      gy0 = y0 + fw,
-      gy1 = y1 - fw,
-      hw = (gx1 - gx0) / 2,
-      cx = (gx0 + gx1) / 2,
-      shape = L.shape || "rect",
-      f = (v) => Math.round(v * 10) / 10;
-    // the glass outline as a path
-    let glass;
-    if (shape === "round") glass = '<ellipse cx="' + f(cx) + '" cy="' + f((gy0 + gy1) / 2) + '" rx="' + f(hw) + '" ry="' + f((gy1 - gy0) / 2) + '"/>';
-    else if (shape === "half") glass = '<path d="M' + f(gx0) + " " + f(gy1) + "A" + f(hw) + " " + f(gy1 - gy0) + " 0 0 1 " + f(gx1) + " " + f(gy1) + 'Z"/>';
-    else if (shape === "arch") {
-      const r = Math.min(hw, (gy1 - gy0) * 0.45);
-      glass = '<path d="M' + f(gx0) + " " + f(gy1) + "V" + f(gy0 + r) + "A" + f(hw) + " " + f(r) + " 0 0 1 " + f(gx1) + " " + f(gy0 + r) + "V" + f(gy1) + 'Z"/>';
-    } else if (shape === "gothic") {
-      const r = Math.min(hw * 1.732, (gy1 - gy0) * 0.6);
-      glass = '<path d="M' + f(gx0) + " " + f(gy1) + "V" + f(gy0 + r) + "Q" + f(gx0) + " " + f(gy0 + r * 0.25) + " " + f(cx) + " " + f(gy0) + "Q" + f(gx1) + " " + f(gy0 + r * 0.25) + " " + f(gx1) + " " + f(gy0 + r) + "V" + f(gy1) + 'Z"/>';
-    } else glass = '<rect x="' + f(gx0) + '" y="' + f(gy0) + '" width="' + f(gx1 - gx0) + '" height="' + f(gy1 - gy0) + '"/>';
-    let lines = "";
-    const ln = (a, b, c, d, w2) => (lines += '<path d="M' + f(a) + " " + f(b) + "L" + f(c) + " " + f(d) + '" stroke-width="' + w2 + '"/>');
-    const [lx, ly] = L.lites;
-    for (let i = 1; i < lx; i++) ln(gx0 + ((gx1 - gx0) * i) / lx, gy0, gx0 + ((gx1 - gx0) * i) / lx, gy1, 2);
-    for (let j = 1; j < ly; j++) ln(gx0, gy0 + ((gy1 - gy0) * j) / ly, gx1, gy0 + ((gy1 - gy0) * j) / ly, 2);
-    if (g.op === "double_hung" && shape === "rect") ln(gx0, (gy0 + gy1) / 2, gx1, (gy0 + gy1) / 2, 2.2);
-    // the grille, drawn per pane
-    const gr = L.grille,
-      [nx, ny] = L.grid;
-    for (let i = 0; i < lx; i++)
-      for (let j = 0; j < ly; j++) {
-        const a = gx0 + ((gx1 - gx0) * i) / lx,
-          b = gx0 + ((gx1 - gx0) * (i + 1)) / lx,
-          p = gy0 + ((gy1 - gy0) * j) / ly,
-          q = gy0 + ((gy1 - gy0) * (j + 1)) / ly;
-        if (gr === "colonial") {
-          for (let u = 1; u < nx; u++) ln(a + ((b - a) * u) / nx, p, a + ((b - a) * u) / nx, q, 0.8);
-          for (let v = 1; v < ny; v++) ln(a, p + ((q - p) * v) / ny, b, p + ((q - p) * v) / ny, 0.8);
-        } else if (gr === "cottage" || gr === "craftsman") {
-          const yc = g.op === "double_hung" ? (p + q) / 2 : p + (q - p) * (gr === "cottage" ? 0.36 : 0.34),
-            n = gr === "craftsman" ? Math.max(2, nx) : nx;
-          g.op === "double_hung" || ln(a, yc, b, yc, 0.8);
-          for (let u = 1; u < n; u++) ln(a + ((b - a) * u) / n, p, a + ((b - a) * u) / n, yc, 0.8);
-          if (gr === "cottage" && g.op === "double_hung") for (let v = 1; v < Math.round(ny / 2); v++) ln(a, p + ((yc - p) * v) / Math.round(ny / 2), b, p + ((yc - p) * v) / Math.round(ny / 2), 0.8);
-        } else if (gr === "farmhouse") ln((a + b) / 2, p, (a + b) / 2, q, 0.8), g.op === "double_hung" || ln(a, (p + q) / 2, b, (p + q) / 2, 0.8);
-        else if (gr === "prairie") {
-          const e = Math.min(0.09 * k, 0.2 * Math.min(b - a, q - p));
-          ln(a + e, p, a + e, q, 0.8), ln(b - e, p, b - e, q, 0.8), ln(a, p + e, b, p + e, 0.8), ln(a, q - e, b, q - e, 0.8);
-        } else if (gr === "diamond") {
-          const sx = (b - a) / nx;
-          for (let u = -ny * 2; u <= nx + ny * 2; u++) ln(a + u * sx, q, a + u * sx + (q - p) * (sx / ((q - p) / ny)), p, 0.7), ln(a + u * sx, q, a + u * sx - (q - p) * (sx / ((q - p) / ny)), p, 0.7);
-        } else if (gr === "sunburst") {
-          const n = Math.max(4, nx + 3);
-          for (let u = 1; u < n; u++) ln((a + b) / 2, q, (a + b) / 2 + Math.cos((Math.PI * u) / n) * (b - a), q - Math.sin((Math.PI * u) / n) * (b - a), 0.8);
-        }
-      }
-    // dimension lines: the width over it, the height beside it, the sill from the floor
-    const dl = (x1, y1, x2, y2, tx, ty, t, anchor) => '<path d="M' + f(x1) + " " + f(y1) + "L" + f(x2) + " " + f(y2) + '" stroke="#9fe3ff" stroke-width=".8" marker-start="url(#' + "IDa" + ')" marker-end="url(#' + "IDa" + ')"/><text x="' + f(tx) + '" y="' + f(ty) + '" font-size="8" fill="#9fe3ff" text-anchor="' + (anchor || "middle") + '">' + t + "</text>";
-    const m2 = (v) => (Math.round(v * 100) / 100).toFixed(2);
-    let dims = dl(x0, y0 - 5, x0 + ww, y0 - 5, x0 + ww / 2, y0 - 8, m2(g.w)) + dl(x0 + ww + 5, y0, x0 + ww + 5, y1, x0 + ww + 8, (y0 + y1) / 2 + 3, m2(g.h), "start");
-    if (g.sill > 0.04) dims += dl(x0 - 5, y1, x0 - 5, yF, x0 - 8, (y1 + yF) / 2 + 3, m2(g.sill), "end");
-    const id = "wpc" + ((Math.random() * 1e6) | 0);
-    dims = dims.split("IDa").join(id + "a");
-    return (
-      '<svg class="bwp" viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '" aria-label="Window preview">' +
-      '<defs><marker id="' + id + 'a" viewBox="0 0 6 6" refX="3" refY="3" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L6 3L0 6z" fill="#9fe3ff"/></marker><clipPath id="' + id + '">' + glass + '</clipPath><linearGradient id="' + id + 'g" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#cfe3ef"/><stop offset=".55" stop-color="#7d9fb4"/><stop offset=".56" stop-color="#4c5f58"/><stop offset="1" stop-color="#3a4741"/></linearGradient></defs>' +
-      '<rect x="0" y="' + f(yF - g.wallH * k) + '" width="' + W + '" height="' + f(g.wallH * k) + '" fill="rgba(255,255,255,.06)"/>' +
-      '<path d="M0 ' + f(yF) + "H" + W + '" stroke="currentColor" stroke-width="1.2" opacity=".6"/>' +
-      '<path d="M0 ' + f(yF - g.wallH * k) + "H" + W + '" stroke="currentColor" stroke-width=".8" stroke-dasharray="3 3" opacity=".4"/>' +
-      '<rect x="' + f(x0) + '" y="' + f(y0) + '" width="' + f(ww) + '" height="' + f(wh) + '" fill="' + g.finish + '" stroke="rgba(0,0,0,.4)" stroke-width=".6"/>' +
-      '<g fill="url(#' + id + 'g)">' + glass + "</g>" +
-      '<g clip-path="url(#' + id + ')" stroke="' + g.finish + '" fill="none">' + lines + "</g>" +
-      dims +
-      "</svg>"
-    );
-  }
-
   /* ---------- the tray (what the next click draws) and the inspector (everything else, with exact numbers) ---------- */
   const opts = $("bopts"),
     row2 = $("bdecor"),
@@ -442,11 +353,17 @@
   dpanel.className = "panel ui-panel ui-panel--side";
   dpanel.hidden = true;
   dpanel.setAttribute("role", "region");
-  dpanel.innerHTML = '<div class="ui-panel__head"><span class="bdic"></span><div class="bph"><h2></h2><small></small></div><button type="button" class="ui-close" aria-label="Close the details" title="Close (More opens it again)">' + svg(I.close, 18) + '</button></div><div id="bdfit" role="status" hidden></div><div id="bdbody"></div><div id="bdfoot" hidden></div>';
+  // head, then the door and window designer's stage (sticky: outside the scrolling body), the fit line, the designer's
+  // tabs, the body and the foot
+  dpanel.innerHTML =
+    '<div class="ui-panel__head"><span class="bdic"></span><div class="bph"><h2></h2><small></small></div><button type="button" class="ui-close" aria-label="Close the details" title="Close (More opens it again)">' + svg(I.close, 18) + "</button></div>" +
+    '<div id="bdstage" hidden></div><div id="bdfit" role="status" hidden></div><div id="bdtabs" class="ui-tabs" role="tablist" aria-label="Designer" hidden></div><div id="bdbody"></div><div id="bdfoot" hidden></div>';
   document.body.appendChild(dpanel);
   const dbody = $("bdbody"),
     dfit = $("bdfit"),
-    dfoot = $("bdfoot");
+    dfoot = $("bdfoot"),
+    dstage = $("bdstage"),
+    dtabs = $("bdtabs");
   dpanel.querySelector(".ui-close").addEventListener("click", () => (BL.choose("insp"), back()));
   let groups = [],
     lastV = null,
@@ -454,17 +371,30 @@
   const tabSel = {};
   const keyHint = (k) => (k ? "<kbd>" + esc(k) + "</kbd>" : "");
   const same = (a, b) => a === b || (a !== null && b !== null && typeof a === "object" && typeof b === "object" && JSON.stringify(a) === JSON.stringify(b));
-  // a tray or inspector card: the picture (an opening's drawing when the item names one, else its icon) and its name
+  // a tray or inspector card: the picture (an opening's drawing when the item names one, else its icon) and its name.
+  // Opening drawings are made once per type (or recent design) and size, then reused.
   const thumbs = new Map();
-  function pic(x) {
+  function pic(x, size = 30) {
     if ((x.thumb || x.spec) && window.__openingPreview) {
-      const k = x.spec ? JSON.stringify(x.spec) : x.thumb;
-      if (!thumbs.has(k)) thumbs.set(k, window.__openingPreview.draw(x.spec || x.thumb, { size: "thumb", width: 30, height: 30 }));
-      return thumbs.get(k);
+      const k = (x.spec ? JSON.stringify(x.spec) : x.thumb) + "@" + size;
+      if (!thumbs.has(k)) {
+        let h = "";
+        try {
+          h = window.__openingPreview.draw(x.spec || x.thumb, { size: "thumb", width: size, height: size, label: x.name });
+        } catch (e) {}
+        thumbs.set(k, h);
+      }
+      if (thumbs.get(k)) return thumbs.get(k);
     }
-    return I[x.icon] ? svg(I[x.icon], 22) : "";
+    return I[x.icon] ? svg(I[x.icon], size > 30 ? 26 : 22) : "";
   }
   const card = (x, n, m, pressed) => '<button type="button" class="btile bcard" data-g="' + n + '" data-i="' + m + '" title="' + esc(x.name) + '" aria-label="' + esc(x.name) + '" aria-pressed="' + pressed + '">' + pic(x) + '<span class="nm">' + esc(x.name) + "</span></button>";
+  // a catalogue card in the tray (a door or window type, or a recent design): its drawing beside its whole name
+  function ocard(x, n, m, pressed) {
+    const sz = /^(.*?)\s+(\d+(?:\.\d+)?\s*×\s*\d+(?:\.\d+)?)$/.exec(x.name || ""),
+      name = sz ? sz[1] : x.name;
+    return '<button type="button" class="btile bcard bocard" data-g="' + n + '" data-i="' + m + '" title="' + esc(x.name + (x.note ? ". " + x.note : "")) + '" aria-label="' + esc(x.name) + '" aria-pressed="' + pressed + '"><span class="th">' + pic(x, 40) + '</span><span class="nm' + (sz ? " sz" : "") + '"><b>' + esc(name) + "</b>" + (sz ? "<small>" + esc(sz[2]) + "</small>" : "") + "</span></button>";
+  }
   function groupHtml(g, n, inTray) {
     const lab = (extra) => '<span class="blab">' + esc(g.label || "") + (extra !== undefined ? ' <b class="bval">' + esc(extra) + "</b>" : "") + (inTray ? "" : keyHint(g.key)) + "</span>";
     const cur = g.items ? g.items.find((x) => same(x.v, g.value)) : null;
@@ -472,24 +402,11 @@
     if (g.type === "num")
       return '<div class="bgroup bnumg">' + lab() + '<div class="bitems bnumi ui-step"><button type="button" class="bchip" data-g="' + n + '" data-i="-1" aria-label="Less">' + svg(I.minus, 13) + '</button><input type="text" inputmode="decimal" autocomplete="off" data-g="' + n + '" value="' + esc(g.value) + '" aria-label="' + esc(g.label) + '"><span class="bu u">' + esc(g.unit || "") + '</span><button type="button" class="bchip" data-g="' + n + '" data-i="1" aria-label="More">' + svg(I.plus, 13) + "</button></div>" + (g.note ? '<span class="bnote' + (g.bad ? " bad" : "") + '">' + esc(g.note) + "</span>" : "") + "</div>";
     if (g.type === "badges") return '<div class="bgroup bbadges">' + g.items.map((x) => '<span class="bbadge ui-tag' + (x.k ? " k-" + x.k : "") + '"' + (x.title ? ' title="' + esc(x.title) + '"' : "") + ">" + esc(x.text) + "</span>").join("") + "</div>";
-    if (g.type === "winprev") return '<div class="bgroup bwinprev">' + lab() + winPreview(g) + "</div>";
-    if (g.type === "stage") {
-      const P = window.__openingPreview;
-      if (!P || !g.spec) return "";
-      let h = "";
-      try {
-        h = P.draw(g.spec, { size: "stage", wall: g.wall, at: g.at, hand: g.hand, anchor: g.anchor });
-        if (g.plan) h += P.plan(g.spec, g.hand);
-      } catch (e) {
-        return "";
-      }
-      return '<div class="bgroup bstage" data-g="' + n + '">' + h + (g.blurb ? '<span class="bnote">' + esc(g.blurb) + "</span>" : "") + "</div>";
-    }
     if (g.type === "info") return '<div class="bgroup binfo"><span class="btitle">' + esc(g.title) + '</span><span class="bnum">' + esc(g.text) + "</span></div>";
     if (g.type === "swatches") return '<div class="bgroup"' + tip + ">" + lab(cur ? cur.name : g.value === null ? "mixed" : "") + '<div class="bitems">' + g.items.map((x, m) => '<button type="button" class="bsw" data-g="' + n + '" data-i="' + m + '" title="' + esc(x.name) + '" aria-label="' + esc(x.name) + '" aria-pressed="' + same(x.v, g.value) + '">' + swatch(x.sw) + "</button>").join("") + "</div></div>";
     // tiles are named cards: a picture and its name, the chosen one marked
     if (g.type === "tiles") return '<div class="bgroup"' + tip + ">" + lab(cur ? cur.name : g.value === null ? "mixed" : "") + '<div class="bitems bcards">' + g.items.map((x, m) => card(x, n, m, same(x.v, g.value))).join("") + "</div></div>";
-    if (g.type === "chips") return '<div class="bgroup"' + tip + ">" + (g.label ? lab(cur && cur.note ? cur.note : undefined) : "") + '<div class="bitems ui-seg">' + g.items.map((x, m) => '<button type="button" class="bchip" data-g="' + n + '" data-i="' + m + '" aria-pressed="' + same(x.v, g.value) + '"' + (x.note ? ' title="' + esc(x.note) + '"' : "") + ">" + esc(x.name) + "</button>").join("") + "</div></div>";
+    if (g.type === "chips") return '<div class="bgroup" data-id="' + esc(g.id || "") + '"' + tip + ">" + (g.label ? lab(cur && cur.note ? cur.note : undefined) : "") + '<div class="bitems ui-seg">' + g.items.map((x, m) => '<button type="button" class="bchip" data-g="' + n + '" data-i="' + m + '" aria-pressed="' + same(x.v, g.value) + '"' + (x.note ? ' title="' + esc(x.note) + '"' : "") + ">" + esc(x.name) + "</button>").join("") + "</div></div>";
     if (g.type === "stepper") return '<div class="bgroup">' + lab() + '<div class="bitems bstep ui-step"><button type="button" class="bchip" data-g="' + n + '" data-i="-1" aria-label="Less">' + svg(I.minus, 14) + '</button><span class="bnum n">' + esc(g.text) + '</span><button type="button" class="bchip" data-g="' + n + '" data-i="1" aria-label="More">' + svg(I.plus, 14) + "</button></div></div>";
     if (g.type === "toggle") return '<div class="bgroup"><span class="blab">&nbsp;</span><div class="bitems"><button type="button" class="btile" data-g="' + n + '" aria-pressed="' + !!g.on + '" title="' + esc(g.title || g.name) + '">' + svg(I[g.icon], 17) + "<span>" + esc(g.name) + "</span></button></div></div>";
     if (g.type === "action") return '<div class="bgroup"><span class="blab">' + (g.key && !inTray ? keyHint(g.key) : "&nbsp;") + '</span><div class="bitems"><button type="button" class="btile' + (g.danger ? " danger" : "") + '" data-g="' + n + '" title="' + esc((g.title || g.name) + (g.key ? " (" + g.key + ")" : "")) + '">' + svg(I[g.icon], 17) + "<span>" + esc(g.name) + "</span></button></div></div>";
@@ -508,11 +425,13 @@
       if (a < 0) a = run.findIndex((r) => r.g.items.some((x) => same(x.v, val)));
       if (a < 0) a = 0;
     }
-    const { g, n } = run[a];
+    const { g, n } = run[a],
+      cat = g.id === "otype";   // the door or window catalogue: drawings and whole names
     return (
-      '<div class="bgroup btabbed"><div class="blab btabl" role="tablist">' +
+      '<div class="bgroup btabbed' + (cat ? " bocat" : "") + '"><div class="blab btabl" role="tablist">' +
       run.map((r, k) => '<button type="button" role="tab" data-tab="' + esc(key) + '" data-k="' + k + '" aria-selected="' + (k === a) + '"' + (r.g.note ? ' title="' + esc(r.g.note) + '"' : "") + ">" + esc(r.g.label || "") + "</button>").join("") +
-      '</div><div class="bitems bcards">' + g.items.map((x, m) => card(x, n, m, same(x.v, val))).join("") + "</div></div>"
+      (cat && g.note ? '<span class="btabn">' + esc(g.note) + "</span>" : "") +
+      '</div><div class="bitems bcards">' + g.items.map((x, m) => (cat ? ocard : card)(x, n, m, same(x.v, val))).join("") + "</div></div>"
     );
   }
   const setHtml = (el, html) => {
@@ -521,6 +440,39 @@
     el.innerHTML = html;
     return true;
   };
+  // the door and window designer (docs/design/plan-mode-redesign.md section 3.1): a stage drawn to scale with handles, a
+  // door's plan view, the fit line, tabs (Size & place, Style, Finish) and the foot. Its sizes are fixed so a drag in the
+  // stage can be turned back into metres from the drawing's own data-k, data-ox and data-oy.
+  const stageW = (g) => (g.plan ? 220 : 356),
+    stageH = (g) => (g.plan ? 168 : 172),
+    dtabSel = {};
+  let stageV = null,
+    stageKey = "",
+    stageCache = "";
+  function stageHtml(g) {
+    const P = window.__openingPreview;
+    if (!P || !g.spec) return "";
+    try {
+      const sel = g.mode === "sel",
+        win = g.kind === "window",
+        tip = win ? (sel ? "Drag an edge to resize, the middle to move" : "Drag an edge to resize, the middle to raise") : sel ? "Drag an edge to resize, the middle to slide" : "Drag an edge to resize";
+      let h = '<div class="bstrow"><div class="bstel">' + P.draw(g.spec, { size: "stage", wall: g.wall, at: g.at, hand: g.hand, anchor: g.anchor, handles: true, width: stageW(g), height: stageH(g) }) + "</div>",
+        cap = "";
+      // a door's plan view beside it: its quarters are the buttons for which way it opens
+      if (g.plan) {
+        const pl = P.plan(g.spec, g.hand, { width: 132, height: stageH(g) });
+        if (pl) {
+          const hs = P.hands(g.spec),
+            on = hs.find((c) => (c.flip === null || +c.flip === +!!g.hand.flip) && (c.out === null || +c.out === +!!g.hand.out));
+          h += '<div class="bstpl">' + pl + "</div>";
+          cap = on ? on.label : g.how || "";
+        }
+      }
+      return h + '</div><div class="bststrip"><span class="bsttip">' + esc(tip) + "</span>" + (cap ? '<span class="bstcap" title="Click a quarter of the plan to change it">' + esc(cap) + "</span>" : "") + "</div>";
+    } catch (e) {
+      return "";
+    }
+  }
   function renderOpts(v) {
     lastV = v;
     groups = v.groups;
@@ -531,12 +483,12 @@
     }
     const tray = [],
       second = [],
-      inspS = new Map(),
-      inspTop = [],
+      inspL = [],
       foot = [],
       acts = [],
       ends = [];
-    let swatches = false;
+    let swatches = false,
+      stageG = null;
     for (let n = 0; n < groups.length; n++) {
       const g = groups[n];
       if (g.acts || (g.type === "action" && g.id && g.id.startsWith("s:") && g.tier)) {
@@ -557,13 +509,14 @@
           while (groups[n] && groups[n].id === g.id && groups[n].type === "tiles") run.push({ g: groups[n], n: n++ });
           n--;
           arr.push(tabbedHtml(run, toolKey));
-        } else arr.push(groupHtml(g, n, true));
-      } else {
+        } else if (g.id === "o:recent") arr.push('<div class="bgroup bocat brecent"><span class="blab">' + esc(g.label || "Recent") + '</span><div class="bitems bcards">' + g.items.map((x, m) => ocard(x, n, m, false)).join("") + "</div></div>");
+        else arr.push(groupHtml(g, n, true));
+      } else if (g.type === "stage") stageG = g;
+      else {
         const h = groupHtml(g, n, false);
         if (!h) continue;
         if (g.foot) foot.push(h);
-        else if (!g.sec) inspTop.push(h);
-        else (inspS.get(g.sec) || inspS.set(g.sec, []).get(g.sec)).push(h);
+        else inspL.push({ g, h });
       }
     }
     const I_ = v.inspector || { has: false, open: false };
@@ -574,40 +527,207 @@
     setHtml($("bacts"), acts.join(""));
     setHtml(opts, tray.join("") + (end ? '<div class="btrayend">' + end + "</div>" : ""));
     opts.hidden = !tray.length;
+    opts.classList.toggle("bocats", tray.some((h) => h.includes(" bocat")));
     setHtml(row2, second.join(""));
     row2.hidden = !second.length;
     // the inspector
-    const show = !!(I_.open && I_.has && (inspTop.length || inspS.size));
+    const show = !!(I_.open && I_.has && (inspL.length || stageG));
     dpanel.hidden = !show;
+    stageV = show ? stageG : null;
+    dpanel.classList.toggle("bdes", !!stageV);
+    if (stageV) dpanel.dataset.kind = stageV.kind;
     // the fit line: does the next or selected opening fit, and if not, what was done and the fixes
     const fit = v.fit,
-      fitHtml = fit && fit.text ? '<span class="bfitt">' + svg(fit.ok ? I.done : I.warn, 15) + "<span>" + esc(fit.text) + "</span></span>" + (fit.fixes || []).map((x, k) => '<button type="button" class="bchip" data-fix="' + k + '">' + esc(x.label) + "</button>").join("") : "";
+      fitHtml = fit && fit.text ? '<span class="bfitt">' + svg(fit.ok ? I.done : I.warn, 15) + "<span>" + esc(fit.text) + "</span></span>" + (fit.fixes && fit.fixes.length ? '<span class="bfixes">' + fit.fixes.map((x, k) => '<button type="button" class="bchip bfix" data-fix="' + k + '">' + svg(I.right, 13) + "<span>" + esc(x.label) + "</span></button>").join("") + "</span>" : "") : "";
     setHtml(dfit, show ? fitHtml : "");
     dfit.hidden = !show || !fitHtml;
     dfit.className = fit && !fit.ok ? "bad" : fit && fit.adjusted ? "adj" : "";
     setHtml($("bfit"), !show && fit && !fit.ok ? fitHtml : "");
     $("bfit").hidden = show || !fit || fit.ok;
-    setHtml(dfoot, show ? foot.join("") : "");
+    // the foot: Flip and Delete for a selected unit; the next one says where it goes
+    setHtml(dfoot, show ? (stageV && stageV.mode !== "sel" ? '<span class="bdnext">' + svg(I.right, 14) + "<span>Click a wall to place it</span></span>" : "") + foot.join("") : "");
     dfoot.hidden = !show || !foot.length;
-    if (show) {
-      const head = dpanel.firstChild;
-      setHtml(head.firstChild, svg(I[I_.icon] || I.select, 22));
-      const h2 = head.querySelector("h2"),
-        sm = head.querySelector("small");
-      h2.textContent !== I_.title && (h2.textContent = I_.title || "");
-      sm.textContent !== (I_.sub || "") && (sm.textContent = I_.sub || "");
-      dpanel.dataset.mode = I_.mode || "next";
-      const was = dbody.querySelector("input:focus"),
-        top = dbody.scrollTop;
-      if (setHtml(dbody, inspTop.join("") + [...inspS].map(([name, hs]) => '<section class="bsec"><h3 class="bsech">' + esc(name) + '</h3><div class="bsecb">' + hs.join("") + "</div></section>").join(""))) {
-        dbody.scrollTop = top;
-        if (was) {
-          const again = dbody.querySelector('input[data-g="' + was.dataset.g + '"]');
-          again && again.focus();
-        }
+    if (!show) return;
+    const head = dpanel.firstChild;
+    setHtml(head.firstChild, svg(I[I_.icon] || I.select, 22));
+    const h2 = head.querySelector("h2"),
+      sm = head.querySelector("small");
+    h2.textContent !== I_.title && (h2.textContent = I_.title || "");
+    sm.textContent !== (I_.sub || "") && (sm.textContent = I_.sub || "");
+    dpanel.dataset.mode = I_.mode || "next";
+    // the stage: kept out of the scrolling body so it stays in view (and keeps a drag's pointer while it redraws)
+    if (stageV) {
+      const k = JSON.stringify(stageV);
+      if (k !== stageKey) ((stageKey = k), (stageCache = stageHtml(stageV)));
+    }
+    setHtml(dstage, stageV ? stageCache : "");
+    dstage.hidden = !stageV;
+    let body;
+    if (stageV) {
+      // tabs from the sections view() gives, in its order; the Preview section's facts go at the foot of Size & place
+      const secs = [],
+        about = [];
+      for (const x of inspL) x.g.sec === "Preview" ? about.push(x.h) : x.g.sec && !secs.includes(x.g.sec) && secs.push(x.g.sec);
+      let cur = dtabSel[stageV.kind];
+      if (!secs.includes(cur)) cur = secs[0];
+      setHtml(dtabs, secs.map((s) => '<button type="button" role="tab" data-dt="' + secs.indexOf(s) + '" aria-selected="' + (s === cur) + '">' + esc(s) + "</button>").join(""));
+      dtabs.hidden = secs.length < 2;
+      dtabs._secs = secs;
+      // the tab's groups, in blocks: consecutive groups that share a `group` (height on the wall, along the wall) stand
+      // together
+      const blocks = [];
+      let key = {};
+      for (const x of inspL) {
+        if (x.g.sec !== cur) continue;
+        const k = x.g.group || (x.g.type === "info" ? "info" : "");
+        if (k !== key) blocks.push({ k, hs: [] }), (key = k);
+        blocks[blocks.length - 1].hs.push(x.h);
+      }
+      const blurb = stageV.blurb && stageV.blurb !== stageV.how ? stageV.blurb : "";
+      if (cur === secs[0] && (about.length || blurb)) blocks.push({ k: "about", hs: [(blurb ? '<p class="bblurb">' + esc(blurb) + "</p>" : "") + about.join("")] });
+      body = blocks.map((b) => '<section class="bsec bdblk' + (b.k ? " k-" + b.k : "") + '"><div class="bsecb">' + b.hs.join("") + "</div></section>").join("");
+      dbody.setAttribute("role", "tabpanel");
+    } else {
+      dtabs.hidden = true;
+      setHtml(dtabs, "");
+      const inspS = new Map(),
+        top = [];
+      for (const x of inspL) x.g.sec ? (inspS.get(x.g.sec) || inspS.set(x.g.sec, []).get(x.g.sec)).push(x.h) : top.push(x.h);
+      body = top.join("") + [...inspS].map(([name, hs]) => '<section class="bsec"><h3 class="bsech">' + esc(name) + '</h3><div class="bsecb">' + hs.join("") + "</div></section>").join("");
+      dbody.removeAttribute("role");
+    }
+    const was = dbody.querySelector("input:focus"),
+      top = dbody.scrollTop;
+    if (setHtml(dbody, body)) {
+      dbody.scrollTop = top;
+      if (was) {
+        const again = dbody.querySelector('input[data-g="' + was.dataset.g + '"]');
+        again && again.focus();
       }
     }
   }
+  // a designer tab
+  dtabs.addEventListener("click", (e) => {
+    const t = e.target.closest("[data-dt]");
+    if (!t || !stageV || !dtabs._secs) return;
+    dtabSel[stageV.kind] = dtabs._secs[+t.dataset.dt];
+    dbody.scrollTop = 0;
+    lastV && renderOpts(lastV);
+  });
+  dtabs.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const ts = [...dtabs.children],
+      i = ts.findIndex((t) => t.getAttribute("aria-selected") === "true"),
+      j = (i + (e.key === "ArrowRight" ? 1 : -1) + ts.length) % ts.length;
+    e.preventDefault();
+    e.stopPropagation();
+    ts[j] && (ts[j].click(), dtabs.children[j] && dtabs.children[j].focus());
+  });
+
+  /* ---------- the stage's handles: drag an edge to resize, the middle to move. One choose per frame while a drag
+     is live; widths, heights and places go in 5 cm steps (Ctrl: 1 cm), through the same ids as the steppers ---------- */
+  let sdrag = null,
+    sdragRaf = 0;
+  const stageSvg = () => dstage.querySelector("svg.op-prev--stage");
+  function stageM(x, y, el) {
+    const r = el.getBoundingClientRect(),
+      vb = el.viewBox.baseVal,
+      k = +el.dataset.k,
+      px = ((x - r.left) * vb.width) / r.width,
+      py = ((y - r.top) * vb.height) / r.height;
+    return { u: (px - +el.dataset.ox) / k, y: (+el.dataset.oy - py) / k };
+  }
+  // where the unit stands now, in metres along its run and above the floor, and its designer numbers
+  function stageNow() {
+    const v = BL.view(),
+      g = v.groups.find((x) => x.type === "stage");
+    if (!g || !window.__openingPreview) return null;
+    const M = window.__openingPreview.metrics(g.spec, { size: "stage", wall: g.wall, at: g.at, width: stageW(g), height: stageH(g) }),
+      num = (id) => {
+        const x = v.groups.find((q) => q.id === id && q.type === "num");
+        return x ? parseFloat(String(x.value).replace(",", ".")) : NaN;
+      };
+    return { g, uL: (M.x0 - M.ox) / M.k, uR: (M.x1 - M.ox) / M.k, yT: (M.oy - M.y0) / M.k, yB: (M.oy - M.y1) / M.k, w: num("w:w"), h: num("w:h"), an: g.anchor || "sill", sel: g.mode === "sel", win: g.kind === "window" };
+  }
+  function stageStep() {
+    sdragRaf = 0;
+    const D = sdrag,
+      el = stageSvg();
+    if (!D || !el) return;
+    const p = stageM(D.x, D.y, el),
+      S = D.s,
+      st = (x) => (D.ctrl ? Math.round(x * 100) / 100 : Math.round(x * 20) / 20),
+      r2 = (x) => Math.round(x * 100) / 100,
+      out = [],
+      send = (id, val) => out.push([id, val]),
+      anY = (sill, head) => (S.an === "head" ? head : S.an === "centre" ? (sill + head) / 2 : sill),
+      w0 = S.uR - S.uL,
+      h0 = S.yT - S.yB;
+    if (D.k === "l" || D.k === "r") {
+      if (!isFinite(S.w)) return;
+      // the opposite edge stays put (the next unit has no place yet: it grows about its middle)
+      const want = D.k === "r" ? (S.sel ? p.u - S.uL : 2 * (p.u - (S.uL + S.uR) / 2)) : S.sel ? S.uR - p.u : 2 * ((S.uL + S.uR) / 2 - p.u),
+        w = r2(st(S.w + want - w0));
+      if (w <= 0) return;
+      send("w:w", w);
+      if (S.sel && D.k === "l") send("o:pos", r2(S.uR - (w0 + w - S.w)));
+      else if (S.sel) send("o:pos", r2(S.uL));
+    } else if (D.k === "t" || D.k === "b") {
+      if (!isFinite(S.h)) return;
+      const y = st(p.y),
+        h = r2(st(S.h + (D.k === "t" ? y - S.yB : S.yT - y) - h0));
+      if (h <= 0) return;
+      send("w:h", h);
+      // the other edge stays put: say where the anchored line is now
+      if (S.win) {
+        const sill = D.k === "t" ? S.yB : S.yT - (h0 + h - S.h),
+          head = D.k === "t" ? S.yB + h0 + h - S.h : S.yT;
+        if (!(D.k === "t" && S.an === "sill") && !(D.k === "b" && S.an === "head")) send("o:y", { anchor: S.an, y: r2(anY(sill, head)) });
+      }
+    } else if (D.k === "move") {
+      if (S.sel) send("o:pos", r2(st(S.uL + p.u - D.u0)));
+      if (S.win) send("o:y", { anchor: S.an, y: r2(st(anY(S.yB, S.yT) + p.y - D.y0)) });
+    }
+    // the same request as last frame changes nothing (and would only add steps to undo)
+    const j = JSON.stringify(out);
+    if (!out.length || j === D.sent) return;
+    D.sent = j;
+    for (const [id, val] of out) BL.choose(id, val);
+  }
+  dstage.addEventListener("pointerdown", (e) => {
+    const h = e.target.closest("[data-h]"),
+      el = stageSvg();
+    if (!h || !el || e.button > 0) return;
+    const s = stageNow();
+    if (!s) return;
+    e.preventDefault();
+    const p = stageM(e.clientX, e.clientY, el);
+    sdrag = { k: h.dataset.h, id: e.pointerId, x: e.clientX, y: e.clientY, u0: p.u, y0: p.y, s, sent: "", ctrl: e.ctrlKey || e.metaKey, n0: Array.isArray(B.undo) ? B.undo.length : -1 };
+    try {
+      dstage.setPointerCapture(e.pointerId);
+    } catch (err) {}
+    dstage.dataset.drag = sdrag.k;
+  });
+  dstage.addEventListener("pointermove", (e) => {
+    if (!sdrag || e.pointerId !== sdrag.id) return;
+    sdrag.x = e.clientX;
+    sdrag.y = e.clientY;
+    sdrag.ctrl = e.ctrlKey || e.metaKey;
+    sdragRaf || (sdragRaf = requestAnimationFrame(stageStep));
+  });
+  const stageEnd = (e) => {
+    if (!sdrag || e.pointerId !== sdrag.id) return;
+    sdragRaf && cancelAnimationFrame(sdragRaf);
+    e.type === "pointerup" && stageStep();
+    // one drag is one step to undo
+    const n0 = sdrag.n0;
+    if (n0 >= 0 && B.undo.length > n0 + 1 && B.undo.length < 200) B.undo.splice(n0 + 1);
+    sdrag = null;
+    delete dstage.dataset.drag;
+    back();
+  };
+  dstage.addEventListener("pointerup", stageEnd);
+  dstage.addEventListener("pointercancel", stageEnd);
   const onPick = (e) => {
     const tab = e.target.closest("button[data-tab]");
     if (tab) return ((tabSel[tab.dataset.tab] = +tab.dataset.k), lastV && renderOpts(lastV));
@@ -629,7 +749,7 @@
   };
   // pointing at a swatch or a card names it in the group's label
   const named = (e) => e.target.closest(".bsw, .btile[data-i]");
-  for (const el of [opts, row2, $("bacts"), dbody, dfit, dfoot, $("bfit")]) {
+  for (const el of [opts, row2, $("bacts"), dbody, dfit, dfoot, $("bfit"), dstage]) {
     el.addEventListener("click", onPick);
     el.addEventListener("pointerover", (e) => {
       const b = named(e),
@@ -807,6 +927,23 @@
       $("bcoach").innerHTML = coachV.map((c, n) => '<button type="button" class="bcoach' + (c.done ? " done" : "") + (n === next ? " next" : "") + '" data-n="' + n + '" title="' + esc(c.done ? c.text + ": done" : c.tool ? "Pick the " + c.text + " tool" : "Leave build mode when the house is planned") + '"><b>' + (c.done ? svg(I.done, 12) : n + 1) + "</b><span>" + esc(c.text) + "</span></button>").join("");
     }
   }
+  // on a desktop the designer docks on the right down to the bar, and the hint row and tray keep to its left, so the
+  // stage and the Size & place tab have the height they need
+  let dockW = "";
+  function designerDock() {
+    const dock = !dpanel.hidden && dpanel.classList.contains("bdes") && !document.body.classList.contains("touch");
+    bar.classList.toggle("bdock", dock);
+    let w = "";
+    if (dock) {
+      const bm = $("bmain").getBoundingClientRect();
+      dpanel.style.bottom = Math.round(window.innerHeight - bm.top + 8) + "px";
+      w = Math.max(240, Math.round(dpanel.getBoundingClientRect().left - 12 - bar.getBoundingClientRect().left)) + "px";
+    }
+    if (w !== dockW) {
+      dockW = w;
+      for (const el of [opts, $("bhead")]) el.style.maxWidth = w;
+    }
+  }
   function frame() {
     if (!B.on) return void (sched.hidden || (sched.hidden = true), dpanel.hidden || (dpanel.hidden = true), flyClose(), (uiV = -1));
     if (uiV !== B.uiVer) {
@@ -831,6 +968,7 @@
       // the drawers end just above the bar (CSS anchors do it where they can; this is the fallback)
       const above = Math.round(window.innerHeight - bar.getBoundingClientRect().top + 8) + "px";
       for (const p of [dpanel, sched]) p.style.bottom !== above && (p.style.bottom = above);
+      designerDock();
     }
     if ((B.typedV || 0) !== typedV) ((typedV = B.typedV || 0), (typed.a = typed.b = ""));
     const m = G.camera.matrixWorld.elements,
