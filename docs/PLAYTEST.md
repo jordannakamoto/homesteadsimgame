@@ -1019,3 +1019,9 @@ Nothing new to see yet: this is the plumbing decks, porches, lofts, skylights an
 - A wall counts as closed in once its shell is on (frame, sheathing, wrap, siding, lining): the cut's caps and the jamb boards in its openings appear then, not only once everything (trim, paint, wiring, plumbing) is done. Before, a building built by hand with later stages to go showed none of it.
 - Where the cut passes through a window, it shows the window in section: a solid white frame across the wall with a pale line for the glass, instead of a notch; through a door, its frame posts are solid and the doorway stays open.
 - Nails: a closed-in wall shows no nail heads; the nail marks are cut by the dollhouse like the pieces they are in (none float above a cut wall); driven nails are drawn small.
+
+## Solid dollhouse cuts without seams (branch `solid-cuts`)
+
+- Anything the dollhouse cut slices (door and window units, trim, framing) shows its cut faces in its own colour, a little darker, not dark brown: a cut piece reads solid.
+- The cut walls' caps are one flat colour over the whole thickness (no thin strips per layer, so no seams), run on into the corners where walls meet, and windows stay solid in the cut's sides too; only a doorway stays open.
+- A closed wall at full height gets a flat cap on its top, so its top plates and stud ends do not show.
