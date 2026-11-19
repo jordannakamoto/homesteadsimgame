@@ -1,1 +1,277 @@
-/* ui: hud (stub) */
+/* ui: the HUD frame (docs/design/ui-redesign.md section 3, desktop).
+   Top-left #stock + #vitals, top-right #hud-top (clock, weather, speed, gear), left lane #dock + quest card #cvnext,
+   bottom lane #tools (with the mode-chip collapse), prompt lane #lock / #cvprompt, toast lane #msg / #cvbanner,
+   right-side drawers (#status settings, #sv, #ck, #ut, #cv, #wxpanel, #gfxsettings). Wiring: src/game/hud.js.
+   Several of these elements carry .panel (so the Graphics "frosted glass" switch reaches them) and head.html's
+   .panel rule makes every .panel position: fixed; elements placed inside a container here are set back to relative. */
+
+/* visually hidden text (labels kept for screen readers) */
+#stock .label, #vitals .label, #speed .nm, #wxcond, .hud-sr {
+  position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ---------- top-left: money, wood, stone ---------- */
+#stock {
+  position: fixed; z-index: 10;
+  top: calc(var(--lane-edge) + var(--sa-t)); left: calc(var(--lane-edge) + var(--sa-l));
+  display: flex; align-items: center; gap: var(--sp-2);
+  pointer-events: none;
+}
+#stock > * { pointer-events: auto; position: relative; inset: auto; }
+#stock > .item { height: 38px; padding: 0 14px 0 8px; gap: 7px; }
+#stock > .item .ui-ic { width: 22px; height: 22px; }
+#stock .num { font-family: var(--font-display); font-weight: var(--fw-display); font-size: var(--fs-lg); line-height: 1; font-variant-numeric: tabular-nums; min-width: 1.4ch; color: var(--ink); }
+#stock > .item.money { --tone: var(--money); height: 42px; padding-right: 16px; }
+#stock > .item.money .ui-ic { width: 26px; height: 26px; }
+#stock > .item.money .num { font-size: var(--fs-xl); color: var(--money); min-width: 4ch; }
+#stock > .item[data-ic="wood"] { --tone: var(--ic-wood); }
+#stock > .item[data-ic="stone"] { --tone: var(--ic-stone); }
+#stock > .item.ui-pop { animation: ui-pop 320ms var(--ease); }
+/* resting / sheltered: a status chip at the end of the row */
+#stock > #shelter { height: 34px; padding: 0 12px 0 8px; gap: 6px; font-family: var(--font-display); font-weight: var(--fw-display); color: var(--good); }
+#shelter .ui-ic { color: var(--good); }
+#shelter small { font-family: var(--font-body); font-weight: var(--fw-body); font-size: var(--fs-xs); color: var(--ink-dim); margin-left: 2px; }
+
+/* ---------- vitals: two icon meters on one pill, no text labels ---------- */
+#vitals {
+  position: fixed; z-index: 10;
+  top: calc(var(--lane-edge) + var(--sa-t) + 50px); left: calc(var(--lane-edge) + var(--sa-l));
+  display: flex; align-items: center; gap: var(--sp-4);
+  width: auto; padding: 7px 14px 7px 10px;
+  border-radius: var(--r-pill);
+}
+#vitals .bar { display: flex; align-items: center; gap: 6px; }
+#vitals .bar .ui-ic { width: 20px; height: 20px; color: var(--tone, var(--accent)); }
+#vitals .track {
+  position: relative; width: 92px; height: 10px; border-radius: var(--r-pill);
+  background: var(--well); overflow: hidden; box-shadow: inset 0 1px 2px rgba(0, 0, 0, .18);
+}
+#vitals .fill { height: 100%; width: 100%; border-radius: inherit; background: var(--tone, var(--accent)); }
+:root:not([data-skin="minimal"]) #vitals .fill { box-shadow: inset 0 -3px 0 rgba(0, 0, 0, .12), inset 0 2px 0 rgba(255, 255, 255, .35); }
+#vitals .bar:has(#stbar) { --tone: var(--good); }
+#vitals .bar:has(#hungerbar) { --tone: var(--warn); }
+#vitals .bar:has(#hpbar) { --tone: var(--danger); }
+#vitals #hungerbar, #vitals #stbar, #vitals #hpbar { background: var(--tone); }
+
+/* ---------- top-right: clock, weather / speed, gear ---------- */
+#hud-top {
+  position: fixed; z-index: 21;
+  top: calc(var(--lane-edge) + var(--sa-t)); right: calc(var(--lane-edge) + var(--sa-r));
+  display: flex; flex-direction: column; align-items: flex-end; gap: var(--sp-2);
+  pointer-events: none;
+}
+#hud-top .hud-row { display: flex; align-items: center; gap: var(--sp-2); }
+#hud-top .hud-row > *, #hud-top #wx > button { pointer-events: auto; }
+#hud-top .panel { position: relative; inset: auto; }
+/* clock chip: icon, "Day 3", 08:10 */
+#hud-clock { height: 38px; gap: 8px; padding: 0 14px 0 9px; cursor: default; }
+#hud-clock .pair { display: inline-flex; align-items: baseline; gap: 4px; color: var(--ink-dim); font-size: var(--fs-sm); }
+#hud-clock .pair .label { font-weight: var(--fw-body); text-transform: var(--label-transform); letter-spacing: var(--label-track); font-size: var(--fs-xs); }
+#hud-clock #day { color: var(--ink); font-weight: var(--fw-strong); font-variant-numeric: tabular-nums; }
+#hud-clock #clock { font-family: var(--font-display); font-weight: var(--fw-display); font-size: var(--fs-lg); line-height: 1; font-variant-numeric: tabular-nums; min-width: 5ch; }
+#hud-clock .ui-ic { width: 22px; height: 22px; color: var(--warn); }
+#hud-clock.is-night .ui-ic { color: var(--info); }
+/* weather chip (#wxbtn opens the weather drawer) */
+#wx { position: static; display: flex; }
+#hud-top #wxbtn {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 38px; min-width: 0; margin: 0; padding: 0 14px 0 9px;
+  font-variant-numeric: tabular-nums; line-height: 1; text-align: left;
+}
+#hud-top #wxbtn .ui-ic { width: 22px; height: 22px; color: var(--tone, var(--info)); }
+#hud-top #wxbtn[data-wx="Clear"] { --tone: var(--warn); }
+#hud-top #wxbtn #wxdate { grid-column: auto; color: var(--ink-dim); font-size: var(--fs-xs); font-weight: var(--fw-body); }
+#hud-top #wxbtn #wxtemp { font-family: var(--font-display); font-weight: var(--fw-display); font-size: var(--fs-lg); }
+#hud-top #wxbtn[aria-expanded="true"] { background: var(--select-bg); border-color: var(--select-edge); color: var(--select-ink); }
+/* speed: five icon buttons as one segmented control */
+#hud-top #speed {
+  display: inline-flex; gap: 2px; padding: 3px; height: 38px; align-items: stretch;
+  background: var(--surface-1); border: var(--border-w) solid var(--edge); border-radius: var(--r-pill);
+  box-shadow: var(--shadow-1);
+}
+#hud-top #speed > button { min-width: 38px; min-height: 0; padding: 0 8px; border-radius: var(--r-pill); }
+#hud-top #speed > button::before { border-radius: var(--r-pill); }
+#hud-top #speed > button .ui-ic { width: 18px; height: 18px; margin: 0; }
+#hud-top #speed > button[data-speed="0"][aria-pressed="true"] { color: var(--warn); }
+/* gear */
+#hud-gear { width: 38px; min-width: 38px; height: 38px; border-radius: var(--r-pill); background: var(--surface-1); box-shadow: var(--shadow-1); }
+#hud-gear .ui-ic { width: 22px; height: 22px; transition: rotate var(--t) var(--ease); }
+#hud-gear[aria-pressed="true"] { background: var(--select-bg); color: var(--select-ink); border-color: var(--select-edge); }
+#hud-gear[aria-pressed="true"] .ui-ic { rotate: 60deg; }
+
+/* ---------- left lane: the dock, then the quest card ---------- */
+#ui-lane-left > #dock { gap: var(--sp-2); }
+#dock .ui-dock-btn { color: var(--ink); }
+#dock .ui-dock-btn[aria-pressed="true"] { color: var(--select-ink); }
+#ui-lane-left > #cvnext.ui-card {
+  width: 248px; padding: 10px 14px 12px; gap: 0;
+  background: var(--surface-2); border: var(--border-w) solid var(--edge); border-left: 5px solid var(--accent);
+  border-radius: var(--r-md); box-shadow: var(--shadow-1);
+}
+#cvnext .cvk { font-size: var(--fs-xs); font-weight: var(--fw-strong); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-dim); }
+#cvnext .cvt { font-family: var(--font-display); font-weight: var(--fw-display); font-size: var(--fs-lg); line-height: 1.15; color: var(--ink); margin: 2px 0 4px; }
+#cvnext .cvl { font-size: var(--fs-sm); line-height: 1.35; color: var(--ink); }
+#cvnext .cvwhy { border-top-color: var(--edge); }
+#cvnext button { min-height: 30px; padding: 4px 12px; font-size: var(--fs-sm); }
+#cvnext button.go { background: var(--accent); color: var(--accent-ink); border-color: var(--accent-edge); box-shadow: var(--lip-accent); }
+@media (max-height: 760px) {
+  #dock .ui-dock-btn { min-height: 52px; width: 56px; padding: 4px 2px; }
+  #dock .ui-dock-btn > svg { width: 22px; height: 22px; }
+  #ui-lane-left > #dock { gap: 6px; }
+}
+
+/* ---------- bottom lane: the hotbar row ---------- */
+#ui-lane-bottom > #tools {
+  display: flex; align-items: flex-end; gap: var(--sp-2);
+  padding: 10px; border-radius: calc(var(--r-slot) + 10px);
+}
+/* phone: the row may be wider than the screen; it scrolls sideways (room on top for the lift and the marker) */
+body.touch #ui-lane-bottom > #tools {
+  justify-content: flex-start; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+  scrollbar-width: none; padding: 24px 8px 8px; max-width: 100%;
+}
+body.touch #ui-lane-bottom > #tools::-webkit-scrollbar { display: none; }
+body.building #ui-lane-bottom > #tools { display: none; }
+#tools button .hud-back { display: none; }
+/* the mode chip: in a sub-mode only its own button stays, with a back arrow; a click on it returns to the axe */
+#tools:has(> button[aria-pressed="true"]:is([data-tool="garden"], [data-tool="yard"], [data-tool="site"], [data-tool="hands"])) > button[aria-pressed="false"] { display: none; }
+#tools:has(> button[aria-pressed="true"]:is([data-tool="garden"], [data-tool="yard"], [data-tool="site"], [data-tool="hands"])) > button[aria-pressed="true"] {
+  translate: none; box-shadow: var(--shadow-1);
+  background: var(--accent); color: var(--accent-ink); border-color: var(--accent-edge);
+}
+#tools:has(> button[aria-pressed="true"]:is([data-tool="garden"], [data-tool="yard"], [data-tool="site"], [data-tool="hands"])) > button[aria-pressed="true"]::after { display: none; }
+#tools:has(> button[aria-pressed="true"]:is([data-tool="garden"], [data-tool="yard"], [data-tool="site"], [data-tool="hands"])) > button[aria-pressed="true"] .key { display: none; }
+#tools:has(> button[aria-pressed="true"]:is([data-tool="garden"], [data-tool="yard"], [data-tool="site"], [data-tool="hands"])) > button[aria-pressed="true"] .hud-back {
+  display: inline-flex; position: absolute; left: 3px; top: 3px; width: 18px; height: 18px;
+  align-items: center; justify-content: center; border-radius: 50%;
+  background: var(--accent-ink); color: var(--accent);
+}
+#tools button .hud-back .ui-ic { width: 12px; height: 12px; stroke-width: 3; }
+
+/* ---------- prompt lane: at most one prompt ---------- */
+#ui-lane-prompt > #lock.ui-prompt { padding: 6px 16px; font-size: var(--fs-sm); color: var(--ink-dim); text-align: center; }
+#ui-lane-prompt:has(> :not(#lock):not([hidden]):not(:empty)) > #lock { display: none; }
+#ui-lane-prompt > #cvprompt.ui-prompt { padding: 8px 20px 9px; border-radius: var(--r-lg); gap: 5px; }
+#cvprompt .row { font-size: var(--fs-md); }
+#cvprompt .pb { background: var(--well); height: 5px; border-radius: var(--r-pill); }
+#cvprompt .pb b { background: var(--accent); }
+
+/* ---------- toast lane ---------- */
+#ui-lane-toast > #msg {
+  padding: 12px 22px; max-width: 100%; text-align: center;
+  font-family: var(--font-display); font-weight: var(--fw-display); font-size: var(--fs-lg); line-height: 1.25;
+  color: var(--ink); background: var(--surface-2);
+  border: var(--border-w) solid var(--edge); border-radius: var(--r-pill);
+  box-shadow: var(--shadow-2);
+  animation: ui-toast-in var(--t) var(--ease) both;
+}
+:root[data-skin="minimal"] #ui-lane-toast > #msg { border-radius: var(--r-md); }
+#ui-lane-toast > #cvbanner {
+  padding: 10px 26px 12px; text-align: center; max-width: 100%;
+  background: var(--surface-2); color: var(--ink);
+  border: var(--border-w) solid var(--accent-edge); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  animation: ui-toast-in var(--t) var(--ease) both;
+}
+#cvbanner .t { font-family: var(--font-display); font-weight: var(--fw-display); color: var(--accent-edge); }
+#cvbanner .l { color: var(--ink); font-size: var(--fs-sm); }
+
+/* ---------- drawers: right side, under the top cluster, above the hotbar; one at a time (kit) ---------- */
+body:not(.touch) :is(#sv, #ck, #ut, #cv, #wxpanel, #status, #gfxsettings).ui-panel--side {
+  position: fixed; z-index: 25;
+  top: calc(var(--hud-top-h) + var(--sa-t)); right: calc(var(--lane-edge) + var(--sa-r)); left: auto; bottom: auto;
+  transform: none; translate: none;
+  width: 400px; height: auto; max-width: calc(100vw - 2 * var(--lane-edge));
+  max-height: calc(100vh - var(--hud-top-h) - var(--lane-bottom-h) - 3 * var(--lane-edge));
+  padding: 0; gap: 0;
+  color: var(--ink); background: var(--surface-2);
+  border: var(--border-w) solid var(--edge); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2), var(--inner-hi);
+  font-size: var(--fs-md);
+}
+body:not(.touch) :is(#sv, #ck).ui-panel--wide { width: 560px; }
+body.touch :is(#sv, #ck, #ut, #cv, #wxpanel, #status, #gfxsettings).ui-panel--side {
+  position: fixed; z-index: 25; top: auto !important; left: 0; right: 0; bottom: 0; transform: none; translate: none;
+  width: 100%; max-width: none; height: auto; max-height: 72vh !important;
+  padding: 0 0 var(--sa-b); gap: 0; background: var(--surface-2);
+  border-radius: var(--r-lg) var(--r-lg) 0 0; border-bottom: 0;
+}
+:is(#sv, #ck, #ut, #cv, #wxpanel, #status) > .ui-panel__head h2 {
+  font-family: var(--font-display); font-weight: var(--fw-display); font-size: var(--fs-xl); color: var(--ink); margin: 0;
+}
+:root[data-skin="minimal"] :is(#sv, #ck, #ut, #cv, #wxpanel, #status) > .ui-panel__head h2 { font-size: var(--fs-lg); }
+:is(#sv, #ck, #ut, #cv) > .ui-panel__head { margin: 0; }
+:is(#svmoney, #ckmoney, #cvmoney) { font-family: var(--font-display); font-weight: var(--fw-display); font-size: var(--fs-lg); color: var(--money); margin-left: auto; }
+:is(#svnote, #cknote, #cvsay) { margin: 0 var(--sp-4) var(--sp-2); min-height: 0; }
+:is(#svnote, #cknote, #cvsay):empty { display: none; }
+:is(#svbody, #ckbody, #utbody, #cvbody) { padding: 0 var(--sp-4) var(--sp-4); }
+/* weather drawer */
+#wxpanel .ui-panel__note { color: var(--ink); }
+#wxpanel dl { font-size: var(--fs-sm); gap: 6px 14px; }
+#wxpanel .site { font-size: var(--fs-sm); margin-top: 10px; }
+#wxpanel select { font-size: var(--fs-sm); background: var(--well); }
+/* graphics drawer (the engine's own panel; it sets an inline top from the old top bar, which the frame overrides) */
+body:not(.touch) #gfxsettings.ui-panel {
+  top: calc(var(--hud-top-h) + var(--sa-t)) !important;
+  max-height: calc(100vh - var(--hud-top-h) - var(--lane-bottom-h) - 3 * var(--lane-edge)) !important;
+}
+#gfxsettings.ui-panel { display: block; overflow: auto; padding: 12px 16px 16px; font-size: var(--fs-sm); }
+#gfxsettings .head h2 { font-family: var(--font-display); font-weight: var(--fw-display); font-size: var(--fs-lg); }
+
+/* ---------- the settings drawer (#status): skin tiles, graphics, switches, new world, dev readouts ---------- */
+#status.ui-panel {
+  display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); align-content: start;
+  padding: 0 var(--sp-4) var(--sp-4); overflow: auto; overscroll-behavior: contain;
+}
+body:not(.touch) #status.ui-panel--side, body.touch #status.ui-panel--side { padding: 0 var(--sp-4) var(--sp-4); gap: var(--sp-2); }
+#status > :not(button) { grid-column: 1 / -1; }
+#status > .ui-panel__head {
+  position: sticky; top: 0; z-index: 1; margin: 0 calc(-1 * var(--sp-4)); background: var(--surface-2);
+}
+#status > button { justify-content: flex-start; text-align: left; }
+#status .hud-sec {
+  margin-top: var(--sp-2); font-family: var(--font-display); font-weight: var(--fw-display); font-size: var(--fs-sm);
+  color: var(--ink-dim); text-transform: var(--label-transform); letter-spacing: var(--label-track);
+}
+#status .hud-gfx { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+#status .hud-gfx > button { flex: 1 1 0; white-space: nowrap; }
+#quality::before { content: "Quality"; color: var(--ink-dim); font-weight: var(--fw-body); margin-right: 2px; }
+#status #newworld { grid-column: 1 / -1; margin-top: var(--sp-3); justify-content: center; color: var(--danger); }
+#status .hud-dev { display: flex; gap: var(--sp-4); margin-top: var(--sp-1); color: var(--ink-dim); font-size: var(--fs-xs); }
+#status .hud-dev .pair { display: inline-flex; gap: 6px; }
+#status .hud-dev .val { color: var(--ink); font-weight: var(--fw-strong); font-variant-numeric: tabular-nums; }
+#status > span:not([class]) { font-size: var(--fs-xs); color: var(--ink-dim); }
+/* skin tiles: a tiny preview of each look. The preview colours are the skins' own values (not tokens: both
+   previews show at once, whichever skin is on) */
+#status .hud-skins { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.hud-skin { flex-direction: column; align-items: stretch; gap: 6px; height: auto; padding: 6px 6px 8px; border-radius: var(--r-md); font-size: var(--fs-md); }
+.hud-skin[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent-edge); color: var(--pressed-ink); }
+.hud-skin .nm { font-family: var(--font-display); font-weight: var(--fw-display); text-align: center; }
+.hud-skin__pv {
+  position: relative; display: block; height: 78px; overflow: hidden;
+  border-radius: calc(var(--r-md) - 5px);
+  background: linear-gradient(180deg, #a9d3ee 0%, #cfe6f2 52%, #86b862 52%, #6f9f4f 100%);
+}
+.hud-skin__pv > i, .hud-skin__pv .r > i { position: absolute; display: block; }
+.hud-skin__pv .c { left: 7px; top: 7px; width: 42px; height: 12px; }
+.hud-skin__pv .m { left: 7px; top: 24px; width: 30px; height: 7px; }
+.hud-skin__pv .r { position: absolute; left: 50%; bottom: 7px; translate: -50% 0; display: flex; gap: 4px; padding: 4px; }
+.hud-skin__pv .r > i { position: relative; width: 17px; height: 17px; }
+.hud-skin__pv .r > i.on { translate: 0 -3px; }
+.hud-skin[data-skin="cozy"] .hud-skin__pv .c { background: #fff9ec; border: 2px solid #e6d6b2; border-radius: 7px; box-shadow: 0 2px 0 rgba(122, 92, 48, .3); }
+.hud-skin[data-skin="cozy"] .hud-skin__pv .m { background: #35a865; border-radius: 4px; box-shadow: 0 0 0 2px #fff9ec; }
+.hud-skin[data-skin="cozy"] .hud-skin__pv .r { background: #fff9ec; border-radius: 9px; box-shadow: 0 2px 0 rgba(122, 92, 48, .3); }
+.hud-skin[data-skin="cozy"] .hud-skin__pv .r > i { background: #fff; border: 2px solid #e6d6b2; border-radius: 6px; }
+.hud-skin[data-skin="cozy"] .hud-skin__pv .r > i.on { border-color: #35a865; }
+.hud-skin[data-skin="cozy"] .hud-skin__pv .r > i.on::after { content: ""; position: absolute; left: 50%; top: -9px; width: 6px; height: 6px; margin-left: -3px; background: #35a865; rotate: 45deg; border-radius: 1px; }
+.hud-skin[data-skin="minimal"] .hud-skin__pv .c { background: rgba(16, 19, 23, .72); border: 1px solid rgba(255, 255, 255, .16); border-radius: 4px; }
+.hud-skin[data-skin="minimal"] .hud-skin__pv .m { background: #ffd166; border-radius: 1px; height: 4px; top: 25px; }
+.hud-skin[data-skin="minimal"] .hud-skin__pv .r { background: rgba(16, 19, 23, .72); border-radius: 5px; }
+.hud-skin[data-skin="minimal"] .hud-skin__pv .r > i { background: rgba(255, 255, 255, .1); border: 1px solid rgba(255, 255, 255, .16); border-radius: 3px; }
+.hud-skin[data-skin="minimal"] .hud-skin__pv .r > i.on { background: #f3f5f7; translate: none; }
+.hud-skin[data-skin="minimal"] .hud-skin__pv .r > i.on::after { content: ""; position: absolute; left: 50%; bottom: -5px; width: 8px; height: 2px; margin-left: -4px; background: #f3f5f7; border-radius: 1px; }
+
+/* ---------- modes: what hides when ---------- */
+body.building :is(#dock, #cvnext, #vitals, #shelter) { display: none !important; }
+body.cooking-active :is(#dock, #hud-top) { display: none !important; }
