@@ -5,6 +5,8 @@
 // stacks, carrying) and src/sim/construction.js (the system); the page's add-on reads it for its wording.
 
 import { SERVICE_SUPPLY } from './services.js';
+export { PAINTS, PAINT, SHEENS, SURFACES, finishOf, DECOR } from './decor.js';
+export { PROFILES, REVEAL_M, ENDS, cutWords, FINISH_NAILS_KG_PER_M } from './carpentry.js';
 
 // ---- stages, in the order a building is raised. `needs`: the stages it stands on. `parentFirst`: stages whose
 // members of the same wall or gable must be in first. `flat`: its frames are put together lying down, one at a
@@ -31,7 +33,9 @@ export const STAGES = Object.freeze([
   { id: 'insulation', name: 'Insulation', needs: ['roofing', 'sheathing', 'rough-in'], verb: 'Insulate', what: 'Fill the spaces between studs and rafters with batts.', why: 'Slows heat leaving in winter and coming in during summer.' },
   { id: 'lining', name: 'Lining', needs: ['insulation'], verb: 'Hang the walls', what: 'Hang drywall sheet by sheet, top row first, or put up pine boards from the floor up; lay the floor boards.', why: 'Covers the insulation and makes a finished room.' },
   { id: 'finish', name: 'Tape and mud', needs: ['lining'], verb: 'Tape and mud', what: 'Tape every drywall seam, give it three coats of compound, letting each dry, then sand it smooth.', why: 'Hides the joints so the walls read as one surface. Board walls need none of this.' },
-  { id: 'trim-out', name: 'Trim-out', needs: ['lining', 'finish'], by: 'services', hint: 'Trim-out: Do it for me, in the Build panel (L)', verb: 'Fit the devices and fixtures', what: 'Outlets, switches and lights into their boxes; breakers into the panel; taps and fixtures onto their stubs.', why: 'The wall is finished now, so what you touch goes on its face.' },
+  { id: 'carpentry', name: 'Trim carpentry', needs: ['lining', 'finish'], verb: 'Fit the trim', what: 'Casings round the doors and windows, then baseboard along the floor, each piece cut to fit at the sawhorses.', why: 'Covers the gaps where the walls meet the floor and the frames, and finishes the room.' },
+  { id: 'decorate', name: 'Paint', needs: ['cladding', 'lining', 'finish', 'carpentry'], verb: 'Paint', what: 'A coat of primer on the new walls, then two coats of colour, each dry before the next; two coats on the trim, which comes primed.', why: 'Seals the drywall or boards and gives the room its colour.' },
+  { id: 'trim-out', name: 'Trim-out', needs: ['lining', 'finish', 'decorate'], by: 'services', hint: 'Trim-out: Do it for me, in the Build panel (L)', verb: 'Fit the devices and fixtures', what: 'Outlets, switches and lights into their boxes; breakers into the panel; taps and fixtures onto their stubs.', why: 'The wall is finished now, so what you touch goes on its face.' },
 ]);
 // ---- taping drywall (docs/design/interior-walls.md). Each seam takes the tape and a first coat, then a fill coat and a
 // finish coat, each laid on dry compound, then a light sanding. Setting compound can take the next coat in about an hour
@@ -106,11 +110,11 @@ export const learnGroup = (kind) => LEARN.group[kind] || null;
 
 // ---- how each item sits in a stack and in the arms: the page draws these forms.
 export function itemForm(itemId) {
-  if (/^(cut_)?lumber_|^glulam/.test(itemId)) return 'lumber';
+  if (/^(cut_)?(lumber|trim)_|^glulam/.test(itemId)) return 'lumber';
   if (/^board_/.test(itemId)) return 'boards';
   if (/^(osb|plywood|gypsum)_/.test(itemId)) return 'sheet';
   if (itemId === 'pier_block') return 'block';
-  if (/^(nails|screws)_/.test(itemId)) return 'box';
+  if (/^(nails|screws)_/.test(itemId) || itemId === 'caulk_acrylic') return 'box';
   if (itemId === 'housewrap' || itemId === 'roof_underlayment' || itemId === 'vapour_barrier' || itemId === 'roof_epdm' || itemId === 'roof_ice_water' || itemId === 'roof_green') return 'roll';
   if (itemId === 'drip_edge' || itemId === 'ridge_cap' || itemId === 'gutter_alu' || itemId === 'downspout_alu') return 'trim';
   if (/^roof_/.test(itemId)) return 'bundle';
@@ -153,18 +157,18 @@ export function packSheets(areas, held = [], sheetA = SHEET.areaM2, minKeep = SH
 // that holds it. What is left is kept as an offcut (cripples and short pieces come out of them) or, under minKeepM, is
 // scrap. A saw cut takes kerfM. A piece longer than the longest stock is spliced from two in the plan (src/framing.js).
 export const STICK = Object.freeze({ stocksM: Object.freeze([2.4, 3.0, 3.6, 4.2, 4.8, 5.4, 6.0]), kerfM: 0.003, minKeepM: 0.3, ft: Object.freeze({ 2.4: 8, 3: 10, 3.6: 12, 4.2: 14, 4.8: 16, 5.4: 18, 6: 20 }) });
-export const isStickItem = (itemId) => /^lumber_/.test(itemId);
+export const isStickItem = (itemId) => /^(lumber|trim)_/.test(itemId);     // framing lumber and trim mouldings, in stock lengths
 // ---- what comes cut from the yard and what you cut yourself. Lumberyards sell studs precut and cut plates, joists and beams
 // to length on the order, so most pieces arrive ready to go in. The cuts a carpenter really makes on site are the short and
 // fitted pieces and the angled ones: posts cut to height once the piers are level, blocking, cripples under sills and over
 // headers, gable studs, rafters and hips with their plumb cuts and seat cuts, and any stub under stubM. Those are bought as stock sticks and cut at the sawhorses as a job of their own;
 // each cut piece goes into the arms (an armful at most) or onto the horses.
-export const SITE_CUT = Object.freeze({ kinds: Object.freeze(['block', 'cripple', 'rafter', 'hip', 'post']), armful: 6, shortM: 1.5, stubM: 0.6,
+export const SITE_CUT = Object.freeze({ kinds: Object.freeze(['block', 'cripple', 'rafter', 'hip', 'post', 'casing', 'base', 'stool']), armful: 6, shortM: 1.5, stubM: 0.6,
   says: 'Cut it at the sawhorses first', why: 'Posts, blocking, cripples and rafters are cut on site, to fit; everything else comes cut to length from the yard' });
 export const isSiteCut = (kind, len) => SITE_CUT.kinds.includes(kind) || (len > 0 && len < SITE_CUT.stubM) || ((kind === 'stud' || kind === 'jack') && len > 0 && len < SITE_CUT.shortM);
 // the pieces cut at the sawhorses from a lumber item, carried and stacked like any other item
 export const cutItemOf = (itemId) => 'cut_' + itemId;
-export const isCutItem = (itemId) => /^cut_lumber_/.test(itemId);
+export const isCutItem = (itemId) => /^cut_(lumber|trim)_/.test(itemId);
 // the stock length a new stick for a piece this long is bought as
 export function stockFor(len, stocks = STICK.stocksM) {
   for (const L of stocks) if (L >= len - 1e-9) return L;

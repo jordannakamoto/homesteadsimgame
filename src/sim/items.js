@@ -15,6 +15,7 @@ import { INGREDIENTS, foodId } from './food-catalog.js';
 import { ITEMS_GARDEN, GARDEN_CATEGORIES } from './content/garden-items.js';
 import { ITEMS_LANDSCAPE, LANDSCAPE_CATEGORIES } from './content/landscape.js';
 import { ITEMS_VEHICLES, VEHICLE_CATEGORIES } from './content/vehicles.js';
+import { finishOf, SHEENS } from './content/decor.js';
 import { ITEMS_SERVICES, SERVICE_ITEM_CATEGORIES } from './content/services.js';
 import { ITEMS_CONCRETE } from './content/concrete-items.js';
 import { openingItems, openingItemFromId } from './content/openings.js';
@@ -95,6 +96,7 @@ add({ id: 'plywood_12', name: 'Plywood 12 mm (1220 x 2440)', category: 'sheet', 
 add({ id: 'plywood_18', name: 'Plywood 18 mm (1220 x 2440)', category: 'sheet', unit: 'each', material: 'plywood', dims: { ...SHEET, thicknessM: 0.018 }, priceUsd: 64 });
 add({ id: 'osb_11', name: 'OSB 11 mm (1220 x 2440)', category: 'sheet', unit: 'each', material: 'osb', dims: { ...SHEET, thicknessM: 0.011 }, priceUsd: 19 });
 add({ id: 'osb_18', name: 'OSB 18 mm (1220 x 2440)', category: 'sheet', unit: 'each', material: 'osb', dims: { ...SHEET, thicknessM: 0.018 }, priceUsd: 31 });
+add({ id: 'primer_pva', name: 'Drywall primer (PVA)', category: 'sheet', unit: 'L', massKg: 1.3, priceUsd: 6, blurb: 'Seals new drywall so the paint dries even' });
 add({ id: 'joint_compound', name: 'Joint compound and tape', category: 'sheet', unit: 'kg', material: 'gypsum_board', priceUsd: 1.2, blurb: 'Setting-type compound with paper tape, for drywall seams' });
 add({ id: 'gypsum_13', name: 'Gypsum board 12.7 mm (1220 x 2440)', category: 'sheet', unit: 'each', material: 'gypsum_board', dims: { ...SHEET, thicknessM: 0.0127 }, priceUsd: 15 });
 add({ id: 'housewrap', name: 'Housewrap', category: 'sheet', unit: 'm2', material: 'housewrap', dims: { thicknessM: 0.00018 }, priceUsd: 1.9 });
@@ -138,6 +140,12 @@ add({ id: 'mortar_mix', name: 'Mortar mix (dry)', category: 'stone', unit: 'kg',
 for (const g of ITEMS_CONCRETE) add(g);
 
 // ---- fasteners, by weight
+add({ id: 'trim_casing', name: 'Colonial casing 57 x 17 (primed)', category: 'lumber', unit: 'm', material: 'pine_seasoned', dims: { widthM: 0.057, depthM: 0.0175 }, priceUsd: 2.6, blurb: 'Finger-jointed pine moulding, primed: trim round doors and windows' });
+add({ id: 'trim_base', name: 'Colonial base 83 x 14 (primed)', category: 'lumber', unit: 'm', material: 'pine_seasoned', dims: { widthM: 0.083, depthM: 0.014 }, priceUsd: 3.1, blurb: 'Finger-jointed pine moulding, primed: baseboard along the floor' });
+add({ id: 'trim_stool', name: 'Window stool 95 x 22 (primed)', category: 'lumber', unit: 'm', material: 'pine_seasoned', dims: { widthM: 0.095, depthM: 0.022 }, priceUsd: 6.5, blurb: 'Bullnosed pine board, primed: the shelf under a window' });
+add({ id: 'caulk_acrylic', name: 'Acrylic caulk (paintable)', category: 'sheet', unit: 'L', massKg: 1.5, priceUsd: 15, blurb: 'In 300 ml tubes: a tube runs about 9 m of bead' });
+add({ id: 'miter_saw', name: 'Miter saw', category: 'tools_power', unit: 'each', massKg: 12, priceUsd: 180, powerW: 1500, blurb: 'Swings to any angle: clean miters on trim, fast' });
+add({ id: 'nails_finish', name: 'Finish nails', category: 'fasteners', unit: 'kg', material: 'steel', priceUsd: 9 });
 add({ id: 'nails_framing', name: 'Framing nails (galvanised)', category: 'fasteners', unit: 'kg', material: 'steel', priceUsd: 6.2 });
 add({ id: 'screws_wood', name: 'Wood screws', category: 'fasteners', unit: 'kg', material: 'steel', priceUsd: 12.5 });
 add({ id: 'screws_structural', name: 'Structural screws', category: 'fasteners', unit: 'kg', material: 'steel', priceUsd: 22 });
@@ -188,10 +196,16 @@ const BASE = Object.fromEntries(list.map((i) => [i.id, i])), MADE = Object.creat
 const madeItem = (id) => {
   if (typeof id !== 'string') return undefined;
   if (MADE[id]) return MADE[id];
+  // wall paint, made to order in a colour and sheen of the palette: 'paint_<colour>_<sheen>' by the litre
+  if (id.startsWith('paint_')) {
+    const f = finishOf(id.slice(6));
+    if (!f) return undefined;
+    return (MADE[id] = Object.freeze({ id, name: 'Paint, ' + f.name + ' (' + SHEENS[f.sheen].name.toLowerCase() + ')', category: 'sheet', unit: 'L', massKgPerUnit: 1.3, priceUsd: 14, made: true, colorHex: f.hex }));
+  }
   // pieces cut at the sawhorses: counted one by one, about 1.2 m each on average, never sold
-  if (id.startsWith('cut_lumber_') && BASE[id.slice(4)]) {
+  if (/^cut_(lumber|trim)_/.test(id) && BASE[id.slice(4)]) {
     const b = BASE[id.slice(4)];
-    return (MADE[id] = Object.freeze({ id, name: 'Cut pieces, ' + b.name.replace(' framing lumber', ''), category: b.category, unit: 'each', material: b.material,
+    return (MADE[id] = Object.freeze({ id, name: 'Cut pieces, ' + b.name.replace(' framing lumber', '').replace(/ \(primed\)$/, ''), category: b.category, unit: 'each', material: b.material,
       dims: { lengthM: 1.2, widthM: b.dims.widthM, depthM: b.dims.depthM }, massKgPerUnit: b.massKgPerUnit * 1.2, priceUsd: 0, made: true }));
   }
   if (!id.startsWith('op_')) return undefined;

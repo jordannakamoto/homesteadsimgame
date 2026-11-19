@@ -586,7 +586,7 @@ test('services: no runs planned, insulation goes on as before and there is no ro
   assert.ok(!v.stages.some((q) => q.id === 'rough-in' || q.id === 'trim-out'), v.stages.map((q) => q.id).join());
   assert.ok(K.stageOpen(P(), 'insulation'), 'nothing planned: insulation is open');
   assert.equal(C.STAGE_ORDER.indexOf('rough-in'), C.STAGE_ORDER.indexOf('gutters') + 1);
-  assert.equal(C.STAGE_ORDER.indexOf('trim-out'), C.STAGE_ORDER.indexOf('finish') + 1);     // after lining and its taping (docs/design/interior-walls.md)
+  assert.equal(C.STAGE_ORDER.indexOf('trim-out'), C.STAGE_ORDER.indexOf('decorate') + 1);     // after lining, taping and paint (docs/design/interior-finishes.md)
   assert.ok(C.UNLOCKS.find((u) => u.when === 'plan:cabin').opens.includes('services:in-wall'));
 });
 

@@ -889,3 +889,31 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - Order inside a building: rough-in, insulation, lining (hang), tape and mud, trim-out (devices and fixtures). Trim-out waits for the taping.
 - Opening a wall to get at a run takes off every sheet or board of it, its taped seams and the batts; the hints say so.
 - The planned interior "trim" slice (casings, baseboard) is renamed finish carpentry, apart from services' Trim-out. See `docs/design/interior-walls.md` and the design README.
+
+## Paint: walls and trim (branch `paint`, design in `docs/design/interior-finishes.md`)
+
+- New last building stage, **Paint**: primer on every lined wall face, a rectangle (up to 1.2 m wide, clear of the openings) at a time, then two coats of colour, each on dry paint. The trim (corner boards and round doors and windows) takes two coats of its own colour; it comes primed.
+- Hands: point at a part of a wall or a trim board with E. The roller runs over it and the coat wipes on from the end you stand at; the first coat lets the primer show through, wet paint is darker. The roller in the hand carries the colour.
+- Choosing: plan options (or a selected building's options) have **Walls** (12 colours or bare, with Matte, Eggshell or Satin) and **Trim** (12 colours or as it comes). On a finished building in construction mode, a colour adds the painting as work; changing a colour later means two more coats. Paint is ordered by the litre per colour and sheen, primer by the litre.
+- Finishes are stored by surface (walls, a face, trim, a single piece), so cabinets and new furniture can take their own colour later without changes to the paint code.
+- Opening a wall for services takes its paint off with the drywall.
+- Console: `__build.setDeco(structId, { walls: 'sage_eggshell', trim: 'moss_semigloss' })`.
+- Weak: one colour for all the walls of a building (per face comes in slice 2); no clear oil for boards yet; sheen does not change the look yet; with "Work until done" the paint stage works like taping (waits on wet coats).
+
+## Trim carpentry: casings and baseboard (branch `finish-carpentry`, design in `docs/design/carpentry.md`)
+
+- New stage after taping, **Trim carpentry**: casings round every door and window (a door: two legs to the floor and a head; a window: a frame of four), set back a 5 mm reveal from the jamb, then baseboard along the floor from corner to corner, stopping at the door casings. Paint now comes after it, so walls and trim are painted together.
+- Every piece is cut to fit at the sawhorses from primed moulding in stock lengths: the prompt and the note say the cut ("miter both ends", "cope one end, square the other"), the stick on the horses is the moulding's size and white, and the saw swings to 45 degrees for a miter. A run longer than a stock length is joined with a scarf.
+- Set each piece and nail it: a finish nail about every 40 cm. The nail heads show until the room is painted (filled and painted over).
+- Trim takes the building's Trim colour, inside and out.
+- Drawing: the old wall body's foot (a dark band 30 cm tall) no longer stands in front of framed walls, inside or out, so the baseboard and siding meet the floor as built.
+- Ordered as Casing, Baseboard and Finish nails. The guide no longer asks to reorder when every stick has been cut into pieces still to set.
+- Weak: miters and copes are drawn as square ends; window trim is a picture frame (stool and apron later); no caulk yet; the aim can pick a neighbouring piece first at a corner.
+
+## Trim slice 2: stool and apron, real miters, caulk, miter saw (branch `trim2`)
+
+- Windows get a **stool** (a shelf on the sill, its horns notched round the casing, standing proud of the wall) and an **apron** under it; the legs stand on the stool. The picture frame stays as an option (`spec.winTrim: 'frame'`).
+- Mitered casings are drawn with real 45 degree ends, the long point on the outside, in build mode (and their paint follows the same shape).
+- **Caulk**: after the trim is nailed, a bead where each casing and the base meet the wall (E with the caulk to hand); it dries in about half an hour, and the stage is done when it is all on. Bought in litres (300 ml tubes, about 9 m of bead each).
+- **Miter saw**: a power tool ($180, 1500 W). With it and power, trim is cut on it, quicker; without it, a hand saw in a miter box. The cut note says which.
+- Opening a wall for services takes its trim and caulk off too.
