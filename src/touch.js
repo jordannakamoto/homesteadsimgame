@@ -124,7 +124,7 @@
     xsheet.hidden = true;
     xsheet.setAttribute("role", "group");
     xsheet.setAttribute("aria-label", "More for the plan");
-    for (const id of ["bredo", "bsnap", "blevel", "broofs", "bsched"]) $(id) && xsheet.appendChild($(id));
+    for (const id of ["bredo", "bsnap", "blevel", "bview", "bsched"]) $(id) && xsheet.appendChild($(id));
     document.body.appendChild(xsheet);
     const undo = $("bundo");
     undo && undo.nextSibling ? aids.insertBefore(xbtn, undo.nextSibling) : aids.insertBefore(xbtn, aids.firstChild);

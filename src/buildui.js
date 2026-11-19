@@ -132,6 +132,10 @@
     "t-dome": '<path d="M4.500 19a7.500 10 0 0 1 15 0z"/>',
     "p-pillar": '<path d="M7.500 20h9M9.500 20V7M14.500 20V7M7 7h10M8.500 4.500h7"/>',
     "p-chimney": '<path d="M8 20.500V9h8v11.500M6.500 9h11M9.500 9V6h5v3"/><path d="M12 3.500c1-.800 1-1.700 2-2" opacity=".6"/>',
+    "v-auto": '<path d="M4 19.5V10.2l8-6.2 8 6.2v9.3z"/><path d="M12 10.300l1.050 2.350 2.350 1.050-2.350 1.050L12 17.100l-1.050-2.350-2.350-1.050 2.350-1.050z" fill="currentColor" stroke-width="1"/>',
+    "v-finished": '<path d="M2.500 11L12 3.500 21.500 11"/><path d="M5 9.300v10.200h14V9.300M10 19.500v-5h4v5"/>',
+    "v-cutaway": '<path d="M3 8.500L12 2.500l9 6"/><path d="M5 12.500v7h14v-7" /><path d="M5 12.500h3M16 12.500h3M10.500 12.500h3" opacity=".55"/>',
+    "v-section": '<path d="M5 13V9.200l7-5.200 7 5.200V13" opacity=".35" stroke-dasharray="2 2.200"/><path d="M2 13h20M5 13v6.500h14V13"/>',
     eye: '<path d="M2.5 12s3.6-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.6 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>',
     list: '<path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4"/>',
     close: '<path d="M7 7l10 10M17 7L7 17"/>',
@@ -161,12 +165,20 @@
   }
 
   /* ---------- the bar ---------- */
+  // the view control's four modes: id, name, what it shows
+  const VIEWS = [
+    ["auto", "Auto", "opens the house as far as the tool in hand needs"],
+    ["finished", "Finished", "the whole house, roof on"],
+    ["cutaway", "Cutaway", "roof off, storeys above hidden, walls whole"],
+    ["section", "Section", "cut the walls at a height you choose"],
+  ];
   // Three surfaces, each with one job (docs/design/plan-mode-redesign.md section 2): the bar says which tool, the tray
   // above it (#bopts) what kind of thing the next click draws, and the inspector (#bdesign, a drawer on the right) every
   // property with its exact number. A slim hint row sits on top: the first-run chips, one sentence, the selection's
   // actions. Nine slots: More and Inside are group slots with a flyout (#bfly) of their members.
   bar.innerHTML =
-    '<div id="bhead"><div id="bcoach" role="group" aria-label="Your first house" hidden></div><span id="bhint" aria-live="polite"></span><span id="bfit" role="status" hidden></span><button id="bstop" class="ui-btn ui-btn--go" type="button" hidden>' + svg(I.stop, 14) + '<span>Stop</span><kbd>Esc</kbd></button><span class="grow"></span><div id="bacts" role="group" aria-label="Selection"></div></div>' +
+    '<div id="bhead"><div id="bcoach" role="group" aria-label="Your first house" hidden></div><span id="bhint" aria-live="polite"></span><span id="bfit" role="status" hidden></span><button id="bstop" class="ui-btn ui-btn--go" type="button" hidden>' + svg(I.stop, 14) + '<span>Stop</span><kbd>Esc</kbd></button><span class="grow"></span><div id="bacts" role="group" aria-label="Selection"></div>' +
+    '<span id="bvchip" class="ui-tag" role="status" hidden>' + svg(I.eye, 14) + '<span class="t"></span><button type="button" class="x" aria-label="Show the whole house" title="Show the whole house until the tool changes">' + svg(I.close, 12) + "</button></span></div>" +
     '<div id="bopts" role="group" aria-label="What the next click draws"></div><div id="bdecor" role="group" aria-label="Pieces" hidden></div>' +
     '<div id="bmain"><div id="bpieces" role="group" aria-label="Build tools"></div><div id="baids">' +
     '<button id="bundo" class="ui-btn ui-btn--icon" type="button" title="Undo (Ctrl+Z)" aria-label="Undo">' + svg(I.undo, 18) + "</button>" +
@@ -174,7 +186,10 @@
     '<button id="bsnap" class="ui-btn ui-btn--icon" type="button" aria-pressed="true" aria-label="Snap" title="Snap to the grid, to ends, middles and walls, and to round angles ( / ). Hold Ctrl to place freely.">' + svg(I.snap, 18) + "</button>" +
     '<span class="sep" aria-hidden="true"></span>' +
     '<div id="blevel" class="ui-seg" role="group" aria-label="Storey (Page Up, Page Down)"></div>' +
-    '<button id="broofs" class="ui-btn" type="button" aria-pressed="false" title="Show or lift away the roofs">' + svg(I.eye, 17) + "<span>Roofs</span></button>" +
+    // what plan mode shows (docs/design/plan-mode-redesign.md 3B.4): Auto follows the task, the other three pin a view
+    '<div id="bview" class="ui-seg" role="group" aria-label="What plan mode shows" hidden>' +
+    VIEWS.map((m) => '<button type="button" data-m="' + m[0] + '" aria-pressed="false" title="' + esc(m[1] + ": " + m[2]) + '" aria-label="' + esc(m[1]) + '">' + svg(I["v-" + m[0]], 18) + '<span class="nm">' + esc(m[1]) + "</span></button>").join("") +
+    "</div>" +
     '<span class="sep" aria-hidden="true"></span>' +
     '<button id="bsched" class="ui-btn" type="button" aria-pressed="false" title="Materials: what the plan needs, stage by stage, and what it costs">' + svg(I.list, 18) + '<span class="name">Materials</span><b class="tot" hidden></b></button>' +
     '<button id="bdone" class="ui-slot" type="button" title="Leave build mode (B)">' + svg(I.done, 20) + '<span class="name">Done</span><span class="key ui-key">B</span></button></div></div>';
@@ -283,13 +298,145 @@
   press("bsnap", "snap");
   press("bdone", "done");
   press("bstop", "stop");
-  press("broofs", "roofs");
   press("bsched", "sched");
   // the storeys that exist, the cellar (dim until one is dug) and one empty storey above the top
   $("blevel").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-l]");
     b && (BL.choose("level:set", +b.dataset.l), back());
   });
+  // the view: Auto, Finished, Cutaway, Section; the task view's chip closes to Finished until the tool changes
+  $("bview").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-m]");
+    b && (BL.choose("view:mode", b.dataset.m), back());
+  });
+  $("bvchip").lastChild.addEventListener("click", () => (BL.choose("view:unpin"), back()));
+  // Section's height: an instrument on the right edge of the view, from the foundation's foot to the ridge. A drag sends
+  // at most one height a frame; the line follows the pointer at once.
+  const cutEl = document.createElement("div");
+  cutEl.id = "bvcut";
+  cutEl.hidden = true;
+  cutEl.tabIndex = 0;
+  cutEl.setAttribute("role", "slider");
+  cutEl.setAttribute("aria-orientation", "vertical");
+  cutEl.setAttribute("aria-label", "Section height");
+  cutEl.innerHTML = '<div class="tr"><div class="tk"></div><div class="cut"><span class="val"></span><i></i></div></div>';
+  document.body.appendChild(cutEl);
+  const cutTr = cutEl.firstChild,
+    cutTk = cutTr.firstChild,
+    cutLine = cutTr.lastChild;
+  let cutVc = null,
+    cutKey = "",
+    cutDrag = -1,
+    cutWant = null,
+    cutSent = null,
+    cutRaf = 0;
+  const cutRange = () => (cutVc && cutVc.range && cutVc.range[1] > cutVc.range[0] ? cutVc.range : null);
+  const cutSnap = (y) => {
+    const r = cutRange();
+    return r ? Math.round(Math.max(r[0], Math.min(r[1], y)) * 10) / 10 : y;
+  };
+  // a tick at a storey's floor (the others are the 1.2 m marks)
+  const isFloor = (t) => (t.kind ? t.kind === "floor" : !!t.name && !/^\+|1\.2/.test(String(t.name)));
+  // "1.20 m above Ground": from the highest storey floor at or below the cut (below the lowest one, "below")
+  function cutLabel(y) {
+    if (y === null || y === undefined || !isFinite(y)) return "";
+    const fl = ((cutVc && cutVc.ticks) || []).filter(isFloor).sort((a, b) => a.y - b.y),
+      f = fl.filter((t) => t.y <= y + 1e-6).pop() || fl[0];
+    return f ? Math.abs(y - f.y).toFixed(2) + " m " + (y >= f.y - 1e-6 ? "above " : "below ") + f.name : y.toFixed(2) + " m";
+  }
+  function cutShow(y) {
+    const r = cutRange();
+    if (!r || y === null || y === undefined) return;
+    cutLine.style.top = (((r[1] - y) / (r[1] - r[0])) * 100).toFixed(2) + "%";
+    text(cutLine.firstChild, cutLabel(y));
+    cutEl.setAttribute("aria-valuenow", y.toFixed(1));
+    cutEl.setAttribute("aria-valuetext", cutLabel(y));
+  }
+  function cutSend(y) {
+    cutWant = cutSnap(y);
+    cutShow(cutWant);
+    if (!cutRaf)
+      cutRaf = requestAnimationFrame(() => {
+        cutRaf = 0;
+        if (cutWant !== null && cutWant !== cutSent) ((cutSent = cutWant), BL.choose("view:cut", cutWant));
+      });
+  }
+  const cutAt = (cy) => {
+    const r = cutRange(),
+      b = cutTr.getBoundingClientRect();
+    return r ? r[1] - ((cy - b.top) / Math.max(1, b.height)) * (r[1] - r[0]) : null;
+  };
+  cutEl.addEventListener("pointerdown", (e) => {
+    if (!cutRange()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    cutDrag = e.pointerId;
+    cutEl.setPointerCapture(e.pointerId);
+    cutEl.classList.add("drag");
+    cutSend(cutAt(e.clientY));
+  });
+  cutEl.addEventListener("pointermove", (e) => e.pointerId === cutDrag && cutSend(cutAt(e.clientY)));
+  for (const ev of ["pointerup", "pointercancel", "lostpointercapture"])
+    cutEl.addEventListener(ev, (e) => {
+      if (e.pointerId !== cutDrag) return;
+      cutDrag = -1;
+      cutEl.classList.remove("drag");
+      uiV = -1;
+    });
+  cutEl.addEventListener("keydown", (e) => {
+    const r = cutRange(),
+      now = cutWant !== null ? cutWant : cutVc && cutVc.cut;
+    if (!r || now === null || now === undefined) return;
+    const d = { ArrowUp: 0.1, ArrowRight: 0.1, ArrowDown: -0.1, ArrowLeft: -0.1 }[e.key];
+    const to = d ? now + d : e.key === "Home" ? r[0] : e.key === "End" ? r[1] : null;
+    if (to === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    cutSend(to);
+  });
+  function renderCut(vc) {
+    cutVc = vc;
+    const on = !!(vc && vc.mode === "section" && cutRange());
+    show(cutEl, on);
+    if (!on) return void ((cutWant = cutSent = null), (cutKey = ""));
+    const r = cutRange(),
+      k = JSON.stringify([r, vc.ticks]);
+    if (k !== cutKey) {
+      cutKey = k;
+      cutEl.setAttribute("aria-valuemin", r[0].toFixed(1));
+      cutEl.setAttribute("aria-valuemax", r[1].toFixed(1));
+      cutTk.innerHTML = (vc.ticks || [])
+        .filter((t) => t.y >= r[0] - 1e-6 && t.y <= r[1] + 1e-6)
+        .map((t) => {
+          const floor = isFloor(t);
+          return '<i class="' + (floor ? "fl" : "mk") + '" style="top:' + (((r[1] - t.y) / (r[1] - r[0])) * 100).toFixed(2) + '%">' + (floor ? "<b>" + esc(t.name) + "</b>" : "") + "</i>";
+        })
+        .join("");
+    }
+    // while a drag is live the line follows the pointer; afterwards it shows what the view settled on
+    if (cutDrag < 0 && vc.cut !== null && vc.cut !== undefined) ((cutWant = null), (cutSent = vc.cut), cutShow(vc.cut));
+  }
+  // where the slider stands: the right edge of the view, clear of the drawers and above the bar (and a phone's sheet)
+  function placeCut() {
+    if (cutEl.hidden) return;
+    let bottom = bar.getBoundingClientRect().top,
+      right = window.innerWidth;
+    for (const p of [dpanel, sched]) {
+      if (p.hidden) continue;
+      // layout boxes, not the drawer's slide-in transform
+      const w = p.offsetWidth;
+      if (!w) continue;
+      if (w > window.innerWidth * 0.6) bottom = Math.min(bottom, p.offsetTop);
+      else right = Math.min(right, p.offsetLeft);
+    }
+    const b = Math.round(window.innerHeight - bottom + 12) + "px",
+      rt = right < window.innerWidth ? Math.round(window.innerWidth - right + 8) + "px" : "";
+    cutEl.style.getPropertyValue("--bvcut-b") !== b && cutEl.style.setProperty("--bvcut-b", b);
+    cutEl.style.getPropertyValue("--bvcut-r") !== rt && (rt ? cutEl.style.setProperty("--bvcut-r", rt) : cutEl.style.removeProperty("--bvcut-r"));
+    // too little room left (a phone's sheet is up): put it away until there is
+    cutEl.classList.remove("squeezed");
+    cutEl.offsetHeight < 110 && cutEl.classList.add("squeezed");
+  }
   // the first-run chips: a room, a door, a roof, then Done. A chip picks its tool.
   let coachV = [];
   $("bcoach").addEventListener("click", (e) => {
@@ -304,7 +451,9 @@
   sched.id = "bschedp";
   sched.className = "panel ui-panel ui-panel--side";
   sched.hidden = true;
-  sched.innerHTML = '<div class="ui-panel__head">' + svg(I.list, 24) + '<div class="bph"><h2>Materials</h2><small></small></div><button type="button" class="ui-close" data-x="sched" aria-label="Close the materials" title="Close">' + svg(I.close, 18) + '</button></div><div class="bschb"></div><div class="bschf"></div>';
+  sched.innerHTML = '<div class="ui-panel__head">' + svg(I.list, 24) + '<div class="bph"><h2>Materials</h2><small></small></div><button type="button" class="ui-close" data-x="sched" aria-label="Close the materials" title="Close">' + svg(I.close, 18) + '</button></div>' +
+    '<button type="button" class="bschv" role="switch" aria-checked="false" data-x="left" hidden title="Draw the plan as a blueprint: the parts still to build in blue, each later stage as a ghost"><span>Show what is left to build</span><i aria-hidden="true"></i></button>' +
+    '<div class="bschb"></div><div class="bschf"></div>';
   document.body.appendChild(sched);
   const money = (v) => "$" + Math.round(v).toLocaleString("en-US");
   let schedHtml = "";
@@ -312,6 +461,11 @@
     sched.hidden = !d;
     $("bsched").setAttribute("aria-pressed", d ? "true" : "false");
     if (!d) return void (schedHtml = "");
+    // the blueprint switch (plan mode otherwise draws planned parts finished)
+    const sw = sched.querySelector(".bschv"),
+      vc = v.viewc;
+    show(sw, !!vc && !v.sandbox);
+    vc && sw.getAttribute("aria-checked") !== String(!!vc.left) && sw.setAttribute("aria-checked", String(!!vc.left));
     const body =
       d.stages.length
         ? d.stages
@@ -335,6 +489,7 @@
     const x = e.target.closest("[data-x]");
     if (!x) return;
     if (x.dataset.x === "sched") return (BL.choose("sched"), back());
+    if (x.dataset.x === "left") return (BL.choose("view:left", x.getAttribute("aria-checked") !== "true"), back());
     // order: leave plan mode and open the Build panel, where the plan's materials are bought
     BL.choose("sched");
     BL.choose("done");
@@ -365,6 +520,23 @@
     dstage = $("bdstage"),
     dtabs = $("bdtabs");
   dpanel.querySelector(".ui-close").addEventListener("click", () => (BL.choose("insp"), back()));
+  // the make-up controls (Stands on, Insulation, Inside) open the view onto what they change while they have focus
+  const MAKEUP = /^(s:)?(found|ins|lining)$/;
+  let focusK = "";
+  const makeupOf = (el) => {
+    const c = el && el.closest && el.closest("[data-g]"),
+      g = c && groups[+c.dataset.g];
+    return g && MAKEUP.test(g.id || "") ? g.id : "";
+  };
+  function focusTell(k) {
+    if (k === focusK) return;
+    focusK = k;
+    BL.choose("view:focus", k || null);
+  }
+  for (const el of [opts, dpanel]) {
+    el.addEventListener("focusin", (e) => focusTell(makeupOf(e.target)));
+    el.addEventListener("focusout", (e) => focusTell(makeupOf(e.relatedTarget)));
+  }
   let groups = [],
     lastV = null,
     tabTool = "";
@@ -910,7 +1082,22 @@
     $("bundo").disabled = !v.undo;
     $("bredo").disabled = !v.redo;
     $("bsnap").setAttribute("aria-pressed", v.snap ? "true" : "false");
-    $("broofs").setAttribute("aria-pressed", v.roofs ? "true" : "false");
+    // the view control and the task view's chip
+    const vc = v.viewc || null,
+      vw = $("bview"),
+      chip = $("bvchip");
+    show(vw, !!vc);
+    if (vc) for (const b of vw.children) b.getAttribute("aria-pressed") !== String(b.dataset.m === vc.mode) && b.setAttribute("aria-pressed", String(b.dataset.m === vc.mode));
+    const ct = vc && vc.mode === "auto" && vc.chip ? String(vc.chip) : "";
+    show(chip, !!ct);
+    text(chip.children[1], ct);
+    // on a phone the view control lives in the "..." sheet, beside the storeys
+    const xs = $("baidsheet");
+    if (xs && vw.parentElement !== xs) {
+      const lv = $("blevel");
+      lv && lv.parentElement === xs ? xs.insertBefore(vw, lv.nextSibling) : xs.appendChild(vw);
+    }
+    renderCut(vc);
     const lk = JSON.stringify(v.levels);
     if (lk !== levelsKey) {
       levelsKey = lk;
@@ -949,7 +1136,7 @@
     }
   }
   function frame() {
-    if (!B.on) return void (sched.hidden || (sched.hidden = true), dpanel.hidden || (dpanel.hidden = true), flyClose(), (uiV = -1));
+    if (!B.on) return void (sched.hidden || (sched.hidden = true), dpanel.hidden || (dpanel.hidden = true), cutEl.hidden || (cutEl.hidden = true), flyClose(), (uiV = -1));
     if (uiV !== B.uiVer) {
       uiV = B.uiVer;
       const v = BL.view();
@@ -980,6 +1167,7 @@
       const above = Math.round(window.innerHeight - bar.getBoundingClientRect().top + 8) + "px";
       for (const p of [dpanel, sched]) p.style.bottom !== above && (p.style.bottom = above);
       designerDock();
+      placeCut();
     }
     if ((B.typedV || 0) !== typedV) ((typedV = B.typedV || 0), (typed.a = typed.b = ""));
     const m = G.camera.matrixWorld.elements,

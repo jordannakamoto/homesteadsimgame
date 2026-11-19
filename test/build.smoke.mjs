@@ -341,7 +341,7 @@ const raf = (page) => page.waitForTimeout(250);   // touch.js settles the sticks
   const sizes = await G(() => [...document.querySelectorAll('#bpieces button, #bdone, #bundo, #bxtra')].map((b) => { const r = b.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; }));
   check('phone: tools, undo, "..." and done are at least 44 px', sizes.length >= 12 && sizes.every((s) => s[0] >= 44 && s[1] >= 44), JSON.stringify(sizes.slice(0, 3)));
   await page.tap('#bxtra'); await step(2); await page.waitForTimeout(450);   // past its opening animation
-  const xs = await G(() => { const sh = document.getElementById('baidsheet'), bs = ['bredo', 'bsnap', 'broofs', 'bsched'].map((id) => document.getElementById(id)); return { open: !sh.hidden, inside: bs.every((b) => sh.contains(b)), big: bs.every((b) => b.getBoundingClientRect().height >= 44 && b.getBoundingClientRect().width >= 44), levels: sh.querySelectorAll('#blevel button').length }; });
+  const xs = await G(() => { const sh = document.getElementById('baidsheet'), bs = ['bredo', 'bsnap', 'bview', 'bsched'].map((id) => document.getElementById(id)); return { open: !sh.hidden, inside: bs.every((b) => sh.contains(b)), big: bs.every((b) => b.getBoundingClientRect().height >= 44 && b.getBoundingClientRect().width >= 44), levels: sh.querySelectorAll('#blevel button').length }; });
   check('phone: "..." opens Redo, Snap, the storeys, Roofs and Materials, each at least 44 px', xs.open && xs.inside && xs.big && xs.levels >= 2, JSON.stringify(xs));
   const snap0 = await G(() => __build.view().snap); await page.tap('#bsnap'); await step(2);
   check('phone: Snap in the sheet still works', (await G(() => __build.view().snap)) === !snap0);

@@ -240,3 +240,17 @@ body.touch:has(#bdesign:not([hidden])) #bschedp { right: calc(6px + var(--sa-r))
   body.touch #bschedp { left: auto; right: calc(6px + var(--sa-r)); width: 360px; top: calc(var(--hud-top-h) + var(--sa-t)); bottom: calc(6px + var(--sa-b)) !important; }
   body.touch:has(#bdesign:not([hidden])) #bschedp { right: calc(6px + var(--sa-r) + 346px); }
 }
+
+/* ==================== view (step V2): the view control in the "..." sheet, the chip, Section's slider ==================== */
+#baidsheet #bview.ui-seg { height: var(--hit); }
+#baidsheet #bview.ui-seg > button { min-width: var(--hit); padding: 0 9px; }
+#baidsheet #bview .nm { display: inline; }
+body.touch #bvchip.ui-tag { min-height: 32px; font-size: var(--fs-xs); }
+body.touch #bvchip .x { width: 32px; min-width: 32px; height: 32px; min-height: 32px; }
+/* 44 px wide on the right edge; in portrait it stops above the look stick */
+body.touch #bvcut { width: var(--hit); padding: 20px 0; }
+body.touch #bvcut .cut > i { width: 30px; height: 18px; top: -10px; margin-left: -15px; }
+body.touch #bvcut .cut .val { top: -13px; }
+@media (orientation: portrait) {
+  body.touch #bvcut { bottom: calc(var(--bvcut-b, 120px) + 118px); }
+}
