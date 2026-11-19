@@ -9,11 +9,13 @@
 //     unlocked: [...], tutorial: { card, shed, seen: { [stage]: true }, done }, options: { sandbox, instant, cards, auto, mute }, finished }
 //   progress[..].lines[key]   = { stage, itemId, qty, unit, label, why, count, supply, ordered, used }
 //   progress[..].members[id]  = { stage, kind, parent, line, need, got, built }
-//   progress[..].ext[stage]   = [built, total]: work another system tallies (services: rough-in, trim-out), added to the tally
-//   progress[..].extLines[source] = { sig, lines }: that system's shopping lines, merged into lines (marked `ext`)
+//   progress[..].keep[source] = whatever another system keeps on the building; setPlan carries the whole bag over (keepOf, kept)
+//   progress[..].keep.ext[stage]   = [built, total]: work another system tallies (services: rough-in, trim-out), added to the tally
+//   progress[..].keep.extLines[source] = { sig, lines }: that system's shopping lines, merged into lines (marked `ext`)
 // Build mode owns the shape of a building; the page hands its members and shopping lines to construction.setPlan.
 // Commands return { ok, reason? ... } and change nothing when they fail.
 
+import { keepOf, kept } from './core/keep.js';
 import { ITEMS } from './items.js';
 import * as SUP from './core/supply.js';
 import * as C from './content/construction.js';
@@ -192,6 +194,7 @@ export function cutList(pr, key) {
 // ---------------------------------------------------------------- reading a building's progress (pure)
 const membersOfStage = (pr, stage) => Object.keys(pr.members).filter((id) => pr.members[id].stage === stage);
 // the frames of a lie-flat stage, in the order they are put together
+export { keepOf, kept };
 export function flatParents(pr, stage) {
   const out = [];
   for (const id in pr.members) { const m = pr.members[id]; if (m.stage === stage && !out.includes(m.parent)) out.push(m.parent); }
@@ -215,7 +218,7 @@ export function stageSatisfied(pr, stage, seen = {}) {
 export function stageOpen(pr, stage) {
   const def = C.STAGE[stage];
   if (!def) return false;
-  if (pr.hold && pr.hold[stage]) return false;      // held by another system (green concrete: construction.setHold)
+  if (kept(pr, 'hold') && kept(pr, 'hold')[stage]) return false;      // held by another system (green concrete: construction.setHold)
   const seen = {};
   return def.needs.every((n) => stageSatisfied(pr, n, seen));
 }
@@ -243,7 +246,7 @@ export function blocked(pr, id) {
   if (m.built) return 'already built';
   const def = C.STAGE[m.stage];
   if (!def) return 'not part of the build';
-  if (pr.hold && pr.hold[m.stage]) return pr.hold[m.stage];
+  { const h = kept(pr, 'hold'); if (h && h[m.stage]) return h[m.stage]; }
   if (!stageOpen(pr, m.stage)) return 'stage not open';
   if (def.parentFirst) for (const o in pr.members) { const q = pr.members[o]; if (!q.built && q.parent === m.parent && def.parentFirst.includes(q.stage)) return 'frame not finished'; }
   if (def.flat && flatCurrent(pr, m.stage) !== m.parent) return 'one frame at a time';
@@ -382,7 +385,8 @@ function ensureCard(ctx, s) {
 function retally(pr) {
   pr.tally = {};
   for (const id in pr.members) { const m = pr.members[id]; const t = pr.tally[m.stage] || (pr.tally[m.stage] = [0, 0]); t[1]++; if (m.built) t[0]++; }
-  for (const st in pr.ext || {}) { const e = pr.ext[st]; if (!e || !(e[1] > 0)) continue; const t = pr.tally[st] || (pr.tally[st] = [0, 0]); t[0] += e[0]; t[1] += e[1]; }
+  const xe = kept(pr, 'ext') || {};
+  for (const st in xe) { const e = xe[st]; if (!e || !(e[1] > 0)) continue; const t = pr.tally[st] || (pr.tally[st] = [0, 0]); t[0] += e[0]; t[1] += e[1]; }
 }
 function refresh(ctx, s, pr) {
   const was = pr.done;
@@ -544,9 +548,7 @@ function setPlan(ctx, p) {
   if (!s.waste) s.waste = {};
   requote(s, pr);
   if (old) for (const k in old.raised) pr.raised[k] = true;
-  if (old && old.ext) pr.ext = JSON.parse(JSON.stringify(old.ext));               // work another system tallies stays with the building
-  if (old && old.extLines) pr.extLines = JSON.parse(JSON.stringify(old.extLines));
-  if (old && old.hold && Object.keys(old.hold).length) pr.hold = { ...old.hold };   // holds belong to another system (construction.setHold): a plan sent again keeps them
+  if (old) { const ok = keepOf(old); if (Object.keys(ok).length) pr.keep = JSON.parse(JSON.stringify(ok)); }   // what other systems keep (work they tally, their lines, holds) stays with the building, whole
   if (!old) for (const st of C.STAGES) if (st.flat) for (const par of flatParents(pr, st.id)) if (frameReady(pr, st.id, par)) pr.raised[par] = true;
   retally(pr);
   if (!pr.lines[LADDER_KEY] && C.LADDER.with.some((st) => pr.tally[st] && pr.tally[st][1]) && item(C.LADDER.itemId)) {   // work at height is done from a ladder: it comes with the order
@@ -554,7 +556,7 @@ function setPlan(ctx, p) {
     pr.lines[LADDER_KEY] = { stage: C.LADDER.stage, itemId: C.LADDER.itemId, qty: 1, unit: 'each', label: 'Ladder', why: C.LADDER.why, count: 1, supply: false, ordered: o ? o.ordered : 0, used: o ? o.used : 0 };
   }
   for (const key in pr.lines) { const ln = pr.lines[key]; if (ln.supply) { const t = pr.tally[ln.stage]; ln.used = old && old.lines[key] ? Math.min(old.lines[key].used, ln.qty) : 0; if (!old && t && t[1]) ln.used = round6((ln.qty * t[0]) / t[1]); } }
-  if (old && old.extLines) applyExtLines(s, pr, old.lines);
+  if (old && kept(old, 'extLines')) applyExtLines(s, pr, old.lines);
   // what a piece picked up in play (cut at the sawhorses, coats of mud, when it went in), carried over after the plan's own
   // fields, in the order play adds them, so a plan sent again unchanged (as after a reload) leaves the record exactly as it was
   if (old) for (const id in pr.members) {
@@ -812,7 +814,7 @@ function install(ctx, p) {
   for (const id of p.memberIds || []) {
     const m = pr.members[id];
     const why = blocked(pr, id);
-    if (why) { out.refused.push({ id, reason: why, missing: why === 'support missing' ? supportMissing(pr, id) : undefined, held: m && pr.hold && pr.hold[m.stage] ? 1 : undefined }); break; }
+    if (why) { out.refused.push({ id, reason: why, missing: why === 'support missing' ? supportMissing(pr, id) : undefined, held: m && kept(pr, 'hold') && kept(pr, 'hold')[m.stage] ? 1 : undefined }); break; }
     const ln = m.line ? pr.lines[m.line] : null;
     if (m.kind === 'joint') {      // a drywall seam: one pass per call (tape and first coat, fill, finish, then sanding)
       const r = mudPass(ctx, s, pr, m, ln, fromStacks);
@@ -980,10 +982,10 @@ function setExternal(ctx, p) {
   if (!pr) return { ok: false, reason: 'unknown building' };
   if (!C.STAGE[p.stage]) return { ok: false, reason: 'unknown stage' };
   const total = Math.max(0, Math.round(+p.total || 0)), built = Math.max(0, Math.min(total, Math.round(+p.built || 0)));
-  if (!pr.ext) pr.ext = {};
-  const was = pr.ext[p.stage] || [0, 0];
+  const ext = keepOf(pr).ext || (pr.keep.ext = {});
+  const was = ext[p.stage] || [0, 0];
   if (was[0] === built && was[1] === total) return { ok: true, changed: false };
-  if (total > 0) pr.ext[p.stage] = [built, total]; else delete pr.ext[p.stage];
+  if (total > 0) ext[p.stage] = [built, total]; else delete ext[p.stage];
   const before = stageComplete(pr, p.stage);
   retally(pr);
   refresh(ctx, s, pr);
@@ -997,7 +999,8 @@ function applyExtLines(s, pr, prev) {
   for (const key in prev) if (prev[key].ext) keep[key] = { ordered: prev[key].ordered, used: prev[key].used, stage: prev[key].stage, itemId: prev[key].itemId, label: prev[key].label, why: prev[key].why, ext: prev[key].ext };
   for (const key of Object.keys(pr.lines)) if (pr.lines[key].ext) delete pr.lines[key];
   const want = {};
-  for (const src in pr.extLines || {}) for (const l of pr.extLines[src].lines) want[l.key] = { ...l, ext: src };
+  const xl = kept(pr, 'extLines') || {};
+  for (const src in xl) for (const l of xl[src].lines) want[l.key] = { ...l, ext: src };
   for (const key of new Set([...Object.keys(keep), ...Object.keys(want)])) {
     const o = keep[key], w = want[key] || { ...o, qty: 0, count: 0 }, it = item(w.itemId);
     const used = o ? o.used : 0, ordered = o ? o.ordered : 0, qty = round6(Math.max(+w.qty || 0, used));
@@ -1014,8 +1017,8 @@ function setExtLines(ctx, p) {
     if (!l || !C.STAGE[l.stage] || !item(l.itemId) || !(+l.qty >= 0)) return { ok: false, reason: 'bad line', itemId: l && l.itemId };
     lines.push({ key: String(l.key || l.stage + '|' + p.source + ':' + l.itemId), stage: l.stage, itemId: l.itemId, qty: round6(+l.qty), label: l.label || '', why: l.why || '', count: Math.max(0, Math.round(+l.count || 0)) });
   }
-  if (!pr.extLines) pr.extLines = {};
-  pr.extLines[p.source] = { sig: p.sig === undefined ? null : p.sig, lines };
+  const xl = keepOf(pr).extLines || (pr.keep.extLines = {});
+  xl[p.source] = { sig: p.sig === undefined ? null : p.sig, lines };
   applyExtLines(s, pr, pr.lines);
   ctx.emit('construction.extLines', { structId: pr.id, source: p.source });
   return { ok: true, lines: lines.length };
@@ -1104,7 +1107,7 @@ export const constructionSystem = () => ({
       const pr = c.s.progress[p && p.structId];
       if (!pr) return { ok: false, reason: 'unknown building' };
       const done = [];
-      for (const id of p.memberIds || []) { const m = pr.members[id]; if (!m || m.built || m.kind === 'site') continue; m.got = m.need; m.built = 1; m.builtAt = round6(ctx.state.t); pr.tally[m.stage][0]++; done.push(id); }
+      for (const id of p.memberIds || []) { const m = pr.members[id]; if (!m || m.built || m.kind === 'site') continue; m.got = m.need; m.built = 1; m.builtAt = round6(c.state.t); pr.tally[m.stage][0]++; done.push(id); }
       if (done.length) refresh(c, c.s, pr);
       return { ok: done.length > 0, settled: done };
     },
@@ -1113,8 +1116,8 @@ export const constructionSystem = () => ({
       const pr = c.s.progress[p && p.structId], stages = p && (Array.isArray(p.stages) ? p.stages : [p.stage]);
       if (!pr) return { ok: false, reason: 'unknown building' };
       if (!stages.length || !stages.every((st) => C.STAGE[st])) return { ok: false, reason: 'unknown stage' };
-      if (!pr.hold) pr.hold = {};
-      for (const st of stages) if (p.reason) pr.hold[st] = String(p.reason); else delete pr.hold[st];
+      const hold = keepOf(pr).hold || (pr.keep.hold = {});
+      for (const st of stages) if (p.reason) hold[st] = String(p.reason); else delete hold[st];
       refresh(c, c.s, pr);
       c.emit('construction.hold', { structId: pr.id, stages, reason: p.reason || null });
       return { ok: true };
@@ -1144,5 +1147,5 @@ export const constructionSystem = () => ({
     'construction.setExtLines': setExtLines,
     'construction.use': useExt,
   },
-  api: { content: C, wantItem, nextCut, liningCovered, feelOf: (s) => C.feelOf(s), knows: (s, kind) => !!(s.learn && s.learn.known[C.learnGroup(kind)]), sheetSource, needsStock, stockNeed, stickSource, stickImbalance, cutList, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance, carrierKg },
+  api: { content: C, wantItem, nextCut, liningCovered, feelOf: (s) => C.feelOf(s), knows: (s, kind) => !!(s.learn && s.learn.known[C.learnGroup(kind)]), sheetSource, needsStock, stockNeed, stickSource, stickImbalance, cutList, sheetImbalance, planFromPieces, catalog: CONSTRUCTION_CATALOG, buildingView, stageView, installable, blocked, keepOf, kept, openStages, stageOpen, stageComplete, flatCurrent, flatParents, frameReady, quoteStage, wanted, armful, stageSatisfied, tutorialStep, carriedMassKg, imbalance: SUP.imbalance, carrierKg },
 });

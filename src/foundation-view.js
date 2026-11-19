@@ -116,7 +116,7 @@
       if (job) {
         if (!pr || !poured) { cmd('forget', { structId: st.id }); sent.delete(st.id); continue; }
         // a plan sent again by the construction view starts without the cure's holds: put them back now
-        if (sent.get(st.id) !== st.ver || (job.held && !(pr.hold && Object.keys(pr.hold).length))) { send(st); showBuilt(st, pr); }
+        if (sent.get(st.id) !== st.ver || (job.held && !(((pr.keep && pr.keep.hold) || pr.hold) && Object.keys((pr.keep && pr.keep.hold) || pr.hold).length))) { send(st); showBuilt(st, pr); }
         continue;
       }
       if (!pr || pr.done || !poured || (cs.options && cs.options.sandbox)) continue;
