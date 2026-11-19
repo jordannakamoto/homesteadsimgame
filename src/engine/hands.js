@@ -165,6 +165,9 @@
   window.addEventListener('pointermove', (e) => {
     if (!cfg || (e.target !== canvas && !aim.down && !ptr.turning)) return;
     e.stopImmediatePropagation();
+    // a second button pressed or let go while the first is held comes as a move with the buttons changed (the
+    // pointer is already down), not as a new press: the right button during a left press is aim.second
+    if (aim.down && !aim.alt && e.pointerType === 'mouse') aim.second = !!(e.buttons & 2);
     if (e.pointerType === 'touch' && fingers.size > 1) {       // two fingers turn and tilt the view
       const f = fingers.get(e.pointerId); if (!f) return;
       turn(e.clientX - f.x, e.clientY - f.y); f.x = e.clientX; f.y = e.clientY; return;

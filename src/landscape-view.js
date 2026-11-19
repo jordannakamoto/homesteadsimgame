@@ -844,9 +844,10 @@
     if (f & (RD.FLAG.TAMP1 | RD.FLAG.TAMP2)) return 0.85;              // packed
     return 0.5 + clamp(-EW.hAt(g, i, j) * 0.5, 0, 0.3);               // firm, harder deeper down (subsoil, clay)
   }
-  // The scoop: the blade is stamped in (it bites and takes about half a blade), then sinks further while you hold
-  // the button still, taking more as it goes (faster in loose earth, slowly through turf and clay), until the blade
-  // is full. Drag and it levers up and comes with you; let go and it levers up and drops beside the hole.
+  // The scoop: a press puts the blade in (it bites and takes a first bite of earth). Holding it there, each click of
+  // the right button is a boot on the blade: the character steps on it and drives it deeper, taking more (a good
+  // bite in loose earth, a little through turf and clay), until the blade is full. Drag and it levers up and comes
+  // with you; let go and it levers up and drops beside the hole.
   const T_LIFT = 0.16;
   function digTick(dt) {
     const P = G.player;
@@ -858,19 +859,29 @@
       if (!dig.bit && dig.t >= T_BITE) {
         dig.bit = true; bite();
         if (dig.bag || dig.fail) { dig.ph = 'lift'; dig.t = 0; return; }
-        if (!lever(SCOOP_M3 * (L().scale || 1) * 0.5, false)) { dig.ph = 'lift'; dig.t = 0; return; }
-        dig.ph = 'sink'; dig.t = 0; dig.next = 0;
+        if (!lever(SCOOP_M3 * (L().scale || 1) * 0.4, false)) { dig.ph = 'lift'; dig.t = 0; return; }
+        dig.ph = 'sink'; dig.t = 0; dig.stomp = -1; dig.sec = !!a.second;
       }
       return;
     }
     if (dig.ph === 'sink') {
-      // still held and not dragged: the blade goes on in
+      // still held and not dragged: a right-click is a boot on the blade
       if (dig.held && !moved) {
-        dig.next -= dt;
-        if (dig.next <= 0 && dig.load < dig.cap - 1e-6) {
-          dig.next = 0.07;
-          const rate = dig.cap / (0.35 + 0.65 * HARD);                // a full blade in 0.45 s (loose) to 1 s (turf)
-          if (!lever(rate * 0.07, true)) dig.load = dig.cap;           // something else under the blade: that is all
+        if (a.second && !dig.sec && dig.stomp < 0) {
+          if (dig.load >= dig.cap - 1e-6) sayS('The blade is full. Drag it where it goes.');
+          else dig.stomp = 0;
+        }
+        dig.sec = !!a.second;
+        if (dig.stomp >= 0) {
+          const s0 = dig.stomp; dig.stomp += dt;
+          if (s0 < 0.12 && dig.stomp >= 0.12) {
+            // the boot comes down: the blade goes in, a stop, crumbs
+            G.juice.hitStop = 0.02 + 0.05 * HARD;
+            const turf = HARD >= 1;
+            if (!lever(dig.cap * (0.34 - 0.18 * HARD), true)) dig.load = dig.cap;
+            G.burst(dig.x, surfaceAt(dig.x, dig.z) + 0.05, dig.z, 3 + Math.round(5 * HARD), turf ? 0x5e8a3a : 0x4c3726, 1.0, 1.4, 0.045, 0.4);
+          }
+          if (dig.stomp >= 0.3) dig.stomp = -1;
         }
         return;
       }
@@ -943,12 +954,15 @@
       // stamped in from above; pushed on in while held (deeper as it fills, rocking a little); levered up and back
       const full = dig.cap ? clamp(dig.load / dig.cap, 0, 1) : 0;
       const kIn = dig.ph === 'in' ? ease(t / T_BITE) : 1, kUp = dig.ph === 'lift' ? ease(t / T_LIFT) : 0;
-      const sink = dig.ph === 'in' ? 0 : 0.12 * full * (1 - kUp), rock = dig.ph === 'sink' ? 0.03 * Math.sin(dig.t * 22) : 0;
+      const sink = dig.ph === 'in' ? 0 : 0.12 * full * (1 - kUp), rock = 0;
       const back = 0.18 * kUp, d = Math.hypot(_D.x, _D.z) || 1;
       _B.set(_D.x - (_D.x / d) * back, _D.y + 0.38 - 0.54 * kIn - sink + 0.62 * kUp, _D.z - (_D.z / d) * back);
       _Hn.set(0.05 + rock, 1.38 - 0.36 * kIn - 0.1 * full * (1 - kUp) - 0.02 * kUp, 0.18 + 0.16 * kIn - 0.2 * kUp);
       arm = -1.7 + 0.7 * kIn + 0.15 * kUp; lean = 0.32 * kIn + 0.08 * full * (1 - kUp) - 0.2 * kUp;
-      leg = dig.ph === 'in' ? -0.55 * Math.sin(Math.PI * Math.min(1, t / T_BITE)) : dig.ph === 'sink' ? -0.35 * (1 - full) : 0;   // a boot on the blade
+      // a boot on the blade: lifted, then stamped down on it, the body dropping with it
+      const st = dig.ph === 'sink' && dig.stomp >= 0 ? dig.stomp : -1, up = st < 0 ? 0 : st < 0.12 ? ease(st / 0.12) : 1 - ease((st - 0.12) / 0.18);
+      leg = dig.ph === 'in' ? -0.55 * Math.sin(Math.PI * Math.min(1, t / T_BITE)) : dig.ph === 'sink' ? -0.25 - 0.7 * up : 0;
+      if (st >= 0) { lean += 0.12 * (st < 0.12 ? 0 : 1 - up); _Hn.y += 0.08 * up; }
       face = Math.atan2(dig.x - P.x, dig.z - P.z);
     } else {
       // carried: the blade, loaded, held out over where it will drop; tipped: a flick up and over
@@ -1314,7 +1328,7 @@
     else {
       const id = held();
       if (id === 'store') h = 'Pick what to buy. Things you own appear on the bar.';
-      else if (id === 'shovel') h = loaded() ? '<b>' + litres(L().carry.m3) + ' L</b> on the shovel: <b>press and drag</b> it where it goes, let go to drop it.' : '<b>Press</b> to dig (hold to push the blade deeper), <b>drag</b> the load where it goes, <b>let go</b> to drop it. <b>Right-drag</b> pushes earth with the flat of the blade; <b>right-click</b> pats it down. <b>Q E</b> or middle-drag turn the view, the <b>wheel</b> zooms (shift tilts).';
+      else if (id === 'shovel') h = loaded() ? '<b>' + litres(L().carry.m3) + ' L</b> on the shovel: <b>press and drag</b> it where it goes, let go to drop it.' : '<b>Press</b> to put the blade in; still holding, <b>right-click</b> to step on it and drive it deeper. <b>Drag</b> the load where it goes, <b>let go</b> to drop it. <b>Right-drag</b> pushes earth with the flat of the blade; <b>right-click</b> pats it down. <b>Q E</b> or middle-drag turn the view, the <b>wheel</b> zooms (shift tilts).';
       else if (id === 'sod') h = '<b>Drag</b> along the grass to cut the turf off in a strip.';
       else if (id === 'barrow') h = L().barrow.m3 > 1e-6 ? '<b>' + litres(L().barrow.m3) + ' L</b> in the barrow. <b>Click</b> to shovel in more, <b>drag down</b> to tip it all out.' : '<b>Click</b> to shovel a scoop into the barrow. When it is full, walk it over and <b>drag down</b> to tip it out.';
       else if (id === 'can') h = '<b>Hold and drag down</b> to pour over new plants: water them in, and keep them moist for three weeks while they root. Fill the can at the pump or the stream.';
@@ -1347,7 +1361,7 @@
   function tip(what, res) {
     if (told[what]) return;
     told[what] = 1;
-    if (what === 'dug') sayS('Hold still and the blade goes deeper, for a full load. Then drag it where you want it and let go: a heap, a hill, a bank.', 6);
+    if (what === 'dug') sayS('Keep holding and right-click to step on the blade: it goes deeper and takes more. Then drag it where you want it and let go: a heap, a hill, a bank.', 7);
     else if (what === 'patted') sayS('Patted down with the back of the blade: the lumps are gone and the earth is firm. Pat a bank to shape it, or a bed to level it.', 6);
     else if (what === 'pushed') sayS('The flat of the blade pushes loose earth ahead of it and fills the hollows it passes. Push from beside a heap to flatten it; drag from its top to spread it out.', 6);
     else if (what === 'scooped') sayS((SURFACES[res.s] ? SURFACES[res.s].name : res.s) + ' on the blade. Drag it to the bed and let go. Rake it level after.', 6);
