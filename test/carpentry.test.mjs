@@ -81,3 +81,20 @@ test('trim goes up after the taping and before the paint, cut at the sawhorses p
   const used = (it) => Object.values(pr.lines).filter((l) => l.itemId === it).reduce((t, l) => t + l.used, 0);
   assert.ok(used('trim_casing') > 0 && used('trim_base') > 0);
 });
+
+test('the sawhorses come with the lumber to a new site, and stay put when they are already by it', () => {
+  const sim = createGameSim(4);
+  sim.state.sys.stock.money = 1e5;
+  const plan = (id, x) => { const mem = F.generate(room()).map((m) => ({ ...m, struct: id, built: false })); return sim.commandNow('construction.setPlan', K.planFromPieces(id, mem, F.materialsList(mem), { name: id, x, z: 40, r: 3 })); };
+  assert.ok(plan('a', 40).ok && plan('b', 120).ok);
+  const order = (id) => { for (const st of C.STAGE_ORDER) sim.commandNow('construction.order', { structId: id, stage: st }); sim.commandNow('construction.deliverNow', {}); };
+  order('a');
+  const h1 = { ...cs(sim).horses };
+  assert.ok(Math.hypot(h1.x - 40, h1.z - 40) < 8, 'by the first site');
+  order('b');
+  assert.ok(Math.hypot(cs(sim).horses.x - 120, cs(sim).horses.z - 40) < 8, 'moved to the second');
+  sim.commandNow('construction.moveHorses', { x: 118, z: 45, yaw: 0 });
+  assert.ok(plan('c', 125).ok);
+  order('c');
+  assert.deepEqual([cs(sim).horses.x, cs(sim).horses.z], [118, 45], 'already close: left where you put them');
+});

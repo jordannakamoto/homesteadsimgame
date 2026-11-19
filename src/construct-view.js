@@ -942,6 +942,10 @@
   function finishInstall(id, mid, layer, kind, r) {
     V.idleT = 0;
     const pr = S().progress[id];
+    if (r.installed.length && kind === 'insulation') {      // a batt pressed into its bay: a little puff of fibres along it
+      const g = geom(id), m = g && g.byId.get(mid);
+      if (m) { worldPt(g, null, m.a, wA); worldPt(g, null, m.b, wB); for (let i = 0; i <= 5; i++) { wM.lerpVectors(wA, wB, i / 5); G.burst(wM.x, wM.y, wM.z, 2, 0xf4b9a8, 0.45, 0.25, 0.018, 0.7); } }
+    }
     if (r.installed.length) {
       if (layer === 'main') { freshOf(id).add(mid); B.hideGhost && B.hideGhost(id, r.installed); }
       if (kind === 'site' || kind === 'door' || kind === 'window' || freshOf(id).size >= 40) { flush(id); if (kind === 'site') V.terrainV = (V.terrainV || 0) + 1; }

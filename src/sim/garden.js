@@ -42,7 +42,7 @@ import { ITEMS } from './items.js';
 import { DAY, HOUR, calendarT } from './time.js';
 import { sunTimes, dayOfYear, MONTHS, MONTH_START, DAYS_IN_YEAR, START_DAY_OF_YEAR, monthOf, dayOfMonth } from './calendar.js';
 import { climateModel, CLIMATES, DEFAULT_CLIMATE } from './weather.js';
-import { reliefAt as groundRelief } from './core/earthwork.js';
+import { reliefAt as groundRelief, sAt as groundCode, fAt as groundFlags, LOOSE_BIT } from './core/earthwork.js';
 
 export const CELL_M = 0.3, CELL_AREA = CELL_M * CELL_M;
 const STATE_V = 1;
@@ -696,7 +696,12 @@ function till(ctx, p = {}) {
     const c = at.group.cells[at.index];
     if (!tilled(c)) {
       if (!c.till) broke++;
-      c.till = Math.min(1, r3((c.till || 0) + step));
+      // ground the shovel has already broken works up quickly: earth dug and thrown is loose, there is no sod to cut
+      // (one stroke); ground cut down to firm earth or skimmed of its turf has no sod either (half the work)
+      let st = step;
+      const Lg = ctx.get && ctx.get('landscape'), lg = Lg && Lg.grid;
+      if (lg) { const i = Math.round(x / lg.step), j = Math.round(z / lg.step); if (groundCode(lg, i, j)) st = groundFlags(lg, i, j) & LOOSE_BIT ? 1 : step * 2; }
+      c.till = Math.min(1, r3((c.till || 0) + st));
       if (c.till >= 1) { delete c.till; worked++; c.on += c.wN; c.wN = 0; c.weed = 0.01; }
     } else if (!c.pl || p.amongPlants !== false) { cleared += c.weed; c.on += c.wN; c.wN = 0; c.weed = 0; if (!c.pl) delete c.open; }
   }
