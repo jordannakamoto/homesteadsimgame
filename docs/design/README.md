@@ -5,6 +5,7 @@ Three workstreams toward "the full home building experience". Each doc has a sum
 - `ground-foundations.md`: one ground for every system that cuts and fills (shovel, build site prep, machines), compact earthwork saves, foundations as a real process (layout, dig, base, forms, rebar, pour, cure, strip), the concrete mixer, masonry, and landscaping and farming sharing the same ground and soil.
 - `services-roughin.md`: plumbing and electrical as part of construction: one generic run mechanism through the frame, rough-in before insulation, trim-out after lining, two-click routing, drilling and pulling gestures, power reaching tools.
 - `interior-walls.md` (added later the same day): drywall hung sheet by sheet or pine boards course by course, both faces of partitions, tape and mud with drying and sanding (stage `finish`), then trim. Painting is a later decorating step.
+- `interior-finishes.md`: paint by surface (walls, a wall face, trim, a single piece; cabinets and furniture join through `PAINTABLE`), primer and two coats by hand with drying (stage `decorate`, "Paint"), then wallpaper. Slice 1 shipped: walls and trim.
 - `vehicles.md`: a controller stack for whatever the player is driving, a generic vehicle core (records, drive model, implements), the ATV and its trailer first, later machines as content.
 
 ## Coordination between workstreams

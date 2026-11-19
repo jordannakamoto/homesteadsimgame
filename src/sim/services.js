@@ -301,8 +301,8 @@ export function servicesSystem({ classes = SERVICE_CLASSES, routesName = 'routes
     if (!pr) return { ok: false, reason: 'unknown building' };
     if (!p.host) return { ok: false, reason: 'no wall' };
     const ids = [];
-    // the taped seams and the lining first (every sheet or board on the wall, or an older plan's single piece), then the batts
-    for (const id of Object.keys(pr.members).sort()) { const m = pr.members[id]; if ((m.kind === 'joint' || m.kind === 'lining' || id === p.host + '.ln') && m.stage !== 'subfloor' && m.parent === p.host && (m.built || m.got > 0 || m.coat > 0)) ids.push(id); }
+    // the paint, the taped seams and the lining first (every sheet or board on the wall, or an older plan's single piece), then the batts
+    for (const id of Object.keys(pr.members).sort()) { const m = pr.members[id]; if ((m.kind === 'joint' || m.kind === 'lining' || m.kind === 'prime' || m.kind === 'paint' || id === p.host + '.ln') && m.stage !== 'subfloor' && m.parent === p.host && (m.built || m.got > 0 || m.coat > 0)) ids.push(id); }
     for (const id of Object.keys(pr.members).sort()) { const m = pr.members[id]; if (m.stage === 'insulation' && m.parent === p.host && (m.built || m.got > 0)) ids.push(id); }
     if (!ids.length) return { ok: false, reason: 'nothing covers it' };
     const r = callAs(ctx, 'construction', 'construction.dismantle', { structId: p.structId, memberIds: ids, local: true }) || { ok: false, reason: 'no construction' };

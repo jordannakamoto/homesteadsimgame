@@ -894,3 +894,12 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - Nothing new to see. What services (rough-in work and lines) and the foundation (holds on framing) keep on a building now lives under `progress[id].keep[source]`, and sending a building's plan again carries the whole bag over, so a new source cannot be dropped by accident. Try: pour a slab and watch framing stay held across a reload; order services lines and reload.
 - Older saves with `ext` / `extLines` / `hold` on the record are moved under `keep` when first read (no save version bump). Console: `__game.sim.state.sys.construction.progress[id].keep`.
 - Also fixed: `construction.settle` read an undefined `ctx` (the foundation smoke hit it).
+## Paint: walls and trim (branch `paint`, design in `docs/design/interior-finishes.md`)
+
+- New last building stage, **Paint**: primer on every lined wall face, a rectangle (up to 1.2 m wide, clear of the openings) at a time, then two coats of colour, each on dry paint. The trim (corner boards and round doors and windows) takes two coats of its own colour; it comes primed.
+- Hands: point at a part of a wall or a trim board with E. The roller runs over it and the coat wipes on from the end you stand at; the first coat lets the primer show through, wet paint is darker. The roller in the hand carries the colour.
+- Choosing: plan options (or a selected building's options) have **Walls** (12 colours or bare, with Matte, Eggshell or Satin) and **Trim** (12 colours or as it comes). On a finished building in construction mode, a colour adds the painting as work; changing a colour later means two more coats. Paint is ordered by the litre per colour and sheen, primer by the litre.
+- Finishes are stored by surface (walls, a face, trim, a single piece), so cabinets and new furniture can take their own colour later without changes to the paint code.
+- Opening a wall for services takes its paint off with the drywall.
+- Console: `__build.setDeco(structId, { walls: 'sage_eggshell', trim: 'moss_semigloss' })`.
+- Weak: one colour for all the walls of a building (per face comes in slice 2); no clear oil for boards yet; sheen does not change the look yet; with "Work until done" the paint stage works like taping (waits on wet coats).

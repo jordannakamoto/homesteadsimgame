@@ -5,6 +5,7 @@
 // stacks, carrying) and src/sim/construction.js (the system); the page's add-on reads it for its wording.
 
 import { SERVICE_SUPPLY } from './services.js';
+export { PAINTS, PAINT, SHEENS, SURFACES, finishOf, DECOR } from './decor.js';
 
 // ---- stages, in the order a building is raised. `needs`: the stages it stands on. `parentFirst`: stages whose
 // members of the same wall or gable must be in first. `flat`: its frames are put together lying down, one at a
@@ -31,7 +32,8 @@ export const STAGES = Object.freeze([
   { id: 'insulation', name: 'Insulation', needs: ['roofing', 'sheathing', 'rough-in'], verb: 'Insulate', what: 'Fill the spaces between studs and rafters with batts.', why: 'Slows heat leaving in winter and coming in during summer.' },
   { id: 'lining', name: 'Lining', needs: ['insulation'], verb: 'Hang the walls', what: 'Hang drywall sheet by sheet, top row first, or put up pine boards from the floor up; lay the floor boards.', why: 'Covers the insulation and makes a finished room.' },
   { id: 'finish', name: 'Tape and mud', needs: ['lining'], verb: 'Tape and mud', what: 'Tape every drywall seam, give it three coats of compound, letting each dry, then sand it smooth.', why: 'Hides the joints so the walls read as one surface. Board walls need none of this.' },
-  { id: 'trim-out', name: 'Trim-out', needs: ['lining', 'finish'], by: 'services', hint: 'Trim-out: Do it for me, in the Build panel (L)', verb: 'Fit the devices and fixtures', what: 'Outlets, switches and lights into their boxes; breakers into the panel; taps and fixtures onto their stubs.', why: 'The wall is finished now, so what you touch goes on its face.' },
+  { id: 'decorate', name: 'Paint', needs: ['cladding', 'lining', 'finish'], verb: 'Paint', what: 'A coat of primer on the new walls, then two coats of colour, each dry before the next; two coats on the trim, which comes primed.', why: 'Seals the drywall or boards and gives the room its colour.' },
+  { id: 'trim-out', name: 'Trim-out', needs: ['lining', 'finish', 'decorate'], by: 'services', hint: 'Trim-out: Do it for me, in the Build panel (L)', verb: 'Fit the devices and fixtures', what: 'Outlets, switches and lights into their boxes; breakers into the panel; taps and fixtures onto their stubs.', why: 'The wall is finished now, so what you touch goes on its face.' },
 ]);
 // ---- taping drywall (docs/design/interior-walls.md). Each seam takes the tape and a first coat, then a fill coat and a
 // finish coat, each laid on dry compound, then a light sanding. Setting compound can take the next coat in about an hour

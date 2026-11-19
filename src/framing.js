@@ -4,8 +4,8 @@
    Pure arithmetic: no DOM, no three.js. The page reads it as window.__framing; tests read globalThis.__framing. */
 (() => {
   // the order a building is raised in (docs/CONSTRUCTION.md)
-  const STAGES = ["site", "foundation", "floor-frame", "subfloor", "wall-frame", "top-plates", "roof-frame", "roof-deck", "dry-in", "roofing", "sheathing", "wrap", "openings", "cladding", "gutters", "rough-in", "insulation", "lining", "finish", "trim-out", "services"];
-  const STAGE_NAME = { site: "Site", foundation: "Foundation", "floor-frame": "Floor frame", subfloor: "Subfloor", "wall-frame": "Wall frames", "top-plates": "Top plates", "roof-frame": "Roof frame", "roof-deck": "Roof deck", "dry-in": "Dry-in", roofing: "Roofing", sheathing: "Sheathing", wrap: "Wrap", openings: "Windows and doors", cladding: "Cladding", gutters: "Gutters", "rough-in": "Rough-in", insulation: "Insulation", lining: "Lining", finish: "Tape and mud", "trim-out": "Trim-out", services: "Services" };
+  const STAGES = ["site", "foundation", "floor-frame", "subfloor", "wall-frame", "top-plates", "roof-frame", "roof-deck", "dry-in", "roofing", "sheathing", "wrap", "openings", "cladding", "gutters", "rough-in", "insulation", "lining", "finish", "decorate", "trim-out", "services"];
+  const STAGE_NAME = { site: "Site", foundation: "Foundation", "floor-frame": "Floor frame", subfloor: "Subfloor", "wall-frame": "Wall frames", "top-plates": "Top plates", "roof-frame": "Roof frame", "roof-deck": "Roof deck", "dry-in": "Dry-in", roofing: "Roofing", sheathing: "Sheathing", wrap: "Wrap", openings: "Windows and doors", cladding: "Cladding", gutters: "Gutters", "rough-in": "Rough-in", insulation: "Insulation", lining: "Lining", finish: "Tape and mud", decorate: "Paint", "trim-out": "Trim-out", services: "Services" };
   // actual (not nominal) sizes of North American lumber, metres: [breadth, depth]
   const LUMBER = { "2x4": [0.038, 0.089], "2x6": [0.038, 0.14], "2x8": [0.038, 0.184], "2x10": [0.038, 0.235], "2x12": [0.038, 0.286], glulam: [0.09, 0.225], "4x4": [0.089, 0.089], "6x6": [0.14, 0.14] };
   const SHEET = { w: 1.22, l: 2.44 };
@@ -462,6 +462,22 @@
           for (const x of o ? [0.02] : [0.02, L - 0.02]) joint("corner", at(x, yb + 0.012, joff), at(x, yt, joff), [ux, 0, uz], yt - yb - 0.012);
         }
         else { let row = 0; for (let y = yb + 0.01; y < yt - 0.03; y += 0.14, row++) lay(y, Math.min(yt, y + 0.14), row, 3.6, "boards"); }
+        // paint (docs/design/interior-finishes.md): over the lining, a coat of primer then the colour, worked a
+        // rectangle at a time: the face clear of the openings in widths of 1.2 m (a roller's reach from one spot).
+        // draw 0: the view draws each coat as a thin skin as it goes on
+        const fin = finFor(spec.deco, "walls", w.id + "|" + fc);
+        if (fin) {
+          let k2 = 0;
+          for (const [x0, x1, ya, yb2] of bandFree(gyp ? yb + 0.012 : yb + 0.01, yt)) {
+            const n2 = Math.max(1, Math.round((x1 - x0) / 1.2));
+            for (let i = 0; i < n2; i++) {
+              const xa = x0 + ((x1 - x0) * i) / n2, xb = x0 + ((x1 - x0) * (i + 1)) / n2, ym = (ya + yb2) / 2, area = r3((xb - xa) * (yb2 - ya)), k3 = k2++;
+              if (xb - xa < 0.04 || yb2 - ya < 0.04) continue;
+              M(out, w.id + ".pr" + fc + "." + k3, "prime", gyp ? "pva" : "knot", "decorate", w.id, "primer", 0.001, yb2 - ya, at(xa, ym, sg * (face + th + 0.0045)), at(xb, ym, sg * (face + th + 0.0045)), UP, { draw: 0, area, face: fc, surface: "walls" });
+              M(out, w.id + ".pt" + fc + "." + k3, "paint", "paint", "decorate", w.id, "paint", 0.001, yb2 - ya, at(xa, ym, sg * (face + th + 0.0058)), at(xb, ym, sg * (face + th + 0.0058)), UP, { draw: 0, area, face: fc, fin, surface: "walls" });
+            }
+          }
+        }
       }
     }
   }
@@ -745,12 +761,35 @@
   }
 
   // desc: { found, spec: { ins, lining, studs, joists, rafters }, floors, walls, roofs } -> members
+  // ---- finishes (docs/design/interior-finishes.md). A building's finishes are one record of surfaces, each painted its own
+  // colour: { walls: fin, faces: { "<wall>|<face>": fin }, trim: fin, items: { "<piece id>": fin } }, a fin being
+  // "<colour>_<sheen>". Walls get primer and paint rectangles where they are lined (wallMembers); anything else that
+  // takes paint names its surface in PAINTABLE and gets a skin of paint a little larger than itself, two coats, over
+  // stock that comes primed (trim boards now; cabinets and furniture add their kinds here as they are made)
+  function finFor(deco, surface, key) {
+    if (!deco) return null;
+    if (surface === "walls") return (deco.faces && deco.faces[key]) || deco.walls || null;
+    return (deco.items && deco.items[key]) || deco[surface] || null;
+  }
+  const PAINTABLE = [{ surface: "trim", is: (m) => m.kind === "cladding" && m.type === "trim" }];
+  function paintOver(out, deco) {
+    if (!deco) return;
+    const n0 = out.length;
+    for (let i = 0; i < n0; i++) {
+      const m = out[i], P = PAINTABLE.find((q) => q.is(m)), fin = P && finFor(deco, P.surface, m.id);
+      if (!fin) continue;
+      // the skin: 1 mm proud of every face, and 1 mm past each end
+      const L = hyp(m.b[0] - m.a[0], m.b[1] - m.a[1], m.b[2] - m.a[2]) || 1, e = 0.001 / L, ext = (p, q) => p.map((v, k) => v + (v - q[k]) * e);
+      M(out, m.id + ".pt", "paint", "paint", "decorate", m.parent, "paint", m.section.b + 0.002, m.section.d + 0.002, ext(m.a, m.b), ext(m.b, m.a), m.n, { draw: 0, area: r3((m.area || m.length * m.section.d) * 1.2), fin, surface: P.surface, of: m.id, ...(m.roof ? { roof: m.roof } : {}) });
+    }
+  }
   function generate(desc) {
     const out = [],
       spec = desc.spec || {};
     for (const f of desc.floors || []) floorMembers(out, f, desc.found || "plinth", spec);
     for (const w of desc.walls || []) wallMembers(out, w, spec);
     for (const r of desc.roofs || []) roofMembers(out, r, spec);
+    paintOver(out, spec.deco);
     return out;
   }
 
@@ -798,6 +837,8 @@
       const f = FLOOR_ITEM[m.material];
       return ["floor" + m.material, f ? f[0] : null, f ? f[1] : "m2", f && f[1] === "m" ? m.area / 0.14 : m.area, "Flooring", "The finished floor you walk on.", f ? undefined : "flooring: " + m.material];
     }
+    if (k === "prime") return ["primer", "primer_pva", "L", m.area / 10, "Primer", "A coat of primer on the new walls, so the paint goes on even."];
+    if (k === "paint") return ["paint" + m.fin, "paint_" + m.fin, "L", (m.area * 2) / 12, "Paint", "Two coats of colour: rolled on the walls a section at a time, brushed on the trim board by board."];
     if (k === "joint") return ["mud", "joint_compound", "kg", (m.len || m.length) * 0.3, "Joint compound and tape", "Tape over every drywall seam and three coats of compound, sanded smooth, so the joints vanish."];
     if (k === "lining") return t === "gypsum" ? ["gyp", "gypsum_13", "sheet", m.area, "Wall panels", "Panels on the inside of the walls. They cover the insulation and finish the room."] : ["lin", "board_pine_1x6", "m", m.area / 0.14, "Lining boards", "Boards on the inside of the walls and ceiling. They cover the insulation and finish the room."];
     if ((k === "door" || k === "window") && m.unit) return ["u" + m.unit, m.unit, "each", 1, m.unitName || (k === "door" ? "Door" : "Window"), "A ready-made " + k + " in its frame. It is carried in, set into its rough opening and nailed through the frame."];
