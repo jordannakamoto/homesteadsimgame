@@ -12,6 +12,16 @@
   const T = G.THREE, $ = (id) => document.getElementById(id), canvas = $('view');
   const bar = $('gbar'), hint = bar.querySelector('.ghint'), toolsEl = bar.querySelector('.gtools'), seedsEl = bar.querySelector('.gseeds');
   const label = $('glabel'), fxEl = $('gfx'), card = $('gcard'), alm = $('galm'), tip = $('gtip');
+  // the bar sits in the bottom lane beside the mode chip; its hint and seed box stack above it in the prompt and context
+  // places, the guide card goes where the quest card is, the almanac is a drawer (template/ui/30-hotbar.css)
+  if (window.__ui) {
+    const ctx = document.createElement('div'); ctx.className = 'gctx'; ctx.append(hint, seedsEl); bar.insertBefore(ctx, toolsEl);
+    for (const el of [toolsEl, hint, seedsEl]) el.classList.add('panel');
+    bar.classList.remove('panel');
+    window.__ui.mount(bar, 'bottom', { order: 2 }); window.__ui.mount(tip, 'left', { order: 5 });
+    new ResizeObserver(() => document.body.style.setProperty('--gbar-ctx', ctx.offsetHeight + 'px')).observe(ctx);
+    window.__ui.panel({ el: alm, kind: 'side' });
+  }
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v), lerp = (a, b, t) => a + (b - a) * t;
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const CELL = 0.3, DAY = 86400;
@@ -931,8 +941,8 @@
   const tag = label;
   let tagSig = '', tagX = -1, tagY = -1;
   const tagPt = { x: 0, y: 0, vis: false };
-  function updateTag() {
-    const a = H.aim, id = held();
+  function updateTag(a = H.aim) {
+    const id = held();
     let txt = '', warn = false;
     if (a.valid && !a.down && !H.raising) {
       const c = cellAt(a.x, a.z), cell = c && c.bed.cells[c.i], p = cell && cell.pl && S().plants[cell.pl];
@@ -948,6 +958,18 @@
     H.setMark(warn ? 0xf0b080 : 0xfff2c4, id === 'can' || id === 'mulch' || id === 'compost' ? 1.6 : id === 'hoe' ? 1.3 : 1);
     if (txt !== tagSig) { tagSig = txt; tag.textContent = txt; tag.hidden = !txt; tag.classList.toggle('warn', warn); tagX = -1; }
   }
+  // the tag answers the pointer at once, not at the next refresh: on a slow machine that is several frames away.
+  // Throttled; reads the ground under the pointer the way the hands do (clamped to the garden's reach of 1.5 m).
+  const tagGp = { x: 0, y: 0, z: 0 };
+  let tagMoveT = 0;
+  canvas.addEventListener('mousemove', (e) => {
+    if (!on || H.aim.down || e.buttons || e.timeStamp - tagMoveT < 60) return;
+    tagMoveT = e.timeStamp;
+    const r = canvas.getBoundingClientRect(), g = H.groundAt(((e.clientX - r.left) / r.width) * 2 - 1, -(((e.clientY - r.top) / r.height) * 2 - 1), tagGp);
+    if (!g) return;
+    const P = G.player, dx = g.x - P.x, dz = g.z - P.z, d = Math.hypot(dx, dz) || 1, k = clamp(d, 0.3, 1.5) / d;
+    updateTag({ valid: true, down: false, x: P.x + dx * k, z: P.z + dz * k });
+  });
   function moveTag() {
     if (tag.hidden) return;
     const a = H.aim; toScreen(a.x, a.y + 0.35, a.z, tagPt);

@@ -1,1 +1,214 @@
-/* ui: hotbar (stub) */
+/* ui: hotbar and context bars.
+   The sub-mode bars #gbar (Garden), #lbar (Yard), #fbar (Site) live in the bottom lane, after the mode chip (#tools
+   collapsed). Each is a tray (.gtools.panel) of kit slots (.hslot, drawn by src/engine/hands.js).
+   A bar's hint line (.ghint) and store row (.gseeds) stay inside it (views and tests address them as `#gbar .ghint`),
+   wrapped by the view in .gctx, which is placed where the context and prompt lanes are: fixed, screen-centred, just
+   above the hotbar, store row nearest the slots, hint above it. Each view writes the wrapper's height to
+   --<bar id>-ctx on body (a ResizeObserver, no per-frame work) and the shared prompt lane (#reachhint, #lock,
+   #cvprompt, __ui.prompt) lifts above it, so nothing overlaps.
+   Also here: #reachhint (prompt lane), #reachbeat (toast lane), #svplan (context lane), the vehicle toasts, and the
+   garden's cards: #gcard (inspector card), #galm (almanac drawer), #gtip (quest card in the left lane). */
+
+/* ---------- the bar: a transparent holder in the bottom lane (no filter or transform: .gctx is fixed inside it) ---------- */
+:is(#gbar, #lbar, #fbar) {
+  position: relative; inset: auto; display: block; order: 2;
+  width: auto; max-width: 100%; margin: 0; padding: 0;
+  background: none; border: 0; border-radius: 0; box-shadow: none;
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  transform: none; z-index: auto;
+}
+
+/* ---------- the tray of slots ---------- */
+:is(#gbar, #lbar, #fbar) > .gtools {
+  position: relative; inset: auto; z-index: auto;
+  display: flex; flex-wrap: nowrap; align-items: flex-end; justify-content: center; gap: var(--sp-2);
+  width: max-content; max-width: 100%; margin: 0;
+  padding: var(--sp-2);
+  background: var(--surface-1);
+  border: var(--border-w) solid var(--edge);
+  border-radius: calc(var(--r-slot) + var(--sp-2));
+  box-shadow: var(--shadow-1), var(--inner-hi);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+}
+/* cozy: the tray reads as a wooden-cream shelf the slots sit in */
+:root:not([data-skin="minimal"]) :is(#gbar, #lbar, #fbar) > .gtools {
+  background: color-mix(in srgb, var(--well) 70%, var(--surface-2));
+  border-color: var(--edge-strong);
+}
+/* a slot's badge can hold "12 L": let it be wider than a bubble, never wider than the slot */
+:is(#gbar, #lbar, #fbar) .hslot .bdg { max-width: calc(var(--slot) - 26px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- the context stack: store row and hint, in the lanes' place ---------- */
+:is(#gbar, #lbar, #fbar) > .gctx {
+  position: fixed; z-index: 10;
+  left: calc(var(--lane-edge) + var(--sa-l)); right: calc(var(--lane-edge) + var(--sa-r));
+  bottom: calc(var(--lane-edge) + var(--sa-b) + var(--lane-bottom-h) + var(--lane-gap));
+  display: flex; flex-direction: column; align-items: center; gap: var(--lane-gap);
+  pointer-events: none;
+}
+/* desktop: keep clear of the left lane (dock, quest card, #gtip: at most 280px wide) on both sides, so the row stays centred */
+@media (min-width: 900px) {
+  body:not(.touch) :is(#gbar, #lbar, #fbar) > .gctx {
+    left: calc(var(--lane-edge) + var(--sa-l) + 280px + var(--lane-gap));
+    right: calc(var(--lane-edge) + var(--sa-r) + 280px + var(--lane-gap));
+  }
+}
+:is(#gbar, #lbar, #fbar) > .gctx > * { pointer-events: auto; position: relative; inset: auto; transform: none; margin: 0; max-width: 100%; }
+:is(#gbar, #lbar, #fbar) > .gctx > :empty { display: none; }
+/* the shared prompt lane sits above a bar's context stack while that bar shows */
+body:has(#gbar:not([hidden])) #ui-lane-prompt { bottom: calc(var(--lane-edge) + var(--sa-b) + var(--lane-bottom-h) + 2 * var(--lane-gap) + var(--gbar-ctx, 0px)); }
+body:has(#lbar:not([hidden])) #ui-lane-prompt { bottom: calc(var(--lane-edge) + var(--sa-b) + var(--lane-bottom-h) + 2 * var(--lane-gap) + var(--lbar-ctx, 0px)); }
+body:has(#fbar:not([hidden])) #ui-lane-prompt { bottom: calc(var(--lane-edge) + var(--sa-b) + var(--lane-bottom-h) + 2 * var(--lane-gap) + var(--fbar-ctx, 0px)); }
+
+/* ---------- prompt lines: a bar's hint, and the Hands hint ---------- */
+:is(#gbar, #lbar, #fbar) .ghint, #reachhint {
+  position: relative; inset: auto; transform: none;
+  width: max-content; max-width: min(640px, 100%); min-height: 0; margin: 0;
+  padding: 8px 18px;
+  font-family: var(--font-body); font-weight: var(--fw-body); font-size: var(--fs-md); line-height: 1.4;
+  text-align: center; color: var(--ink);
+  background: var(--surface-1);
+  border: var(--border-w) solid var(--edge); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1), var(--inner-hi);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+}
+#reachhint { max-width: min(720px, 100%); white-space: pre-line; pointer-events: none; }
+:is(#gbar, #lbar, #fbar) .ghint b, #reachhint b { color: var(--accent-edge); font-weight: var(--fw-strong); }
+:root[data-skin="minimal"] :is(:is(#gbar, #lbar, #fbar) .ghint b, #reachhint b) { color: var(--accent); }
+:is(#gbar, #lbar, #fbar) .ghint button {
+  min-height: 30px; padding: 3px 12px; margin: 2px 0 2px 6px; vertical-align: middle;
+  font-size: var(--fs-sm); border-radius: var(--r-pill);
+}
+:is(#gbar, #lbar, #fbar) .ghint button.go, #gcard button.go, #galm button.go, #gtip button.go {
+  background: var(--accent); color: var(--accent-ink); border-color: var(--accent-edge); box-shadow: var(--lip-accent);
+}
+:is(#gbar, #lbar, #fbar) .ghint button.go:hover, #gcard button.go:hover, #galm button.go:hover, #gtip button.go:hover { background: color-mix(in srgb, var(--accent) 88%, white); }
+:is(#gbar, #lbar, #fbar) .ghint #gcan { background: var(--well); }
+
+/* ---------- the store row (seed box, Yard store): cards on a tray ---------- */
+:is(#gbar, #lbar) .gseeds {
+  display: flex; gap: var(--sp-2); overflow-x: auto; overscroll-behavior: contain;
+  width: max-content; max-width: min(940px, 100%);
+  padding: var(--sp-2) var(--sp-2) calc(var(--sp-2) + 3px);
+  background: var(--surface-1);
+  border: var(--border-w) solid var(--edge); border-radius: calc(var(--r-md) + var(--sp-2));
+  box-shadow: var(--shadow-1), var(--inner-hi);
+  backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+  scrollbar-width: thin;
+}
+:is(#gbar, #lbar) .gseed {
+  flex: 0 0 140px; min-height: 0; height: auto;
+  display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 2px;
+  padding: 8px 10px; text-align: left;
+  font-family: var(--font-body); font-weight: var(--fw-body); font-size: 12px; line-height: 1.3; color: var(--ink-dim);
+  background: var(--surface-3);
+  border: var(--border-w) solid var(--edge); border-radius: var(--r-md);
+  box-shadow: var(--lip);
+}
+:is(#gbar, #lbar) .gseed:hover { background: var(--surface-hover); }
+:is(#gbar, #lbar) .gseed b {
+  display: flex; justify-content: space-between; align-items: center; gap: 6px;
+  font-family: var(--font-display); font-weight: var(--fw-display); font-size: var(--fs-md); line-height: 1.2; color: var(--ink);
+}
+:is(#gbar, #lbar) .gseed b i { font-style: normal; flex: none; width: 12px; height: 12px; border-radius: 50%; display: inline-block; box-shadow: 0 0 0 2px var(--surface-3), 0 0 0 3px var(--edge); }
+:is(#gbar, #lbar) .gseed .when { color: var(--good); font-weight: var(--fw-strong); }
+:is(#gbar, #lbar) .gseed .when.no { color: var(--warn); }
+:is(#gbar, #lbar) .gseed .own { color: var(--ink); font-weight: var(--fw-strong); }
+:is(#gbar, #lbar) .gseed[aria-pressed="true"] { background: var(--select-bg); color: var(--ink-dim); border-color: var(--select-edge); box-shadow: 0 0 0 2px var(--accent-soft), var(--lip); }
+:is(#gbar, #lbar) .gseed:disabled { opacity: 1; cursor: default; background: transparent; box-shadow: none; }
+
+/* ---------- other lane members this step places ---------- */
+/* the Hands celebration beat, top centre */
+#reachbeat {
+  position: relative; inset: auto; transform: none;
+  font-family: var(--font-display); font-weight: var(--fw-display); font-size: 26px; line-height: 1.2;
+  color: var(--float-ink); text-shadow: 0 2px 0 rgba(58, 42, 18, .9), 0 0 18px rgba(255, 214, 120, .7);
+  text-align: center; pointer-events: none;
+  animation: ui-toast-in var(--t) var(--ease) both;
+}
+/* the services plan strip (context lane) */
+#svplan { position: relative; inset: auto; transform: none; display: flex; gap: var(--sp-2); padding: var(--sp-2); border-radius: calc(var(--r-sm) + var(--sp-2)); }
+#svplan button { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); padding: 5px 12px; }
+#svplan button i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+#svplan button kbd { margin-left: 2px; }
+#svplan button[aria-pressed="true"] { border-color: currentColor; background: var(--select-bg); }
+
+/* ---------- #gtip: the garden's guide card, in the quest card's place (left lane); one quest card at a time ---------- */
+#gtip {
+  position: relative; inset: auto; z-index: auto; transform: none;
+  width: 280px; max-width: 100%; padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-sm); line-height: 1.4; color: var(--ink);
+  background: var(--surface-2);
+  border: var(--border-w) solid var(--accent-edge); border-radius: var(--r-md);
+  box-shadow: var(--shadow-1), var(--inner-hi);
+}
+#gtip h3 { margin: 0 0 4px; font-family: var(--font-display); font-weight: var(--fw-display); font-size: var(--fs-lg); line-height: 1.2; color: var(--accent-edge); }
+:root[data-skin="minimal"] #gtip h3 { color: var(--accent); }
+#gtip .why { margin-top: 4px; color: var(--ink-dim); font-size: var(--fs-xs); }
+#gtip .acts { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-2); }
+#gtip .acts button { min-height: 32px; padding: 4px 12px; font-size: var(--fs-sm); }
+#gtip .acts button:not(.go) { background: transparent; border-color: transparent; box-shadow: none; color: var(--ink-dim); }
+body:has(#gtip:not([hidden])) #cvnext { display: none; }
+
+/* ---------- #gcard: the inspector card that follows a pointed plant or bed (right, under the top bar) ---------- */
+#gcard {
+  position: fixed; z-index: 12;
+  top: calc(var(--hud-top-h) + var(--sa-t)); right: calc(var(--lane-edge) + var(--sa-r)); left: auto; bottom: auto;
+  width: min(330px, calc(100vw - 2 * var(--lane-edge)));
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-md); line-height: 1.4; color: var(--ink);
+  background: var(--surface-2);
+  border: var(--border-w) solid var(--edge); border-radius: var(--r-md);
+  box-shadow: var(--shadow-2), var(--inner-hi);
+}
+body.ui-sheet #gcard { right: calc(var(--lane-edge) + var(--sa-r) + 400px + var(--lane-gap)); }
+#gcard h2 { margin: 0; display: flex; align-items: baseline; gap: 8px; min-width: 0; font-family: var(--font-display); font-weight: var(--fw-display); font-size: var(--fs-xl); line-height: 1.15; }
+#gcard h2 small { font-family: var(--font-body); font-weight: var(--fw-body); font-size: var(--fs-sm); color: var(--ink-dim); }
+#gcard .row2 { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+#gcard .st { font-weight: var(--fw-strong); color: var(--good); }
+#gcard .st.warn { color: var(--warn); }
+#gcard .st.bad { color: var(--danger); }
+#gcard .strip { position: relative; height: 26px; margin: 4px 0 14px; }
+#gcard .strip .bar { position: absolute; left: 0; right: 0; top: 9px; height: 8px; border-radius: var(--r-pill); background: var(--well); overflow: hidden; }
+#gcard .strip .bar i { display: block; height: 100%; background: var(--good); border-radius: inherit; }
+#gcard .strip .mk { position: absolute; top: 0; width: 2px; height: 26px; background: var(--accent-edge); }
+#gcard .strip .lab { position: absolute; top: 26px; font-size: var(--fs-xs); color: var(--ink-dim); white-space: nowrap; }
+#gcard .strip .lab.r { right: 0; }
+#gcard .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+#gcard .chips span { font-size: 12px; padding: 2px 8px; border-radius: var(--r-pill); background: var(--well); color: var(--ink); }
+#gcard .det { font-size: 12px; color: var(--ink-dim); font-variant-numeric: tabular-nums; display: grid; grid-template-columns: 1fr auto; gap: 1px 10px; }
+#gcard button { min-height: 32px; padding: 4px 12px; font-size: var(--fs-sm); }
+#gcard button[data-act="close"], #galm button[data-act="close"] {
+  flex: none; width: 36px; min-width: 36px; height: 36px; min-height: 36px; padding: 0;
+  border-radius: var(--r-pill); background: transparent; border-color: transparent; box-shadow: none; color: var(--ink-dim); font-size: var(--fs-md);
+}
+#gcard button[data-act="close"]:hover, #galm button[data-act="close"]:hover { background: var(--surface-hover); color: var(--ink); }
+
+/* ---------- #galm: the almanac drawer (adopted by __ui.panel as a side drawer; content is one block, so it scrolls itself) ---------- */
+#galm {
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  overflow-y: auto; overscroll-behavior: contain;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  font-size: var(--fs-md); line-height: 1.4;
+}
+#galm:not(.ui-panel) {
+  position: fixed; z-index: 20;
+  top: calc(var(--hud-top-h) + var(--sa-t)); right: calc(var(--lane-edge) + var(--sa-r)); left: auto;
+  width: min(400px, calc(100vw - 2 * var(--lane-edge)));
+  max-height: calc(100vh - var(--hud-top-h) - var(--lane-bottom-h) - 3 * var(--lane-edge));
+  background: var(--surface-2); border: var(--border-w) solid var(--edge); border-radius: var(--r-lg); box-shadow: var(--shadow-2);
+}
+#galm h2 { margin: 0; display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); font-family: var(--font-display); font-weight: var(--fw-display); font-size: var(--fs-xl); line-height: 1.1; }
+#galm h3 { margin: var(--sp-2) 0 0; font-family: var(--font-display); font-weight: var(--fw-display); font-size: var(--fs-sm); color: var(--ink-dim); text-transform: var(--label-transform); letter-spacing: var(--label-track); }
+#galm .frost { padding: 8px 12px; border-radius: var(--r-sm); background: var(--surface-3); border: 1px solid var(--edge); }
+#galm .frost.likely { background: color-mix(in srgb, var(--info) 16%, transparent); border-color: color-mix(in srgb, var(--info) 45%, transparent); }
+#galm ul { margin: 0; padding-left: 18px; }
+#galm li small { color: var(--ink-dim); }
+#galm button { min-height: 32px; padding: 4px 12px; font-size: var(--fs-sm); }
+
+/* ---------- phone: smaller cards; the inspector sits above the bar ---------- */
+body.touch :is(#gbar, #lbar) .gseed { flex-basis: 124px; padding: 6px 8px; }
+@media (max-width: 720px) {
+  #gcard { top: auto; bottom: calc(var(--lane-edge) + var(--sa-b) + var(--lane-bottom-h) + var(--lane-context-h) + 2 * var(--lane-gap)); }
+}

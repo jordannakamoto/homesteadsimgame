@@ -1190,6 +1190,14 @@
   const bar = $('lbar');
   if (!bar) return;
   const hint = bar.querySelector('.ghint'), toolsEl = bar.querySelector('.gtools'), storeEl = bar.querySelector('.gseeds');
+  // the bar sits in the bottom lane beside the mode chip; its hint and store stack above it in the prompt and context places (template/ui/30-hotbar.css)
+  if (window.__ui) {
+    const ctx = document.createElement('div'); ctx.className = 'gctx'; ctx.append(hint, storeEl); bar.insertBefore(ctx, toolsEl);
+    for (const el of [toolsEl, hint, storeEl]) el.classList.add('panel');
+    bar.classList.remove('panel');
+    window.__ui.mount(bar, 'bottom', { order: 2 });
+    new ResizeObserver(() => document.body.style.setProperty('--lbar-ctx', ctx.offsetHeight + 'px')).observe(ctx);
+  }
   const label = $('glabel');
   const I = (body) => '<svg viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="var(--ic-outline)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' + body + '</svg>';
   const ICONS = {

@@ -24,36 +24,11 @@
 html, body { height: 100%; margin: 0; background: #121a1e; color: var(--ink); font-family: var(--font-body); font-size: 14px; overflow: hidden; }
 #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; outline: none; cursor: crosshair; touch-action: none; }
 .panel { position: fixed; background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 8px; padding: 10px 14px; backdrop-filter: blur(6px); }
-#stock { top: 16px; left: 16px; display: flex; gap: 18px; align-items: baseline; }
-#stock .item { display: flex; gap: 8px; align-items: baseline; }
-#stock .label { color: var(--ink-dim); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
-#stock .num { font-family: var(--font-display); font-size: 22px; font-variant-numeric: tabular-nums; min-width: 1.6ch; }
-#status { top: 16px; right: 16px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 300px); }
-#status .pair { display: flex; gap: 6px; align-items: baseline; }
-#status .label { color: var(--ink-dim); font-size: 12px; }
-#status .val { font-variant-numeric: tabular-nums; font-weight: 700; }
-#speed { display: flex; gap: 2px; }
-#speed button { padding: 4px 8px; min-width: 0; font-variant-numeric: tabular-nums; }
-#speed button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 button { font: inherit; color: var(--ink); background: var(--surface-3); border: 1px solid var(--panel-edge); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
 button:hover { background: var(--surface-hover); }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-#tools { bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; padding: 8px; }
-#tools button { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 74px; padding: 8px 10px; }
-#tools button .key { font-size: 11px; color: var(--ink-dim); }
-#tools button .name { font-family: var(--font-display); font-size: 16px; }
-#tools button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
-#tools button[aria-pressed="true"] .name { color: var(--accent); }
 #help { bottom: 16px; left: 16px; max-width: 360px; font-size: 13px; }
-#vitals { top: 74px; left: 16px; display: flex; flex-direction: column; gap: 8px; width: 250px; }
-#vitals .bar { display: grid; grid-template-columns: 62px 1fr; gap: 10px; align-items: center; }
-#vitals .label { color: var(--ink-dim); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
-#vitals .track { height: 10px; border-radius: 5px; background: var(--well); overflow: hidden; }
-#vitals .fill { height: 100%; width: 100%; border-radius: 5px; }
-#vitals .fill.hp { background: var(--danger); }
-#vitals .fill.st { background: var(--accent); }
 #hurt { position: fixed; inset: 0; pointer-events: none; opacity: 0; box-shadow: inset 0 0 140px 30px rgba(190, 40, 30, 0.75); }
-#msg { top: 30%; left: 50%; transform: translateX(-50%); font-family: var(--font-display); font-size: 22px; padding: 14px 22px; }
 #stance { bottom: 16px; right: 16px; display: flex; flex-wrap: wrap; justify-content: flex-end; max-width: 420px; gap: 6px; align-items: center; padding: 6px 8px; }
 #stance[hidden] { display: none; }
 #stance .chip { padding: 3px 9px; border-radius: 5px; border: 1px solid transparent; color: var(--ink-dim); font-size: 13px; }
@@ -67,8 +42,6 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 #reticle.full, #reticle.full.on { border-color: var(--accent); }
 #reticle.on { border-color: var(--danger); }
 #reticle[hidden] { display: none; }
-#lock { top: 28%; left: 50%; transform: translateX(-50%); text-align: center; max-width: 80%; font-size: 15px; }
-#lock[hidden] { display: none; }
 #help[hidden] { display: none; }
 #help h1 { font-family: var(--font-display); font-weight: 400; font-size: 17px; margin: 0 0 8px; }
 #help dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
@@ -207,15 +180,7 @@ body.touch #bschedp { left: 6px; right: 6px; width: auto; top: 60px; }
 .bport.t-link.sel { border-color: var(--accent); color: var(--accent); }
 body.touch .bport:not(.t-link) { width: 26px; height: 26px; margin: -13px 0 0 -13px; }
 #bmarq { border: 1px dashed #fff; background: rgba(255, 255, 255, 0.12); }
-#shelter { top: 146px; left: 16px; padding: 5px 12px; color: var(--accent); font-family: var(--font-display); font-size: 15px; }
-#shelter[hidden] { display: none; }
-#shelter small { font-family: var(--font-body); color: var(--ink-dim); font-size: 12px; margin-left: 6px; }
 /* ---------- stock: the money readout, inventory, supplier and projects panel (src/stock-view.js) ---------- */
-#stock { gap: 12px; }
-#stock .num.money { color: var(--accent); min-width: 4ch; }
-#svbar { top: 140px; left: 16px; display: flex; gap: 6px; padding: 5px 6px; }
-#svbar button { padding: 3px 10px; font-family: var(--font-display); font-size: 15px; white-space: nowrap; }
-#svbar .key { font-family: var(--font-body); font-size: 11px; color: var(--ink-dim); margin-left: 2px; }
 #sv { top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(780px, calc(100vw - 24px)); height: min(640px, calc(100vh - 24px)); display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 14px; z-index: 30; background: var(--surface-2); font-size: 16px; }
 #sv[hidden] { display: none; }
 #sv .svhead { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
@@ -258,9 +223,6 @@ body.touch .bport:not(.t-link) { width: 26px; height: 26px; margin: -13px 0 0 -1
 #sv .card .acts { display: flex; gap: 6px; }
 #sv .card button { font-size: 15px; padding: 6px 12px; }
 @media (max-width: 720px) {
-  #svbar .key { display: none; }
-  #svbar { top: 92px; left: 6px; }
-  html body.touch #stock, html body #stock { top: 112px; left: 6px; }
   #sv .svtabs { width: 100%; }
   #sv .svtabs button { flex: 1; }
   #sv .svmoney { margin-left: 0; }
@@ -307,7 +269,7 @@ body.peaceful .cb, body.peaceful #stance, body.peaceful #combo { display: none !
 #touchui[data-mode="build"] .stick { width: 104px; height: 104px; }
 body.touch { overscroll-behavior: none; -webkit-user-select: none; user-select: none; }
 body.touch button { touch-action: manipulation; }
-body.touch #help, body.touch #lock, body.touch #stance, body.touch #tools .key, body.touch #buildbar .key, body.touch #status .pair.dev { display: none; }
+body.touch #help, body.touch #lock, body.touch #stance, body.touch #buildbar .key { display: none; }
 body.touch #buildbar { width: auto; left: max(6px, env(safe-area-inset-left)); right: max(6px, env(safe-area-inset-right)); bottom: max(6px, env(safe-area-inset-bottom)); transform: none; max-width: none; padding: 5px 6px; gap: 4px; }
 body.touch #bhead { flex-wrap: wrap; row-gap: 3px; }
 body.touch #bhint { order: 5; flex-basis: 100%; font-size: 12px; padding: 0 2px; }
@@ -323,62 +285,13 @@ body.touch #bpieces button, body.touch #bsnap, body.touch #bdone, body.touch #bs
 body.touch #bundo, body.touch #bredo { min-width: 44px; min-height: 40px; justify-content: center; }
 body.touch #blevel button { min-width: 36px; justify-content: center; }
 body.touch #bfree { min-height: 40px; }
-body.touch #tools { bottom: max(6px, env(safe-area-inset-bottom)); gap: 5px; padding: 5px; max-width: calc(100vw - 12px); box-sizing: border-box; overflow-x: auto; scrollbar-width: none; }
-body.touch #tools::-webkit-scrollbar { display: none; }
-body.touch #tools button { flex: none; }
-body.touch #tools button { min-width: 54px; padding: 7px 6px; }
-body.touch #tools button .name { font-size: 14px; }
-@media (max-width: 520px) {
-  body.touch #stock .item:nth-child(3) { display: none; }
-}
-@media (max-width: 900px), (max-height: 480px) {
-  body.touch #stock { top: 6px; left: 6px; padding: 4px 8px; gap: 9px; }
-  body.touch #stock .label { font-size: 10px; }
-  body.touch #stock .num { font-size: 16px; }
-  body.touch #stock .item { gap: 4px; }
-  body.touch #vitals { top: 40px; left: 6px; width: 150px; padding: 5px 8px; gap: 4px; }
-  body.touch #vitals .bar { grid-template-columns: 1fr; }
-  body.touch #vitals .label { display: none; }
-  body.touch #vitals .track { height: 7px; }
-  body.touch #status { top: 6px; right: 6px; padding: 4px 6px; gap: 6px; }
-  body.touch #status .label { display: none; }
-  body.touch #status button { padding: 3px 7px; font-size: 12px; }
-  body.touch #shelter { top: 74px; left: 6px; }
-}
 @media (max-width: 720px) {
   #help { display: none; }
-  #tools button { min-width: 58px; }
 }
 
 /* ---------- the garden (src/garden-view.js): palette, seed cards, inspector card, almanac, tips ---------- */
 body.gardening #lock, body.gardening #reticle, body.gardening #stance, body.gardening #combo { display: none !important; }
 body.gardening #view { cursor: crosshair; }
-:is(#gbar, #lbar) { bottom: 92px; left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 20px); display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; z-index: 6; }
-:is(#gbar, #lbar)[hidden] { display: none; }
-:is(#gbar, #lbar) .gtools { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
-:is(#gbar, #lbar) .hslot { position: relative; display: flex; flex-direction: column; align-items: center; gap: 1px; width: 70px; padding: 7px 2px 6px; border-radius: 12px; background: var(--surface-3); border-width: 2px; transition: transform 0.12s; }
-:is(#gbar, #lbar) .hslot svg { width: 36px; height: 36px; }
-:is(#gbar, #lbar) .hslot .nm { font-family: var(--font-display); font-size: 14px; white-space: nowrap; max-width: 66px; overflow: hidden; text-overflow: ellipsis; }
-:is(#gbar, #lbar) .hslot .key { position: absolute; left: 5px; top: 3px; font-size: 11px; font-weight: 700; color: var(--ink-dim); }
-:is(#gbar, #lbar) .hslot .bdg { position: absolute; right: 4px; top: 3px; font-size: 10px; color: var(--ink-dim); }
-:is(#gbar, #lbar) .hslot .mtr { display: block; width: 46px; height: 5px; border-radius: 3px; background: var(--surface-hover); overflow: hidden; }
-:is(#gbar, #lbar) .hslot .mtr i { display: block; height: 100%; background: var(--info); }
-:is(#gbar, #lbar) .hslot.dim svg, :is(#gbar, #lbar) .hslot.dim .nm { opacity: 0.45; }
-:is(#gbar, #lbar) .hslot[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); transform: translateY(-5px) scale(1.06); }
-:is(#gbar, #lbar) .hslot[aria-pressed="true"] .nm { color: var(--accent); }
-:is(#gbar, #lbar) .ghint { text-align: center; font-size: 15px; color: var(--ink); min-height: 20px; max-width: 640px; margin: 0 auto; line-height: 1.35; }
-:is(#gbar, #lbar) .ghint b { color: var(--accent); font-weight: 700; }
-:is(#gbar, #lbar) .ghint button, #gcard button, #galm button, #gtip button { font-size: 14px; padding: 4px 11px; margin-left: 6px; border-radius: 8px; }
-:is(#gbar, #lbar) .ghint button.go, #gcard button.go, #galm button.go, #gtip button.go { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
-:is(#gbar, #lbar) .gseeds { display: flex; gap: 6px; overflow-x: auto; max-width: min(760px, calc(100vw - 30px)); padding-bottom: 2px; }
-:is(#gbar, #lbar) .gseeds[hidden] { display: none; }
-:is(#gbar, #lbar) .gseed { flex: 0 0 132px; text-align: left; padding: 6px 8px; border-radius: 10px; background: var(--surface-3); display: flex; flex-direction: column; gap: 2px; font-size: 12px; line-height: 1.3; color: var(--ink-dim); }
-:is(#gbar, #lbar) .gseed b { font-family: var(--font-display); font-weight: 400; font-size: 15px; color: var(--ink); display: flex; justify-content: space-between; align-items: center; }
-:is(#gbar, #lbar) .gseed b i { font-style: normal; width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
-:is(#gbar, #lbar) .gseed .when { color: var(--good); }
-:is(#gbar, #lbar) .gseed .when.no { color: var(--warn); }
-:is(#gbar, #lbar) .gseed[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
-:is(#gbar, #lbar) .gseed .own { color: var(--ink); font-weight: 700; }
 #gcan { display: inline-block; width: 70px; height: 10px; border-radius: 5px; background: var(--surface-hover); vertical-align: middle; overflow: hidden; margin: 0 4px; }
 #gcan i { display: block; height: 100%; background: var(--info); transition: width 0.2s; }
 #glabel { position: fixed; left: 0; top: 0; pointer-events: none; background: var(--surface-2); border: 1px solid var(--panel-edge); border-radius: 8px; padding: 3px 10px; font-size: 14px; font-weight: 700; white-space: nowrap; z-index: 7; font-variant-numeric: tabular-nums; }
@@ -389,44 +302,7 @@ body.gardening #view { cursor: crosshair; }
 #gfx .pop.big { font-size: 30px; color: var(--float-ink); animation-duration: 2.2s; }
 #gfx .pop small { display: block; font-family: var(--font-body); font-size: 13px; text-align: center; color: var(--float-ink); }
 @keyframes gpop { 0% { opacity: 0; margin-top: 8px; transform: translate(-50%, -100%) scale(0.7); } 15% { opacity: 1; transform: translate(-50%, -100%) scale(1.12); } 30% { transform: translate(-50%, -100%) scale(1); } 100% { opacity: 0; margin-top: -54px; } }
-#gcard { top: 122px; right: 14px; width: min(330px, calc(100vw - 28px)); z-index: 8; display: flex; flex-direction: column; gap: 6px; font-size: 15px; line-height: 1.4; }
-#gcard[hidden] { display: none; }
-#gcard h2 { font-family: var(--font-display); font-weight: 400; font-size: 22px; margin: 0; display: flex; align-items: baseline; gap: 8px; }
-#gcard h2 small { font-family: var(--font-body); font-size: 13px; color: var(--ink-dim); }
-#gcard .st { font-weight: 700; color: var(--good); }
-#gcard .st.warn { color: var(--warn); }
-#gcard .st.bad { color: var(--danger); }
-#gcard .strip { position: relative; height: 26px; margin: 4px 0 14px; }
-#gcard .strip .bar { position: absolute; left: 0; right: 0; top: 9px; height: 8px; border-radius: 4px; background: var(--surface-hover); overflow: hidden; }
-#gcard .strip .bar i { display: block; height: 100%; background: linear-gradient(90deg, #7fae5a, #b9d77a); }
-#gcard .strip .mk { position: absolute; top: 0; width: 2px; height: 26px; background: var(--accent); }
-#gcard .strip .lab { position: absolute; top: 26px; font-size: 11px; color: var(--ink-dim); white-space: nowrap; }
-#gcard .strip .lab.r { right: 0; }
-#gcard .chips { display: flex; flex-wrap: wrap; gap: 5px; }
-#gcard .chips span { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--surface-3); }
-#gcard .det { font-size: 12px; color: var(--ink-dim); font-variant-numeric: tabular-nums; display: grid; grid-template-columns: 1fr auto; gap: 1px 10px; }
-#gcard .row2 { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
-#galm { top: 150px; left: 14px; width: min(360px, calc(100vw - 28px)); max-height: calc(100vh - 200px); overflow-y: auto; z-index: 8; font-size: 15px; line-height: 1.4; display: flex; flex-direction: column; gap: 6px; }
-#galm[hidden] { display: none; }
-#galm h2 { font-family: var(--font-display); font-weight: 400; font-size: 22px; margin: 0; display: flex; justify-content: space-between; align-items: center; }
-#galm h3 { font-family: var(--font-display); font-weight: 400; font-size: 17px; margin: 6px 0 0; color: var(--accent); }
-#galm .frost { padding: 6px 10px; border-radius: 8px; background: var(--surface-3); }
-#galm .frost.likely { background: rgba(120, 170, 230, 0.2); border: 1px solid rgba(150, 200, 255, 0.5); }
-#galm ul { margin: 0; padding-left: 18px; }
-#galm li small { color: var(--ink-dim); }
-#gtip { bottom: 236px; right: 14px; width: min(380px, calc(100vw - 28px)); z-index: 9; font-size: 15px; line-height: 1.45; border-color: var(--accent-soft); }
-#gtip[hidden] { display: none; }
-#gtip h3 { font-family: var(--font-display); font-weight: 400; font-size: 19px; margin: 0 0 3px; color: var(--accent); }
-#gtip .why { color: var(--ink-dim); font-size: 13px; margin-top: 3px; }
-#gtip .acts { display: flex; justify-content: flex-end; margin-top: 6px; }
-body.touch :is(#gbar, #lbar) { bottom: 84px; }
-body.touch :is(#gbar, #lbar) .hslot { width: 58px; }
-@media (max-width: 720px) { :is(#gbar, #lbar) .hslot { width: 54px; } :is(#gbar, #lbar) .hslot svg { width: 28px; height: 28px; } #gcard { top: auto; bottom: 230px; } }
 /* chickens panel (iteration 13) */
-#utbar { top: 224px; left: 16px; padding: 5px 6px; }
-#utbar button { padding: 3px 10px; font-family: var(--font-display); font-size: 15px; white-space: nowrap; }
-#utbar button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
-#utbar .key { font-family: var(--font-body); font-size: 11px; color: var(--ink-dim); margin-left: 2px; }
 #ut { top: 74px; left: 284px; width: 380px; max-width: calc(100vw - 24px); max-height: calc(100vh - 170px); overflow: auto; z-index: 6; }
 #ut .uthead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
 #ut h2 { margin: 0; font-family: var(--font-display); font-size: 20px; color: var(--accent); font-weight: 500; }
@@ -441,11 +317,8 @@ body.touch :is(#gbar, #lbar) .hslot { width: 58px; }
 #ut .utnone { margin: 2px 0 4px; color: var(--ink-dim); font-size: 13.5px; line-height: 1.35; }
 #ut .utissue { margin: 6px 0 2px; padding: 6px 9px; border-left: 3px solid var(--accent); background: var(--well); border-radius: 0 6px 6px 0; font-size: 13px; line-height: 1.35; }
 #ut .utissue b { font-weight: 600; }
-body.cooking-active #utbar, body.cooking-active #ut { display: none; }
-@media (max-width: 700px) { #utbar { top: 174px; left: 6px; } #utbar .key { display: none; } #ut { left: 6px; top: 60px; } }
-#ckbar { top: 182px; left: 16px; padding: 5px 6px; }
-#ckbar button { padding: 3px 10px; font-family: var(--font-display); font-size: 15px; white-space: nowrap; }
-#ckbar .key { font-family: var(--font-body); font-size: 11px; color: var(--ink-dim); margin-left: 2px; }
+body.cooking-active #ut { display: none; }
+@media (max-width: 700px) { #ut { left: 6px; top: 60px; } }
 #ck { top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(760px, calc(100vw - 24px)); height: min(660px, calc(100vh - 24px)); display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 14px; z-index: 30; background: var(--surface-2); font-size: 16px; }
 #ck[hidden] { display: none; }
 #ck .ckhead { display: flex; align-items: center; gap: 12px; }
@@ -479,12 +352,7 @@ body.cooking-active #utbar, body.cooking-active #ut { display: none; }
 #ck .ckbuy .n { min-width: 22px; text-align: center; font-weight: 700; }
 #ck .ckbuy .go { font-family: var(--font-display); font-size: 17px; border-color: var(--accent); background: var(--accent-soft); }
 #ck .ckblurb { color: var(--ink-dim); font-size: 14px; }
-@media (max-width: 700px) { #ckbar { top: 134px; left: 6px; } #ckbar .key { display: none; } }
 /* construction (iteration 2c): the Build button, the next-step note, the Build panel, the work prompt, banners */
-#cvbar { top: 266px; left: 16px; padding: 5px 6px; display: flex; gap: 6px; }
-#cvbar button { padding: 3px 10px; font-family: var(--font-display); font-size: 15px; white-space: nowrap; }
-#cvbar button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
-#cvbar .key { font-family: var(--font-body); font-size: 11px; color: var(--ink-dim); margin-left: 2px; }
 #cvnext { top: 310px; left: 16px; width: 252px; padding: 8px 12px 9px; border-left: 3px solid var(--accent); }
 #cvnext[hidden], #cv[hidden], #cvprompt[hidden], #cvbanner[hidden], #cvsand[hidden], #cvact[hidden] { display: none; }
 #cvnext .cvk { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim); }
@@ -557,9 +425,8 @@ body.cooking-active #utbar, body.cooking-active #ut { display: none; }
 #cvbanner.small .t { font-size: 17px; }
 #cvsand { top: 120px; left: 16px; font-size: 12.5px; padding: 5px 10px; z-index: 6; }
 #cvact { right: 22px; bottom: 210px; width: 92px; height: 92px; border-radius: 50%; display: grid; place-items: center; text-align: center; font-family: var(--font-display); font-size: 15px; line-height: 1.1; z-index: 8; border-color: var(--accent); color: var(--accent); touch-action: none; user-select: none; }
-body.cooking-active #cvbar, body.cooking-active #cvnext, body.cooking-active #cvprompt { display: none; }
+body.cooking-active #cvnext, body.cooking-active #cvprompt { display: none; }
 @media (max-width: 700px) {
-  #cvbar { top: 214px; left: 6px; } #cvbar .key { display: none; }
   #cvnext { top: 254px; left: 6px; width: 200px; padding: 6px 9px; } #cvnext .cvt { font-size: 15px; } #cvnext .cvl { font-size: 12.5px; }
   #cv { top: 6px; right: 6px; max-height: calc(100vh - 12px); }
   #cvprompt { bottom: 150px; } #cvbanner { top: 60px; }
@@ -569,59 +436,65 @@ body.cooking-active #cvbar, body.cooking-active #cvnext, body.cooking-active #cv
 <body>
 <canvas id="view" tabindex="0" aria-label="Game view"></canvas>
 
-<div id="stock" class="panel" aria-live="off">
-  <div class="item"><span class="label">Wood</span><span class="num" id="wood">0</span></div>
-  <div class="item"><span class="label">Stone</span><span class="num" id="stone">0</span></div>
-  <div class="item cb"><span class="label">Defeated</span><span class="num" id="kills">0</span></div>
-  <div class="item"><span class="num money" id="money" title="Your money">$0</span></div>
+<!-- top-left: what you have (money, wood, stone) and how you are (stamina, hunger). Icons come from src/game/hud.js -->
+<div id="stock" aria-live="off">
+  <div class="item money panel ui-chip" data-ic="coin" title="Your money"><span class="label">Money</span><span class="num money v" id="money">$0</span></div>
+  <div class="item panel ui-chip" data-ic="wood" title="Wood"><span class="label">Wood</span><span class="num v" id="wood">0</span></div>
+  <div class="item panel ui-chip" data-ic="stone" title="Stone"><span class="label">Stone</span><span class="num v" id="stone">0</span></div>
+  <div class="item cb panel ui-chip"><span class="label">Defeated</span><span class="num v" id="kills">0</span></div>
 </div>
-<div id="svbar" class="panel svbtns" role="group" aria-label="Belongings">
-  <button type="button" id="svb-inv" title="What you own (I)">Items <span class="key">I</span></button>
-  <button type="button" id="svb-shop" title="Order materials and tools (U)">Supplier <span class="key">U</span></button>
-  <button type="button" id="svb-notes" title="Optional project ideas (J)">Projects <span class="key">J</span></button>
+<div id="vitals" class="panel">
+  <div class="bar cb" title="Health"><span class="label">Health</span><div class="track"><div class="fill hp" id="hpbar"></div></div></div>
+  <div class="bar" title="Stamina"><span class="label">Stamina</span><div class="track"><div class="fill st" id="stbar"></div></div></div>
 </div>
 
-<div id="sv" class="panel" role="dialog" aria-label="Belongings" hidden>
-  <div class="svhead">
+<!-- left edge: the dock (launchers). The buttons keep their ids; each view still wires its own -->
+<nav id="dock" class="ui-dock" aria-label="Launchers">
+  <button type="button" id="svb-inv" class="ui-dock-btn" aria-pressed="false" title="What you own (I)"><span class="nm">Bag</span><span class="ui-key">I</span></button>
+  <button type="button" id="svb-shop" class="ui-dock-btn" aria-pressed="false" title="Order materials and tools (U)"><span class="nm">Shop</span><span class="ui-key">U</span></button>
+  <button type="button" id="svb-notes" class="ui-dock-btn" aria-pressed="false" title="Optional project ideas (J)" hidden><span class="nm">Projects</span><span class="ui-key">J</span></button>
+  <button type="button" id="ckb" class="ui-dock-btn" aria-pressed="false" title="Your hens, the coop and the morning chores (H)"><span class="nm">Hens</span><span class="ui-key">H</span></button>
+  <button type="button" id="utb" class="ui-dock-btn" aria-pressed="false" title="Power, water and room temperatures at a glance (P)"><span class="nm">Home</span><span class="ui-key">P</span></button>
+  <button type="button" id="cvb" class="ui-dock-btn" aria-pressed="false" title="Your buildings: order materials and raise them stage by stage (L)"><span class="nm">Build</span><span class="ui-key">L</span></button>
+</nav>
+
+<!-- drawers (right side, one at a time) -->
+<div id="sv" class="panel ui-panel ui-panel--side ui-panel--wide" role="dialog" aria-label="Belongings" hidden>
+  <div class="svhead ui-panel__head">
     <div class="svtabs" role="tablist">
       <button type="button" role="tab" data-tab="inv" aria-selected="true">Inventory</button>
       <button type="button" role="tab" data-tab="shop" aria-selected="false">Supplier</button>
       <button type="button" role="tab" data-tab="notes" aria-selected="false">Projects</button>
     </div>
-    <div class="svmoney" id="svmoney">$0</div>
-    <button type="button" id="svgrant" title="Testing: adds $100,000">+ $100,000</button>
-    <button type="button" id="svclose" aria-label="Close" title="Close (Esc)">Close</button>
+    <div class="svmoney ui-panel__aside" id="svmoney">$0</div>
+    <button type="button" id="svgrant" class="ui-btn--ghost" title="Testing: adds $100,000">+ $100,000</button>
+    <button type="button" id="svclose" class="ui-close ui-btn ui-btn--icon ui-btn--ghost" aria-label="Close" title="Close (Esc)"></button>
   </div>
-  <div class="svnote" id="svnote" aria-live="polite"></div>
-  <div class="svbody" id="svbody"></div>
+  <div class="svnote ui-panel__note" id="svnote" aria-live="polite"></div>
+  <div class="svbody ui-panel__body" id="svbody"></div>
 </div>
-
-<div id="utbar" class="panel" role="group" aria-label="Home"><button type="button" id="utb" aria-pressed="false" title="Power, water and room temperatures at a glance (P)">Home <span class="key">P</span></button></div>
-<div id="ut" class="panel" role="dialog" aria-label="Home: power, water and rooms" hidden>
-  <div class="uthead"><h2>Home</h2><button type="button" id="utclose" title="Close (Esc)">Close</button></div>
-  <div id="utbody"></div>
+<div id="ut" class="panel ui-panel ui-panel--side" role="dialog" aria-label="Home: power, water and rooms" hidden>
+  <div class="uthead ui-panel__head"><h2>Home</h2><button type="button" id="utclose" class="ui-close ui-btn ui-btn--icon ui-btn--ghost" aria-label="Close" title="Close (Esc)"></button></div>
+  <div id="utbody" class="ui-panel__body"></div>
 </div>
-<div id="ckbar" class="panel" role="group" aria-label="Chickens"><button type="button" id="ckb" title="Your hens, the coop and the morning chores (H)">Chickens <span class="key">H</span></button></div>
-<div id="ck" class="panel" role="dialog" aria-label="Chickens" hidden>
-  <div class="ckhead"><h2>Chickens</h2><span id="ckmoney"></span><button type="button" id="ckclose" title="Close (Esc)">Close</button></div>
-  <div class="cknote" id="cknote" aria-live="polite"></div>
-  <div class="ckbody" id="ckbody"></div>
-</div>
-
-<div id="vitals" class="panel">
-  <div class="bar cb"><span class="label">Health</span><div class="track"><div class="fill hp" id="hpbar"></div></div></div>
-  <div class="bar"><span class="label">Stamina</span><div class="track"><div class="fill st" id="stbar"></div></div></div>
+<div id="ck" class="panel ui-panel ui-panel--side ui-panel--wide" role="dialog" aria-label="Chickens" hidden>
+  <div class="ckhead ui-panel__head"><h2>Chickens</h2><span id="ckmoney" class="ui-panel__aside"></span><button type="button" id="ckclose" class="ui-close ui-btn ui-btn--icon ui-btn--ghost" aria-label="Close" title="Close (Esc)"></button></div>
+  <div class="cknote ui-panel__note" id="cknote" aria-live="polite"></div>
+  <div class="ckbody ui-panel__body" id="ckbody"></div>
 </div>
 <div id="hurt"></div>
 <div id="msg" class="panel" hidden></div>
 
-<div id="status" class="panel">
-  <div class="pair"><span class="label">Day</span><span class="val" id="day">1</span></div>
-  <div class="pair"><span class="label">Time</span><span class="val" id="clock">08:00</span></div>
-  <div class="pair" id="wx">
-    <button id="wxbtn" type="button" aria-expanded="false" aria-controls="wxpanel" title="Weather (Y)"><span id="wxdate"></span><span id="wxtemp"></span><span id="wxcond"></span></button>
-    <div id="wxpanel" hidden>
-      <h2 id="wxd-date"></h2>
+<!-- top-right: clock, weather, speed, gear -->
+<div id="hud-top">
+  <div class="hud-row">
+    <div id="hud-clock" class="panel ui-chip" title="Day and time"><span class="pair"><span class="label">Day</span><span class="val" id="day">1</span></span><span class="val" id="clock">08:00</span></div>
+    <div class="pair" id="wx">
+      <button id="wxbtn" type="button" class="panel ui-chip" aria-expanded="false" aria-controls="wxpanel" title="Weather (Y)"><span id="wxdate"></span><span id="wxtemp"></span><span id="wxcond"></span></button>
+      <div id="wxpanel" class="ui-panel ui-panel--side" role="dialog" aria-label="Weather" hidden>
+        <div class="ui-panel__head"><h2>Weather</h2><button type="button" id="wxclose" class="ui-close ui-btn ui-btn--icon ui-btn--ghost" aria-label="Close" title="Close (Esc)"></button></div>
+        <div class="ui-panel__note" id="wxd-date"></div>
+        <div class="ui-panel__body">
       <dl>
         <dt>Temperature</dt><dd id="wxd-temp"></dd>
         <dt>Humidity</dt><dd id="wxd-hum"></dd>
@@ -636,19 +509,35 @@ body.cooking-active #cvbar, body.cooking-active #cvnext, body.cooking-active #cv
       </dl>
       <div class="site"><label for="wxclimate">Climate</label><select id="wxclimate"><option value="temperate">Temperate</option><option value="mediterranean-coast">Mediterranean coast</option><option value="cold-continental">Cold continental</option></select><span id="wxd-lat"></span></div>
       <div class="site"><label for="wxyear">Year length</label><select id="wxyear" title="How many days a year lasts. Days stay the same; seasons, plants and animals move faster in a shorter year."><option value="12">12 days (3 a season)</option><option value="20">20 days (5 a season)</option><option value="40">40 days (10 a season)</option><option value="120">120 days (30 a season)</option><option value="365">365 days (real)</option></select></div>
+        </div>
+      </div>
     </div>
   </div>
-  <div id="speed" role="group" aria-label="Game speed">
-    <button type="button" data-speed="0" aria-pressed="false" title="Pause time. You can still build and walk about (` key)">Pause</button>
-    <button type="button" data-speed="1" aria-pressed="true" title="Normal speed: a day takes 20 minutes">1&times;</button>
-    <button type="button" data-speed="10" aria-pressed="false" title="A day takes 2 minutes">10&times;</button>
-    <button type="button" data-speed="100" aria-pressed="false" title="A day takes 12 seconds">100&times;</button>
-    <button type="button" data-speed="1000" aria-pressed="false" title="A day takes about a second. ; slower, ' faster">1000&times;</button>
+  <div class="hud-row">
+    <div id="speed" class="panel ui-seg" role="group" aria-label="Game speed">
+      <button type="button" data-speed="0" aria-pressed="false" aria-label="Pause" title="Pause time. You can still build and walk about (` key)"><span class="nm">Pause</span></button>
+      <button type="button" data-speed="1" aria-pressed="true" aria-label="Normal speed" title="Normal speed: a day takes 20 minutes"><span class="nm">1&times;</span></button>
+      <button type="button" data-speed="10" aria-pressed="false" aria-label="10 times" title="10&times;: a day takes 2 minutes"><span class="nm">10&times;</span></button>
+      <button type="button" data-speed="100" aria-pressed="false" aria-label="100 times" title="100&times;: a day takes 12 seconds"><span class="nm">100&times;</span></button>
+      <button type="button" data-speed="1000" aria-pressed="false" aria-label="1000 times" title="1000&times;: a day takes about a second. ; slower, ' faster"><span class="nm">1000&times;</span></button>
+    </div>
+    <button type="button" id="hud-gear" class="panel ui-btn ui-btn--icon" aria-pressed="false" aria-controls="status" aria-label="Settings" title="Settings"></button>
   </div>
-  <div class="pair dev"><span class="label">FPS</span><span class="val" id="fps">60</span></div>
-  <div class="pair dev"><span class="label">Seed</span><span class="val" id="seed">0</span></div>
-  <button id="quality" type="button" title="Switch graphics quality (G)">High</button>
+</div>
+
+<!-- the settings drawer (gear). Keeps its id: the engine, fx.js, fxpost.js and the kitchen append their switches here,
+     before #newworld, which must stay a direct child -->
+<div id="status" class="panel ui-panel ui-panel--side" role="dialog" aria-label="Settings" hidden>
+  <div class="ui-panel__head"><h2>Settings</h2><button type="button" id="hud-gear-close" class="ui-close ui-btn ui-btn--icon ui-btn--ghost" aria-label="Close" title="Close (Esc)"></button></div>
+  <div class="hud-sec">Look</div>
+  <div class="hud-skins" role="group" aria-label="Interface skin">
+    <button type="button" class="hud-skin" data-skin="cozy" aria-pressed="false"><span class="hud-skin__pv" aria-hidden="true"><i class="c"></i><i class="m"></i><span class="r"><i class="s"></i><i class="s on"></i><i class="s"></i></span></span><span class="nm">Cozy</span></button>
+    <button type="button" class="hud-skin" data-skin="minimal" aria-pressed="false"><span class="hud-skin__pv" aria-hidden="true"><i class="c"></i><i class="m"></i><span class="r"><i class="s"></i><i class="s on"></i><i class="s"></i></span></span><span class="nm">Minimal</span></button>
+  </div>
+  <div class="hud-sec">Graphics</div>
+  <div class="hud-gfx"><button id="quality" type="button" title="Switch graphics quality (G)">High</button></div>
   <button id="newworld" type="button">New world</button>
+  <div class="hud-dev"><div class="pair dev"><span class="label">FPS</span><span class="val" id="fps">60</span></div><div class="pair dev"><span class="label">Seed</span><span class="val" id="seed">0</span></div></div>
 </div>
 
 <div id="help" class="panel" hidden>
@@ -682,16 +571,15 @@ body.cooking-active #cvbar, body.cooking-active #cvnext, body.cooking-active #cv
 </div>
 <div id="combo" aria-live="off"></div>
 <div id="reticle" hidden></div>
-<div id="lock" class="panel">Click the view to take control. Esc frees the mouse.</div>
+<div id="lock" class="panel ui-prompt">Click the view to take control. Esc frees the mouse.</div>
 
-<div id="cvbar" class="panel" role="group" aria-label="Building"><button type="button" id="cvb" aria-pressed="false" title="Your buildings: order materials and raise them stage by stage (L)">Build <span class="key">L</span></button></div>
-<div id="cvnext" class="panel" aria-live="polite" hidden></div>
-<div id="cv" class="panel" role="dialog" aria-label="Build" hidden>
-  <div class="cvhead"><h2 id="cvtitle">Build</h2><span class="cvmoney" id="cvmoney"></span><button type="button" id="cvclose" title="Close (Esc)">Close</button></div>
-  <div class="cvsay" id="cvsay" aria-live="polite"></div>
-  <div id="cvbody"></div>
+<div id="cvnext" class="panel ui-card" aria-live="polite" hidden></div>
+<div id="cv" class="panel ui-panel ui-panel--side" role="dialog" aria-label="Build" hidden>
+  <div class="cvhead ui-panel__head"><h2 id="cvtitle">Build</h2><span class="cvmoney ui-panel__aside" id="cvmoney"></span><button type="button" id="cvclose" class="ui-close ui-btn ui-btn--icon ui-btn--ghost" aria-label="Close" title="Close (Esc)"></button></div>
+  <div class="cvsay ui-panel__note" id="cvsay" aria-live="polite"></div>
+  <div id="cvbody" class="ui-panel__body"></div>
 </div>
-<div id="cvprompt" class="panel" hidden><div class="row"><kbd id="cvpk">E</kbd><span id="cvpt"></span><i id="cvpc"></i></div><div class="pb" id="cvpb" hidden><b></b></div></div>
+<div id="cvprompt" class="panel ui-prompt" hidden><div class="row"><kbd id="cvpk">E</kbd><span id="cvpt"></span><i id="cvpc"></i></div><div class="pb" id="cvpb" hidden><b></b></div></div>
 <div id="cvbanner" class="panel" hidden><div class="t"></div><div class="l"></div></div>
 <button type="button" id="cvsand" class="panel" hidden></button>
 <button type="button" id="cvact" class="panel" hidden></button>
@@ -716,7 +604,7 @@ body.cooking-active #cvbar, body.cooking-active #cvnext, body.cooking-active #cv
 <div id="gtip" class="panel" role="note" hidden></div>
 <div id="buildbar" class="panel" hidden></div>
 <div id="blabel" hidden></div>
-<div id="shelter" class="panel" hidden>Sheltered<small>resting</small></div>
+<div id="shelter" class="panel ui-chip is-good" hidden>Sheltered<small>resting</small></div>
 
 <div id="err" class="panel" hidden></div>
 

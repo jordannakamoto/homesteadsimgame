@@ -269,18 +269,20 @@
 
   /* ================= the bar ================= */
   const css = document.createElement('style');
-  css.textContent = '#fbar{position:fixed;bottom:92px;left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100vw - 20px);display:flex;flex-direction:column;gap:6px;padding:8px 10px;z-index:6}#fbar[hidden]{display:none}' +
-    '#fbar .gtools{display:flex;gap:6px;justify-content:center}#fbar .hslot{position:relative;display:flex;flex-direction:column;align-items:center;gap:1px;width:70px;padding:7px 2px 6px;border-radius:12px;background:var(--surface-3);border-width:2px;transition:transform .12s}' +
-    '#fbar .hslot svg{width:36px;height:36px}#fbar .hslot .nm{font-family:var(--font-display);font-size:14px;white-space:nowrap}#fbar .hslot .key{position:absolute;left:5px;top:3px;font-size:11px;font-weight:700;color:var(--ink-dim)}' +
-    '#fbar .hslot .bdg{position:absolute;right:4px;top:3px;font-size:10px;color:var(--ink-dim)}#fbar .hslot.dim svg,#fbar .hslot.dim .nm{opacity:.45}#fbar .hslot[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);transform:translateY(-5px) scale(1.06)}' +
-    '#fbar .hslot .mtr{display:block;width:46px;height:5px;border-radius:3px;background:var(--surface-hover);overflow:hidden}#fbar .hslot .mtr i{display:block;height:100%;background:linear-gradient(90deg,#e0a020,#ffd23a)}' +
-    '#fbar .ghint{text-align:center;font-size:15px;color:var(--ink);min-height:20px;max-width:640px;margin:0 auto;line-height:1.35}#fbar .ghint b{color:var(--accent)}';
+  css.textContent = '#fbar .hslot .mtr>i{background:var(--warn)}';   // the slots' look is shared (template/ui/10-kit.css, 30-hotbar.css)
   document.head.appendChild(css);
   const bar = document.createElement('div');
   bar.id = 'fbar'; bar.className = 'panel'; bar.hidden = true; bar.setAttribute('role', 'group'); bar.setAttribute('aria-label', 'Site');
   bar.innerHTML = '<div class="ghint" aria-live="polite"></div><div class="gtools"></div>';
   document.body.appendChild(bar);
   const hintEl = bar.querySelector('.ghint'), toolsEl = bar.querySelector('.gtools');
+  // the bar sits in the bottom lane beside the mode chip; its hint stacks above it in the prompt place (template/ui/30-hotbar.css)
+  if (window.__ui) {
+    const ctx = document.createElement('div'); ctx.className = 'gctx'; ctx.append(hintEl); bar.insertBefore(ctx, toolsEl);
+    toolsEl.classList.add('panel'); hintEl.classList.add('panel'); bar.classList.remove('panel');
+    window.__ui.mount(bar, 'bottom', { order: 2 });
+    new ResizeObserver(() => document.body.style.setProperty('--fbar-ctx', ctx.offsetHeight + 'px')).observe(ctx);
+  }
   // a button on the tool strip, beside the Yard
   const tb = $('tools'), yardBtn = tb && tb.querySelector('[data-tool="hands"]');
   if (tb) {

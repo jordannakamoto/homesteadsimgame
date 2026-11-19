@@ -51,7 +51,12 @@
   const line = document.createElement('div');
   line.style.cssText = 'position:fixed;left:50%;bottom:118px;transform:translateX(-50%);padding:6px 14px;border-radius:8px;background:rgba(20,22,18,.72);color:#f1ead6;font:14px/1.3 system-ui,sans-serif;pointer-events:none;z-index:30;display:none;max-width:80vw;text-align:center';
   document.body.appendChild(line);
-  function say(t, s = 2) { line.textContent = t; line.style.display = t ? 'block' : 'none'; sayT = s; }
+  // with the interface kit the line is a toast in the top lane; without it, a line near the bottom of the view
+  function say(t, s = 2) {
+    sayT = s;
+    if (window.__ui && window.__ui.toast) { if (t) window.__ui.toast(t, { seconds: s }); return; }
+    line.textContent = t; line.style.display = t ? 'block' : 'none';
+  }
 
   // ---------------------------------------------------------------- models
   const lambert = () => new T.MeshLambertMaterial({ vertexColors: true });
