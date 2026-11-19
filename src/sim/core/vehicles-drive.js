@@ -196,7 +196,7 @@ export function createBody(kind, { x = 0, z = 0, yaw = 0, fuelL = Infinity, carg
     steer: 0, air: false, contact: [0, 0, 0, 0], sF0: 0.5, jack: false,
     ax: 0, ay: 0, slip: 0, plow: 0, mu: kind.grip.mu, bump: 0, land: 0, stalled: null, rev: false, artic: 0, ra: 0,
     gear: 1, rpm: kind.engine ? kind.engine.idleRpm : 0, shiftT: 0, spin: 0, spinning: false, tip: 0,
-    load: [0, 0, 0, 0], fy: [0, 0], hitch: [0, 0], tongue: 0, belt: [0, 0], tslip: [0, 0], cargoZ: null,
+    load: [0, 0, 0, 0], fy: [0, 0], hitch: [0, 0], tongue: 0, belt: [0, 0], tslip: [0, 0], cargoZ: null, jackHold: false,
     fuelL, cargoKg, burnedL: 0, distM: 0, engineS: 0,
   };
   if (env) settle(b, kind, env);
