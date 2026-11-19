@@ -9454,13 +9454,14 @@
   const CAP_SKIP = new Set(["casing", "base", "stool", "caulk", "paint", "prime", "joint", "batt", "wiring", "pipe", "box"]);
   function capWalls(S) {
     const on = S.cutH < 99 && S.mem && S.mem.walls && S.mem.walls.length;
-    if (!on) { if (S.capMesh) S.capMesh.visible = false; return; }
+    if (!on) { if (S.capMesh) S.capMesh.visible = false; if (S.capSide) S.capSide.visible = false; return; }
     const h = S.cutH, opensAt = [];
     for (const w of S.mem.walls) for (const q of w.openings || []) if (w.y0 + q.sill < h && w.y0 + q.sill + q.height > h) opensAt.push(q.id);
     const key = S.mem.ver + "|" + S.plan.size + "|" + opensAt.join() + "|" + S.mem.walls.filter((w) => w.y0 + (w.h || 0) > h && w.y0 < h).length;
     if (S.capKey !== key) {
       S.capKey = key;
       if (S.capMesh) (S.group.remove(S.capMesh), S.capMesh.geometry.dispose(), (S.capMesh = null));
+      S.capWallsData = [];
       const pos = [], cols = [];
       for (const w of S.mem.walls) {
         if (w.y0 + (w.h || 0) <= h || w.y0 >= h) continue;
@@ -9480,6 +9481,7 @@
           else if (m.kind === "cladding") strips.push([c - half, c + half, MCOL[m.col || "siding"] || MCOL.siding]);
         }
         if (!(hi > lo)) continue;
+        (S.capWallsData || (S.capWallsData = [])).push({ w, L, ux, uz, N, lo, hi, strips, top: w.y0 + (w.h || 0) });
         // along the wall, less the openings the cut passes through
         const gaps = (w.openings || []).filter((q) => opensAt.includes(q.id)).map((q) => [q.offset, q.offset + q.width]).sort((p, q) => p[0] - q[0]);
         let x = 0;
@@ -9500,6 +9502,53 @@
       }
     }
     if (S.capMesh) ((S.capMesh.visible = true), (S.capMesh.position.y = h - 0.0005));   // at the cut: nothing of the cut pieces shows above it
+    capSides(S, h);
+  }
+  // the cut's sides: where the near plane and the two side planes of the cut pass through a finished wall, a vertical cap in
+  // that plane from the cut height to the top of the wall (less any opening it passes through). They move with you and the
+  // camera, so they are worked out every frame: a few quads
+  const _im = new T.Matrix4(), _pl = [new T.Plane(), new T.Plane(), new T.Plane()];
+  function capSides(S, h) {
+    if (!S.capSide) {
+      const g = new T.BufferGeometry(), N = 1200;
+      g.setAttribute("position", new T.BufferAttribute(new Float32Array(N * 3), 3).setUsage(T.DynamicDrawUsage));
+      g.setAttribute("normal", new T.BufferAttribute(new Float32Array(N * 3), 3).setUsage(T.DynamicDrawUsage));
+      g.setAttribute("color", new T.BufferAttribute(new Float32Array(N * 3), 3).setUsage(T.DynamicDrawUsage));
+      S.capSide = new T.Mesh(g, S.capSideMat || (S.capSideMat = new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide })));
+      S.capSide.frustumCulled = false;
+      S.group.add(S.capSide);
+    }
+    const g = S.capSide.geometry, P = g.attributes.position.array, Nn = g.attributes.normal.array, Cc = g.attributes.color.array, max = P.length / 3;
+    let n = 0;
+    const tri = (a, b, c, nr, col) => { if (n + 3 > max) return; for (const q of [a, b, c]) { P.set(q, n * 3); Nn.set(nr, n * 3); Cc.set(col, n * 3); n++; } };
+    S.group.updateMatrixWorld();
+    _im.copy(S.group.matrixWorld).invert();
+    _pl[0].copy(S.near).applyMatrix4(_im); _pl[1].copy(S.sideA).applyMatrix4(_im); _pl[2].copy(S.sideB).applyMatrix4(_im);
+    const val = (pl, x, z) => pl.normal.x * x + pl.normal.z * z + pl.constant;    // kept where >= 0 (the planes stand upright)
+    for (const d of S.capWallsData || []) {
+      const { w, L, ux, uz, N, lo, hi, strips, top } = d;
+      if (top <= h + 0.02) continue;
+      for (let i = 0; i < 3; i++) {
+        const pl = _pl[i], nu = pl.normal.x * ux + pl.normal.z * uz;
+        if (Math.abs(nu) < 1e-4) continue;
+        // where this plane crosses a line along the wall at offset o across it
+        const at = (o) => -(val(pl, w.a[0] + N[0] * o, w.a[1] + N[2] * o)) / nu;
+        const tc = at((lo + hi) / 2);
+        if (tc < 0 || tc > L) continue;
+        const cx = w.a[0] + ux * tc + N[0] * ((lo + hi) / 2), cz = w.a[1] + uz * tc + N[2] * ((lo + hi) / 2);
+        if (_pl.some((q, k) => k !== i && val(q, cx, cz) >= 0)) continue;       // the cut does not reach here
+        // up from the cut to the top of the wall, less an opening the plane passes through
+        let ys = [[h, top]];
+        for (const q of w.openings || []) if (tc > q.offset && tc < q.offset + q.width) ys = ys.flatMap(([y0, y1]) => [[y0, Math.min(y1, w.y0 + q.sill)], [Math.max(y0, w.y0 + q.sill + q.height), y1]].filter(([p0, p1]) => p1 - p0 > 0.01));
+        const nr = [pl.normal.x, 0, pl.normal.z], sh = -0.0015;      // a hair toward the cut side, off the clipped faces
+        const pt = (o, y) => { const t = at(o); return [w.a[0] + ux * t + N[0] * o + nr[0] * sh, y, w.a[1] + uz * t + N[2] * o + nr[2] * sh]; };
+        const quad = (o0, o1, y0, y1, col, e = 0) => { const a = pt(o0, y0), b = pt(o1, y0), c = pt(o1, y1), dd = pt(o0, y1); for (const q of [a, b, c, dd]) ((q[0] -= nr[0] * e), (q[2] -= nr[2] * e)); tri(a, b, c, nr, col); tri(a, c, dd, nr, col); };
+        for (const [y0, y1] of ys) { quad(lo, hi, y0, y1, CAP_CORE); for (const [o0, o1, col2] of strips) quad(o0, o1, y0, y1, col2, 0.0015); }
+      }
+    }
+    g.setDrawRange(0, n);
+    g.attributes.position.needsUpdate = g.attributes.normal.needsUpdate = g.attributes.color.needsUpdate = true;
+    S.capSide.visible = n > 0;
   }
   function dropMembers(S) {
     for (const m of S.memMeshes) {

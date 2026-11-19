@@ -925,3 +925,8 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - **Dollhouse**: where the cut opens a finished wall, a cap at the cut height shows it in section as one solid thing (the room's colour inside, a pale timber core, the siding's colour outside); no studs, batts or hollows. Walls still being built stay open to see into.
 - **Sawhorses** come with the first lumber delivered for a building when they are away at an earlier site (left where you put them if they are close by).
 - **Insulation**: a wall shows its frame until both its siding and its lining are on, so the batts going in are seen; batts are drawn soft and fibrous, pillowed between the studs, and a batt pressed into its bay gives a puff of fibres. Between the studs, before a batt, the back of the sheathing shows.
+
+## Fixes: Work until done on trim and paint, dollhouse side cuts (branch `trim-bug`)
+
+- **Work until done** (and Guided) no longer stop with "That cannot go in yet" in Trim carpentry or Paint: they skip what cannot go on yet (caulk before its trim is nailed, colour before dry primer, a coat on a wet one) and, when all that is left is drying, wait with "Waiting for it to dry" instead of stopping.
+- **Dollhouse**: where the cut's sides (and the near cut) pass through a finished wall, the cut face is capped in the wall's colours too, so no hollow shows at the ends of cut walls; the caps follow the cut as you and the camera move.
