@@ -2430,6 +2430,12 @@ const pm = {};
         const hh = mk(0.035, 0.035, 0.34, 0x8a5a32); hh.position.set(0, -0.5, 0.13);
         const hd = mk(0.045, 0.15, 0.05, 0x5f666c); hd.position.set(0, -0.53, 0.3);
         hh.visible = hd.visible = false; arm.add(hh, hd); pm.hammer = [hh, hd];
+        // a paint roller, out while painting walls (P.roller: the paint's colour, set by construction): a handle along
+        // the hand, a wire frame, and the sleeve across the end, coloured by what is on it
+        const rh = mk(0.035, 0.035, 0.3, 0x3b3f44); rh.position.set(0, -0.5, 0.12);
+        const rf = mk(0.015, 0.015, 0.16, 0xb5bac0); rf.position.set(0, -0.5, 0.33);
+        const rs = mk(0.24, 0.07, 0.07, 0xf1efe8); rs.position.set(0, -0.5, 0.42);
+        rh.visible = rf.visible = rs.visible = false; arm.add(rh, rf, rs); pm.roller = [rh, rf, rs];
       }
       continue;
     }
@@ -4333,9 +4339,11 @@ function updatePlayer(dt) {
     if (P.work.kind === 'hammer') { armR = -2.3 + 1.7 * P.work.k; lean = 0.1 + 0.12 * P.work.k; }
     else if (P.work.kind === 'lift') { armL = armR = -2.5; lean = -0.12; }
     else if (P.work.kind === 'carry') armR = -2.0 + armR * 0.2;
+    else if (P.work.kind === 'roll') { armR = -2.15 + 0.75 * Math.sin(P.work.k * Math.PI * 2); armL = -1.6 + 0.3 * Math.sin(P.work.k * Math.PI * 2); lean = 0.05; }
     else if (P.work.kind === 'saw') { armR = -1.25 + 0.5 * Math.sin(P.work.k * Math.PI * 2); armL = -0.85; lean = 0.38; }
   }
-  if (pm.hammer && (pm.hammer[0].visible !== !!P.hammer)) { const h = !!P.hammer; pm.hammer[0].visible = pm.hammer[1].visible = h; pm.hatchet[0].visible = pm.hatchet[1].visible = !h; }
+  if (pm.hammer && (pm.hammer[0].visible !== !!P.hammer || pm.roller[0].visible !== !!P.roller)) { const r = !!P.roller, h = !r && !!P.hammer; pm.hammer[0].visible = pm.hammer[1].visible = h; for (const q of pm.roller) q.visible = r; pm.hatchet[0].visible = pm.hatchet[1].visible = !h && !r; }
+  if (pm.roller && P.roller && pm.roller[2].userData.hex !== P.roller) { pm.roller[2].userData.hex = P.roller; pm.roller[2].material.color.setHex(P.roller); }
   if (P.handPose) { armL = P.handPose.l; armR = P.handPose.r; lean += P.handPose.lean || 0; }   // hands-on work poses the arms (set by add-ons)
   pm.legL.rotation.x = legL; pm.legR.rotation.x = legR;
   pm.armL.rotation.x = armL; pm.armR.rotation.x = armR;

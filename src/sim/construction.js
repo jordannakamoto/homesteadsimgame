@@ -22,7 +22,9 @@ import { VEHICLE_KINDS } from './content/vehicles.js';
 const { round6, cents } = SUP;
 const LADDER_KEY = C.LADDER.stage + '|ladder';
 const o_cut = (old, id) => (old && old.members[id] && old.members[id].cut) || null;
-export const CONSTRUCTION_CATALOG = Object.freeze({ ...C.ITEMS_CONSTRUCTION, ...ITEMS });
+const CAT0 = Object.freeze({ ...C.ITEMS_CONSTRUCTION, ...ITEMS });
+// made-to-order items (paint mixed to a colour, precut lumber) come from the items proxy, which a spread doesn't copy
+export const CONSTRUCTION_CATALOG = new Proxy(CAT0, { get: (t, k) => (k in t ? t[k] : ITEMS[k]), has: (t, k) => k in t || k in ITEMS });
 const item = (id) => CONSTRUCTION_CATALOG[id];
 const LEVELS = ['guided', 'hands-on', 'piece'];
 const isSupply = (itemId) => C.SITE_SUPPLY.includes(itemId);
@@ -354,7 +356,7 @@ export const carriedMassKg = (s) => (s.carried ? s.carried.qty * item(s.carried.
 // Build mode's pieces and shopping lines for one building, as the payload of construction.setPlan.
 export function planFromPieces(structId, pieces, lines, extra = {}) {
   const members = [];
-  for (const p of pieces) if (p.struct === structId && p.stage && p.parent && C.STAGE[p.stage]) members.push({ id: p.id, stage: p.stage, kind: p.kind, parent: p.parent, len: p.length, pcs: p.plies || 1, built: p.built !== false || p.area === 0 || (p.length === 0 && p.area === undefined && !p.volume) });
+  for (const p of pieces) if (p.struct === structId && p.stage && p.parent && C.STAGE[p.stage]) members.push({ id: p.id, stage: p.stage, kind: p.kind, parent: p.parent, ...(p.fin ? { fin: p.fin } : {}), len: p.length, pcs: p.plies || 1, built: p.built !== false || p.area === 0 || (p.length === 0 && p.area === undefined && !p.volume) });
   return { structId, members, lines: lines.map((l) => ({ key: l.key, stage: l.stage, itemId: l.itemId, qty: l.qty, unit: l.unit, label: l.label, why: l.why, count: l.count, members: l.members })), ...extra };
 }
 
@@ -486,8 +488,10 @@ function setPlan(ctx, p) {
     x: +p.x || 0, z: +p.z || 0, r: +p.r || 2, level: (old && old.level) || s.level, stage: null, done: false, lines: {}, members: {}, tally: {}, raised: {} };
   for (const m of p.members) {
     if (!C.STAGE[m.stage]) continue;
-    const o = old && old.members[m.id];
-    pr.members[m.id] = { stage: m.stage, kind: m.kind, parent: m.parent || null, line: null, need: 0, got: o ? o.got : 0, built: o ? o.built : m.built ? 1 : 0 };
+    // a wall painted a new colour: the paint goes on again (over the primer, which stays)
+    const o0 = old && old.members[m.id], o = o0 && (o0.fin || null) !== (m.fin || null) ? null : o0;
+    pr.members[m.id] = { stage: m.stage, kind: m.kind, parent: m.parent || null, line: null, need: 0, got: o ? o.got : 0, built: o ? o.built : m.built && !o0 ? 1 : 0 };
+    if (m.fin) pr.members[m.id].fin = m.fin;
     // a save from before walls were hung sheet by sheet: one lining piece per wall. If that was in, the wall's sheets (or
     // boards) and its seams are in too, so a finished room stays finished
     if (!o && old && (m.kind === 'lining' || m.kind === 'joint') && m.parent && old.members[m.parent + '.ln'] && old.members[m.parent + '.ln'].built) { pr.members[m.id].built = 1; if (m.kind === 'joint') pr.members[m.id].coat = C.FINISH.coats + 1; }
@@ -559,7 +563,7 @@ function setPlan(ctx, p) {
   // fields, in the order play adds them, so a plan sent again unchanged (as after a reload) leaves the record exactly as it was
   if (old) for (const id in pr.members) {
     const o = old.members[id], m = pr.members[id];
-    if (!o) continue;
+    if (!o || (o.fin || null) !== (m.fin || null)) continue;
     if (o.prep && !o.built && m.site) m.prep = 1;
     if (o.coat) { m.coat = o.coat; if (o.dryAt) m.dryAt = o.dryAt; }
     if (o.builtAt !== undefined && m.built) m.builtAt = o.builtAt;
@@ -784,18 +788,29 @@ function putDownCmd(ctx, p) {
 
 // one pass on a drywall seam: the coats need compound (the arms, or the stacks when working from them) and dry mud
 // under them; the sanding pass after the last coat needs neither material nor anything but dry mud
-function mudPass(ctx, s, pr, m, ln, fromStacks) {
-  const t = ctx.state.t, F = C.FINISH, coat = m.coat || 0;
+// the coats of each kind of piece that goes on wet: seams (three coats then sanding), primer (one), paint (two, over dry
+// primer). The last coat builds a primed or painted piece; it stays wet (dryAt) a while, which the view shows
+const COATS = { joint: () => ({ coats: C.FINISH.coats, dryS: C.FINISH.dryS, sand: true }), prime: () => ({ ...C.DECOR.prime, sand: false }), paint: () => ({ ...C.DECOR.paint, sand: false }) };
+export const isCoat = (kind) => !!COATS[kind];
+function mudPass(ctx, s, pr, m, ln, fromStacks, id) {
+  const t = ctx.state.t, F = COATS[m.kind](), coat = m.coat || 0;
   if (m.dryAt && t + 1e-6 < m.dryAt) return { reason: 'wet', waitS: round6(m.dryAt - t) };
+  if (m.kind === 'paint') {        // over its primer, dry
+    const pm = pr.members[String(id).replace('.pt', '.pr')];
+    if (pm && !pm.built) return { reason: 'prime first' };
+    if (pm && pm.dryAt && t + 1e-6 < pm.dryAt) return { reason: 'wet', waitS: round6(pm.dryAt - t) };
+  }
   if (coat < F.coats) {
-    const per = ln ? round6(m.need / F.coats) : 0;
+    // the last coat takes what is left of the piece's share, so rounding never strands a sliver in the tin
+    const per = ln ? round6(coat + 1 >= F.coats ? Math.max(0, m.need - m.got) : m.need / F.coats) : 0;
     if (ln && per > 0) {
       const have = fromStacks ? SUP.stackQty(s, ln.itemId) : s.carried && s.carried.itemId === ln.itemId ? s.carried.qty : 0;
-      if (have + 1e-6 < per) return { reason: !fromStacks && s.carried && s.carried.itemId !== ln.itemId ? 'wrong material' : 'no material', itemId: ln.itemId };
-      const used = fromStacks ? SUP.useFromStacks(s, ln.itemId, per, pr.x, pr.z) : SUP.useCarried(s, ln.itemId, per);
+      if (have + 1e-4 < per) return { reason: !fromStacks && s.carried && s.carried.itemId !== ln.itemId ? 'wrong material' : 'no material', itemId: ln.itemId };
+      const take = Math.min(per, have), used = fromStacks ? SUP.useFromStacks(s, ln.itemId, take, pr.x, pr.z) : SUP.useCarried(s, ln.itemId, take);
       m.got = round6(Math.min(m.need, m.got + used)); ln.used = round6(ln.used + used);
     }
     m.coat = coat + 1; m.dryAt = round6(t + (s.options.instant ? 0 : F.dryS));
+    if (!F.sand && m.coat >= F.coats) { m.got = m.need; m.built = 1; m.builtAt = round6(t); return { ok: true, built: true }; }   // the last coat: done, still wet
     return { ok: true, built: false };
   }
   m.coat = F.coats + 1; m.got = m.need; m.built = 1; m.builtAt = round6(t); delete m.dryAt;    // sanded smooth
@@ -814,8 +829,8 @@ function install(ctx, p) {
     const why = blocked(pr, id);
     if (why) { out.refused.push({ id, reason: why, missing: why === 'support missing' ? supportMissing(pr, id) : undefined, held: m && pr.hold && pr.hold[m.stage] ? 1 : undefined }); break; }
     const ln = m.line ? pr.lines[m.line] : null;
-    if (m.kind === 'joint') {      // a drywall seam: one pass per call (tape and first coat, fill, finish, then sanding)
-      const r = mudPass(ctx, s, pr, m, ln, fromStacks);
+    if (m.kind === 'joint' || m.kind === 'prime' || m.kind === 'paint') {      // a coat at a time: a seam (tape, fill, finish, sanding), primer, paint
+      const r = mudPass(ctx, s, pr, m, ln, fromStacks, id);
       if (!r.ok) { out.refused.push({ id, ...r }); break; }
       if (r.built) { pr.tally[m.stage][0]++; out.installed.push(id); } else out.set.push(id);
       out.coat = { id, coat: m.coat, dryAt: m.dryAt };
@@ -954,7 +969,7 @@ function dismantle(ctx, p) {
       if (!s.offcuts) s.offcuts = {};
       (s.offcuts[ln.itemId] || (s.offcuts[ln.itemId] = [])).push(m.area);
       m.cut = null;
-    } else if (ln && m.got > 0 && m.kind !== 'joint') {      // (taped seams: the compound is spent, nothing comes back)
+    } else if (ln && m.got > 0 && m.kind !== 'joint' && m.kind !== 'prime' && m.kind !== 'paint') {      // (seams, primer and paint: what was spread is spent, nothing comes back)
       SUP.giveBack(s, ln.itemId, m.got, at.x, at.z, C.DELIVERY.layout);
       ln.used = round6(ln.used - m.got);
       out.returned[ln.itemId] = round6((out.returned[ln.itemId] || 0) + m.got);

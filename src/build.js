@@ -128,6 +128,8 @@
     found: "pier-blocks",
     ins: null,
     lining: "boards",
+    // the finishes new buildings get (docs/design/interior-finishes.md): null, or { walls, faces, trim, items }
+    deco: null,
     cmode: false,
     gstage: null,
     dirty: new Set(),
@@ -3649,6 +3651,7 @@
       found: F.found || "plinth",
       ins: F.ins || null,
       lining: F.lining === undefined ? "boards" : F.lining,
+      deco: F.deco ? JSON.parse(JSON.stringify(F.deco)) : null,
       plan: new Set(),
       known: F.fresh ? new Set() : null,
       sitePlanned: !!F.fresh && B.cmode,
@@ -4830,6 +4833,7 @@
     if (S.found !== "plinth") data.found = S.found;
     if (S.ins) data.ins = S.ins;
     if (S.lining !== "boards") data.lining = S.lining;
+    if (S.deco) data.deco = JSON.parse(JSON.stringify(S.deco));
     if (S.plan.size) data.plan = [...S.plan].sort();
     S.ser = { ver: S.ver, data };
     return data;
@@ -4862,6 +4866,7 @@
     S.found = d.found || "plinth";
     S.ins = d.ins || null;
     S.lining = d.lining === undefined ? "boards" : d.lining;
+    S.deco = d.deco ? JSON.parse(JSON.stringify(d.deco)) : null;
     // a copy is a new plan: unbuilt where plans start unbuilt, built otherwise
     S.plan = new Set(fresh ? [] : d.plan || []);
     S.known = fresh ? new Set() : null;
@@ -5130,7 +5135,7 @@
   function applyOp(op, noUndo) {
     if (!op || !op.valid) return null;
     noUndo || pushUndo();
-    let S = op.F.isNew ? newStruct({ ox: op.F.ox, oz: op.F.oz, yaw: op.F.yaw, y0: op.y0, level: op.F.level || 0, hs: op.F.hs || B.hs, lift: op.F.lift || 0, po: op.addPaths.length > 0 || op.addDecor.length > 0, found: B.found, ins: B.ins, lining: B.lining, fresh: true }) : op.F;
+    let S = op.F.isNew ? newStruct({ ox: op.F.ox, oz: op.F.oz, yaw: op.F.yaw, y0: op.y0, level: op.F.level || 0, hs: op.F.hs || B.hs, lift: op.F.lift || 0, po: op.addPaths.length > 0 || op.addDecor.length > 0, found: B.found, ins: B.ins, lining: B.lining, deco: B.deco, fresh: true }) : op.F;
     let refund = 0;
     if (op.delFree.length) S.free = S.free.filter((f) => !op.delFree.includes(f.id));
     if (op.moveFree) for (const f of S.free) if (f.d === op.moveFree.d && f.line === op.moveFree.from && f.pos >= op.moveFree.t0 - 1e-6 && f.pos <= op.moveFree.t1 + 1e-6) f.line = op.moveFree.to;
@@ -7541,10 +7546,44 @@
   const FOUND_ITEMS = ["pier-blocks", "skids", "piers", "stemwall", "slab", "plinth"].map((v) => ({ v, name: window.__framing.FOUNDATIONS[v].name })),
     INS_ITEMS = [{ v: null, name: "None" }, { v: "fibreglass_batt", name: "Fibreglass batts" }, { v: "mineral_wool", name: "Mineral wool" }, { v: "sheep_wool", name: "Sheep's wool" }],
     LIN_ITEMS = [{ v: null, name: "None" }, { v: "boards", name: "Pine boards" }, { v: "gypsum", name: "Drywall" }];
-  const makeUp = (g, pre, f, i, l) => {
+  // the wall paints and sheens, from the simulation's content (docs/design/interior-finishes.md)
+  const decoC = () => {
+    const y = G.sim && G.sim.systems.find((x) => x.name === "construction");
+    return y && y.api.content;
+  };
+  const hex6 = (n) => "#" + n.toString(16).padStart(6, "0");
+  const DECO_ITEMS = (none) => {
+    const c = decoC();
+    return [{ v: null, name: none, sw: ["bare", "#e7e3da", "#b9b2a4"] }].concat(c ? c.PAINTS.map((p) => ({ v: p[0], name: p[1], sw: ["dye", hex6(p[2]), hex6(p[2])] })) : []);
+  };
+  const SHEEN_ITEMS = () => {
+    const c = decoC();
+    return c ? Object.keys(c.SHEENS).filter((v) => v !== "semigloss").map((v) => ({ v, name: c.SHEENS[v].name })) : [];
+  };
+  // a building's finishes, by surface (src/framing.js finFor): { walls, faces, trim, items }, each "<colour>_<sheen>"
+  const finParts = (fin, sheen) => {
+    const [c, sh] = String(fin || "").split("_");
+    return { colour: c || null, sheen: sh || sheen };
+  };
+  const decoWith = (d, id, v) => {
+    const o = JSON.parse(JSON.stringify(d || {})),
+      w = finParts(o.walls, "eggshell");
+    if (id === "deco") o.walls = v ? v + "_" + w.sheen : null;
+    else if (id === "sheen") o.walls = w.colour ? w.colour + "_" + v : null;
+    else if (id === "trim") o.trim = v ? v + "_semigloss" : null;
+    for (const k of Object.keys(o)) if (!o[k] || (typeof o[k] === "object" && !Object.keys(o[k]).length)) delete o[k];
+    return Object.keys(o).length ? o : null;
+  };
+  const makeUp = (g, pre, f, i, l, d) => {
     g.push(G_.select(pre + "found", "Stands on", FOUND_ITEMS, f, (window.__framing.FOUNDATIONS[f] || {}).note));
     g.push(G_.select(pre + "ins", "Insulation", INS_ITEMS, i, "What fills the spaces between studs, joists and rafters"));
     g.push(G_.select(pre + "lining", "Inside", LIN_ITEMS, l, "What covers the inside of the walls"));
+    if (l) {
+      const q = finParts(d && d.walls, "eggshell");
+      g.push(G_.sw(pre + "deco", "Walls", DECO_ITEMS("Bare"), q.colour, "deco"));
+      if (q.colour) g.push(G_.select(pre + "sheen", "Paint finish", SHEEN_ITEMS(), q.sheen, "Matte hides a wall's bumps; satin wipes clean"));
+    }
+    g.push(G_.sw(pre + "trim", "Trim", DECO_ITEMS("As it comes"), finParts(d && d.trim).colour, "trim"));
   };
   // the shopping list as the Schedule panel shows it: by stage, with what each line costs and how far along it is
   function schedule() {
@@ -7661,7 +7700,7 @@
       const S0 = groupOf(refs[0].S).find((O) => O.level === 0) || refs[0].S,
         left = groupOf(S0).reduce((a, O) => a + O.plan.size, 0);
       if (left) g.push(G_.info("Being built", plural(left, "piece") + " still to build"));
-      makeUp(g, "s:", S0.found, S0.ins, S0.lining);
+      makeUp(g, "s:", S0.found, S0.ins, S0.lining, S0.deco);
     }
     g.push(G_.act("s:all", "Whole building", "building"));
     if (one) g.push(G_.act("s:pick", "More like this", "pick", "I"));
@@ -7727,7 +7766,7 @@
       ceil();
       lift();
       t === "room" && wing();
-      t === "room" && makeUp(g, "", B.found, B.ins, B.lining);
+      t === "room" && makeUp(g, "", B.found, B.ins, B.lining, B.deco);
     } else if (t === "wall") {
       g.push(G_.tiles("style", "Style", tiles(STYLE_SHORT, "w-"), B.style, "Shift wheel"));
       g.push(G_.sw("wmat", "Material", SW.wall, B.wmat, "M"));
@@ -7740,7 +7779,7 @@
       g.push(...PAINT());
       lift();
       wing();
-      makeUp(g, "", B.found, B.ins, B.lining);
+      makeUp(g, "", B.found, B.ins, B.lining, B.deco);
     } else if (t === "roof") {
       g.push(G_.tiles("rshape", "Shape", tiles(ROOF_SHAPES, "r-"), B.rsh, "Shift wheel"));
       if (TURNS[B.rsh]) g.push(G_.act("rturn", "Turn", "turn"));
@@ -8331,6 +8370,16 @@
     if (/^(s:)?(rshape|rturn|pitch|pitchn|eave|rake|gutters|rcolor)$/.test(id)) return roofChoose(id, v);
     if (id.startsWith("fx:")) fxChoose(id, v);
     else if (id === "found" || id === "ins" || id === "lining") B[id] = v;
+    else if (id === "deco" || id === "sheen" || id === "trim") B.deco = decoWith(B.deco, id, v);
+    else if (id === "s:deco" || id === "s:sheen" || id === "s:trim") {
+      const q = selRefs()[0];
+      if (q) {
+        pushUndo();
+        const d = decoWith(q.S.deco, id.slice(2), v);
+        for (const O of groupOf(q.S)) ((O.deco = d && JSON.parse(JSON.stringify(d))), O.ver++);
+        for (const O of groupOf(q.S)) rebuild(O);
+      }
+    }
     else if (id === "sched") B.sched = !B.sched;
     else if (id === "s:found") {
       const q = selRefs()[0];
@@ -8990,7 +9039,7 @@
     FOUNDATIONS = FR.FOUNDATIONS,
     STAGES = FR.STAGES,
     CONCRETE = col(0xb5b2aa),
-    MEMBER_EXTRA = ["area", "thickness", "volume", "size", "plies", "roof", "opening", "height"];
+    MEMBER_EXTRA = ["area", "thickness", "volume", "size", "plies", "roof", "opening", "height", "fin", "face", "surface"];
   const Lz = (material, thickness, role) => Object.freeze({ material, thickness, role });
   const footPal = new Map();
   function woodFoot(wm) {
@@ -9007,7 +9056,7 @@
       kS = (H - 0.3) / (EAVE - 0.3),
       up = (y) => (y <= 0.3 ? y : 0.3 + (y - 0.3) * kS),
       yo = (S.hs - 1) * EAVE,
-      desc = { found: S.level === 0 ? S.found : S.found === "plinth" ? "plinth" : "upper", spec: { ins: S.ins, lining: S.lining }, floors: [], walls: [], roofs: [] },
+      desc = { found: S.level === 0 ? S.found : S.found === "plinth" ? "plinth" : "upper", spec: { ins: S.ins, lining: S.lining, deco: S.deco }, floors: [], walls: [], roofs: [] },
       groundY = (x, z) => {
         const [wx, wz] = toWorld(S, x, z);
         return G.heightAt(wx, wz) - S.y0;
@@ -9330,8 +9379,18 @@
   };
   const memberMats = (planes) => ({ mem: capped(Object.assign(memMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })), lap: capped(makeLapMat(planes)), wrap: capped(Object.assign(wrapMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })) });
   const isLap = (m) => /^siding/.test(m.col || "") && m.type === "boards";
-  const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), siding: col(0xb8beb1), sidingDark: col(0x5d4a3b), trim: col(0xefece4), gypsum: col(0xe3e3de), pine: col(0xd8b583), concrete: CONCRETE, gravel: col(0x8f8b82) };
+  const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf1bcc8), siding: col(0xb8beb1), sidingDark: col(0x5d4a3b), trim: col(0xefece4), gypsum: col(0xe3e3de), primer: col(0xf4f3ef), pine: col(0xd8b583), concrete: CONCRETE, gravel: col(0x8f8b82) };
   for (const [k, h] of Object.entries(FR.ROOF_COLORS || {})) MCOL[k] = col(h); // the roofing layers while they go on (src/framing.js)
+  // a wall paint's colour, from its finish key ("sage_eggshell"; src/sim/content/decor.js)
+  const FINCOL = new Map(),
+    finCol = (fin) => {
+      if (!FINCOL.has(fin)) {
+        const c = decoC(),
+          p = c && c.finishOf(fin);
+        FINCOL.set(fin, p ? col(p.hex) : MCOL.primer);
+      }
+      return FINCOL.get(fin);
+    };
   const _m4 = new T.Matrix4(),
     _c = new T.Color();
   function dropMembers(S) {
@@ -9378,6 +9437,11 @@
         ghostAdd(m, top);
         continue;
       }
+      // paint on the walls (docs/design/interior-finishes.md): the colour once it is on; primer only where no colour covers it
+      if (m.kind === "paint" || m.kind === "prime") {
+        if (m.kind === "paint" || P(m.id.replace(".pr", ".pt"))) sets[0].push(m);
+        continue;
+      }
       if (m.draw === 0) continue;
       if (m.stage === "foundation" || m.stage === "floor-frame") sets[0].push(m);
       else if (roofId) (st.all || st.finRoof.has(roofId)) || sets[1].push(m);
@@ -9418,8 +9482,8 @@
         _m4.set(ax, nx * d, (ay * nz - az * ny) * b, (m.a[0] + m.b[0]) / 2, ay, ny * d, (az * nx - ax * nz) * b, (m.a[1] + m.b[1]) / 2, az, nz * d, (ax * ny - ay * nx) * b, (m.a[2] + m.b[2]) / 2, 0, 0, 0, 1);
         mesh.setMatrixAt(n, _m4);
         if (solid) {
-          const c = MCOL[m.col || "timber"],
-            v = /^siding/.test(m.col || "") ? 0.975 + 0.05 * hash(n, list.length, 7) : 0.9 + 0.2 * hash(n, list.length, 7);
+          const c = m.kind === "paint" ? finCol(m.fin) : m.kind === "prime" ? MCOL.primer : MCOL[m.col || "timber"],
+            v = m.kind === "paint" || m.kind === "prime" ? 1 : /^siding/.test(m.col || "") ? 0.975 + 0.05 * hash(n, list.length, 7) : 0.9 + 0.2 * hash(n, list.length, 7);
           mesh.setColorAt(n, _c.setRGB(c[0] * v, c[1] * v, c[2] * v));
         }
       });
@@ -9632,7 +9696,7 @@
     const pl = PLANS[id] && over ? { ...PLANS[id], ...over } : PLANS[id];
     if (!pl) return null;
     pushUndo();
-    const S = newStruct({ ox: x, oz: z, yaw: yawRad || 0, y0: G.heightAt(x, z) + FOUNDATIONS[pl.found].drop - 0.05, level: 0, hs: 1, found: pl.found, ins: pl.ins, lining: pl.lining, fresh: true }),
+    const S = newStruct({ ox: x, oz: z, yaw: yawRad || 0, y0: G.heightAt(x, z) + FOUNDATIONS[pl.found].drop - 0.05, level: 0, hs: 1, found: pl.found, ins: pl.ins, lining: pl.lining, deco: pl.deco || null, fresh: true }),
       hw = pl.w / 2,
       hl = pl.l / 2,
       cs = [[-hw, -hl], [hw, -hl], [hw, hl], [-hw, hl]];
@@ -10686,6 +10750,14 @@
     materialsList,
     plans: planList,
     placePlan,
+    // a building's finishes (docs/design/interior-finishes.md): null, or { walls, faces, trim, items }, each "<colour>_<sheen>"
+    setDeco(structId, deco) {
+      const S = B.structs.find((O) => O.id === structId);
+      if (!S) return false;
+      for (const O of groupOf(S)) ((O.deco = deco ? JSON.parse(JSON.stringify(deco)) : null), O.ver++);
+      for (const O of groupOf(S)) rebuild(O);
+      return true;
+    },
     // roofs: the one geometry (see roofParts), what a roof measures, the roofer's warnings, and the coverings
     roofParts,
     roofStats,

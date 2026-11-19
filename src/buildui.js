@@ -142,6 +142,7 @@
     else if (kind === "flat") d += '<rect x="10" width="4" height="24" fill="' + b + '"/><rect y="20" width="24" height="4" fill="' + b + '"/>';
     else if (kind === "brace") d += "<path" + st + ' stroke-width="3" d="M1.500 0v24M22.500 0v24M0 1.500h24M2 22L22 3"/>';
     else if (kind === "boards") d += "<path" + st + ' stroke-width="1.300" d="M0 6h24M0 12h24M0 18h24M9 0v6M16 6v6M6 12v6M14 18v6"/>';
+    else if (kind === "bare") d += '<path stroke="' + b + '" stroke-width="1.6" d="M3 21L21 3"/>';
     else if (kind === "check") d += '<path fill="' + b + '" d="M0 0h8v8H0zM16 0h8v8h-8zM8 8h8v8H8zM0 16h8v8H0zM16 16h8v8h-8z"/>';
     else if (kind === "roof") d += "<path" + st + ' stroke-width="1.400" d="M0 6q3 3 6 0t6 0 6 0 6 0M0 12q3 3 6 0t6 0 6 0 6 0M0 18q3 3 6 0t6 0 6 0 6 0"/>';
     else if (kind === "asph") d += "<path" + st + ' stroke-width="1.100" d="M0 5h24M0 10h24M0 15h24M0 20h24M6 0v5M14 0v5M22 0v5M2 5v5M10 5v5M18 5v5M6 10v5M14 10v5M22 10v5M2 15v5M10 15v5M18 15v5M6 20v4M14 20v4"/>';
