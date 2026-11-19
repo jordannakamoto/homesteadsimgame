@@ -381,6 +381,7 @@
     const p = { kind: e.kind, frame: near.frame, at, host: e.host || (e.wall ? { parent: e.wall } : undefined) };
     if (e.equip) p.ref = { piece: e.equip, port: e.port };
     if (e.kind === 'stub_supply' || e.kind === 'stub_drain') p.set = { capped: true };
+    if (e.preset && mode.cls === 'cable') p.set = { preset: e.preset.id };          // what it was planned as: the device it gets at trim-out
     const r = cmd('routes.addNode', p);
     return r.ok ? r.id : null;
   }
