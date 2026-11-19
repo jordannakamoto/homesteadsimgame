@@ -5,6 +5,7 @@ import { createSim, createGameSim, siteSystem, calendar as C, DAY, HOUR, makeSav
 import { material } from '../src/sim/materials.js';
 import { rse, infiltrationLs, leakageClass, groundFloorU, cavityR } from '../src/sim/thermal.js';
 import { house, setSite } from './helpers/pieces.mjs';
+import { BENCH, benchOnly } from './helpers/bench.mjs';
 
 const near = (v, ref, tol, msg) => assert.ok(Math.abs(v - ref) <= tol, `${msg}: ${v} vs ${ref} (+-${tol})`);
 const L = (material, thickness, role) => ({ material, thickness, role });
@@ -406,7 +407,7 @@ test('twenty rooms cost well under 0.05 ms a step', () => {
   sys.step = (c) => { const t0 = performance.now(); step(c); ms += performance.now() - t0; n++; };
   try { sim.runDays(20); } finally { sys.step = step; }
   console.log(`# thermal: ${((ms / n) * 1000).toFixed(1)} microseconds a step for 20 rooms (${n} steps)`);
-  assert.ok(ms / n < 0.05, (ms / n).toFixed(4) + ' ms per thermal step');
+  if (BENCH) assert.ok(ms / n < 0.05, (ms / n).toFixed(4) + ' ms per thermal step');
   const t0 = performance.now(); const found = findRooms(pieces); const tFind = performance.now() - t0;
-  assert.equal(found.length, 20); assert.ok(tFind < 250, 'finding the rooms took ' + tFind.toFixed(1) + ' ms');
+  assert.equal(found.length, 20); if (BENCH) assert.ok(tFind < 250, 'finding the rooms took ' + tFind.toFixed(1) + ' ms');
 });

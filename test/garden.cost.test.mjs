@@ -1,6 +1,7 @@
 // Garden cost: run on its own (a separate process) so the timings are not disturbed by the other tests.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { benchOnly } from './helpers/bench.mjs';
 import { createSim, weather, stockSystem, garden, gardenSteps, DAY, calendar } from '../src/sim/index.js';
 const G = (sim) => sim.state.sys.garden;
 const at = (m, d) => (calendar.MONTH_START[m] + d - 1 - calendar.START_DAY_OF_YEAR) * DAY;
@@ -9,7 +10,7 @@ const cmd = (sim, name, p) => sim.commandNow(name, p);
 const give = (sim, id, qty) => { const it = sim.state.sys.stock.items; it[id] = (it[id] || 0) + qty; };
 function makeSim() { const sim = createSim({ seed: 1, systems: [weather, stockSystem(), garden] }); sim.state.sys.stock.tools.push('spade'); return sim; }
 
-test('cost: 400 planted cells under 0.3 ms per growth step and 0.1 ms per soil step; nothing with no beds', () => {
+test('cost: 400 planted cells under 0.3 ms per growth step and 0.1 ms per soil step; nothing with no beds', benchOnly, () => {
   const sim = makeSim(); runTo(sim, at(4, 20));
   for (let k = 0; k < 4; k++) { const r = cmd(sim, 'garden.makeBed', { x0: k * 4, z0: 0, nx: 10, nz: 10 }); give(sim, 'seed_carrot', 5); cmd(sim, 'garden.sow', { crop: 'carrot', bed: r.id }); }
   sim.runDays(30);
