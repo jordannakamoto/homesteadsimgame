@@ -72,8 +72,10 @@ test('ATV: 0-50 km/h takes a few seconds through the gears; wet grass spins the 
   const t50 = (surf) => { const b = ridden(on(surf)); let t = 0, spun = 0, gears = new Set(); drive(b, { throttle: 1 }, on(surf), 12, (q) => { if (q.u < 50 / 3.6) t += SUB; if (q.spin > 0.5) spun += SUB; gears.add(q.gear); }); return { t, spun, gears: gears.size }; };
   const dry = t50('grass'), wet = t50('grass_wet');
   assert.ok(dry.t > 3 && dry.t < 6, '0-50 on dry grass ' + dry.t);
-  assert.ok(dry.spun === 0 && dry.gears >= 3, 'grips and shifts: ' + JSON.stringify(dry));
-  assert.ok(wet.t > dry.t * 1.2 && wet.spun > 0.5, 'wet grass: ' + JSON.stringify(wet));
+  // per-wheel loads (G-3): a full-throttle launch puts three quarters of the weight on the rear tyres, and load
+  // sensitivity costs them a few percent, so at peak torque in first the tyres chirp briefly before the shift
+  assert.ok(dry.spun < 0.6 && dry.gears >= 3, 'grips and shifts: ' + JSON.stringify(dry));
+  assert.ok(wet.t > dry.t * 1.2 && wet.spun > dry.spun + 0.5, 'wet grass: ' + JSON.stringify(wet));
 });
 
 test('ATV: lifting off brakes through the engine; it creeps at idle; braking takes longer on wet grass', () => {
@@ -90,11 +92,14 @@ test('ATV: lifting off brakes through the engine; it creeps at idle; braking tak
 });
 
 test('ATV: it climbs 25 degrees of dry grass but spins out on wet grass; 35 degrees is too steep', () => {
-  const climb = (deg, surf) => { const g = (x, z) => Math.max(0, z - 2) * Math.tan((deg * Math.PI) / 180), b = ridden({ ground: g }); drive(b, { throttle: 1 }, on(surf, g), 10); return b; };
+  const climb = (deg, surf) => { const g = (x, z) => Math.max(0, z - 2) * Math.tan((deg * Math.PI) / 180), b = ridden({ ground: g }); let zMax = 0, uMin = 0; drive(b, { throttle: 1 }, on(surf, g), 10, (q) => { zMax = Math.max(zMax, q.z); uMin = Math.min(uMin, q.u); }); b.zMax = zMax; b.uMin = uMin; return b; };
   assert.ok(climb(25, 'grass').u > 3, 'dry 25');
   const wet = climb(25, 'grass_wet');
   assert.ok(wet.u < 0.5 && wet.spin > 0.5, 'wet 25 spins: ' + wet.u);
-  assert.ok(climb(35, 'grass').u < 0.5, 'dry 35');
+  // 35 degrees: the run-up carries it a few metres, then it spins and slides back down (G-3: it no longer sticks where it
+  // stalled; with the weight on the rear tyres and their grip below tan 35 it cannot hold either)
+  const steep = climb(35, 'grass');
+  assert.ok(steep.zMax < 2 + 7 && steep.uMin < -1, 'dry 35: ' + steep.zMax + ' ' + steep.uMin);
 });
 
 test('ATV: hard cornering leans it and washes the front out before it tips; a side slope adds to the tip', () => {
@@ -118,4 +123,31 @@ test('ATV: heading steer backs up when pushed behind, then stops and drives off 
   assert.ok(b.u > 3 && b.gear >= 1, 'forward again: ' + b.u);
   drive(b, (q) => headingControl(q, ATV, 0, 0), env, 12);
   assert.ok(b.u === 0, 'coasted down and held: ' + b.u);
+});
+
+// Published turning radius: Honda FourTrax Rancher TRX420 (wheelbase 51.0 in) lists 11.5 ft = 3.51 m (the base model, 50 in
+// wheelbase, 9.2 ft); Honda measures it to the outside front tyre. Driven at a walking pace on full lock, ours must agree.
+test('the ATV turning circle at walking pace matches the published 11.5 ft within 10%', () => {
+  const env = on('dirt'), b = ridden(env), pts = [];
+  for (let i = 0, t = 0; i < 14 / SUB; i++, t += SUB) {
+    stepBody(b, ATV, { throttle: b.u < 1.5 ? 0.3 : 0, steer: 1, brake: b.u > 1.8 ? 0.2 : 0 }, env);
+    if (t > 6) {   // left of the nose is the outside of a right turn: outer front tyre
+      const f = ATV.axles[0].z, hw = ATV.track / 2;
+      pts.push([b.x + Math.sin(b.yaw) * f - Math.cos(b.yaw) * hw, b.z + Math.cos(b.yaw) * f + Math.sin(b.yaw) * hw]);
+    }
+  }
+  const R = Math.max(Math.max(...pts.map((p) => p[0])) - Math.min(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1])) - Math.min(...pts.map((p) => p[1])));
+  assert.ok(Math.abs(R / 2 - 3.51) < 0.351, `outer-tyre turning radius ${(R / 2).toFixed(2)} m vs published 3.51 m`);
+});
+
+// The solid rear axle's scrub is a friction moment (it does not fade as the quad slows), so the circle at a slow crawl
+// is the circle at a walk: the tyres are not softer at a crawl than they are at a walk.
+test('the ATV turning circle at a slow crawl is the same as at a walk', () => {
+  const env = on('dirt'), b = ridden(env), pts = [];
+  for (let i = 0, t = 0; i < 30 / SUB; i++, t += SUB) {
+    stepBody(b, ATV, { throttle: b.u < 0.7 ? 0.3 : 0, steer: 1, brake: b.u > 0.9 ? 0.2 : 0 }, env);
+    if (t > 8) { const f = ATV.axles[0].z, hw = ATV.track / 2; pts.push([b.x + Math.sin(b.yaw) * f - Math.cos(b.yaw) * hw, b.z + Math.cos(b.yaw) * f + Math.sin(b.yaw) * hw]); }
+  }
+  const R = Math.max(Math.max(...pts.map((p) => p[0])) - Math.min(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1])) - Math.min(...pts.map((p) => p[1])));
+  assert.ok(Math.abs(R / 2 - 3.51) < 0.351, `outer-tyre turning radius at 0.7 m/s ${(R / 2).toFixed(2)} m vs published 3.51 m`);
 });

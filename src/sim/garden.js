@@ -42,7 +42,7 @@ import { ITEMS } from './items.js';
 import { DAY, HOUR, calendarT } from './time.js';
 import { sunTimes, dayOfYear, MONTHS, MONTH_START, DAYS_IN_YEAR, START_DAY_OF_YEAR, monthOf, dayOfMonth } from './calendar.js';
 import { climateModel, CLIMATES, DEFAULT_CLIMATE } from './weather.js';
-import { reliefAt as groundRelief, sAt as groundCode, fAt as groundFlags, LOOSE_BIT } from './core/earthwork.js';
+import { reliefAt as groundRelief, sAt as groundCode } from './core/earthwork.js';
 
 export const CELL_M = 0.3, CELL_AREA = CELL_M * CELL_M;
 const STATE_V = 1;
@@ -635,6 +635,13 @@ function open(ctx, p = {}) {
 // enough (cell.till climbs to 1; beds made before tilling existed have no `till` and count as worked). Weeds on
 // worked squares are cut, as garden.hoe does.
 const tilled = (c) => c.till === undefined || c.till >= 1;
+// has the shovel broken the ground in this 30 cm square? (any of its earthwork points not turf: a hole, a heap, a
+// skimmed patch reaching into it)
+function brokenGround(lg, x, z) {
+  const st = lg.step, h = CELL_M / 2 - 1e-6;
+  for (let j = Math.ceil((z - h) / st); j <= Math.floor((z + h) / st); j++) for (let i = Math.ceil((x - h) / st); i <= Math.floor((x + h) / st); i++) if (groundCode(lg, i, j)) return true;
+  return false;
+}
 function regroup(s, g, x0g, z0g, nx, nz) {
   const ox = Math.round(g.x0 / CELL_M) - x0g, oz = Math.round(g.z0 / CELL_M) - z0g, soil = SOILS[g.soil] || SOILS[DEFAULT_SOIL];
   const map = (i) => (Math.floor(i / g.nx) + oz) * nx + (i % g.nx) + ox;
@@ -696,11 +703,11 @@ function till(ctx, p = {}) {
     const c = at.group.cells[at.index];
     if (!tilled(c)) {
       if (!c.till) broke++;
-      // ground the shovel has already broken works up quickly: earth dug and thrown is loose, there is no sod to cut
-      // (one stroke); ground cut down to firm earth or skimmed of its turf has no sod either (half the work)
+      // ground the shovel has already broken (dug, thrown, skimmed of its turf) has no sod to cut: one stroke of the
+      // hoe and it is worked soil, ready for seed
       let st = step;
       const Lg = ctx.get && ctx.get('landscape'), lg = Lg && Lg.grid;
-      if (lg) { const i = Math.round(x / lg.step), j = Math.round(z / lg.step); if (groundCode(lg, i, j)) st = groundFlags(lg, i, j) & LOOSE_BIT ? 1 : step * 2; }
+      if (lg && brokenGround(lg, x, z)) st = 1;
       c.till = Math.min(1, r3((c.till || 0) + st));
       if (c.till >= 1) { delete c.till; worked++; c.on += c.wN; c.wN = 0; c.weed = 0.01; }
     } else if (!c.pl || p.amongPlants !== false) { cleared += c.weed; c.on += c.wN; c.wN = 0; c.weed = 0; if (!c.pl) delete c.open; }

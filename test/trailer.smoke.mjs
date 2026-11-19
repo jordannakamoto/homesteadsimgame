@@ -24,9 +24,12 @@ await G(({ a, t }) => {
 await frames(5);
 await G((a) => __vehicles.mount(a), atv.id);
 await frames(30);
-// reverse: point the camera along the nose and hold S
+// reverse: point the camera along the nose and hold Shift+S (gentle throttle, as you back onto a tongue). At full
+// reverse it reaches the tongue at nearly 3 m/s, too fast to latch, and only latched when the bounce off the trailer
+// happened to rest inside the 0.4 m latch radius (0.385 m before the G-3 drive model, 0.467 m after): a coin toss.
 await G((a) => { __game.cam.yaw = __vehicles.body(a).yaw + Math.PI; }, atv.id);
 let hitched = false, sawGuide = false;
+await page.keyboard.down('ShiftLeft');
 await page.keyboard.down('KeyS');
 for (let i = 0; i < 40 && !hitched; i++) {
   await frames(4);
@@ -34,6 +37,7 @@ for (let i = 0; i < 40 && !hitched; i++) {
   hitched = r.h; sawGuide = sawGuide || r.g;
 }
 await page.keyboard.up('KeyS');
+await page.keyboard.up('ShiftLeft');
 check('backing the ball onto the tongue hitches it, with a guide line on the way', hitched && sawGuide, JSON.stringify({ hitched, sawGuide }));
 if (!hitched) await G(() => __vehicles.hitch());
 
