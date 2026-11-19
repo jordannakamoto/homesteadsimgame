@@ -32,7 +32,7 @@ test('paint pieces cover each lined face less its openings, primer under paint, 
 test('no finish chosen: no paint stage, and the building finishes as before', () => {
   const { mem, pr } = start(null);
   assert.ok(!mem.some((m) => m.stage === 'decorate') && K.stageComplete(pr, 'decorate') && pr.done);
-  assert.equal(C.STAGE.decorate.needs.join(), 'cladding,lining,finish');
+  assert.equal(C.STAGE.decorate.needs.join(), 'cladding,lining,finish,carpentry');
   assert.ok(C.STAGE['trim-out'].needs.includes('decorate'), 'devices go on painted walls');
 });
 
@@ -83,13 +83,14 @@ test('a new colour on a painted wall: two more coats over the primer, which stay
 
 test('the trim takes its own colour: two coats on each board, no primer (it comes primed), after the siding', () => {
   const { sim, mem, pr } = start({ walls: 'sage_eggshell', trim: 'chalk_semigloss' });
-  const trim = mem.filter((m) => m.kind === 'cladding' && m.type === 'trim'), tp = mem.filter((m) => m.kind === 'paint' && m.surface === 'trim');
-  assert.ok(trim.length >= 4, 'corner boards and the window trim');
+  // the siding trim outside, and the casings and baseboard inside (docs/design/carpentry.md)
+  const trim = mem.filter((m) => (m.kind === 'cladding' && m.type === 'trim') || m.kind === 'casing' || m.kind === 'base'), tp = mem.filter((m) => m.kind === 'paint' && m.surface === 'trim');
+  assert.ok(trim.filter((m) => m.kind === 'cladding').length >= 4, 'corner boards and the window trim');
   assert.equal(tp.length, trim.length);
-  assert.ok(tp.every((m) => m.fin === 'chalk_semigloss' && m.of && m.section.b > 0.02 && !mem.some((q) => q.id === m.id.replace('.pt', '.pr'))));
+  assert.ok(tp.every((m) => m.fin === 'chalk_semigloss' && m.of && m.section.b > mem.find((q) => q.id === m.of).section.b && !mem.some((q) => q.id === m.id.replace('.pt', '.pr'))));
   assert.ok(mem.filter((m) => m.kind === 'paint' && m.surface === 'walls').every((m) => m.fin === 'sage_eggshell'), 'the walls keep theirs');
   // a different colour on one board: the items record names it
-  const one = F.generate(room({ trim: 'chalk_semigloss', items: { [trim[0].id]: 'charcoal_semigloss' } })).filter((m) => m.kind === 'paint');
+  const one = F.generate(room({ trim: 'chalk_semigloss', items: { [trim[0].id]: 'charcoal_semigloss' } })).filter((m) => m.kind === 'paint');   // one board its own colour
   assert.equal(one.find((m) => m.of === trim[0].id).fin, 'charcoal_semigloss');
   assert.ok(one.filter((m) => m.of !== trim[0].id).every((m) => m.fin === 'chalk_semigloss') && !one.some((m) => m.surface === 'walls'), 'no wall colour, no wall paint');
   sim.state.sys.construction.options.instant = true;
