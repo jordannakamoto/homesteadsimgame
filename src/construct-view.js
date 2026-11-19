@@ -507,7 +507,7 @@
   const segDist = (px, pz, a, b) => { const dx = b.x - a.x, dz = b.z - a.z, L = dx * dx + dz * dz, t = L > 1e-9 ? Math.max(0, Math.min(1, ((px - a.x) * dx + (pz - a.z) * dz) / L)) : 0; return Math.hypot(px - a.x - dx * t, pz - a.z - dz * t); };
 
   // ---- nail points: where a builder really nails. A stick takes a nail at each end; a sheet takes a few along its edges.
-  const STICKS = new Set(['post', 'beam', 'skid', 'joist', 'plate', 'stud', 'header', 'rafter', 'drip', 'rake', 'ridgecap', 'gutter', 'downspout']);
+  const STICKS = new Set(['guardpost', 'rail', 'baluster', 'stringer', 'post', 'beam', 'skid', 'joist', 'plate', 'stud', 'header', 'rafter', 'drip', 'rake', 'ridgecap', 'gutter', 'downspout']);
   const SHEETS = new Set(['sheathing', 'membrane', 'roofing', 'lining', 'insulation', 'cladding']);
   // the layer that hides a stage's nail heads once it is complete
   const COVER = { 'floor-frame': 'subfloor', subfloor: 'lining', 'wall-frame': 'lining', 'top-plates': 'lining', 'roof-frame': 'roof-deck', 'roof-deck': 'dry-in', 'dry-in': 'roofing', sheathing: 'wrap', wrap: 'cladding', carpentry: 'decorate' };   // trim: the nail holes are filled and painted over

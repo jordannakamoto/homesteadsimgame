@@ -96,7 +96,7 @@ test('structure check: joists over the span table are refused, near it warned; a
   assert.ok(!D.planDeck(free({ poly: [[0, 0], [8, 0], [8, 6], [0, 6]] }), ctx).ok, 'nothing spans 5.7 m');
   const low = D.planDeck(free({ height: 0.3 }), { groundY: () => 0 });
   assert.ok(!low.ok && /Too low/.test(low.errors[0]));
-  assert.ok(D.planDeck(free({ height: 1.2 }), { groundY: () => 0 }).warns.some((w) => /guard/.test(w)), 'over 30 in wants a rail');
+  assert.ok(D.planDeck(free({ height: 1.2 }), { groundY: () => 0 }).guard, 'over 30 in gets a guard rail (test/porch.test.mjs has the rest)');
   // a ledger needs a rim joist: not on a slab
   assert.ok(!D.planDeck(attached(), { attached: true, found: 'slab', groundY: () => -0.45 }).ok);
   assert.ok(!D.planDeck({ ...free(), poly: [[0, 0], [1, 0], [1, 1]] }).ok, 'a rectangle');

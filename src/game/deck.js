@@ -10,7 +10,10 @@
      tubes, brackets), the ledger, joists every 400 mm in hangers and the rim in 'deck-frame', boards in 'decking', each a
      course (row) laid from the house out; a click or sweep lays as many rows as the gesture setting says.
    - The deck is a piece { kind: 'floor', type: 'deck', outline } (rooms ignore it), walkable row by row as its boards go on.
-   Data: S.ext.deck = [{ id, poly, dir, height, attach, joist, board }] (see the content file). Owns no truth. */
+   - Slice B-3: Rails (auto: a guard round the open edges when the boards are over 30 in up, else optional), rail posts (4x4
+     notched or 6x6 bolted), Stairs (from a chosen edge down to a landing pad, cut to the rise and run; walked on tread by
+     tread as they go down) and Porch roof (a pitch: posts, header and one shed plane tied to the house wall).
+   Data: S.ext.deck = [{ id, poly, dir, height, attach, joist, board, rails, post, stair, porch }] (see the content file). Owns no truth. */
 import * as D from '../sim/content/deck.js';
 
 (() => {
@@ -39,12 +42,40 @@ import * as D from '../sim/content/deck.js';
     return r;
   }
 
+  // the stair is walked on tread by tread as they go down: the height of the step a point is over, or null
+  let stV = -1;
+  const stairDone = new Map();
+  function stairBuilt(S, pid) {
+    if (stV !== B.version) (stairDone.clear(), (stV = B.version));
+    let r = stairDone.get(pid);
+    if (r) return r;
+    const mw = B.membersOf(S.id), got = { treads: new Set(), pad: false };
+    for (const m of (mw && mw.list) || []) if (m.parent === pid && !mw.planned.has(m.id)) { if (m.kind === 'tread' && m.type === 'tread') got.treads.add(m.step); else if (m.kind === 'landing') got.pad = true; }
+    stairDone.set(pid, got);
+    return got;
+  }
+  function stairGround(S, d, lx, lz) {
+    const pid = h2pid(S, d), q = liteOf(S, pid, d);
+    if (q.st === undefined) { const pl = planFor(S, d), st = pl.stair; q.st = st && st.ok && !st.none ? st : null; }
+    const st = q.st;
+    if (!st) return null;
+    const dx = lx - st.E[0], dz = lz - st.E[1], x = dx * st.o[0] + dz * st.o[1], l = dx * st.o[1] - dz * st.o[0];
+    if (Math.abs(l) > st.w / 2 || x < 0) return null;
+    const got = stairBuilt(S, pid), T = st.T;
+    if (x < (st.N - 1) * T) { const k = Math.floor(x / T) + 1; return got.treads.has(k) ? d.height - k * st.rise : null; }
+    return x < (st.N - 1) * T + D.STAIR.padM && got.pad ? d.height - st.N * st.rise : null;
+  }
+  const h2pid = (S, d) => 'x-deck-' + S.id + '-' + d.id;
+
   extend({
     id: 'deck',
     describe(S, desc, h) {
       for (const d of decks(h)) {
         const wall = d.attach ? (desc.walls || []).find((w) => w.id === d.attach && w.out) : null;
-        desc.extras.push({ kind: 'deck', ...d, id: h.pid(d.id), attached: !!wall, found: desc.found, groundY: h.groundY || (() => 0) });
+        const el = { kind: 'deck', ...d, id: h.pid(d.id), attached: !!wall, found: desc.found, groundY: h.groundY || (() => 0), wallTop: wall ? wall.h : null };
+        desc.extras.push(el);
+        // a porch: one shed plane from the wall ledger down to the header joins the building's roofs (its rafters, sheets, flashing and shingles are made by roofMembers)
+        if (d.porch) { const pl = D.planDeck(el, { attached: el.attached, found: el.found, groundY: el.groundY, wallTop: el.wallTop }); if (pl.ok && pl.porch && pl.porch.ok) desc.roofs.push(D.porchRoofDesc(pl, el.id, el.groundY)); }
       }
     },
     pieces(S, out, h) {
@@ -58,6 +89,8 @@ import * as D from '../sim/content/deck.js';
     ground(S, lx, lz, y, h) {
       let g = null;
       for (const d of decks(h)) {
+        const sg = d.stair ? stairGround(S, d, lx, lz) : null;
+        if (sg !== null && (g === null || sg > g)) g = sg;
         const pid = h.pid(d.id), q = liteOf(S, pid, d), row = D.rowAt(d, { frame: q.f, tL: q.tL }, lx, lz);
         if (row < 0) continue;
         const rows = rowsOf(S, pid), ok = !rows || !rows.size || rows.get(Math.min(row, Math.max(...rows.keys())));
@@ -107,7 +140,7 @@ import * as D from '../sim/content/deck.js';
   if (!B || !G || !W.document) return;
 
   // ---------------------------------------------------------------- the tool
-  const T3 = G.THREE, T = { a: null, readout: '', cand: null, opt: { free: 0.6, drop: 0, joist: 'auto', board: 'pt' } };
+  const T3 = G.THREE, T = { a: null, readout: '', cand: null, opt: { free: 0.6, drop: 0, joist: 'auto', board: 'pt', rails: 'auto', post: '4x4', stair: 'none', porch: 'none' } };
   const JOISTS = ['auto', ...D.JOIST_SIZES];
   const toast = (text, tone) => W.__ui && W.__ui.toast ? W.__ui.toast(text, { tone, seconds: tone === 'bad' ? 5 : 3 }) : null;
   const structOf = (id) => B.state.structs.find((S) => S.id === id) || null;
@@ -117,11 +150,13 @@ import * as D from '../sim/content/deck.js';
   }
   const size = (d) => { const f = D.frameOf(d); return f.W.toFixed(1) + ' x ' + f.D.toFixed(1) + ' m'; };
   const groundIn = (F, y0) => (x, z) => { const [wx, wz] = B.toWorld(F, x, z); return G.heightAt(wx, wz) - y0; };
-  const planFor = (S, d) => D.planDeck(d, { attached: !!d.attach && wallsOf(S).some((w) => w.id === d.attach), found: S.found, groundY: groundIn(S, S.y0) });
+  const wallTopOf = (S, d) => { const mw = d.attach ? B.membersOf(S.id) : null, w = mw && (mw.walls || []).find((q) => q.id === d.attach); return w ? w.h : null; };
+  const planFor = (S, d) => D.planDeck(d, { attached: !!d.attach && wallsOf(S).some((w) => w.id === d.attach), found: S.found, groundY: groundIn(S, S.y0), wallTop: wallTopOf(S, d) });
   function verdict(pl) {
     if (!pl.frame) return pl.errors[0] || '';
-    const sp = pl.joist + ' joists span ' + pl.span.toFixed(2) + ' of ' + pl.maxSpan.toFixed(2) + ' m';
-    return pl.errors.length ? pl.errors[0] : sp + (pl.attached ? ' · bolted to the house' : ' · on its own posts') + (pl.warns.length ? ' · ' + pl.warns[0] : '');
+    const sp = pl.joist + ' joists span ' + pl.span.toFixed(2) + ' of ' + pl.maxSpan.toFixed(2) + ' m', st = pl.stair && pl.stair.ok && !pl.stair.none ? pl.stair : null;
+    return pl.errors.length ? pl.errors[0] : sp + (pl.attached ? ' · bolted to the house' : ' · on its own posts') + (pl.guard ? ' · guard rail' + (pl.guardRequired ? ' (required over 30 in)' : '') : '')
+      + (st ? ' · ' + st.N + ' risers of ' + (st.rise / D.IN).toFixed(1) + ' in' : '') + (pl.porch && pl.porch.ok ? ' · porch roof, ' + pl.porch.clear.toFixed(2) + ' m headroom' : '') + (pl.warns.length ? ' · ' + pl.warns[0] : '');
   }
   // height, joists and boards: for the next deck (pre '') or the selected one (pre 'sel-')
   function controls(g, G_, pre, d, S) {
@@ -130,12 +165,26 @@ import * as D from '../sim/content/deck.js';
     g.push(G_.step(id('height'), 'Height', hTxt));
     g.push(G_.chips(id('joist'), 'Joists', JOISTS.map((v) => ({ v, name: v === 'auto' ? 'Auto' : v })), d ? d.joist || 'auto' : T.opt.joist));
     g.push(G_.chips(id('board'), 'Boards', [{ v: 'pt', name: 'Treated' }, { v: 'cedar', name: 'Cedar' }], d ? d.board || 'pt' : T.opt.board));
+    g.push(G_.chips(id('rails'), 'Rails', [{ v: 'auto', name: 'Auto' }, { v: 'on', name: 'On' }, { v: 'off', name: 'Off' }], d ? d.rails || 'auto' : T.opt.rails));
+    g.push(G_.chips(id('post'), 'Rail posts', [{ v: '4x4', name: '4x4 notched' }, { v: '6x6', name: '6x6 bolted' }], d ? d.post || '4x4' : T.opt.post));
+    g.push(G_.chips(id('stair'), 'Stairs', [{ v: 'none', name: 'None' }, { v: 'out', name: 'Front' }, { v: 'left', name: 'Left' }, { v: 'right', name: 'Right' }], d ? (d.stair && d.stair.edge) || 'none' : T.opt.stair));
+    g.push(G_.chips(id('porch'), 'Porch roof', [{ v: 'none', name: 'None' }, ...D.PORCH.pitches.map((p) => ({ v: String(p), name: p + ':12' }))], d ? (d.porch ? String(d.porch.pitch) : 'none') : T.opt.porch));
+  }
+  // the guard, stair and porch settings, on a deck record (a new one or a selected one)
+  function applyOpt(d, key, v) {
+    if (key === 'rails' && (v === 'auto' || v === 'on' || v === 'off')) d.rails = v;
+    else if (key === 'post' && (v === '4x4' || v === '6x6')) d.post = v;
+    else if (key === 'stair' && ['none', 'out', 'left', 'right', 'house'].includes(v)) d.stair = v === 'none' ? null : { edge: v, w: D.STAIR.minWidthM };
+    else if (key === 'porch' && (v === 'none' || D.PORCH.pitches.includes(+v))) d.porch = v === 'none' ? null : { pitch: +v };
+    else return false;
+    return true;
   }
   function choose(key, v) {
     if (key.startsWith('sel-')) return chooseSel(key.slice(4), v);
     if (key === 'height') { if (T.cand && T.cand.attach) T.opt.drop = Math.max(0, Math.min(0.3, T.opt.drop - v * 0.025)); else T.opt.free = Math.max(0.3, Math.min(3, Math.round((T.opt.free + v * 0.05) * 100) / 100)); }
     else if (key === 'joist' && JOISTS.includes(v)) T.opt.joist = v;
     else if (key === 'board' && (v === 'pt' || v === 'cedar')) T.opt.board = v;
+    else if (['rails', 'post', 'stair', 'porch'].includes(key)) { const o = { rails: T.opt.rails, post: T.opt.post, stair: T.opt.stair ? { edge: T.opt.stair } : null, porch: T.opt.porch !== 'none' ? { pitch: +T.opt.porch } : null }; applyOpt(o, key, v); T.opt.rails = o.rails; T.opt.post = o.post; T.opt.stair = o.stair ? o.stair.edge : 'none'; T.opt.porch = o.porch ? String(o.porch.pitch) : 'none'; }
     T.last && hover(T.last);
     XP.touch();
   }
@@ -147,7 +196,7 @@ import * as D from '../sim/content/deck.js';
     if (key === 'height') d.height = Math.round((d.height + v * (d.attach ? 0.025 : 0.05)) * 1000) / 1000;
     else if (key === 'joist' && JOISTS.includes(v)) d.joist = v;
     else if (key === 'board' && (v === 'pt' || v === 'cedar')) d.board = v;
-    else return;
+    else if (!applyOpt(d, key, v)) return;
     if (d.attach && d.height > FLOOR_T - D.DECK.board.t + 1e-6) return void toast('A deck bolted to the house sits at or below its floor: water must not run in under the door.', 'warn');
     const pl = planFor(k.S, d);
     if (!pl.ok) return void toast(pl.errors[0], 'bad');
@@ -196,8 +245,9 @@ import * as D from '../sim/content/deck.js';
     }
     const poly = [[x0, z0], [x1, z0], [x1, z1], [x0, z1]].map((p) => p.map((v) => Math.round(v * 1000) / 1000));
     const y0 = attach ? S.y0 : G.heightAt(...B.toWorld(F, (x0 + x1) / 2, (z0 + z1) / 2));
-    const d = { id: 0, poly, dir, height: attach ? Math.round((FLOOR_T - D.DECK.board.t - T.opt.drop) * 1000) / 1000 : T.opt.free, attach: attach ? attach.id : null, joist: T.opt.joist, board: T.opt.board };
-    const pl = D.planDeck(d, { attached: !!attach, found: S ? S.found : null, groundY: groundIn(F, y0) });
+    const d = { id: 0, poly, dir, height: attach ? Math.round((FLOOR_T - D.DECK.board.t - T.opt.drop) * 1000) / 1000 : T.opt.free, attach: attach ? attach.id : null, joist: T.opt.joist, board: T.opt.board, rails: T.opt.rails, post: T.opt.post, stair: T.opt.stair === 'none' ? null : { edge: T.opt.stair, w: D.STAIR.minWidthM }, porch: T.opt.porch === 'none' ? null : { pitch: +T.opt.porch } };
+    const wt = attach && S ? ((B.membersOf(S.id).walls || []).find((q) => q.id === attach.id) || {}).h : null;
+    const pl = D.planDeck(d, { attached: !!attach, found: S ? S.found : null, groundY: groundIn(F, y0), wallTop: wt });
     if (inside && !attach) (pl.errors.unshift('That is inside the building: a deck goes outside the walls.'), (pl.ok = false));
     return { d, pl, F, y0, S, attach };
   }
