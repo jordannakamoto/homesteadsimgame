@@ -884,6 +884,10 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - Old saves: a wall lined in one piece before this change counts its new sheets and seams as in, so finished buildings stay finished.
 - Known: `test/shed.e2e.mjs` still fails at the foundation (the pointer picks a neighbouring stack and puts it back), as noted above; not from this branch.
 
+## Key map, help on ? / F1, X means overlays (branch `wave2-k1-keys`)
+- **New:** `src/game/keymap.js` is one table of every key by context; the Controls sheet is drawn from it (combat rows only with `localStorage.combat`), and `__keymap.chip('E')` gives key chips for prompts. The sheet opens on `?` or F1 (H is the Hens'). Unhitching a trailer is now hold R while stopped (a prompt shows; X is overlays everywhere). The 2/3/4 terrain brush needs `localStorage.sandbox = '1'` (its buttons are hidden otherwise). Site and Foundation notes name "Site (7)" for slab, stem wall and pier foundations. Esc also leaves the terrain brush.
+- **Try:** `?` in the world; drive the ATV with a trailer, stop, hold R; `localStorage.sandbox='1'` then reload for keys 2-4.
+- **Weak:** the table is hand-kept (no test ties it to the real handlers); `by` was not set on site/foundation stages (it would make another system tally them), only `hint`.
 ## Interior walls and services, reconciled (branch `reconcile`)
 
 - Electrical boxes are set proud of the studs by the wall's lining (13 mm drywall, 19 mm boards), so after hanging and taping they sit flush with the finished wall and the outlets fitted at Trim-out are on the surface, not buried behind the drywall. Boxes placed before this change keep where they are.
@@ -891,6 +895,10 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - Opening a wall to get at a run takes off every sheet or board of it, its taped seams and the batts; the hints say so.
 - The planned interior "trim" slice (casings, baseboard) is renamed finish carpentry, apart from services' Trim-out. See `docs/design/interior-walls.md` and the design README.
 
+## Wave 2 X2: one bag for what other systems keep on a building
+- Nothing new to see. What services (rough-in work and lines) and the foundation (holds on framing) keep on a building now lives under `progress[id].keep[source]`, and sending a building's plan again carries the whole bag over, so a new source cannot be dropped by accident. Try: pour a slab and watch framing stay held across a reload; order services lines and reload.
+- Older saves with `ext` / `extLines` / `hold` on the record are moved under `keep` when first read (no save version bump). Console: `__game.sim.state.sys.construction.progress[id].keep`.
+- Also fixed: `construction.settle` read an undefined `ctx` (the foundation smoke hit it).
 ## Paint: walls and trim (branch `paint`, design in `docs/design/interior-finishes.md`)
 
 - New last building stage, **Paint**: primer on every lined wall face, a rectangle (up to 1.2 m wide, clear of the openings) at a time, then two coats of colour, each on dry paint. The trim (corner boards and round doors and windows) takes two coats of its own colour; it comes primed.
@@ -911,6 +919,36 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - Ordered as Casing, Baseboard and Finish nails. The guide no longer asks to reorder when every stick has been cut into pieces still to set.
 - Weak: miters and copes are drawn as square ends; window trim is a picture frame (stool and apron later); no caulk yet; the aim can pick a neighbouring piece first at a corner.
 
+## Build mode extension point X1 (branch `wave2-x1-build-ext`)
+Nothing new to see yet: this is the plumbing decks, porches, lofts, skylights and chimneys will plug into, each in a file of its own (ARCHITECTURE.md, "Adding to build mode").
+- Try it with the test fixture (free-standing 4x4 posts): in the console, paste `test/fixtures/build-ext-post.js`, then `__build.setExt(__build.state.structs[0].id, 'xpost', { posts: [[0, -2]] })`. A post appears beside the first building, on its shopping list (List) and, in a plan, as a blueprint in the floor-frame stage. Ctrl+Z takes it away. In build mode a "Post" button joins the bar: click a building to stand another post there (the smoke test covers the button and options, not this click).
+- Weak: extension pieces cannot be picked with the pointer yet, extension tools have no keyboard key, and the fixture's buttons have no real icon art.
+
+## Trim-out by hand: outlets, switches, lights, breakers (branch `wave2-s1-trim`, slice S9b of `docs/design/services-roughin.md`)
+
+- Trim-out is real work and real stock now. The Build panel's Trim-out lines list an outlet and its plate, a switch and its plate, or a light for each box a cable comes to, and a breaker sized to the cable (15 A for 14/2) for each panel slot. Order them like any stage; they sit by the stacks. "Do it for me" still finishes the stage, but it draws all of it from the stacks and says what is missing if it is short.
+- A box planned as a switch gets a switch, an outlet an outlet, a ceiling box a light. Before the first wire goes on, the wheel over the box changes it (outlet, switch, wall light).
+- In Hands (F), at a roughed-in box whose walls are done: **click** strips the cable ends (the copper shows), **drag** away from the box lands the wires on the device (it comes off the stacks then), **click** folds it in and screws it, **click** puts on the plate (a light: its shade). The per-gesture setting (1x to 4x) is how many ends one click or drag does; from 2x the fold click puts the plate on too.
+- At the panel: empty slots pulse; **click** presses a breaker onto the bus bar (several at 3x/4x). The main goes off while you work: **drag** its handle up and the lights come on one after another along the circuit. **Click** a breaker to switch it off or on. A tripped breaker sits mid-throw; hover it for what it drew; switch the load off and click to reset.
+- **Click** a wall switch: the lights after it on the cable go out or on (with no light after it, the outlets: a switched outlet).
+- **Hold** on the yellow tester under the panel: a light hops box to box along every circuit, green where the cable is through, red where it is not; the red marks stay a while and say why on hover ("cable not pulled through to here", "not joined to the panel"). A pass hangs a green tag on the panel. The tester works during rough-in too.
+- Lamps glow by their lens; one point light follows the nearest lit lamp.
+- Console: `__servicesTrim.targets()`, `.where('trim' | 'slot' | 'breaker' | 'main' | 'switch' | 'tester' | 'fault')`, `.lamps()`; sim commands `services.trim { node, n }`, `services.main { panel, on }`, `services.breaker { node }`, `services.flip { node }`, `services.check { structId }`.
+- Old saves: boxes and slots trimmed before this change stay as they were, live and free; a panel has no main state until a breaker is pressed in by hand.
+- Weak: the device is a plain ivory box and the plate a white slab; the land drag accepts any drag of about 20 px from the box (it does not need to end on a screw); touch has no drag mapping for land or the main; wall-face direction for boxes on partitions is guessed from where the box sits in the wall; one switch per light chain (no three-way); the light's glow follows the electrical tick, so after throwing the main it can take a moment of game time to start.
+
+
+
+## Supply plumbing: manifold, pressure test, fixtures on their stubs (branch `wave2-s2-plumb`, slice S10 of `docs/design/services-roughin.md`)
+
+- Cold mode (key 2, with the Hands strip) has two new presets on the wheel: **Manifold** (a PEX manifold on the wall, one line per fixture, six at most) and **Bathroom sink**. Start a run at the tank or pump and end it on the manifold: that main is 3/4 in PEX (a different spec, ring and coil in the Build panel); lines from the manifold to each stub-out are 1/2 in. A 3/4 in main feeding a 1/2 in branch is one pipe of the narrow size with an equivalent length, so friction is Hazen-Williams on both.
+- Rough-in now orders a manifold, a **stub cap** for every stub-out, and the usual pipe, staples and rings. Strap a stub up (two clicks as before): it is **open** (an orange ring) and sprays once the supply reaches it. **Click** it to cap it. "Do it for me" caps every stub from the stacks.
+- **Pressure test**: in Hands, hold on the gauge port at the manifold. The gauge climbs to 690 kPa (100 psi) and holds fifteen minutes, or the needle stalls under 25 kPa and every open end sprays and gets a red mark (hover for why: "stub-out not capped", "end not crimped", "pipe not pulled through"). A pass hangs a green tag. Optional: skipping costs nothing now.
+- **Trim-out**: a capped, ready stub glows. Click to set the fixture on it (kitchen sink, bathroom sink, toilet, shower valve, hose bib: what it was planned as; the first one shuts the manifold's main), click for an angle stop on each supply, click for a supply line from each stop (1x to 4x per click). A sink or shower takes cold and hot: the hot stub within 60 cm is trimmed with it. Fixtures, stops and lines come off the stacks and are Build panel lines.
+- **Switch-on**: **drag** the main's handle on the manifold a quarter turn. The pipes knock (shake, puffs), the taps sputter for a moment, then run (flow from `water.js`, through the pipe: indoor, so it freezes by the indoor rule). **Click** a faucet to run it, a line's stop at the manifold or a fixture's angle stop to shut that one off.
+- Console: `__servicesWater.targets()`, `.where('cap' | 'fix' | 'tap' | 'stop' | 'main' | 'line' | 'pump')`; sim `services.cap { node, on }`, `services.valve { node | run, on }` (manifold node = the main, a run = its line stop, a stub with its fixture = the angle stop), `services.trim { node, n }` on a stub, `services.check { structId, kind: 'water' }`.
+- Old saves: stubs capped by older plans stay capped and free; nothing sprays and nothing asks for caps. `services.valves` is added on load.
+- Weak: fixtures are plain boxes; the test pump has no handle model and the gauge is a needle on a disc; no sound; drains and vents are not here (S11), so a sink empties nowhere yet; the test only judges ends (no weeping fittings); hot water needs a heater run from a hot manifold you plan yourself.
 ## Trim slice 2: stool and apron, real miters, caulk, miter saw (branch `trim2`)
 
 - Windows get a **stool** (a shelf on the sill, its horns notched round the casing, standing proud of the wall) and an **apron** under it; the legs stand on the stool. The picture frame stays as an option (`spec.winTrim: 'frame'`).
@@ -926,3 +964,12 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - **Dollhouse**: where the cut opens a finished wall, a cap at the cut height shows it in section as one solid thing (the room's colour inside, a pale timber core, the siding's colour outside); no studs, batts or hollows. Walls still being built stay open to see into.
 - **Sawhorses** come with the first lumber delivered for a building when they are away at an earlier site (left where you put them if they are close by).
 - **Insulation**: a wall shows its frame until both its siding and its lining are on, so the batts going in are seen; batts are drawn soft and fibrous, pillowed between the studs, and a batt pressed into its bay gives a puff of fibres. Between the studs, before a batt, the back of the sheathing shows.
+
+## Wave 2 B-1: poured piers and stem walls by hand (branch `wave2-b1-piers`, design `ground-foundations.md` B8)
+- The foundation job is made by the simulation, not the page: build mode's foundation members carry their shape (`geo`) into `construction.setPlan`, which calls `foundation.followPlan`; the job, its corners, trenches and holes are worked out there (a headless test builds piers with no page). Removing a building or changing it to a foundation that is not poured drops the job. Sandbox builds and older saves dug the old way get none, as before.
+- Frost: footings go to the frost line of the site's climate (`FROST_DEPTH_M`: temperate 1.2 m (Vermont's 48 in), cold continental 1.35 m, Mediterranean 0.45 m), or the plan's depth if deeper. The Site bar says so, and that the holes take more concrete than the plan showed. A trench is not taken deeper than a shovel throws earth (1.2 m) at its high end.
+- Piers (construction mode, a plan with Piers, then key 7): lay out the corners; the **Digger** (post-hole digger, $38): press on a glowing pier mark, drag side to side to twist, drag up to lift a plug out (spoil lands beside the hole as real earth); `gesture` holes a bite. **Tubes** (10 in x 12 ft, cut to length, the offcut does the next): click a hole and it drops in leaning; press on its top and drag toward the bubble's side until it snaps plumb. **Barrow** as for the slab, drag down at a tube to fill it; **Rod**: press in the wet top and pump up and down (bubbles, the level drops, top it up); **Brackets**: click a full top while it is wet (drilled and epoxied, one at a time, after set). The chip shows Piers %; framing waits for the frame gate and the brackets; then **Beams**: click along a row and the beams go on from the stacks.
+- Stem walls: the trench is dug with the shovel as the slab's pad is (amber, trim), the footing poured into it from the barrow, then **Panels** (4 x 8 ft, a pair at a time, once the footing is a tenth strength) and **Ties** (the hammer on a glowing column: a snap tie per row), the wall filled and rodded, **Bolts** in its wet top, **Strip** at a fifth strength (panels back to stock).
+- Console: `__game.foundation.hard(__game.sim.state, __foundation.job().id)`; commands `foundation.bore / setTube / plumb / fill / rod / setBracket / setPanel / tie / setBeam`. `debugPour` is no longer needed for any foundation (kept for tests).
+- Weak: a frost-depth trench by shovel is a lot of earth (a 3 x 2.4 m shed is about 8 m3): wants the hired hand or a machine; panels are bought, not rented; no bucket, only the barrow, tips into a tube; no backfill step (the 70% gate is only told); the tube's cardboard stays drawn above ground; the gestures (twist and lift, the plumbing drag, the rod pump) were only tested through their commands, so their feel needs a playtest.
+

@@ -703,3 +703,38 @@ test('construction.setExternal and setExtLines on their own: a stage tallied out
   assert.ok(sim.commandNow('construction.setOption', { key: 'sandbox', value: true }).ok);
   assert.ok(sim.commandNow('construction.use', { structId: 9, itemId: 'nm_cable_12_2', qty: 100, from: 'stacks' }).free);
 });
+
+test('keep: what other systems keep on a building survives a plan sent again (hold, ext, extLines, and a key nobody here knows)', () => {
+  const sim = start();
+  assert.ok(sim.commandNow('construction.setHold', { structId: shed.struct, stage: 'wall-frame', reason: 'green concrete' }).ok);
+  assert.ok(sim.commandNow('construction.setExternal', { structId: shed.struct, stage: 'rough-in', built: 1, total: 3 }).ok);
+  assert.ok(sim.commandNow('construction.setExtLines', { structId: shed.struct, source: 'svc', lines: [], sig: 'a' }).ok);
+  pr(sim).keep.someoneElse = { n: 5, deep: { x: [1, 2] } };
+  const again = () => assert.ok(sim.commandNow('construction.setPlan', K.planFromPieces(shed.struct, shed.pieces, shed.materialsList, { name: 'Tool shed', planId: 'shed', tutorial: true, x: 40, z: 40, r: 2 })).ok);
+  again(); again();
+  const P = pr(sim);
+  assert.deepEqual(P.keep.someoneElse, { n: 5, deep: { x: [1, 2] } });
+  assert.equal(P.keep.hold['wall-frame'], 'green concrete');
+  assert.deepEqual(P.keep.ext['rough-in'], [1, 3]);
+  assert.equal(P.keep.extLines.svc.sig, 'a');
+  assert.ok(P.keep !== undefined && P.ext === undefined && P.hold === undefined && P.extLines === undefined);
+  assert.ok(K.blocked(P, Object.keys(P.members).find((id) => P.members[id].stage === 'wall-frame')) === 'green concrete');
+});
+
+test('keep: an old save with ext, extLines and hold on the record itself still loads and works', () => {
+  const sim = start();
+  const P = pr(sim);
+  P.hold = { 'wall-frame': 'old hold' }; P.ext = { 'rough-in': [2, 4] }; P.extLines = { svc: { sig: 'z', lines: [] } };
+  delete P.keep;
+  const sim2 = createGameSim(7);
+  sim2.state.sys = JSON.parse(JSON.stringify(sim.state.sys));
+  const Q = pr(sim2);
+  assert.equal(K.kept(Q, 'hold')['wall-frame'], 'old hold');
+  assert.ok(!K.stageOpen(Q, 'wall-frame'));
+  assert.ok(sim2.commandNow('construction.setHold', { structId: shed.struct, stage: 'wall-frame', reason: null }).ok);
+  assert.deepEqual(Q.keep.ext['rough-in'], [2, 4]);
+  assert.equal(Q.hold, undefined);
+  assert.ok(sim2.commandNow('construction.setPlan', K.planFromPieces(shed.struct, shed.pieces, shed.materialsList, { name: 'Tool shed', planId: 'shed', tutorial: true, x: 40, z: 40, r: 2 })).ok);
+  assert.equal(pr(sim2).keep.extLines.svc.sig, 'z');
+  assert.deepEqual(pr(sim2).tally['rough-in'], [2, 4]);
+});

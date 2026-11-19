@@ -28,10 +28,10 @@
     { id: 'power', key: 'Digit1', name: 'Power', cls: 'cable', colour: '#f2c94c', starts: ['box', 'box_ceiling', 'slot'], noun: 'box',
       presets: [{ id: 'outlet', name: 'Outlet', h: 0.4, kind: 'box', spec: 'cable_nm_14_2' }, { id: 'switch', name: 'Switch', h: 1.2, kind: 'box', spec: 'cable_nm_14_2' },
         { id: 'counter', name: 'Counter outlet', h: 1.1, kind: 'box', spec: 'cable_nm_12_2' }, { id: 'light', name: 'Ceiling light', on: 'ceiling', kind: 'box_ceiling', spec: 'cable_nm_14_2' }] },
-    { id: 'cold', key: 'Digit2', name: 'Cold', cls: 'supply', colour: '#4a8fe8', starts: ['stub_supply', 'port'], noun: 'stub', spec: 'pex_12_blue', equip: ['storage', 'pump', 'pressure'],
-      presets: [{ id: 'sink', name: 'Sink', h: 0.5, kind: 'stub_supply' }, { id: 'toilet', name: 'Toilet', h: 0.2, kind: 'stub_supply' }, { id: 'shower', name: 'Shower valve', h: 1.2, kind: 'stub_supply' }] },
-    { id: 'hot', key: 'Digit3', name: 'Hot', cls: 'supply', colour: '#e0503a', starts: ['stub_supply', 'port'], noun: 'stub', spec: 'pex_12_red', equip: ['heater'],
-      presets: [{ id: 'sink', name: 'Sink', h: 0.5, kind: 'stub_supply' }, { id: 'shower', name: 'Shower valve', h: 1.2, kind: 'stub_supply' }] },
+    { id: 'cold', key: 'Digit2', name: 'Cold', cls: 'supply', colour: '#4a8fe8', starts: ['stub_supply', 'port', 'manifold'], noun: 'stub', spec: 'pex_12_blue', equip: ['storage', 'pump', 'pressure'],
+      presets: [{ id: 'sink', name: 'Sink', h: 0.5, kind: 'stub_supply' }, { id: 'bath', name: 'Bathroom sink', h: 0.5, kind: 'stub_supply' }, { id: 'manifold', name: 'Manifold (one line per fixture)', h: 1.2, kind: 'manifold' }, { id: 'toilet', name: 'Toilet', h: 0.2, kind: 'stub_supply' }, { id: 'shower', name: 'Shower valve', h: 1.2, kind: 'stub_supply' }] },
+    { id: 'hot', key: 'Digit3', name: 'Hot', cls: 'supply', colour: '#e0503a', starts: ['stub_supply', 'port', 'manifold'], noun: 'stub', spec: 'pex_12_red', equip: ['heater'],
+      presets: [{ id: 'sink', name: 'Sink', h: 0.5, kind: 'stub_supply' }, { id: 'bath', name: 'Bathroom sink', h: 0.5, kind: 'stub_supply' }, { id: 'manifold', name: 'Manifold (one line per fixture)', h: 1.2, kind: 'manifold' }, { id: 'shower', name: 'Shower valve', h: 1.2, kind: 'stub_supply' }] },
     { id: 'waste', key: 'Digit4', name: 'Waste', cls: 'drain', colour: '#b07a48', starts: ['stub_drain', 'exit', 'cleanout'], noun: 'drain',
       presets: [{ id: 'sink', name: 'Sink drain', h: 0.45, kind: 'stub_drain', spec: 'dwv_40' }, { id: 'toilet', name: 'Toilet drain', on: 'floor', kind: 'stub_drain', spec: 'dwv_75' },
         { id: 'shower', name: 'Shower drain', on: 'floor', kind: 'stub_drain', spec: 'dwv_50' }, { id: 'exit', name: 'Out of the building', on: 'exit', kind: 'exit' }] },
@@ -133,7 +133,7 @@
       if (n.frame !== near.frame || !mode.starts.includes(n.kind) || n.stray) continue;
       const rs = by[n.id] || [];
       if (rs.length && !rs.some((r) => r.cls === mode.cls)) continue;
-      if (spec && rs.some((r) => r.cls === mode.cls && r.spec !== spec)) continue;          // a cold stub is not a hot one
+      if (spec && n.kind !== 'manifold' && rs.some((r) => r.cls === mode.cls && r.spec !== spec)) continue;          // a cold stub is not a hot one
       if (n.kind === 'slot' && rs.length) continue;                                           // one circuit per breaker
       sockets.push({ node: n.id, kind: n.kind, at: n.at, world: toWorld(n.at), label: labelOf(n, rs) });
     }
@@ -227,7 +227,7 @@
       if (grp && grp.spec) return grp.spec;
       return (tg && tg.preset && tg.preset.spec) || (start && start.preset && start.preset.spec) || 'cable_nm_14_2';
     }
-    if (mode.cls === 'supply') return mode.spec;
+    if (mode.cls === 'supply') return mode.id === 'cold' && ((start && start.kind === 'port' && tg && tg.kind === 'manifold') || (start && start.kind === 'manifold' && tg && tg.kind === 'port')) ? 'pex_34' : mode.spec;   // the main into a manifold is 3/4 in
     let d = 0, best = 'dwv_40';
     const by = runsAt();
     for (const e of [start, tg]) {
@@ -380,7 +380,9 @@
     const at = e.kind === 'exit' && res ? res.path[isEnd ? res.path.length - 1 : 0] : e.at;
     const p = { kind: e.kind, frame: near.frame, at, host: e.host || (e.wall ? { parent: e.wall } : undefined) };
     if (e.equip) p.ref = { piece: e.equip, port: e.port };
-    if (e.kind === 'stub_supply' || e.kind === 'stub_drain') p.set = { capped: true };
+    if (e.kind === 'stub_drain') p.set = { capped: true };
+    if (e.kind === 'stub_supply' && e.preset) p.set = { preset: e.preset.id };       // a supply stub is capped by hand when it is strapped up (services.cap)
+    if (e.preset && mode.cls === 'cable') p.set = { preset: e.preset.id };          // what it was planned as: the device it gets at trim-out
     const r = cmd('routes.addNode', p);
     return r.ok ? r.id : null;
   }
