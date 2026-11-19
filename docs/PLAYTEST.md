@@ -965,6 +965,10 @@ Nothing new to see yet: this is the plumbing decks, porches, lofts, skylights an
 - **Sawhorses** come with the first lumber delivered for a building when they are away at an earlier site (left where you put them if they are close by).
 - **Insulation**: a wall shows its frame until both its siding and its lining are on, so the batts going in are seen; batts are drawn soft and fibrous, pillowed between the studs, and a batt pressed into its bay gives a puff of fibres. Between the studs, before a batt, the back of the sheathing shows.
 
+## Fixes: Work until done on trim and paint, dollhouse side cuts (branch `trim-bug`)
+
+- **Work until done** (and Guided) no longer stop with "That cannot go in yet" in Trim carpentry or Paint: they skip what cannot go on yet (caulk before its trim is nailed, colour before dry primer, a coat on a wet one) and, when all that is left is drying, wait with "Waiting for it to dry" instead of stopping.
+- **Dollhouse**: where the cut's sides (and the near cut) pass through a finished wall, the cut face is capped in the wall's colours too, so no hollow shows at the ends of cut walls; the caps follow the cut as you and the camera move.
 ## Wave 2 B-1: poured piers and stem walls by hand (branch `wave2-b1-piers`, design `ground-foundations.md` B8)
 - The foundation job is made by the simulation, not the page: build mode's foundation members carry their shape (`geo`) into `construction.setPlan`, which calls `foundation.followPlan`; the job, its corners, trenches and holes are worked out there (a headless test builds piers with no page). Removing a building or changing it to a foundation that is not poured drops the job. Sandbox builds and older saves dug the old way get none, as before.
 - Frost: footings go to the frost line of the site's climate (`FROST_DEPTH_M`: temperate 1.2 m (Vermont's 48 in), cold continental 1.35 m, Mediterranean 0.45 m), or the plan's depth if deeper. The Site bar says so, and that the holes take more concrete than the plan showed. A trench is not taken deeper than a shovel throws earth (1.2 m) at its high end.
