@@ -12,6 +12,16 @@
   const T = G.THREE, $ = (id) => document.getElementById(id), canvas = $('view');
   const bar = $('gbar'), hint = bar.querySelector('.ghint'), toolsEl = bar.querySelector('.gtools'), seedsEl = bar.querySelector('.gseeds');
   const label = $('glabel'), fxEl = $('gfx'), card = $('gcard'), alm = $('galm'), tip = $('gtip');
+  // the bar sits in the bottom lane beside the mode chip; its hint and seed box stack above it in the prompt and context
+  // places, the guide card goes where the quest card is, the almanac is a drawer (template/ui/30-hotbar.css)
+  if (window.__ui) {
+    const ctx = document.createElement('div'); ctx.className = 'gctx'; ctx.append(hint, seedsEl); bar.insertBefore(ctx, toolsEl);
+    for (const el of [toolsEl, hint, seedsEl]) el.classList.add('panel');
+    bar.classList.remove('panel');
+    window.__ui.mount(bar, 'bottom', { order: 2 }); window.__ui.mount(tip, 'left', { order: 5 });
+    new ResizeObserver(() => document.body.style.setProperty('--gbar-ctx', ctx.offsetHeight + 'px')).observe(ctx);
+    window.__ui.panel({ el: alm, kind: 'side' });
+  }
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v), lerp = (a, b, t) => a + (b - a) * t;
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const CELL = 0.3, DAY = 86400;
@@ -51,18 +61,18 @@
 
 
   /* ================= icons (inline SVG, drawn for this hotbar) ================= */
-  const I = (body) => '<svg viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="#f1ead6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' + body + '</svg>';
+  const I = (body) => '<svg viewBox="0 0 40 40" aria-hidden="true" fill="none" stroke="var(--ic-outline)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' + body + '</svg>';
   const ICONS = {
-    hands: I('<path d="M12 22v-9a2 2 0 0 1 4 0v6M16 18v-8a2 2 0 0 1 4 0v8M20 18v-7a2 2 0 0 1 4 0v8M24 19v-4a2 2 0 0 1 4 0v9c0 6-3 10-9 10-4 0-6-2-8-5l-4-7c-1-2 1-4 3-2l2 3" fill="#e9b88f" stroke="#f6dcc0"/>'),
-    water: I('<path d="M8 17h16v13a3 3 0 0 1-3 3H11a3 3 0 0 1-3-3z" fill="#5f8fb0" stroke="#bfe2f7"/><path d="M24 20l9-7" stroke="#bfe2f7"/><path d="M33 13l2-2" stroke="#bfe2f7" stroke-width="3"/><path d="M12 17c0-4 2-6 4-6s4 2 4 6" stroke="#bfe2f7"/><path d="M35 18v3M32 22v3M36 24v3" stroke="#8fd0f2" stroke-width="1.8"/>'),
-    hoe: I('<path d="M28 6L14 30" stroke="#d8b585" stroke-width="2.6"/><path d="M10 27l7 5-3 3-7-4z" fill="#b9c2c9" stroke="#cfd6dc"/><path d="M26 30c2-3 5-4 8-3M22 34c2-2 4-3 7-3" stroke="#8cc35a" stroke-width="1.6"/>'),
-    mulch: I('<path d="M6 30c8-4 20-4 28 0" stroke="#e8c97a" stroke-width="3"/><path d="M8 27l6-5M14 28l5-7M20 27l6-6M26 28l5-5M11 24l-3-4M23 24l2-5" stroke="#e8c97a" stroke-width="1.6"/>'),
-    compost: I('<path d="M8 32l4-14h16l4 14z" fill="#5a3d26" stroke="#c99a6a"/><path d="M12 18c2-4 14-4 16 0" stroke="#c99a6a"/><path d="M15 26h2M22 24h2M19 29h2" stroke="#9b7a52" stroke-width="2"/><path d="M27 12c2-2 5-2 6 0" stroke="#8cc35a" stroke-width="1.6"/>'),
-    box: I('<path d="M6 16h28v16H6z" fill="#8a6238" stroke="#e8c79a"/><path d="M6 16l4-6h20l4 6" stroke="#e8c79a"/><path d="M13 10v-3h5v3M22 10v-4h5v4" fill="#f2e8c8" stroke="#f2e8c8" stroke-width="1.4"/><path d="M16 24h8" stroke="#e8c79a"/>'),
-    packet: (hex) => I('<path d="M11 6h18v28H11z" fill="#f2e8c8" stroke="#fff6dc"/><path d="M11 12h18" stroke="#c9b98a" stroke-width="1.6"/><circle cx="20" cy="22" r="6" fill="' + hex + '" stroke="none"/><path d="M20 15c0-3 2-4 4-4" stroke="#6f9a3a" stroke-width="1.8"/>'),
+    hands: I('<path d="M12 22v-9a2 2 0 0 1 4 0v6M16 18v-8a2 2 0 0 1 4 0v8M20 18v-7a2 2 0 0 1 4 0v8M24 19v-4a2 2 0 0 1 4 0v9c0 6-3 10-9 10-4 0-6-2-8-5l-4-7c-1-2 1-4 3-2l2 3" fill="var(--ic-skin)" stroke="var(--ic-outline)"/>'),
+    water: I('<path d="M8 17h16v13a3 3 0 0 1-3 3H11a3 3 0 0 1-3-3z" fill="var(--ic-water)" stroke="var(--ic-outline)"/><path d="M24 20l9-7" stroke="var(--ic-outline)"/><path d="M33 13l2-2" stroke="var(--ic-outline)" stroke-width="3"/><path d="M12 17c0-4 2-6 4-6s4 2 4 6" stroke="var(--ic-outline)"/><path d="M35 18v3M32 22v3M36 24v3" stroke="var(--ic-water)" stroke-width="1.8"/>'),
+    hoe: I('<path d="M28 6L14 30" stroke="var(--ic-wood)" stroke-width="2.6"/><path d="M10 27l7 5-3 3-7-4z" fill="var(--ic-steel)" stroke="var(--ic-outline)"/><path d="M26 30c2-3 5-4 8-3M22 34c2-2 4-3 7-3" stroke="var(--ic-leaf)" stroke-width="1.6"/>'),
+    mulch: I('<path d="M6 30c8-4 20-4 28 0" stroke="var(--ic-paper)" stroke-width="3"/><path d="M8 27l6-5M14 28l5-7M20 27l6-6M26 28l5-5M11 24l-3-4M23 24l2-5" stroke="var(--ic-paper)" stroke-width="1.6"/>'),
+    compost: I('<path d="M8 32l4-14h16l4 14z" fill="var(--ic-soil)" stroke="var(--ic-soil)"/><path d="M12 18c2-4 14-4 16 0" stroke="var(--ic-soil)"/><path d="M15 26h2M22 24h2M19 29h2" stroke="var(--ic-soil)" stroke-width="2"/><path d="M27 12c2-2 5-2 6 0" stroke="var(--ic-leaf)" stroke-width="1.6"/>'),
+    box: I('<path d="M6 16h28v16H6z" fill="var(--ic-wood)" stroke="var(--ic-outline)"/><path d="M6 16l4-6h20l4 6" stroke="var(--ic-outline)"/><path d="M13 10v-3h5v3M22 10v-4h5v4" fill="var(--ic-paper)" stroke="var(--ic-paper)" stroke-width="1.4"/><path d="M16 24h8" stroke="var(--ic-outline)"/>'),
+    packet: (hex) => I('<path d="M11 6h18v28H11z" fill="var(--ic-paper)" stroke="var(--ic-outline)"/><path d="M11 12h18" stroke="var(--ic-paper)" stroke-width="1.6"/><circle cx="20" cy="22" r="6" fill="' + hex + '" stroke="none"/><path d="M20 15c0-3 2-4 4-4" stroke="var(--ic-leaf)" stroke-width="1.8"/>'),
   };
-  ICONS.trowel = I('<path d="M27 7l-6 8" stroke="#d8b585" stroke-width="3.2"/><path d="M22 14l-8 10c-2 3-3 7-2 10 3 1 7-1 9-3l6-10z" fill="#b9c2c9" stroke="#cfd6dc"/><path d="M7 34h12" stroke="#a3784e" stroke-width="2" stroke-dasharray="2 3"/>');
-  ICONS.shovel = I('<path d="M27 5l-9 17" stroke="#d8b585" stroke-width="2.6"/><path d="M24 4l6 3" stroke="#3a3a3a" stroke-width="3"/><path d="M15 20l7 4-3 9c-1 2-4 2-6 1s-3-3-2-5z" fill="#9aa4ab" stroke="#cfd6dc"/><path d="M6 34c4-3 9-3 14-1" stroke="#a3784e" stroke-width="2"/>');
+  ICONS.trowel = I('<path d="M27 7l-6 8" stroke="var(--ic-wood)" stroke-width="3.2"/><path d="M22 14l-8 10c-2 3-3 7-2 10 3 1 7-1 9-3l6-10z" fill="var(--ic-steel)" stroke="var(--ic-outline)"/><path d="M7 34h12" stroke="var(--ic-soil)" stroke-width="2" stroke-dasharray="2 3"/>');
+  ICONS.shovel = I('<path d="M27 5l-9 17" stroke="var(--ic-wood)" stroke-width="2.6"/><path d="M24 4l6 3" stroke="var(--ic-steel)" stroke-width="3"/><path d="M15 20l7 4-3 9c-1 2-4 2-6 1s-3-3-2-5z" fill="var(--ic-steel)" stroke="var(--ic-outline)"/><path d="M6 34c4-3 9-3 14-1" stroke="var(--ic-soil)" stroke-width="2"/>');
   const hexOf = (n) => '#' + n.toString(16).padStart(6, '0');
 
   /* ================= state of the view ================= */
@@ -942,8 +952,8 @@
   const tag = label;
   let tagSig = '', tagX = -1, tagY = -1;
   const tagPt = { x: 0, y: 0, vis: false };
-  function updateTag() {
-    const a = H.aim, id = held();
+  function updateTag(a = H.aim) {
+    const id = held();
     let txt = '', warn = false;
     if (a.valid && !a.down && !H.raising) {
       const c = cellAt(a.x, a.z), cell = c && c.bed.cells[c.i], p = cell && cell.pl && S().plants[cell.pl];
@@ -959,6 +969,18 @@
     H.setMark(warn ? 0xf0b080 : 0xfff2c4, id === 'can' || id === 'mulch' || id === 'compost' ? 1.6 : id === 'hoe' ? 1.3 : 1);
     if (txt !== tagSig) { tagSig = txt; tag.textContent = txt; tag.hidden = !txt; tag.classList.toggle('warn', warn); tagX = -1; }
   }
+  // the tag answers the pointer at once, not at the next refresh: on a slow machine that is several frames away.
+  // Throttled; reads the ground under the pointer the way the hands do (clamped to the garden's reach of 1.5 m).
+  const tagGp = { x: 0, y: 0, z: 0 };
+  let tagMoveT = 0;
+  canvas.addEventListener('mousemove', (e) => {
+    if (!on || H.aim.down || e.buttons || e.timeStamp - tagMoveT < 60) return;
+    tagMoveT = e.timeStamp;
+    const r = canvas.getBoundingClientRect(), g = H.groundAt(((e.clientX - r.left) / r.width) * 2 - 1, -(((e.clientY - r.top) / r.height) * 2 - 1), tagGp);
+    if (!g) return;
+    const P = G.player, dx = g.x - P.x, dz = g.z - P.z, d = Math.hypot(dx, dz) || 1, k = clamp(d, 0.3, 1.5) / d;
+    updateTag({ valid: true, down: false, x: P.x + dx * k, z: P.z + dz * k });
+  });
   function moveTag() {
     if (tag.hidden) return;
     const a = H.aim; toScreen(a.x, a.y + 0.35, a.z, tagPt);

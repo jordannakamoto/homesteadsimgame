@@ -157,23 +157,23 @@
   // Three slim rows: a hint line (with what can be done to the selection), the options strip, the tools. The
   // options strip folds away (`) for an even lower bar; build mode shifts the view up by half the bar's height.
   bar.innerHTML =
-    '<div id="bhead"><span id="bhint" aria-live="polite"></span><button id="bstop" type="button" hidden>' + svg(I.stop, 14) + '<span>Stop</span><kbd>Esc</kbd></button><span class="grow"></span><div id="bacts" role="group" aria-label="Selection"></div>' +
-    '<button id="bfold" type="button" title="Hide or show the options ( ` )" aria-expanded="true"><span>Options</span>' + svg(I.down, 14) + "</button></div>" +
+    '<div id="bhead"><span id="bhint" aria-live="polite"></span><button id="bstop" class="ui-btn ui-btn--go" type="button" hidden>' + svg(I.stop, 14) + '<span>Stop</span><kbd>Esc</kbd></button><span class="grow"></span><div id="bacts" role="group" aria-label="Selection"></div>' +
+    '<button id="bfold" class="ui-btn ui-btn--ghost" type="button" title="Hide or show the options ( ` )" aria-expanded="true"><span>Options</span>' + svg(I.down, 14) + "</button></div>" +
     '<div id="bopts" role="group" aria-label="Options"></div><div id="bdecor" role="group" aria-label="Pieces" hidden></div>' +
     '<div id="bmain"><div id="bpieces" role="group" aria-label="Build tools"></div><div id="baids">' +
-    '<button id="bsnap" type="button" aria-pressed="true" title="Snap to the grid, to ends, middles and walls, and to round angles ( / ). Hold Ctrl to place freely.">' + svg(I.snap, 20) + '<span class="name">Snap</span><span class="key">/</span></button>' +
-    '<div id="blevel" title="The storey you are working on (Page Up, Page Down)"><button id="bldn" type="button" aria-label="Storey down">' + svg(I.down, 16) + '</button><span id="blname">Ground</span><button id="blup" type="button" aria-label="Storey up">' + svg(I.up, 16) + "</button></div>" +
-    '<button id="bsched" type="button" aria-pressed="false" title="The schedule: what this building needs, stage by stage">' + svg('<path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4"/>', 20) + '<span class="name">List</span></button>' +
-    '<button id="bfree" type="button" aria-pressed="true" title="When off, pieces cost wood and removing them refunds it">Free</button>' +
-    '<button id="bundo" type="button" title="Undo (Ctrl+Z)" aria-label="Undo">' + svg(I.undo, 18) + '<span>Undo</span></button><button id="bredo" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">' + svg(I.redo, 18) + "<span>Redo</span></button>" +
-    '<button id="bdone" type="button" title="Leave build mode (B)">' + svg(I.done, 20) + '<span class="name">Done</span><span class="key">B</span></button></div></div>';
+    '<button id="bsnap" class="ui-slot" type="button" aria-pressed="true" title="Snap to the grid, to ends, middles and walls, and to round angles ( / ). Hold Ctrl to place freely.">' + svg(I.snap, 20) + '<span class="name">Snap</span><span class="key ui-key">/</span></button>' +
+    '<div id="blevel" class="ui-step" title="The storey you are working on (Page Up, Page Down)"><button id="bldn" type="button" aria-label="Storey down">' + svg(I.down, 16) + '</button><span id="blname" class="n">Ground</span><button id="blup" type="button" aria-label="Storey up">' + svg(I.up, 16) + "</button></div>" +
+    '<button id="bsched" class="ui-slot" type="button" aria-pressed="false" title="The schedule: what this building needs, stage by stage">' + svg('<path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4"/>', 20) + '<span class="name">List</span></button>' +
+    '<button id="bfree" class="ui-btn" type="button" aria-pressed="true" title="When off, pieces cost wood and removing them refunds it">Free</button>' +
+    '<button id="bundo" class="ui-btn ui-btn--icon" type="button" title="Undo (Ctrl+Z)" aria-label="Undo">' + svg(I.undo, 18) + '<span>Undo</span></button><button id="bredo" class="ui-btn ui-btn--icon" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">' + svg(I.redo, 18) + "<span>Redo</span></button>" +
+    '<button id="bdone" class="ui-slot" type="button" title="Leave build mode (B)">' + svg(I.done, 20) + '<span class="name">Done</span><span class="key ui-key">B</span></button></div></div>';
   const pieces = $("bpieces");
   let grp = -1;
   for (const t of BL.view().tools) {
-    if (t.group !== grp && grp >= 0) pieces.insertAdjacentHTML("beforeend", '<span class="sep"></span>');
+    if (t.group !== grp && grp >= 0) pieces.insertAdjacentHTML("beforeend", '<span class="sep" aria-hidden="true"></span>');
     grp = t.group;
     const letter = BL.TOOL_LETTER[t.id] || "";
-    pieces.insertAdjacentHTML("beforeend", '<button type="button" data-piece="' + t.id + '" title="' + t.name + " (" + letter + (t.key === letter ? "" : " or " + t.key) + ')" aria-pressed="false">' + svg(I[t.id], 19) + '<span class="name">' + t.name + '</span><span class="key">' + letter + "</span></button>");
+    pieces.insertAdjacentHTML("beforeend", '<button type="button" data-piece="' + t.id + '" title="' + t.name + " (" + letter + (t.key === letter ? "" : " or " + t.key) + ')" aria-pressed="false">' + svg(I[t.id], 19) + '<span class="name">' + t.name + '</span><span class="key ui-key">' + letter + "</span></button>");
   }
   const back = () => canvas.focus();
   pieces.addEventListener("click", (e) => {
@@ -194,7 +194,7 @@
   // the schedule: the bill of materials by stage, in a panel at the side
   const sched = document.createElement("div");
   sched.id = "bschedp";
-  sched.className = "panel";
+  sched.className = "panel ui-panel ui-panel--side";
   sched.hidden = true;
   document.body.appendChild(sched);
   const money = (v) => "$" + Math.round(v).toLocaleString("en-US");
@@ -307,7 +307,7 @@
     // the window and door designer: a panel docked at the right, above the bar, clear of the wall being worked on
     dpanel = document.createElement("div");
   dpanel.id = "bdesign";
-  dpanel.className = "panel";
+  dpanel.className = "panel ui-panel ui-panel--side";
   dpanel.hidden = true;
   document.body.appendChild(dpanel);
   let groups = [];
@@ -316,15 +316,15 @@
     const lab = (extra) => '<span class="blab">' + esc(g.label || "") + (extra !== undefined ? ' <b class="bval">' + esc(extra) + "</b>" : "") + keyHint(g.key) + "</span>";
     const cur = g.items ? g.items.find((x) => x.v === g.value) : null;
     if (g.type === "num")
-      return '<div class="bgroup bnumg">' + lab() + '<div class="bitems bnumi"><button type="button" class="bchip" data-g="' + n + '" data-i="-1" aria-label="Less">' + svg(I.minus, 13) + '</button><input type="text" inputmode="decimal" autocomplete="off" data-g="' + n + '" value="' + esc(g.value) + '" aria-label="' + esc(g.label) + '"><span class="bu">' + esc(g.unit || "") + '</span><button type="button" class="bchip" data-g="' + n + '" data-i="1" aria-label="More">' + svg(I.plus, 13) + "</button></div>" + (g.note ? '<span class="bnote' + (g.bad ? " bad" : "") + '">' + esc(g.note) + "</span>" : "") + "</div>";
-    if (g.type === "badges") return '<div class="bgroup bbadges">' + g.items.map((x) => '<span class="bbadge' + (x.k ? " k-" + x.k : "") + '"' + (x.title ? ' title="' + esc(x.title) + '"' : "") + ">" + esc(x.text) + "</span>").join("") + "</div>";
+      return '<div class="bgroup bnumg">' + lab() + '<div class="bitems bnumi ui-step"><button type="button" class="bchip" data-g="' + n + '" data-i="-1" aria-label="Less">' + svg(I.minus, 13) + '</button><input type="text" inputmode="decimal" autocomplete="off" data-g="' + n + '" value="' + esc(g.value) + '" aria-label="' + esc(g.label) + '"><span class="bu u">' + esc(g.unit || "") + '</span><button type="button" class="bchip" data-g="' + n + '" data-i="1" aria-label="More">' + svg(I.plus, 13) + "</button></div>" + (g.note ? '<span class="bnote' + (g.bad ? " bad" : "") + '">' + esc(g.note) + "</span>" : "") + "</div>";
+    if (g.type === "badges") return '<div class="bgroup bbadges">' + g.items.map((x) => '<span class="bbadge ui-tag' + (x.k ? " k-" + x.k : "") + '"' + (x.title ? ' title="' + esc(x.title) + '"' : "") + ">" + esc(x.text) + "</span>").join("") + "</div>";
     if (g.type === "winprev") return '<div class="bgroup bwinprev">' + lab() + winPreview(g) + "</div>";
     if (g.type === "info") return '<div class="bgroup binfo"><span class="btitle">' + esc(g.title) + '</span><span class="bnum">' + esc(g.text) + "</span></div>";
     if (g.type === "swatches") return '<div class="bgroup">' + lab(cur ? cur.name : g.value === null ? "mixed" : "") + '<div class="bitems">' + g.items.map((x, m) => '<button type="button" class="bsw" data-g="' + n + '" data-i="' + m + '" title="' + esc(x.name) + '" aria-label="' + esc(x.name) + '" aria-pressed="' + (x.v === g.value) + '">' + swatch(x.sw) + "</button>").join("") + "</div></div>";
     // tiles are icons; the label above names the one that is chosen (or the one under the pointer)
-    if (g.type === "tiles") return '<div class="bgroup">' + lab(cur ? cur.name : g.value === null ? "mixed" : "") + '<div class="bitems">' + g.items.map((x, m) => '<button type="button" class="btile" data-g="' + n + '" data-i="' + m + '" title="' + esc(x.name) + '" aria-label="' + esc(x.name) + '" aria-pressed="' + (x.v === g.value) + '">' + svg(I[x.icon], 19) + "</button>").join("") + "</div></div>";
-    if (g.type === "chips") return '<div class="bgroup">' + (g.label ? lab(cur && cur.note ? cur.note : undefined) : "") + '<div class="bitems">' + g.items.map((x, m) => '<button type="button" class="bchip" data-g="' + n + '" data-i="' + m + '" aria-pressed="' + (x.v === g.value) + '"' + (x.note ? ' title="' + esc(x.note) + '"' : "") + ">" + esc(x.name) + "</button>").join("") + "</div></div>";
-    if (g.type === "stepper") return '<div class="bgroup">' + lab() + '<div class="bitems bstep"><button type="button" class="bchip" data-g="' + n + '" data-i="-1" aria-label="Less">' + svg(I.minus, 14) + '</button><span class="bnum">' + esc(g.text) + '</span><button type="button" class="bchip" data-g="' + n + '" data-i="1" aria-label="More">' + svg(I.plus, 14) + "</button></div></div>";
+    if (g.type === "tiles") return '<div class="bgroup">' + lab(cur ? cur.name : g.value === null ? "mixed" : "") + '<div class="bitems ui-seg">' + g.items.map((x, m) => '<button type="button" class="btile" data-g="' + n + '" data-i="' + m + '" title="' + esc(x.name) + '" aria-label="' + esc(x.name) + '" aria-pressed="' + (x.v === g.value) + '">' + svg(I[x.icon], 19) + "</button>").join("") + "</div></div>";
+    if (g.type === "chips") return '<div class="bgroup">' + (g.label ? lab(cur && cur.note ? cur.note : undefined) : "") + '<div class="bitems ui-seg">' + g.items.map((x, m) => '<button type="button" class="bchip" data-g="' + n + '" data-i="' + m + '" aria-pressed="' + (x.v === g.value) + '"' + (x.note ? ' title="' + esc(x.note) + '"' : "") + ">" + esc(x.name) + "</button>").join("") + "</div></div>";
+    if (g.type === "stepper") return '<div class="bgroup">' + lab() + '<div class="bitems bstep ui-step"><button type="button" class="bchip" data-g="' + n + '" data-i="-1" aria-label="Less">' + svg(I.minus, 14) + '</button><span class="bnum n">' + esc(g.text) + '</span><button type="button" class="bchip" data-g="' + n + '" data-i="1" aria-label="More">' + svg(I.plus, 14) + "</button></div></div>";
     if (g.type === "toggle") return '<div class="bgroup"><span class="blab">&nbsp;</span><div class="bitems"><button type="button" class="btile" data-g="' + n + '" aria-pressed="' + !!g.on + '" title="' + esc(g.title || g.name) + '">' + svg(I[g.icon], 17) + "<span>" + esc(g.name) + "</span></button></div></div>";
     if (g.type === "action") return '<div class="bgroup"><span class="blab">' + (g.key ? keyHint(g.key) : "&nbsp;") + '</span><div class="bitems"><button type="button" class="btile' + (g.danger ? " danger" : "") + '" data-g="' + n + '"' + (g.title ? ' title="' + esc(g.title) + '"' : "") + ">" + svg(I[g.icon], 17) + "<span>" + esc(g.name) + "</span></button></div></div>";
     if (g.type === "field") return '<div class="bgroup">' + lab() + '<div class="bitems bfield" title="' + esc(g.title || "") + '"><input type="text" inputmode="decimal" autocomplete="off" data-g="' + n + '" value="' + esc(g.value) + '" aria-label="' + esc(g.label) + '"' + (g.locked ? " disabled" : "") + "><span>" + esc(g.unit) + "</span></div></div>";
@@ -350,7 +350,7 @@
       if (g.type === "action" && g.id.startsWith("s:")) acts.push('<button type="button" class="bchip' + (g.danger ? " danger" : "") + '" data-g="' + n + '" title="' + esc(g.title || g.name) + (g.key ? " (" + esc(g.key) + ")" : "") + '">' + svg(I[g.icon], 15) + "<span>" + esc(g.name) + "</span></button>");
       else put(g.row === "d" ? third : g.row === 2 ? second : first, groupHtml(g, n), g);
     });
-    const flat = (arr) => arr.map((x) => (typeof x === "string" ? x : '<div class="bsec"><div class="bsech">' + esc(x.name) + '</div><div class="bsecb">' + x.html.join("") + "</div></div>")).join("");
+    const flat = (arr) => arr.map((x) => (typeof x === "string" ? x : '<div class="bsec ui-card"><div class="bsech">' + esc(x.name) + '</div><div class="bsecb">' + x.html.join("") + "</div></div>")).join("");
     $("bacts").innerHTML = acts.join("");
     opts.innerHTML = flat(first);
     opts.hidden = !first.length;
