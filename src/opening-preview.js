@@ -545,7 +545,7 @@
   /* ---------- the stage: the unit on its wall run, with dimensions and handles ---------- */
   function layout(s, o) {
     const W = o.width || 360, Hp = o.height || 220, wall = o.wall || {}, L = wall.L > 0 ? wall.L : 4, H = wall.H > 0 ? wall.H : 2.84,
-      at = Number.isFinite(o.at) ? o.at : L / 2, u0 = at - s.w / 2, e = extents(s), padT = 16, padB = 36, padS = 12;
+      at = Number.isFinite(o.at) ? o.at : L / 2, u0 = at - s.w / 2, e = extents(s), padT = 16, padB = 42, padS = 12;
     let k = (Hp - padT - padB) / Math.max(H, s.sill + e.hi + 0.1);
     k = Math.min(k, (W - 2 * padS - 76) / Math.max(0.3, e.b - e.a));
     const span = (W - 2 * padS) / k;
@@ -609,13 +609,28 @@
     // extension lines from the unit's edges down to the string
     d += "M" + f(X(u0)) + " " + f(Y(s.sill) + 3) + "V" + f(yC + 4) + "M" + f(X(u0 + s.w)) + " " + f(Y(s.sill) + 3) + "V" + f(yC + 4);
     out.push('<path d="' + d + '" fill="none" ' + dl + "/>");
-    const label = (a, b, v, strong) => {
-      const x0 = cx(X(a)), x1 = cx(X(b)), w = x1 - x0, t = m2(v);
-      if (v < 0.005 && !strong) return;
-      const fits = w > t.length * 5.6 + 4;
-      out.push('<text x="' + f((x0 + x1) / 2) + '" y="' + f(fits ? yC - 3 : yC + 11) + '" text-anchor="middle" ' + tx + (strong ? "" : ' fill-opacity=".8"') + ">" + t + "</text>");
-    };
-    label(lb, u0, u0 - lb), label(u0, u0 + s.w, s.w, true), label(u0 + s.w, rb, rb - u0 - s.w);
+    // labels: inside its ticks if it fits, else below the string (with a short leader), else shifted sideways along that
+    // row or dropped to a second row; never over another label. A gap under 3 cm is not labelled.
+    const TW = (t) => t.length * 5.8 + 2, rows = [[yC - 3, 0], [yC + 10, 1], [yC + 20, 1]], boxes = [];
+    const free = (cxm, tw, ri) => boxes.every((q) => q.ri !== ri || cxm + tw / 2 <= q.l || cxm - tw / 2 >= q.r) && cxm - tw / 2 >= 2 && cxm + tw / 2 <= M.W - 2;
+    const items = [[lb, u0, u0 - lb, false], [u0, u0 + s.w, s.w, true], [u0 + s.w, rb, rb - u0 - s.w, false]].filter((q) => q[3] || q[2] >= 0.03)
+      .map((q) => { const x0 = cx(X(q[0])), x1 = cx(X(q[1])); return { x0, x1, v: q[2], strong: q[3], t: m2(q[2]), m: (x0 + x1) / 2 }; })
+      .sort((p, q) => (q.strong - p.strong) || ((q.x1 - q.x0) - (p.x1 - p.x0)));
+    let leaders = "";
+    for (const it of items) {
+      const tw = TW(it.t);
+      let at = null;
+      if (it.x1 - it.x0 > tw + 2 && free(it.m, tw, 0)) at = [it.m, 0];
+      for (let ri = 1; ri < 3 && !at; ri++)
+        for (let d = 0; d <= 140 && !at; d += 4)
+          for (const sg of d ? [-1, 1] : [1]) if (free(it.m + sg * d, tw, ri)) { at = [it.m + sg * d, ri]; break; }
+      if (!at) at = [it.m, 2];
+      boxes.push({ l: at[0] - tw / 2, r: at[0] + tw / 2, ri: at[1] });
+      const y = rows[at[1]][0];
+      if (at[1]) leaders += "M" + f(it.m) + " " + f(yC) + "L" + f(at[0]) + " " + f(y - 8.5);
+      out.push('<text x="' + f(at[0]) + '" y="' + f(y) + '" text-anchor="middle" ' + tx + (it.strong ? "" : ' fill-opacity=".8"') + ">" + it.t + "</text>");
+    }
+    leaders && out.push('<path d="' + leaders + '" fill="none" stroke="var(--cad)" stroke-width=".6" stroke-opacity=".7"/>');
     // the height beside the unit, and the sill (or head, or centre) from the floor on the other side
     const vert = (x, y0, y1, t, side, cap) => {
       out.push('<path d="M' + f(x) + " " + f(y0) + "V" + f(y1) + tick(x, y0) + tick(x, y1) + '" fill="none" ' + dl + "/>");
