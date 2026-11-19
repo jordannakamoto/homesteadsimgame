@@ -116,6 +116,15 @@
     fmat: "planks",
     rmat: "asphalt",
     stairDir: 0,
+    // the next stair: its type ('auto' picks), width, turn, material and look (src/sim/content/stairs.js)
+    stType: "auto",
+    stWidth: 0.92,
+    stTurn: null,
+    stMat: "pine",
+    stLook: { rail: null, railStyle: "square", open: null, nosing: null, boxed: false, flare: 0, gallery: true },
+    stSweep: null,
+    stRadius: null,
+    stV: 0,
     prevTool: "axe",
     pending: { ox: 0, oz: 0, yaw: 0, y0: 0, isNew: true },
     ptr: { x: 0, y: 0, rx: 0, ry: 0 },
@@ -2135,7 +2144,7 @@
       }
     }
   }
-  const onFloorAt = (S, x, z) => (S.floors.has(ck(Math.floor(x), Math.floor(z))) && !(S.id && wellOver(S, Math.floor(x), Math.floor(z)))) || inRings(S, x, z) || (S.polys || []).some((p) => pip(p.pts, x, z));
+  const onFloorAt = (S, x, z) => (S.floors.has(ck(Math.floor(x), Math.floor(z))) && !(S.id && wellAt(S, x, z))) || inRings(S, x, z) || (S.polys || []).some((p) => pip(p.pts, x, z));
   // height of a decoration above its structure's base: on the floor if there is one, else on the ground
   function decorY(D, it) {
     const base = D.base || D;
@@ -2200,59 +2209,181 @@
     [1.5, "Tall"],
     [2, "Grand"],
   ];
-  const stairLen = (hs) => Math.max(3, Math.round(3 * hs));
+  // ---- stairs (docs/design/plan-mode-redesign.md, section 3A). A record in S.stairs is
+  // { id, type, x, z, dir, y, rise, run, width, n, turn, at, opening, auto, mat, rail, railStyle, open, nosing, boxed }:
+  // x, z the foot's centre in the building's metres, dir which way it climbs (0..3 as DIRS), y the foot's height above
+  // this structure's floor top (below 0 for steps that start on the ground), rise up to the surface it lands on, run the
+  // room ahead it was laid out in. window.__stairs solves a record into a layout; window.__stairsGeo builds its parts.
+  // Old saves' { id, i, j, dir } become straight stairs when they load (stairRec).
+  const ST = () => window.__stairs || null,
+    SGEO = () => window.__stairsGeo || null,
+    rr3 = (v) => Math.round(v * 1000) / 1000;
+  const stairLen = (hs) => Math.max(3, Math.round(3 * hs));   // the old fixed stair's length, for old saves
   const sameGrid = (A, Bq) => A.ox === Bq.ox && A.oz === Bq.oz && A.yaw === Bq.yaw;
-  // is this floor tile an opening above a staircase coming up from the storey below?
-  function wellOver(U, i, j) {
+  const ST_KEYS = ["type", "x", "z", "dir", "rise", "run", "width", "n", "turn", "at", "opening", "sweep", "radius", "flare", "rail", "wall"],
+    stairMemo = new WeakMap();
+  // a record's layout, solved once and kept until one of its numbers changes
+  function stairLy(st) {
+    if (!st.type) st = ST().fromRecord(st, { rise: EAVE });
+    const key = ST_KEYS.map((k) => st[k]).join("|"),
+      m = stairMemo.get(st);
+    if (m && m.key === key) return m.Ly;
+    const Ly = ST().layoutOf(st, { opening: st.opening });
+    stairMemo.set(st, { key, Ly });
+    return Ly;
+  }
+  // a rectangle of a stair's own frame [u0, v0, u1, v1] in the building's metres [x0, z0, x1, z1]
+  function stairBox(Ly, r) {
+    const a = ST().toWorld(Ly, r[0], r[1]),
+      b = ST().toWorld(Ly, r[2], r[3]);
+    return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])];
+  }
+  // where a floor is opened over the stairs that land on it (the solver's well), in its own metres
+  const wellMemo = new WeakMap();
+  function wellRects(U) {
+    if (!U || !U.id || !ST()) return [];
+    const v = B.version + "|" + (B.stV || 0),
+      m = wellMemo.get(U);
+    if (m && m.v === v) return m.r;
+    const r = [];
     for (const S of B.structs) {
-      if (S === U || !S.stairs.length || !sameGrid(S, U) || Math.abs(S.y0 + EAVE * S.hs - U.y0) > 0.3) continue;
-      const n = stairLen(S.hs);
+      if (S === U || !S.stairs.length || !sameGrid(S, U)) continue;
       for (const st of S.stairs) {
-        const [dx, dz] = DIRS[st.dir];
-        for (let m = 0; m < n; m++) if (st.i + dx * m === i && st.j + dz * m === j) return true;
+        if (Math.abs(S.y0 + (st.y || 0) + (st.rise === undefined ? EAVE * S.hs : st.rise) - U.y0) > 0.3) continue;
+        const Ly = stairLy(st);
+        for (const w of Ly.well || []) r.push(stairBox(Ly, w));
       }
     }
-    return false;
+    wellMemo.set(U, { v, r });
+    return r;
   }
-  function stairH(S, lx, lz) {
-    const n = stairLen(S.hs);
+  const wellAt = (U, x, z) => wellRects(U).some((r) => x > r[0] + 1e-3 && x < r[2] - 1e-3 && z > r[1] + 1e-3 && z < r[3] - 1e-3);
+  // is this floor tile (mostly) an opening above a staircase coming up from below?
+  function wellOver(U, i, j) {
+    let a = 0;
+    for (const r of wellRects(U)) a += Math.max(0, Math.min(i + 1, r[2]) - Math.max(i, r[0])) * Math.max(0, Math.min(j + 1, r[3]) - Math.max(j, r[1]));
+    return a >= 0.5;
+  }
+  // what is left of a floor tile round a stairwell, exactly (a gallery guard stands on the opening's edge): null when
+  // nothing is cut, true when all of it is, else the boxes [x0, z0, x1, z1] that stay
+  function wellCut(U, i, j) {
+    const rs = wellRects(U).filter((r) => r[0] < i + 1 - 1e-3 && r[2] > i + 1e-3 && r[1] < j + 1 - 1e-3 && r[3] > j + 1e-3);
+    if (!rs.length) return null;
+    const cuts = (a, k) => [...new Set([a, a + 1, ...rs.flatMap((r) => [r[k], r[k + 2]]).filter((v) => v > a + 1e-3 && v < a + 1 - 1e-3)])].sort((p, q) => p - q),
+      xs = cuts(i, 0),
+      zs = cuts(j, 1),
+      out = [];
+    for (let b = 0; b < zs.length - 1; b++) {
+      const zm = (zs[b] + zs[b + 1]) / 2;
+      let a0 = -1;
+      for (let a = 0; a <= xs.length - 1; a++) {
+        const xm = a < xs.length - 1 ? (xs[a] + xs[a + 1]) / 2 : 0,
+          shut = a < xs.length - 1 && !rs.some((r) => xm > r[0] && xm < r[2] && zm > r[1] && zm < r[3]);
+        if (shut && a0 < 0) a0 = a;
+        else if (!shut && a0 >= 0) (out.push([xs[a0], zs[b], xs[a], zs[b + 1]]), (a0 = -1));
+      }
+    }
+    return out.length ? out : true;
+  }
+  // the walking height on the stairs of S at a point of its grid (above S.y0), for a walker at world height y; on a
+  // spiral the landing at the top (stairs-spiral's spiralInfo) is walked as the floor it meets
+  function stairH(S, lx, lz, y) {
+    if (!S.stairs.length || !ST()) return null;
+    let best = null;
     for (const st of S.stairs) {
-      const [dx, dz] = DIRS[st.dir],
-        rx = lx - (st.i + 0.5),
-        rz = lz - (st.j + 0.5),
-        along = rx * dx + rz * dz + 0.5,
-        lat = Math.abs(-rx * dz + rz * dx);
-      if (lat <= 0.5 && along >= -0.05 && along <= n + 0.05) return FLOOR_T + clamp(along / n, 0, 1) * EAVE * S.hs;
-    }
-    return null;
-  }
-  function stairPieces(g, st, hs) {
-    const steps = stairLen(hs) * 4,
-      [dx, dz] = DIRS[st.dir],
-      sx = st.i + 0.5 - dx * 0.5,
-      sz = st.j + 0.5 - dz * 0.5;
-    for (let m = 0; m < steps; m++) {
-      const mid = (m + 0.5) * 0.25,
-        cx = sx + dx * mid,
-        cz = sz + dz * mid,
-        hx = dx ? 0.125 : 0.46,
-        hz = dz ? 0.125 : 0.46;
-      g.abox(cx - hx, 0, cz - hz, cx + hx, FLOOR_T + ((m + 1) / steps) * EAVE * hs, cz + hz, shade(C.floor, 0.82 + 0.2 * hash(st.i, st.j, m)));
-    }
-    // handrails
-    const L = stairLen(hs),
-      rise = EAVE * hs;
-    for (const side of [-1, 1]) {
-      const lx = -dz * 0.47 * side,
-        lz = dx * 0.47 * side;
-      g.obox([sx + (dx * L) / 2 + lx, FLOOR_T + rise / 2 + 0.95, sz + (dz * L) / 2 + lz], [(dx * L) / 2, rise / 2, (dz * L) / 2], [0, 0.04, 0], [-dz * 0.035, 0, dx * 0.035], C.beam);
-      for (const t of [0.02, 0.5, 0.98]) {
-        const px = sx + dx * L * t + lx,
-          pz = sz + dz * L * t + lz,
-          py = FLOOR_T + rise * t;
-        g.abox(px - 0.04, py - 0.1, pz - 0.04, px + 0.04, py + 0.97, pz + 0.04, C.beam);
+      const Ly = stairLy(st),
+        base = FLOOR_T + (st.y || 0),
+        yr = y === undefined ? 99 : y - S.y0 - base,
+        hs = [],
+        h = ST().heightAt(Ly, lx, lz, yr);
+      if (h !== null) hs.push(h);
+      const SG = SGEO(),
+        L = Ly.spiral && SG && SG.spiralInfo ? SG.spiralInfo(Ly) : null;
+      if (L && L.landing) {
+        const [u, v] = ST().toLocal(Ly, lx, lz),
+          w = (Ly.well && Ly.well[0]) || Ly.box,
+          c = Ly.spiral.c,
+          sg = Math.sign(Ly.spiral.step) || 1,
+          span = sg * (L.landing.a1 - L.landing.a0);
+        if (u >= w[0] - 1e-3 && u <= w[2] + 1e-3 && v >= w[1] - 1e-3 && v <= w[3] + 1e-3) {
+          let q = (sg * (Math.atan2(v - c[1], u - c[0]) - L.landing.a0)) % (Math.PI * 2);
+          if (q < 0) q += Math.PI * 2;
+          if (q <= span + 1e-3) hs.push(Ly.rise);
+        }
       }
+      if (!hs.length) continue;
+      const under = hs.filter((q) => q <= yr + 0.36),
+        v = base + (under.length ? Math.max(...under) : Math.min(...hs));
+      if (best === null || v > best) best = v;
     }
+    return best;
+  }
+  // does a stair stand clear of S's grid walls, on its floor? (an old save's stair that no longer fits is kept short)
+  function stairClear(S, Ly) {
+    for (const p of Ly.rects || []) {
+      const [x0, z0, x1, z1] = stairBox(Ly, p.r);
+      for (let i = Math.ceil(x0 + 0.02); i < x1 - 0.02; i++) for (let j = Math.floor(z0); j < z1; j++) if (S.walls.has(ek(i, j, 1))) return false;
+      for (let j = Math.ceil(z0 + 0.02); j < z1 - 0.02; j++) for (let i = Math.floor(x0); i < x1; i++) if (S.walls.has(ek(i, j, 0))) return false;
+      for (let x = x0 + 0.1; x < x1; x += 0.25) for (let z = z0 + 0.1; z < z1; z += 0.25) if (!S.floors.has(ck(Math.floor(x), Math.floor(z))) && !inRings(S, x, z)) return false;
+    }
+    return true;
+  }
+  // a saved stair as a record of today: an old { i, j, dir } is a straight stair up one storey, laid out by the rules;
+  // where that longer stair would run into a wall or off the floor it keeps its old length, steep, and says so
+  function stairRec(S, x) {
+    if (!x || x.type || !ST()) return { ...x };
+    const r = ST().fromRecord(x, { rise: EAVE * (S.hs || 1) });
+    r.y = 0;
+    if (!stairClear(S, ST().solve({ type: r.type, x: r.x, z: r.z, dir: r.dir, rise: r.rise, run: r.run, width: r.width, n: r.n }))) ((r.run = stairLen(S.hs || 1)), (r.n = null));
+    return r;
+  }
+  // which sides of a stair's first flight run along a grid wall: 1 left, 2 right
+  function stairWalls(Wm, Ly) {
+    const f = Ly.flights && Ly.flights[0];
+    if (!Wm || !f || f.len < 0.3) return 0;
+    let m = 0;
+    for (const [bit, sg] of [[1, -1], [2, 1]]) {
+      let hit = 0,
+        n = 0;
+      for (let t = 0.15; t < f.len; t += 0.3, n++) {
+        const o = sg * (f.w / 2 + 0.07),
+          u = f.a[0] + f.d[0] * t - f.d[1] * o,
+          v = f.a[1] + f.d[1] * t + f.d[0] * o,
+          [x, z] = ST().toWorld(Ly, u, v),
+          [x2, z2] = ST().toWorld(Ly, u + f.d[0], v + f.d[1]);
+        if (Math.abs(x2 - x) > Math.abs(z2 - z) ? Math.abs(z - Math.round(z)) < 0.16 && Wm.has(ek(Math.floor(x), Math.round(z), 0)) : Math.abs(x - Math.round(x)) < 0.16 && Wm.has(ek(Math.round(x), Math.floor(z), 1))) hit++;
+      }
+      if (n && hit / n >= 0.6) m |= bit;
+    }
+    return m;
+  }
+  // a stair's carpentry into a structure's mesh, standing on its floor (or on the ground below it). Railing on Auto
+  // follows the walls: against a wall on both sides it is a handrail on brackets, against one the guard goes on the
+  // open side. A ghost also outlines the opening it cuts in the floor above.
+  function stairPieces(g, st, D) {
+    const S_ = ST(),
+      SG = SGEO();
+    if (!S_ || !SG) return;
+    const Ly = stairLy(st),
+      look = S_.lookOf(st, Ly),
+      base = FLOOR_T + (st.y || 0);
+    if (!st.rail && Ly.railDefault !== "none") {
+      const s = stairWalls(D && ((D.base && D.base.walls) || D.walls), Ly);
+      if (s === 3) ((look.rail = "wall"), (look.wall = "both"));
+      else if (s === 1) look.rail = "right";
+      else if (s === 2) look.rail = "left";
+    } else if (st.rail === "wall") look.wall = st.wall || "both";
+    SG.emit(g, Ly, look, { y0: base });
+    if (st._ghost)
+      for (const w of Ly.well || []) {
+        const [x0, z0, x1, z1] = stairBox(Ly, w),
+          y = base + Ly.rise + 0.02,
+          e = 0.03;
+        g.abox(x0, y, z0 - e, x1, y + 0.03, z0 + e, [1, 1, 1]);
+        g.abox(x0, y, z1 - e, x1, y + 0.03, z1 + e, [1, 1, 1]);
+        g.abox(x0 - e, y, z0, x0 + e, y + 0.03, z1, [1, 1, 1]);
+        g.abox(x1 - e, y, z0, x1 + e, y + 0.03, z1, [1, 1, 1]);
+      }
   }
   function pip(pts, x, z) {
     let c = false;
@@ -3600,10 +3731,13 @@
     if (raised) depth = D.found === "slab" ? 0.06 : 0.085;
     for (const k of D.floors) {
       const [i, j] = parse(k);
-      if (D.id && wellOver(D, i, j)) continue;
+      // a stairwell opens the floor where the stair below needs headroom, in 10 cm strips round the opening
+      const cut = D.id ? wellCut(D, i, j) : null;
+      if (cut === true) continue;
       const fm = FLOORS[(D.fmat && D.fmat.get(k)) || "planks"],
         fcol = fm.c2 && (i + j) & 1 ? fm.c2 : fm.c;
-      for (let p = 0; p < 2; p++) g.abox(i, 0, j + p * 0.5, i + 1, FLOOR_T - (p ? 0.006 : 0), j + p * 0.5 + 0.5, shade(fcol, 0.9 + 0.2 * hash(i, j, p)));
+      if (cut) for (const q of cut) g.abox(q[0], 0, q[1], q[2], FLOOR_T, q[3], shade(fcol, 0.9 + 0.2 * hash(i, j, 0)));
+      else for (let p = 0; p < 2; p++) g.abox(i, 0, j + p * 0.5, i + 1, FLOOR_T - (p ? 0.006 : 0), j + p * 0.5 + 0.5, shade(fcol, 0.9 + 0.2 * hash(i, j, p)));
       const st = raised ? (D.found === "slab" ? CONCRETE : shade(C.beam, 1.2)) : open ? C.beam : shade(C.stone, 0.85);
       if (!D.floors.has(ck(i, j - 1))) g.abox(i, -depth, j, i + 1, 0.04, j + 0.12, st);
       if (!D.floors.has(ck(i, j + 1))) g.abox(i, -depth, j + 0.88, i + 1, 0.04, j + 1, st);
@@ -3735,7 +3869,7 @@
     RPAL = C.thatch;
     rg.yo = 0;
     if (hs !== 1) for (const q of [g.p, g.glass.p]) for (let n = 1; n < q.length; n += 3) q[n] = stretchY(q[n], hs);
-    for (const st of D.stairs || []) stairPieces(g, st, hs);
+    for (const st of D.stairs || []) stairPieces(g, st, D);
     const fr = D.ox !== undefined ? D : D.frame;
     if (fr) (D.paths || []).forEach((p, n) => pathPieces(late, fr, p, n));
     const glow = new Geo();
@@ -4169,8 +4303,9 @@
     }
     S.depth = S.level ? 0.12 : clamp(S.y0 - minH + 0.35, 0.35, 8);
     for (const st of S.stairs) {
-      ext(st.i - 3, st.j - 3);
-      ext(st.i + 4, st.j + 4);
+      const r = stairLy(st).box ? stairBox(stairLy(st), stairLy(st).box) : [st.x - 3, st.z - 3, st.x + 3, st.z + 3];
+      ext(Math.floor(r[0]) - 1, Math.floor(r[1]) - 1);
+      ext(Math.ceil(r[2]) + 1, Math.ceil(r[3]) + 1);
     }
     S.b = { i0, i1, j0, j1 };
     S.polys = findPolys(S);
@@ -4588,6 +4723,145 @@
     for (const o of S.fopen) o.g === g && o.f.id !== skipId && out.push({ a: o.off - OP.ROUGH_GAP, b: o.off + o.sp.w + OP.ROUGH_GAP, sill: o.sp.rough.sill, head: o.sp.head });
     return out;
   }
+  /* ---------- stairs: drag from the lower surface to the higher one (docs/design/plan-mode-redesign.md 3A.3) ---------- */
+  // the surface under the pointer: the floor of this storey the ray meets first, or the ground
+  function surfAt() {
+    const c = pick;
+    if (!c.valid) return null;
+    const o = ray.ray.origin,
+      tg = Math.hypot(c.x - o.x, c.y - o.y, c.z - o.z);
+    let best = { S: null, y: c.y, x: c.x, z: c.z, t: tg };
+    for (const S of B.structs) {
+      if (S.po || S.level !== B.level || S.cx === undefined || !S.floors.size) continue;
+      const y = S.y0 + FLOOR_T,
+        p = planeHit(y);
+      if (!p) continue;
+      const [lx, lz] = toLocal(S, p[0], p[1]);
+      if (!onFloorAt(S, lx, lz)) continue;
+      const t = Math.hypot(p[0] - o.x, y - o.y, p[1] - o.z);
+      // a floor sunk in the ground (a cellar) is still the one being pointed at on its own storey
+      if ((t < tg + 0.6 || B.level !== 0) && (!best.S || t < best.t - 1e-6)) best = { S, y, x: p[0], z: p[1], t };
+    }
+    return best.S || B.level === 0 ? best : null;   // the ground is a foot only on the ground storey
+  }
+  // a grid wall of F between two points of its grid
+  const wallCross = (F, px, pz, qx, qz) => (Math.floor(px) !== Math.floor(qx) && F.walls.has(ek(Math.max(Math.floor(px), Math.floor(qx)), Math.floor(qz), 1))) || (Math.floor(pz) !== Math.floor(qz) && F.walls.has(ek(Math.floor(qx), Math.max(Math.floor(pz), Math.floor(qz)), 0)));
+  // how far one can go from a point the way f points before a wall or the floor's edge (ground: walls only)
+  function stairRoom(F, x, z, f, max, ground) {
+    let px = x,
+      pz = z;
+    for (let s = 0.05; s <= max + 1e-6; s += 0.05) {
+      const qx = x + f[0] * s,
+        qz = z + f[1] * s;
+      if ((!ground && !onFloorAt(F, qx, qz)) || wallCross(F, px, pz, qx, qz)) return Math.max(0, s - 0.05);
+      ((px = qx), (pz = qz));
+    }
+    return max;
+  }
+  // the stair a drag (or a click) describes: from the surface pressed on to the one the pointer is over. Over a higher
+  // floor beside it (a raised or split-level floor, a porch from the ground) the head lands on that floor's edge; over
+  // the same floor it climbs to the storey above, as long as the drag (shortened by walls and the floor's edge)
+  function stairOp(h, d) {
+    const S_ = ST(),
+      cur = surfAt(),
+      foot = (d && d.foot) || cur,
+      op0 = blankOp(h.F);
+    B.stLive = null;
+    if (!S_ || !foot) return finishOp(op0);
+    const tgt = cur && cur.S && cur.S !== foot.S && cur.y > foot.y + 0.02 && (!foot.S || sameGrid(cur.S, foot.S)) ? cur : null,
+      F = foot.S || (tgt && tgt.S);
+    if (!F) {
+      op0.marker = [h.lx, h.lz];
+      op0.note = d ? "Drag onto the floor or porch it should reach" : "Start on a floor, or on the ground beside a porch";
+      return finishOp(op0);
+    }
+    const op = blankOp(F),
+      [ax, az] = toLocal(F, foot.x, foot.z),
+      [bx, bz] = cur ? toLocal(F, cur.x, cur.z) : [ax, az],
+      sn = snapOn() ? 0.5 : 0.05,
+      W = B.stWidth || 0.92,
+      type = B.stType || "auto";
+    let fx = Math.round(ax / sn) * sn,
+      fz = Math.round(az / sn) * sn;
+    const dx = bx - fx,
+      dz = bz - fz,
+      moved = !!d && Math.hypot(dx, dz) > 0.35,
+      dir = moved ? (Math.abs(dx) >= Math.abs(dz) ? (dx > 0 ? 0 : 2) : dz > 0 ? 1 : 3) : B.stairDir,
+      f = DIRS[dir],
+      along = moved ? dx * f[0] + dz * f[1] : Infinity,
+      sideOf = (x, z) => ({ left: Math.max(0, stairRoom(F, x, z, [f[1], -f[0]], 6, !foot.S) - W / 2), right: Math.max(0, stairRoom(F, x, z, [-f[1], f[0]], 6, !foot.S) - W / 2) });
+    let rise,
+      run,
+      side,
+      se = -1,
+      y = foot.y - (F.y0 + FLOOR_T);
+    if (tgt) {
+      // the near edge of the higher floor: the first point on it along the way
+      for (let s = 0; s <= Math.min(along, 30) + 0.6; s += 0.05)
+        if (onFloorAt(tgt.S, fx + f[0] * s, fz + f[1] * s)) {
+          se = s;
+          break;
+        }
+      if (se < 0.1) {
+        op.marker = [fx, fz];
+        op.note = "Drag toward the edge of the higher floor";
+        return finishOp(op);
+      }
+      rise = tgt.y - foot.y;
+      const ex = fx + f[0] * (se - 0.05),
+        ez = fz + f[1] * (se - 0.05);
+      run = foot.S ? stairRoom(foot.S, ex, ez, [-f[0], -f[1]], 8) + 0.05 : 6;
+      side = foot.S ? sideOf(ex, ez) : null;
+    } else if (foot.S) {
+      rise = EAVE * foot.S.hs;
+      run = B.typed.a ? B.typed.a : Math.min(along, stairRoom(F, fx, fz, f, 12));
+      side = sideOf(fx + f[0] * 0.3, fz + f[1] * 0.3);
+    } else {
+      op.marker = [fx, fz];
+      op.note = "Drag onto the floor or porch it should reach";
+      return finishOp(op);
+    }
+    const grand = (S_.GRAND_TYPES || []).includes(type),
+      inp = { type: type === "auto" && !foot.S ? "deck" : type, rise, run, side, width: grand && !B.stWidthSet ? null : W, turn: B.stTurn || null, x: fx, z: fz, dir, sweep: B.stSweep || null, radius: B.stRadius || null, flare: (B.stLook && B.stLook.flare) || 0 };
+    let Ly = S_.solve(inp);
+    if (type === "auto" && !foot.S && !Ly.ok) Ly = S_.solve({ ...inp, type: "auto" });
+    // onto a higher floor beside: slide the stair so its head meets that floor's edge
+    if (tgt && Ly.headDir && Ly.headDir[0] > 0.5) {
+      const sh = se - Ly.head[0];
+      fx += f[0] * sh;
+      fz += f[1] * sh;
+      if (!foot.S) {
+        const [wx, wz] = toWorld(F, fx, fz),
+          gy = G.heightAt(wx, wz);
+        y = gy - (F.y0 + FLOOR_T);
+        rise = tgt.y - gy;
+      }
+      Ly = S_.solve({ ...inp, type: Ly.type, x: fx, z: fz, rise });
+    }
+    const rec = { type: Ly.type, x: rr3(fx), z: rr3(fz), dir, y: rr3(y), rise: Ly.rise, run: rr3(Number.isFinite(run) ? run : Ly.length), width: Ly.type === "spiral" ? W : Ly.width, n: Ly.n, turn: Ly.turn, at: Ly.at, mat: B.stMat || "pine", ...(B.stLook || {}) };
+    if (Ly.sweep !== undefined && Ly.sweep !== null && Ly.curves && Ly.curves.length) ((rec.sweep = Ly.sweep), (rec.radius = Ly.radius ?? null));
+    if (type === "auto") rec.auto = true;
+    if (rec.mat === "stone" && !(Ly.type === "steps" || Ly.type === "deck")) rec.mat = "pine";
+    const here = F.stairs.find((q) => Math.abs((q.x ?? -99) - rec.x) < 0.05 && Math.abs((q.z ?? -99) - rec.z) < 0.05 && q.dir === dir && Math.abs((q.y || 0) - rec.y) < 0.05);
+    if (here && !moved) {
+      op.note = "Stairs are already here";
+      op.pick = here.id;
+      return finishOp(op);
+    }
+    op.addStairs.push({ ...rec, _ghost: true });
+    op.stair = { Ly, rec };
+    B.stLive = Ly;
+    // the rise, the run and the risers, beside the ghost
+    const base = FLOOR_T + y,
+      side0 = (Ly.span ? Ly.span[1] : W / 2) + 0.3,
+      [mx, mz] = S_.toWorld(Ly, Ly.length / 2, side0),
+      [hx, hz] = S_.toWorld(Ly, ...(Ly.head || [Ly.length, 0]));
+    op.dims.push({ lx: mx, lz: mz, y: base + 0.05, text: fmtM(Ly.length) + " run", field: tgt ? "" : "a", val: Ly.length, unit: "m" });
+    op.dims.push({ lx: hx, lz: hz, y: base + Ly.rise / 2, text: "rises " + fmtM(Ly.rise), field: "", val: null, unit: "" });
+    op.dims.push({ lx: Ly.x + (hx - Ly.x) / 2, lz: Ly.z + (hz - Ly.z) / 2, y: base + Ly.rise / 2 + 0.4, text: Ly.label, field: "", val: null, unit: "" });
+    op.label = (type === "auto" ? "Auto: " : "") + Ly.text;
+    return finishOp(op);
+  }
   function computeOp() {
     const h = B.hover;
     if (!h) return null;
@@ -4723,21 +4997,7 @@
       }
       return finishOp(op);
     }
-    if (t === "stairs") {
-      const a0 = d ? d.a : cell;
-      let dir = B.stairDir;
-      if (d && (cell.i !== a0.i || cell.j !== a0.j)) dir = Math.abs(cell.i - a0.i) >= Math.abs(cell.j - a0.j) ? (cell.i > a0.i ? 0 : 2) : cell.j > a0.j ? 1 : 3;
-      const here = S ? S.stairs.find((st) => st.i === a0.i && st.j === a0.j && st.dir === dir) : null;
-      if (!S) {
-        op.marker = [vtx.i, vtx.j];
-        op.note = "Stairs start on a floor";
-      } else if (here) ((op.note = "Stairs are already here"), (op.pick = here.id));
-      else {
-        op.addStairs.push({ i: a0.i, j: a0.j, dir });
-        op.label = "Stairs up " + fmtM(EAVE * S.hs) + " · " + stairLen(S.hs) + " m long";
-      }
-      return finishOp(op);
-    }
+    if (t === "stairs") return stairOp(h, d);
     if (t === "tower") {
       op.marker = d ? [d.a.i, d.a.j] : [pt.i, pt.j];
       if (d) {
@@ -5158,7 +5418,8 @@
     S.walls = new Map(d.walls.map(([k, t]) => [k, modern(t)]));
     S.roofs = d.roofs.map((r) => ({ ...r }));
     S.segs = (d.segs || []).map((x) => Object.assign(x.slice(), { 4: modern(x[4]) }));
-    S.stairs = (d.stairs || []).map((x) => ({ ...x }));
+    S.stairs = (d.stairs || []).map((x) => stairRec(S, x));
+    B.stV = (B.stV || 0) + 1;
     S.pillars = (d.pillars || []).map((x) => x.slice());
     S.paths = (d.paths || []).map((x) => x.slice());
     S.decor = (d.decor || []).filter((x) => DECOR[x[2]]).map((x) => x.slice());
@@ -5493,7 +5754,12 @@
     for (const pi of op.delPolyRoofs) S.polyRoofs = S.polyRoofs.filter((p) => !pip(S.polys[pi].pts, p[0], p[1]));
     for (const p of op.addPolyRoofs) S.polyRoofs.push([p[0], p[1], B.rmat, null]);
     for (const idx of [...op.delStairs].sort((a, b) => b - a)) S.stairs.splice(idx, 1);
-    for (const st of op.addStairs) S.stairs.push({ ...st });
+    for (const st of op.addStairs) {
+      const { _ghost, ...rec } = st;
+      S.stairs.push(rec);
+      B.stLast = rec;   // the stair just placed: the Stairs tool's fit line and fixes are about it
+    }
+    if (op.addStairs.length || op.delStairs.length) B.stV = (B.stV || 0) + 1;
     for (const sg of op.addSegs) S.segs.push([sg[0], sg[1], sg[2], sg[3], sg[4], sg[5] || B.wmat, sg[6] || null, sg[7] || null]);
     for (const r of op.addRings) S.rings.push({ ...r, sides: r.sides.slice(), mat: r.mat || B.wmat, rmat: r.rmat || B.rmat, fmat: r.fmat || B.fmat });
     for (const [i, j, m] of op.addFloors) {
@@ -5985,14 +6251,29 @@
           }
         }
       }
-      const sn = stairLen(S.hs);
       for (let idx = 0; idx < S.stairs.length; idx++) {
+        // each flight as a few boxes that climb with it, landings and a spiral's square as one each
         const st = S.stairs[idx],
-          [dx, dz] = DIRS[st.dir];
-        for (let m = 0; m < sn; m++) {
-          const t = hitBox(R, st.i + dx * m, 0, st.j + dz * m, st.i + dx * m + 1, FLOOR_T + ((m + 1) / sn) * H, st.j + dz * m + 1);
-          if (t >= 0 && t < bt) ((bt = t), (best = { S, kind: "stair", idx, id: st.id }));
+          Ly = stairLy(st),
+          b0 = FLOOR_T + (st.y || 0),
+          hit = (r, y1) => {
+            const t = hitBox(R, r[0], b0 - 0.05, r[1], r[2], b0 + y1, r[3]);
+            if (t >= 0 && t < bt) ((bt = t), (best = { S, kind: "stair", idx, id: st.id }));
+          };
+        for (const f of Ly.flights || []) {
+          const k = Math.max(1, Math.ceil(f.len / 0.5));
+          for (let m = 0; m < k; m++) {
+            const a = (f.len * m) / k,
+              c = (f.len * (m + 1)) / k,
+              hw = f.w / 2,
+              p = [-f.d[1], f.d[0]],
+              us = [f.a[0] + f.d[0] * a + p[0] * hw, f.a[0] + f.d[0] * c - p[0] * hw],
+              vs = [f.a[1] + f.d[1] * a + p[1] * hw, f.a[1] + f.d[1] * c - p[1] * hw];
+            hit(stairBox(Ly, [Math.min(...us), Math.min(...vs), Math.max(...us), Math.max(...vs)]), f.y0 + ((m + 1) / k) * (f.y1 - f.y0));
+          }
         }
+        for (const l of Ly.landings || []) l.r && hit(stairBox(Ly, l.r), l.y);
+        for (const p of Ly.rects || []) if (p.part !== "flight" && p.part !== "landing") hit(stairBox(Ly, p.r), p.part === "flare" ? 0.6 : p.part === "winders" && Ly.corner ? Ly.corner.y1 : Ly.rise);
       }
       for (let idx = 0; idx < S.pillars.length; idx++) {
         const p = S.pillars[idx],
@@ -6632,7 +6913,7 @@
         gone.add(q);
       } else if (q.kind === "roof") moved(S.roofs, q.r, (v, fresh) => ((v.i0 += di), (v.i1 += di), (v.j0 += dj), (v.j1 += dj), fresh && delete v.id, v));
       else if (q.kind === "ring") moved(S.rings, q.r, (v, fresh) => ((v.cx += di), (v.cz += dj), fresh && delete v.id, v));
-      else if (q.kind === "stair") moved(S.stairs, q.st, (v, fresh) => ((v.i += di), (v.j += dj), fresh && delete v.id, v));
+      else if (q.kind === "stair") (moved(S.stairs, q.st, (v, fresh) => ((v.x += di), (v.z += dj), fresh && delete v.id, v)), (B.stV = (B.stV || 0) + 1));
       else if (q.kind === "pillar") moved(S.pillars, q.p, (v, fresh) => ((v[0] += di), (v[1] += dj), fresh && (v[4] = null), v));
       else if (q.kind === "decor") moved(S.decor, q.it, (v, fresh) => ((v[0] += di), (v[1] += dj), fresh && (v[5] = null), v));
       else if (q.kind === "path") moved(S.paths, q.p, (v, fresh) => ((v[0] += di), (v[1] += dj), (v[2] += di), (v[3] += dj), fresh && (v[6] = null), v));
@@ -6818,7 +7099,7 @@
     else if (q.kind === "pillar") ((B.wmat = q.p[2] || "timber"), (B.pkind = q.p[3] || "pillar"), (B.tool = "pillar"));
     else if (q.kind === "path") ((B.pwidth = q.p[4]), (B.pmat = q.p[5] || "cobble"), (B.tool = "path"));
     else if (q.kind === "decor") ((B.dkind = q.it[2]), (B.drot = q.it[3] || 0), (B.dcol = q.it[4] || 0), (B.tool = "decor"));
-    else if (q.kind === "stair") ((B.stairDir = q.st.dir), (B.tool = "stairs"));
+    else if (q.kind === "stair") ((B.stairDir = q.st.dir), (B.stType = q.st.auto ? "auto" : q.st.type), (B.stWidth = q.st.width || 0.92), (B.stTurn = q.st.turn || null), (B.stMat = q.st.mat || "pine"), (B.stLook = { rail: q.st.rail || null, railStyle: q.st.railStyle || "square", open: q.st.open ?? null, nosing: q.st.nosing ?? null, boxed: !!q.st.boxed }), (B.tool = "stairs"));
     B.tapMode = "";
     B.drag = null;
     B.key = "";
@@ -7232,7 +7513,7 @@
         drawOp(op, F, null);
         if (B.tool === "measure" && !B.tapMode) measDraw(B.measA ? [B.measA, measPoint(h)] : null);
         label(B.tapMode === "pick" ? (B.hoverId ? "Take this in hand" : "") : B.tapMode === "paint" ? (B.hoverId ? "Paint" : "") : "");
-      } else drawOp((B.op = computeOp()), F, d);
+      } else drawOp((B.op = computeOp()), B.op ? B.op.F : F, d);
       hint();
     }
     gridGroup.userData.lines.position.set(Math.round(h.lx), FLOOR_T + 0.03, Math.round(h.lz));
@@ -7255,7 +7536,7 @@
     roof: "Click a room to roof it, or drag a rectangle. Enter roofs it all.",
     door: "Click a wall to hang the door. Drag it to slide.",
     window: "Click a wall to place the window. Drag an edge to resize.",
-    stairs: "Drag from the foot of the stairs the way they climb.",
+    stairs: "Drag from the lower floor up to the higher one.",
     pillar: "Click to stand a pillar, or drag for an evenly spaced row.",
     path: "Drag a path over the ground, or click point to point.",
     decor: "Pick a piece, then click to place it. Wall pieces snap to walls.",
@@ -7530,6 +7811,7 @@
     const wing = (e.shiftKey || B.wingNext) && !h.F.isNew ? { ox: h.F.ox, oz: h.F.oz, yaw: h.F.yaw, y0: h.F.y0 + B.lift, isNew: true, level: h.F.level, hs: B.hs, lift: B.lift } : null;
     if (B.wingNext) ((B.wingNext = false), touchUi());
     B.drag = { F: wing || freeze(h.F), a: anchorFor(h), t: performance.now(), mode: "drag", hit: B.tool === "door" || B.tool === "window" ? wallUnder(h) : null, x: e.clientX, y: e.clientY, fgrab: freeTool() ? B.fover : null };
+    if (B.tool === "stairs") B.drag.foot = surfAt();   // the stair's foot: the surface pressed on
     B.key = "";
     hint();
   });
@@ -7805,7 +8087,13 @@
     else if (t === "window") B.wstyle = cyc(Object.keys(WIN_NAME), B.wstyle, back);
     else if (t === "door") B.dstyle = cyc(Object.keys(DOOR_NAME), B.dstyle, back);
     else if (t === "pillar") B.pkind = B.pkind === "pillar" ? "chimney" : "pillar";
-    else if (t === "stairs") B.stairDir = (B.stairDir + (back ? 3 : 1)) % 4;
+    else if (t === "stairs") {
+      // the types that fit where the last stair was laid out (all of them before one is), then Auto
+      const all = stairTypes().map((x) => x.id),
+        fits = B.stLive ? B.stLive.fits : null,
+        list = ["auto", ...all.filter((x) => x !== "auto" && (!fits || fits.includes(x)))];
+      B.stType = cyc(list, list.includes(B.stType) ? B.stType : "auto", back);
+    }
     else if (t === "path") B.pwidth = cyc([1, 2, 3], B.pwidth, back);
     else if (t === "decor") B.drot = (B.drot + (back ? 7 : 1)) % 8;
     else if (t === "equip") fxChoose("fx:turn");
@@ -8052,6 +8340,167 @@
     q.pathLength && out.push("path " + fmtM(q.pathLength));
     return out.join(" · ");
   }
+  /* ---------- stairs in the tray and the inspector (docs/design/plan-mode-redesign.md 3A.4) ---------- */
+  // the types the tray offers: Auto and every type the carpentry can build (new types appear as they are added)
+  const stairTypes = () => {
+    const SG = SGEO();
+    return ST() ? ST().TYPES.filter((t) => t.id === "auto" || !SG || typeof SG.kinds[t.id] === "function") : [];
+  };
+  // a type's tray drawing, made once
+  const stThumbs = new Map();
+  function stThumb(id, name) {
+    if (!stThumbs.has(id)) {
+      let h = "";
+      try {
+        h = SGEO() ? SGEO().draw(id === "auto" ? "straight" : id, "thumb", { width: 22, height: 22, label: name }) : "";
+      } catch (e) {}
+      stThumbs.set(id, h);
+    }
+    return stThumbs.get(id);
+  }
+  // the stair the inspector's edits and the fit line's fixes are about: the selected one, or with the Stairs tool the
+  // one just placed
+  function stairTarget() {
+    if (B.tool === "select") {
+      if (B.sel.length !== 1) return null;
+      const q = refOf(B.sel[0]);
+      return q && q.kind === "stair" ? { S: q.S, st: q.st } : null;
+    }
+    if (B.tool === "stairs" && B.stLast) {
+      const S = B.structs.find((O) => O.stairs.includes(B.stLast));
+      return S ? { S, st: B.stLast } : null;
+    }
+    return null;
+  }
+  // change a placed stair as one undo step; the floors over it open again where it now needs headroom
+  function stairEdit(fn) {
+    const T_ = stairTarget();
+    if (!T_) return false;
+    pushUndo();
+    fn(T_.st);
+    B.stV = (B.stV || 0) + 1;
+    for (const O of groupOf(T_.S)) rebuild(O);
+    B.selV++;
+    B.key = "";
+    touchUi();
+    return true;
+  }
+  // the fit line: what the stair is, or what does not fit and the fixes that would
+  function stairFit(Ly, fixable) {
+    if (!Ly) return null;
+    const head = Number.isFinite(Ly.headroom) ? " · headroom " + fmtM(Ly.headroom) : "";
+    return { ok: Ly.ok, adjusted: false, text: Ly.ok ? Ly.text + head : Ly.issues.slice(0, 2).map((x) => x.text).join(" · "), fixes: fixable ? (Ly.fixes || []).map((x) => ({ id: "st:fix", label: x.label, code: x.code })) : [] };
+  }
+  function stairFix(k) {
+    const T_ = stairTarget(),
+      Ly = T_ ? stairLy(T_.st) : B.stLive,
+      fx = Ly && Ly.fixes && Ly.fixes[+k];
+    if (!fx) return;
+    const { side, ...p } = fx.patch || {};   // 'Widen the hall' is advice: the room has to grow, not the stair
+    if (T_) return stairEdit((st) => (Object.assign(st, p), p.type && (st.auto = false)));
+    // a stair still in the hand: the fix becomes the setting
+    if (p.type) B.stType = p.type;
+    if (p.turn) B.stTurn = p.turn;
+    if (p.width) ((B.stWidth = p.width), (B.stWidthSet = true));
+    if (p.sweep) B.stSweep = p.sweep;
+    if (p.radius) B.stRadius = p.radius;
+    if (p.flare !== undefined) B.stLook = { ...B.stLook, flare: p.flare };
+  }
+  function stairChoose(id, v) {
+    const k = id.slice(3),
+      T_ = B.tool === "select" ? stairTarget() : null,
+      num = (cur, step, lo, hi) => clamp(v && typeof v === "object" ? cur + (v.step || 0) * step : +v, lo, hi),
+      LOOK = ["rail", "railStyle", "open", "nosing", "boxed", "flare", "gallery"];
+    if (k === "fix") return stairFix(v);
+    if (k === "suggest") return stairChoose("st:type", v);
+    if (T_) {
+      const Ly = stairLy(T_.st);
+      return stairEdit((st) => {
+        if (k === "type") {
+          if (v === "auto") ((st.type = ST().solve({ ...st, type: "auto", n: null, at: null }).type), (st.auto = true));
+          else ((st.type = v), (st.auto = false));
+          st.n = st.at = null;
+          if (st.mat === "stone" && !(st.type === "steps" || st.type === "deck")) st.mat = "pine";
+        } else if (k === "width" || k === "widthn") st.width = rr3(num(st.width || 0.92, 0.05, 0.5, 3));
+        else if (k === "n") ((st.n = Math.round(num(Ly.n, 1, 1, 40))), (st.at = null));
+        else if (k === "turn") st.turn = v;
+        else if (k === "sweep") st.sweep = v;
+        else if (k === "radius") st.radius = rr3(num(Ly.radius || 1.5, 0.1, 0.6, 4));
+        else if (k === "at") st.at = Math.round(num(Ly.at || 1, 1, 1, Math.max(1, Ly.n - 1)));
+        else if (k === "mat") st.mat = v;
+        else if (LOOK.includes(k)) st[k] = v;
+      });
+    }
+    if (k === "type") B.stType = v;
+    else if (k === "width" || k === "widthn") ((B.stWidth = rr3(num(B.stWidth || 0.92, 0.05, 0.5, 3))), (B.stWidthSet = true));
+    else if (k === "turn") B.stTurn = v;
+    else if (k === "sweep") B.stSweep = v;
+    else if (k === "radius") B.stRadius = v === null ? null : rr3(num(B.stRadius || 1.5, 0.1, 0.6, 4));
+    else if (k === "mat") B.stMat = v;
+    else if (LOOK.includes(k)) B.stLook = { ...B.stLook, [k]: v };
+  }
+  // the Stairs tool's groups, or a selected stair's: the type cards and material in the tray; size, railing, treads
+  // and what is under it in the inspector, with the side view on its stage
+  function stairGroups(g, sel) {
+    const S_ = ST(),
+      SG = SGEO();
+    if (!S_) return;
+    const T_ = stairTarget(),
+      st = sel && T_ ? T_.st : null;
+    if (sel && !st) return;
+    const live = !sel && B.drag && B.op && B.op.stair ? B.op.stair.Ly : null,
+      ghost = !sel && B.op && B.op.stair ? B.op.stair.Ly : null,
+      Ly = st ? stairLy(st) : live,
+      shown = Ly || ghost,
+      cur = st || { type: B.stType, width: B.stWidth, turn: B.stTurn, mat: B.stMat, ...B.stLook },
+      L0 = shown || S_.solve({ type: B.stType === "auto" ? "straight" : B.stType, rise: EAVE }),
+      look = S_.lookOf(cur, L0),
+      fits = shown ? shown.fits : null,
+      w = cur.width || 0.92,
+      sec = (x, name) => ((x.sec = name), g.push(x));
+    B.fit = stairFit(Ly || (!sel && T_ ? stairLy(T_.st) : null), !live);
+    // tray
+    const GR = S_.GRAND_TYPES || [],
+      card = (t) => ({ v: t.id, name: t.name, title: t.blurb, svg: stThumb(t.id, t.name), note: fits && t.id !== "auto" && !fits.includes(t.id) ? "Does not fit here" : "" }),
+      tv = st ? (st.auto ? "auto" : st.type) : B.stType,
+      sugg = !sel && shown && shown.suggest ? shown.suggest.filter((id) => S_.TYPE_BY_ID[id]) : [];
+    // a big open hall: the grand stairs that fit it, offered first (Auto never picks them)
+    if (sugg.length) g.push(G_.tiles("st:suggest", "Suggested for this hall", sugg.map((id) => card(S_.TYPE_BY_ID[id])), GR.includes(tv) ? tv : null));
+    g.push({ ...G_.tiles("st:type", "Stairs", stairTypes().filter((t) => !GR.includes(t.id)).map(card), tv, ", ."), cur: !GR.includes(tv) });
+    const grand = stairTypes().filter((t) => GR.includes(t.id));
+    if (grand.length) g.push({ ...G_.tiles("st:type", "Grand", grand.map(card), tv), cur: GR.includes(tv), note: "For a big open hall" });
+    const mats = S_.MATERIALS.filter((m) => !m.only || m.only.includes(L0.type) || (L0.base && m.only.includes(L0.base)));
+    g.push(G_.sw("st:mat", "Material", mats.map((m) => {
+      const pal = SG ? SG.palette({ mat: m.id }) : null;
+      return { v: m.id, name: m.name, sw: pal ? ["planks", hexOf(pal.tread), hexOf(pal.riser)] : ["planks", "#b08050", "#806040"] };
+    }), cur.mat || "pine", "M"));
+    // the stage: the side view, drawn to scale with its numbers
+    let svg = "";
+    try {
+      svg = SG ? SG.draw(shown || (B.stType === "auto" ? "straight" : B.stType), "stage", { width: 356, height: 172 }) : "";
+    } catch (e) {}
+    g.push({ type: "stage", id: "st:stage", kind: "stairs", sec: "Preview", mode: sel ? "sel" : "next", svg, next: "Drag from the lower floor to the higher one", blurb: (S_.TYPE_BY_ID[L0.type] || {}).blurb || "" });
+    if (shown) sec(G_.info(shown.n + " × " + Math.round(shown.riser * 1000) + " mm", "Treads " + Math.round(shown.tread * 1000) + " mm · " + Math.round(shown.angle) + "° · " + fmtM(shown.length) + " long" + (shown.parts && shown.parts.stringers.length ? " · stringers " + shown.parts.stringers.map(fmtM).join(", ") : "")), "Preview");
+    // size
+    sec(G_.chips("st:width", "Width", S_.WIDTHS.map((v) => ({ v, name: fmt(v) + " m" })), S_.WIDTHS.find((v) => Math.abs(v - w) < 1e-6)), "Size");
+    sec({ type: "num", id: "st:widthn", label: "Exact width", value: fmt(w), unit: "m", note: L0.type === "steps" || L0.type === "deck" ? "Steps go up to 3 m wide" : L0.type === "spiral" ? "Tread length sets the diameter" : "" }, "Size");
+    if (st) sec({ type: "num", id: "st:n", label: "Risers", value: String(Ly.n), unit: "", note: Math.round(Ly.riser * 1000) + " mm risers · " + Math.round(Ly.tread * 1000) + " mm treads", bad: Ly.riser > 0.19 + 1e-6 && Ly.type !== "ladder" && Ly.type !== "spiral" }, "Size");
+    if (L0.turn) sec(G_.chips("st:turn", "Turn", [...(st ? [] : [{ v: null, name: "Auto" }]), { v: "left", name: "Left" }, { v: "right", name: "Right" }], st ? st.turn || Ly.turn : B.stTurn), "Size");
+    if (st && Ly.at) sec({ type: "num", id: "st:at", label: Ly.winders && Ly.winders.length ? "Winders after riser" : "Landing after riser", value: String(Ly.at), unit: "" }, "Size");
+    // railing, treads, under it
+    sec(G_.chips("st:rail", "Railing", [{ v: null, name: "Auto" }, { v: "both", name: "Both" }, { v: "left", name: "Left" }, { v: "right", name: "Right" }, { v: "wall", name: "Wall" }, { v: "none", name: "None" }], cur.rail || null), "Railing");
+    sec(G_.chips("st:railStyle", "Style", S_.RAIL_STYLES.map((x) => ({ v: x.id, name: x.name })), cur.railStyle || "square"), "Railing");
+    sec(G_.chips("st:open", "Risers", [{ v: null, name: "Auto" }, { v: false, name: "Closed" }, { v: true, name: "Open" }], cur.open ?? null), "Treads");
+    sec(G_.chips("st:nosing", "Nosing", [{ v: null, name: "Auto" }, { v: true, name: "On" }, { v: false, name: "Off" }], cur.nosing ?? null), "Treads");
+    // curves and grand stairs: how far round, how tight, a flared start, the gallery round the opening
+    if (L0.curves && L0.curves.length) {
+      sec(G_.chips("st:sweep", "Sweep", [...(st ? [] : [{ v: null, name: "Auto" }]), ...(S_.SWEEPS || [90, 180, 270, 360]).map((v) => ({ v, name: v + "°" }))], st ? st.sweep ?? null : B.stSweep), "Size");
+      sec({ type: "num", id: "st:radius", label: "Inside radius", value: fmt(st ? Ly.radius || 1.5 : B.stRadius || L0.radius || 1.5), unit: "m", note: L0.narrow ? "narrow end " + Math.round(L0.narrow * 1000) + " mm" : "" }, "Size");
+    }
+    if ((S_.FLARE_TYPES || []).includes(L0.type)) sec(G_.chips("st:flare", "Flared start", [0, 1, 2, 3].map((v) => ({ v, name: v ? v + (v === 1 ? " step" : " steps") : "None" })), +(cur.flare || 0)), "Treads");
+    if (GR.includes(L0.type)) sec(G_.chips("st:gallery", "Gallery", [{ v: true, name: "Front" }, { v: "all", name: "All round" }, { v: false, name: "None" }], cur.gallery ?? true), "Railing");
+    sec(G_.chips("st:boxed", "Under it", [{ v: false, name: "Open" }, { v: true, name: "Boxed in" }], !!look.boxed), "Under it");
+  }
   function selGroups(g) {
     const refs = selRefs(),
       one = refs.length === 1 ? refs[0] : null,
@@ -8070,7 +8519,7 @@
       else if (one.kind === "floor" || one.kind === "poly") ((title = FLOORS[p.material].name + " floor"), (text = fmtA(p.area) + " · " + fmtM(p.perimeter) + " around"));
       else if (one.kind === "roof" || one.kind === "polyroof") ((title = ROOFS[ps[0].material].name + " " + (ROOF_SHAPES[ps[0].type] || "pointed").toLowerCase() + " roof"), (text = fmtA(ps.reduce((a, q) => a + (q.kind === "roof" ? q.area : 0), 0)) + " · pitch " + Math.round(ps[0].pitchDeg) + "°"));
       else if (one.kind === "ring") ((title = "Round room"), (text = fmtM(one.r.r * 2) + " wide · " + plural(one.r.h, "storey") + " · " + fmtA(p.area)));
-      else if (one.kind === "stair") ((title = "Stairs"), (text = fmtM(p.length) + " long · rises " + fmtM(p.height)));
+      else if (one.kind === "stair") ((title = (ST().TYPE_BY_ID[p.type] || { name: "Stairs" }).name + " stair"), (text = fmtM(p.length) + " long · rises " + fmtM(p.height) + " · " + p.steps + " × " + Math.round(p.riser * 1000) + " mm"));
       else if (one.kind === "pillar") ((title = one.p[3] === "chimney" ? "Chimney" : "Pillar"), (text = fmtM(p.height) + " high"));
       else if (one.kind === "path") ((title = PATHS[p.material].name + " path"), (text = fmtM(p.length) + " long · " + fmtM(p.width) + " wide"));
       else if (one.kind === "decor") ((title = p.name), (text = fmt(p.width) + " × " + fmt(p.depth) + " m · " + fmtM(p.height) + " high"));
@@ -8105,6 +8554,7 @@
       g.push(G_.chips("s:pwidth", "Width", [1, 2, 3].map((v) => ({ v, name: v + " m" })), common(refs.filter((q) => q.kind === "path").map((q) => q.p[4]))));
       g.push(G_.sw("s:pmat", "Surface", SW.path, common(refs.filter((q) => q.kind === "path").map((q) => q.p[5] || "cobble"))));
     }
+    if (one && one.kind === "stair") stairGroups(g, true);
     if (has("decor")) {
       g.push(G_.sw("s:dcol", "Colour", SW.dye, common(refs.filter((q) => q.kind === "decor").map((q) => q.it[4] || 0))));
       g.push(G_.act("s:turn", "Turn", "turn"));
@@ -8175,7 +8625,7 @@
     wall: ["style", "wmat", "paint", "pick"],
     floor: ["fmat", "paint", "pick"],
     roof: ["rshape", "rturn", "rmat", "roofall", "facts", "paint", "pick"],
-    stairs: ["turn"],
+    stairs: ["st:suggest", "st:type", "st:mat"],
     pillar: ["pkind", "wmat", "gap", "paint", "pick"],
     path: ["pwidth", "pmat", "paint", "pick"],
     // Door and Window: Recent and the catalogue's family groups in the tray (rustic: gap and Pick); the designer is the inspector
@@ -8184,8 +8634,8 @@
   };
   TRAY.tower = TRAY.room;
   const SEC_OF = { hs: "Level", lift: "Level", wing: "Level", tshape: "On a round room", "s:hs": "Level", "s:levels": "Level", "s:width": "Size", "s:x": "Position", "s:z": "Position", "rbadges": "Pitch", "s:rbadges": "Pitch", "w:prev": "Size", roofs: "View" };
-  const SEL_STYLE = new Set(["s:style", "s:otype", "s:rshape", "s:rturn", "s:pkind", "s:pwidth", "s:top", "s:turn", "s:len"]),
-    SEL_MAT = new Set(["s:wmat", "s:fmat", "s:rmat", "s:pmat", "s:dcol"]),
+  const SEL_STYLE = new Set(["s:style", "s:otype", "s:rshape", "s:rturn", "s:pkind", "s:pwidth", "s:top", "s:turn", "s:len", "st:type"]),
+    SEL_MAT = new Set(["s:wmat", "s:fmat", "s:rmat", "s:pmat", "s:dcol", "st:mat"]),
     SEL_ACTS = new Set(["s:all", "s:pick", "s:dup", "s:del"]);
   function tierOf(t, g) {
     const all = t === "decor" || t === "equip" || t === "measure" || t === "copy" || (t === "select" && !B.sel.length),
@@ -8232,6 +8682,7 @@
       : t === "roof" ? ROOF_SHAPES[B.rsh] + " · " + ROOFS[B.rmat].name
       : t === "pillar" ? (B.pkind === "chimney" ? "Chimney" : "Pillar") + " · " + WALLS[B.wmat].name
       : t === "path" ? PATHS[B.pmat].name + " · " + B.pwidth + " m wide"
+      : t === "stairs" && ST() ? (ST().TYPE_BY_ID[B.stType] || { name: "Auto" }).name + " · " + ((ST().MATERIALS.find((m) => m.id === B.stMat) || { name: "Pine" }).name)
       : t === "decor" ? DECOR[B.dkind].name
       : "";
     return { open, has: any, title: NEXT_NAME[t] ? "Next " + NEXT_NAME[t] : (TOOLS.find((x) => x.id === t) || { name: "Build" }).name, sub, icon: t === "tower" ? "room" : t === "copy" ? "select" : t, mode: "next" };
@@ -8286,7 +8737,7 @@
       roofPlanView(g, "", { shape: B.rsh, pitch12: B.pitch12, eave: B.eave, rake: B.rake, gutters: B.gutters, color: B.rcolor, mat: B.rmat }, hov || null);
       g.push(G_.tiles("tshape", "On a round room", tiles(TOP_SHORT, "t-"), B.tshape));
     } else if (t === "door" || t === "window") openingView(g);
-    else if (t === "stairs") g.push(G_.act("turn", "Turn", "turn", "Shift wheel"));
+    else if (t === "stairs") stairGroups(g, false);
     else if (t === "pillar") {
       g.push(G_.tiles("pkind", "Kind", [{ v: "pillar", name: "Pillar", icon: "p-pillar" }, { v: "chimney", name: "Chimney", icon: "p-chimney" }], B.pkind, "Shift wheel"));
       g.push(G_.sw("wmat", "Material", SW.wall, B.wmat, "M"));
@@ -9226,6 +9677,15 @@
     });
   }
   function choose(id, v) {
+    // a designer handle's whole drag is one step to undo: 'begin' marks where it started, 'end' folds the rest in
+    if (id === "o:drag") {
+      if (v === "begin") B.dragUndo = B.undo.length;
+      else if (B.dragUndo !== null && B.dragUndo !== undefined) {
+        if (B.undo.length > B.dragUndo + 1) B.undo.splice(B.dragUndo + 1);
+        B.dragUndo = null;
+      }
+      return;
+    }
     if (id === "shape") return setTool(v);
     if (id === "roofall") return roofBuilding();
     if (/^(s:)?(rshape|rturn|pitch|pitchn|eave|rake|gutters|rcolor)$/.test(id)) return roofChoose(id, v);
@@ -9273,6 +9733,8 @@
       if (B.fsel && fselOpen()) designSet((f) => ((f.sizeIdx = v), delete f.w, delete f.h));
       else ((B.osize = v), (B.od.w = B.od.h = null));
     } else if (id.startsWith("w:")) designChoose(id, v);
+    else if (id === "o:fix" && (B.tool === "stairs" || (B.tool === "select" && stairTarget()))) stairFix(v);   // the fit line's fixes are the stair's here
+    else if (id.startsWith("st:")) stairChoose(id, v);
     else if (id.startsWith("o:")) openingChoose(id, v);
     else if (id.startsWith("d:")) doorChoose(id.slice(2), v);
     else if (id === "osill") {
@@ -11538,12 +12000,12 @@
       out.push({ ...head(id, "roof", shape, rm), tower: r.id, a: c, b: c, radius: re, y0: y0 + base, y1: y0 + base + rise, eaveY: y0 + base, ridgeY: y0 + base + rise, pitchDeg: (Math.acos(clamp(plan / area, 0, 1)) * 180) / Math.PI, area, planArea: plan, thickness: sumT(L), footprint: ringLoop(re), facets: r.n, layers: L });
       parts.push(id);
     });
-    const sn = stairLen(S.hs);
     for (const st of S.stairs) {
-      const [dx, dz] = DIRS[st.dir],
-        sx = st.i + 0.5 - dx * 0.5,
-        sz = st.j + 0.5 - dz * 0.5;
-      out.push({ ...head(st.id, "stair", "straight", "timber"), a: W2(sx, sz), b: W2(sx + dx * sn, sz + dz * sn), y0: y0 + FLOOR_T, y1: y0 + FLOOR_T + H, length: sn, height: H, width: 0.92, steps: sn * 4 });
+      // a solved stair: its foot and head, risers and treads, and the numbers a carpenter cuts from
+      const Ly = stairLy(st),
+        b0 = y0 + FLOOR_T + (st.y || 0),
+        hd = ST().toWorld(Ly, ...(Ly.head || [Ly.length, 0]));
+      out.push({ ...head(st.id, "stair", Ly.type, st.mat === "stone" ? "stone" : "timber"), finish: st.mat || "pine", a: W2(st.x, st.z), b: W2(hd[0], hd[1]), y0: b0, y1: b0 + Ly.rise, length: Ly.length, height: Ly.rise, width: Ly.width, steps: Ly.n, riser: Ly.riser, tread: Ly.tread, angle: Ly.angle, headroom: Number.isFinite(Ly.headroom) ? Ly.headroom : null, footprint: loop(Ly.footprint), flights: Ly.flights.length, landings: Ly.landings.length, treads: Ly.parts.treads, risers: Ly.parts.risers, stringers: Ly.parts.stringers.slice(), ok: Ly.ok });
     }
     const pil = S.pillars;
     for (const p of pil) {
@@ -11835,7 +12297,7 @@
         const [lx, lz] = toLocal(S, x, z);
         const ci = Math.floor(lx),
           cj = Math.floor(lz);
-        if (!S.deckGhost && ((S.floors.has(ck(ci, cj)) && !wellOver(S, ci, cj)) || ringAt(S, lx, lz, 0.1) >= 0 || polyAt(S, lx, lz) >= 0)) {
+        if (!S.deckGhost && ((S.floors.has(ck(ci, cj)) && !wellAt(S, lx, lz)) || ringAt(S, lx, lz, 0.1) >= 0 || polyAt(S, lx, lz) >= 0)) {
           const top = S.y0 + FLOOR_T;
           if (y >= top - 0.65) g = Math.max(g, top);
         }
@@ -11843,7 +12305,7 @@
           const tw = topWalk(S, lx, lz, y);
           if (tw !== null) g = Math.max(g, tw);
         }
-        const sh = stairH(S, lx, lz);
+        const sh = stairH(S, lx, lz, y);
         if (sh !== null && y >= S.y0 + sh - 0.65) g = Math.max(g, S.y0 + sh);
       }
       return g;
