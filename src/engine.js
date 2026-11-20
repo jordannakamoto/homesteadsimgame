@@ -15,7 +15,7 @@ import { createWaterFx } from './water/water-fx.js';
 import { createReflectProbe } from './water/reflect-probe.js';
 import { createReflectPlane } from './water/reflect-plane.js';
 import { createRippleSim } from './water/ripple-sim.js';
-import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, stringifySave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork, powerNear, vehicleCore, groundRead, setGroundBase, routeFind, frameChannelsFor, frameAttach, frameSnap, frameRayHit, foundationRead, legacyLinkCommands, legacyPrune, convertLegacyLinks } from './sim/index.js';
+import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, stringifySave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork, powerNear, vehicleCore, groundRead, setGroundBase, routeFind, frameChannelsFor, frameAttach, frameSnap, frameRayHit, foundationRead, legacyLinkCommands, legacyPrune, convertLegacyLinks, snowRead } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -3641,6 +3641,7 @@ const gfxPanel = (() => {
         : (quality.scale === 'auto' ? 'Auto: rendering at ' + Math.round(renderScale() * 100) + '% to hold ' + quality.target + ' fps. ' : '')
           + 'Below 100%, the 3D view is enlarged with a sharpening upscaler; the HUD stays sharp.' }),
       fxMode ? seg('Lighting', [['full', 'Full'], ['no relight', 'No relight'], ['off', 'Off']], fxMode, (m) => { fx.setLighting(m); try { localStorage.setItem('fx-lighting', m); } catch (e) {} }) : '',
+      window.__snow ? seg('Snow', [[true, 'Deep'], [false, 'Ground only']], window.__snow.flags.surface, (v) => window.__snow.set({ surface: v })) : '',
       h('div', { className: 'row' }, h('span', { textContent: 'Screen' }), fs),
       h('div', { className: 'sec', textContent: 'Grass and trees' }),
       chk('drawOrder', 'Draw trees, then grass, then ground', 'Skips pixels that end up covered. Looks the same, runs faster.'),
@@ -4956,6 +4957,7 @@ window.__game = {
   },
   treeGeo, pineLite: pineLiteGeo, markStockDirty: () => { hudDirty = true; },
   garden: gardenRead, landscape: landscapeRead, earthwork, vehicleCore,
+  snow: snowRead,   // reads of the snowpack (src/sim/snow.js): at, window, bearing, ...; drawn by src/snow/
   // runs through a building's frame (src/sim/core/routefind.js over src/sim/content/frame-channels.js)
   servicesLink,   // __build.connect's power and water: a legacy run in the routes store (src/sim/services-legacy.js)
   routes: { find: routeFind, channelsFor: (structId) => frameChannelsFor(structId, window.__build), attach: frameAttach, snap: frameSnap, rayHit: frameRayHit },

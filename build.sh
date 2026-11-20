@@ -8,11 +8,13 @@ min() { npx esbuild "src/$1.js" --minify-whitespace --charset=utf8 --log-level=w
 npx esbuild src/engine.js --bundle --minify --format=iife --target=es2020 --charset=utf8 --legal-comments=inline --log-level=warning > dist/engine.min.js
 mkdir -p dist/engine
 npx esbuild src/openings-global.js --bundle --minify --format=iife --target=es2020 --log-level=warning > dist/openings-global.min.js
+# the snow add-on is several modules: bundle them (three comes from __game, never imported)
+npx esbuild src/snow/index.js --bundle --minify-whitespace --format=iife --target=es2020 --charset=utf8 --log-level=warning > dist/snow.min.js
 for m in engine/ui game/keymap framing build-ext build buildui engine/hands engine/carry engine/assembly engine/cutstation engine/scaffold engine/roofwalk construct-view garden-view landscape-view touch nature fxpost fxhost fx stock-view weather-view chickens-view utilities-view engine/reach engine/parts opening-hands water-hands engine/routes overlays services-view services-plan services-hands services-trim services-water engine/payout engine/fieldmesh foundation-view engine/vehicles game/vehicles-atv game/hud; do min $m --legal-comments=eof; done
 python3 - <<'P'
 r = lambda p: open(p, encoding='utf-8').read()
 h, t, g = r('template/head.html'), r('template/tail.html'), r('dist/engine.min.js')
-b = '\n'.join(r('dist/%s.min.js' % m) for m in ['openings-global', 'engine/ui', 'game/keymap', 'framing', 'build-ext', 'build', 'buildui', 'engine/hands', 'engine/carry', 'engine/assembly', 'engine/cutstation', 'engine/scaffold', 'engine/roofwalk', 'construct-view', 'garden-view', 'landscape-view', 'touch', 'nature', 'fxpost', 'fxhost', 'fx', 'stock-view', 'weather-view', 'chickens-view', 'utilities-view', 'engine/reach', 'engine/parts', 'opening-hands', 'water-hands', 'engine/routes', 'overlays', 'services-view', 'services-plan', 'services-hands', 'services-trim', 'services-water', 'engine/payout', 'engine/fieldmesh', 'foundation-view', 'engine/vehicles', 'game/vehicles-atv', 'game/hud'])
+b = '\n'.join(r('dist/%s.min.js' % m) for m in ['openings-global', 'engine/ui', 'game/keymap', 'framing', 'build-ext', 'build', 'buildui', 'engine/hands', 'engine/carry', 'engine/assembly', 'engine/cutstation', 'engine/scaffold', 'engine/roofwalk', 'construct-view', 'garden-view', 'landscape-view', 'touch', 'nature', 'fxpost', 'fxhost', 'fx', 'stock-view', 'weather-view', 'snow', 'chickens-view', 'utilities-view', 'engine/reach', 'engine/parts', 'opening-hands', 'water-hands', 'engine/routes', 'overlays', 'services-view', 'services-plan', 'services-hands', 'services-trim', 'services-water', 'engine/payout', 'engine/fieldmesh', 'foundation-view', 'engine/vehicles', 'game/vehicles-atv', 'game/hud'])
 import glob
 css = '\n'.join(r(f) for f in sorted(glob.glob('template/ui/*.css')))
 assert '</head>' in h

@@ -1,4 +1,4 @@
-/* Weather view: rain and snow near the camera, snow lying on the ground, and the weather readout in the
+/* Weather view: rain and snow near the camera and the weather readout in the
    status bar. Draws the simulation's weather (sim.state.sys.weather); owns no truth of its own.
    Reaches the game only through window.__game. */
 (() => {
@@ -128,58 +128,7 @@
   snow.visible = false;
   G.scene.add(rain, snow);
 
-  /* ================= snow lying on the ground =================
-     A whitening of the ground and grass colour where the snow lies, patchy while it is thin and on
-     upward-facing ground only. A few shader instructions on materials that are drawn anyway: no new pass. */
-  const uSnow = { value: 0 };
-  const patched = new WeakSet();
-  const SNOW_FN = `
-    uniform float uSnowCover; varying vec3 vSnowW;
-    float snowHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-    float snowNoise(vec2 p) {
-      vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
-      return mix(mix(snowHash(i), snowHash(i + vec2(1, 0)), f.x), mix(snowHash(i + vec2(0, 1)), snowHash(i + vec2(1, 1)), f.x), f.y);
-    }`;
-  function patchSnow(mat, kind) {
-    if (!mat || patched.has(mat)) return;
-    patched.add(mat);
-    const before = mat.onBeforeCompile,
-      keyBefore = mat.customProgramCacheKey;
-    mat.onBeforeCompile = function (sh, r) {
-      if (before) before.call(this, sh, r);
-      sh.uniforms.uSnowCover = uSnow;
-      sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nvarying vec3 vSnowW;").replace(
-        "#include <project_vertex>",
-        `{ vec4 sw = vec4(transformed, 1.0);
-         #ifdef USE_INSTANCING
-           sw = instanceMatrix * sw;
-         #endif
-         vSnowW = (modelMatrix * sw).xyz; }
-         #include <project_vertex>`,
-      );
-      const up = kind === "grass" ? "1.0" : "smoothstep(0.5, 0.85, dot(normal, normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz)))";
-      sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\n" + SNOW_FN).replace(
-        "#include <normal_fragment_maps>",
-        `#include <normal_fragment_maps>
-         if (uSnowCover > 0.0) {
-           float n = snowNoise(vSnowW.xz * 0.45) * 0.65 + snowNoise(vSnowW.xz * 2.1) * 0.35;
-           float cover = smoothstep(n * 0.9, n * 0.9 + 0.12, uSnowCover * 1.1) * ${up};
-           ${kind === "grass" ? "cover *= 0.85;" : ""}
-           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.74, 0.77, 0.82), cover);
-         }`,
-      );
-    };
-    mat.customProgramCacheKey = () => (keyBefore ? keyBefore.call(mat) : "") + "|snow1" + kind;
-    mat.needsUpdate = true;
-  }
-  function findGround() {
-    for (const c of G.world.chunks.values()) {
-      if (c.terrain) patchSnow(c.terrain.material, "ground");
-      if (c.grassMesh) patchSnow(c.grassMesh.material, "grass");
-      if (c.terrain && c.grassMesh) return true;
-    }
-    return false;
-  }
+  // Snow lying on the ground is drawn by the snow add-on (src/snow/), from the simulation's snowpack.
 
   /* ================= status bar readout ================= */
   const CMP = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
@@ -268,7 +217,6 @@
   /* ================= per frame ================= */
   let prev = performance.now(),
     hudT = 0,
-    groundReady = false,
     cost = 0,
     costN = 0;
   const hemi = (() => {
@@ -285,8 +233,6 @@
   function update(dt) {
     const w = W();
     if (w) {
-      // patch the ground shaders only once snow first lies, so snowless seasons pay nothing
-      if (!groundReady && w.snowDepthM > 0.002) groundReady = findGround();
       // ease toward the simulation's values so a step of the weather never pops on screen
       const e = 1 - Math.exp(-dt * 1.5);
       rainK += (clamp(Math.pow(w.rainMmH / 8, 0.6), 0, 1) - rainK) * e;
@@ -295,7 +241,6 @@
       const s = Math.min(w.windMs, 16) * 0.35;   // the wind is slower near the ground where we see the rain
       windX += (-Math.sin(w.windDirRad) * s - windX) * e;
       windZ += (Math.cos(w.windDirRad) * s - windZ) * e;
-      uSnow.value += (clamp(w.snowDepthM / 0.12, 0, 1) - uSnow.value) * e;
       const cam = G.camera,
         P = G.player;
       shared.uTime.value = (shared.uTime.value + dt) % 3600;
@@ -338,12 +283,17 @@
   }
   requestAnimationFrame(frame);
 
+  // the snow on the ground is the snow add-on's; its readings are passed on here for older callers
+  const groundInfo = () => {
+    const i = window.__snow ? window.__snow.info() : null, w = W();
+    return { groundSnow: i ? i.groundSnow : clamp(((w && w.snowDepthM) || 0) / 0.12, 0, 1), groundPatched: i ? !!i.groundPatched : false };
+  };
   // for tests and screenshots: what the view is drawing, and its CPU cost per frame
   window.__weatherView = {
-    info: () => ({ rain: rain.visible ? rainGeo.drawRange.count / 2 : 0, snow: snow.visible ? snowGeo.drawRange.count : 0, groundSnow: uSnow.value, groundPatched: groundReady, msPerFrame: costN ? cost / costN : 0 }),
+    info: () => ({ rain: rain.visible ? rainGeo.drawRange.count / 2 : 0, snow: snow.visible ? snowGeo.drawRange.count : 0, ...groundInfo(), msPerFrame: costN ? cost / costN : 0 }),
     resetCost: () => { cost = 0; costN = 0; },
     bench: (n = 2000) => { const t0 = performance.now(); for (let i = 0; i < n; i++) update(1 / 144); return (performance.now() - t0) / n; },
-    settle: () => { const w = W(); if (!w) return; rainK = clamp(Math.pow(w.rainMmH / 8, 0.6), 0, 1); snowK = clamp(Math.pow(w.snowMmH / 2.5, 0.6), 0, 1); uSnow.value = clamp(w.snowDepthM / 0.12, 0, 1); },
+    settle: () => { const w = W(); if (!w) return; rainK = clamp(Math.pow(w.rainMmH / 8, 0.6), 0, 1); snowK = clamp(Math.pow(w.snowMmH / 2.5, 0.6), 0, 1); },
     open: setOpen,
     parts: { rain, snow, shared },
   };

@@ -16,6 +16,7 @@ import { constructionSystem } from './construction.js';
 import { structure } from './structure.js';
 import { garden } from './garden.js';
 import { landscape } from './landscape.js';
+import { snow } from './snow.js';
 import { groundSystem } from './ground.js';
 import { foundationSystem } from './foundation.js';
 import { FLAG as LANDSCAPE_FLAG } from './content/landscape.js';
@@ -48,6 +49,7 @@ export { landscape, landscapeRead, reliefAt, plantSize } from './landscape.js';
 export { SURFACES, THINGS, PLANTS as NURSERY, SCOOP_M3, SCOOP_SCALES, ITEMS_LANDSCAPE } from './content/landscape.js';
 export * as earthwork from './core/earthwork.js';
 export { groundSystem, groundRead, setGroundBase } from './ground.js';
+export { snow, snowRead } from './snow.js';
 export { foundationSystem, foundationRead } from './foundation.js';
 export * as cure from './core/cure.js';
 export { SOILS, AMENDMENTS, MULCH } from './content/soils.js';
@@ -84,7 +86,7 @@ const vehicles = createVehicleSystem({ name: 'vehicles', kinds: VEHICLE_KINDS, i
 const plumbing = plumbingSystem({ kinds: PLUMBING_KINDS, mates: PLUMBING_MATES, stepM: PLUMBING_STEP_M, material: PLUMBING_PIPE, kit: STARTER_KIT });
 // Runs in buildings (generic routes with services content), compiled by services before electrical and water read them.
 const routesSystem = createRoutesSystem({ name: 'routes', classes: SERVICE_CLASSES, guard: servicesGuard });
-export const GAME_SYSTEMS = [weather, streams, stockSystem(), siteSystem(), structure, routesSystem, services, electrical, partsSystem, plumbing, water, thermal, cookingSystem(), chickensSystem(), physicalKitchenSystem(), groundSystem({ tampBits: [LANDSCAPE_FLAG.TAMP1, LANDSCAPE_FLAG.TAMP2] }), landscape, garden, constructionSystem(), foundationSystem(), vehicles];
+export const GAME_SYSTEMS = [weather, streams, stockSystem(), siteSystem(), structure, routesSystem, services, electrical, partsSystem, plumbing, water, thermal, cookingSystem(), chickensSystem(), physicalKitchenSystem(), groundSystem({ tampBits: [LANDSCAPE_FLAG.TAMP1, LANDSCAPE_FLAG.TAMP2] }), landscape, snow, garden, constructionSystem(), foundationSystem(), vehicles];
 
 export function createGameSim(seed, opts = {}) {
   return createSim({ seed, systems: GAME_SYSTEMS, ...opts });
