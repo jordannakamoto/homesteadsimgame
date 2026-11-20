@@ -24,9 +24,6 @@
 html, body { height: 100%; margin: 0; background: #121a1e; color: var(--ink); font-family: var(--font-body); font-size: 14px; overflow: hidden; }
 #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; outline: none; cursor: crosshair; touch-action: none; }
 .panel { position: fixed; background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 8px; padding: 10px 14px; backdrop-filter: blur(6px); }
-button { font: inherit; color: var(--ink); background: var(--surface-3); border: 1px solid var(--panel-edge); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
-button:hover { background: var(--surface-hover); }
-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 #help { bottom: 16px; left: 16px; max-width: 360px; font-size: 13px; }
 #hurt { position: fixed; inset: 0; pointer-events: none; opacity: 0; box-shadow: inset 0 0 140px 30px rgba(190, 40, 30, 0.75); }
 #stance { bottom: 16px; right: 16px; display: flex; flex-wrap: wrap; justify-content: flex-end; max-width: 420px; gap: 6px; align-items: center; padding: 6px 8px; }
@@ -59,52 +56,28 @@ body.building #view { cursor: default; }
 #buildbar button:disabled { opacity: 0.35; cursor: default; }
 #buildbar kbd, #bstop kbd { font: 600 9.5px var(--font-body); color: var(--ink-dim); border: 1px solid var(--panel-edge); border-radius: 4px; padding: 0 3px; margin-left: 4px; white-space: nowrap; }
 #bhead { display: flex; align-items: center; gap: 6px; min-height: 19px; }
-#bhead .grow { flex: 1; }
-#bhint { color: var(--ink); font-size: 12.5px; padding-left: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 #bacts { display: flex; gap: 3px; }
 #bacts .bchip, #bstop { display: flex; align-items: center; gap: 4px; min-height: 19px; padding: 0 8px 0 6px; font-size: 12px; flex: none; }
-#bacts .danger { color: var(--danger); border-color: var(--danger); }
-#bstop { border-color: var(--accent); color: var(--accent); }
-#bfold { display: flex; align-items: center; gap: 2px; min-height: 18px; padding: 0 5px 0 7px; font-size: 11px; color: var(--ink-dim); background: none; border-color: transparent; flex: none; }
-#bfold svg { transition: transform 0.15s; }
-#buildbar.fold #bfold svg { transform: rotate(180deg); }
-#bopts, #bdecor { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 3px 11px; padding: 3px 2px 4px; border-top: 1px solid var(--panel-edge); max-width: 1248px; }
 #bdecor { padding-top: 0; border-top: 0; margin-top: -3px; }
 .bgroup { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.blab { font-size: 9.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-dim); white-space: nowrap; height: 11px; line-height: 11px; }
-.blab .bval { color: var(--ink); font-weight: 700; letter-spacing: 0.02em; text-transform: none; font-size: 11px; margin-left: 2px; }
 .bitems { display: flex; gap: 2px; align-items: center; min-height: 24px; }
-.bsw { width: 23px; height: 23px; padding: 0; border-radius: 5px; overflow: hidden; border: 1px solid rgba(0, 0, 0, 0.5); flex: none; }
 .bsw svg { display: block; width: 100%; height: 100%; }
-.bsw[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
 .btile { display: flex; align-items: center; justify-content: center; gap: 4px; min-width: 30px; height: 24px; padding: 0 5px; font-size: 12px; line-height: 1; white-space: nowrap; }
 .bchip { min-height: 24px; padding: 2px 7px; font-size: 12px; white-space: nowrap; }
-.btile.danger { color: var(--danger); border-color: var(--danger); }
 .btile[aria-pressed="true"], .bchip[aria-pressed="true"], #bpieces button[aria-pressed="true"], #bsnap[aria-pressed="true"], #bfree[aria-pressed="true"], #bsched[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
-.bstep .bchip { padding: 2px 5px; display: flex; align-items: center; }
 .bnum { font-variant-numeric: tabular-nums; font-size: 12.5px; }
 .bstep .bnum { min-width: 40px; text-align: center; font-weight: 700; }
-.bfield { background: var(--well); border: 1px solid var(--panel-edge); border-radius: 6px; padding: 0 7px 0 2px; height: 24px; color: var(--ink-dim); font-size: 12px; }
 .bfield input { width: 44px; background: none; border: 0; color: var(--ink); font: 700 12.5px var(--font-body); font-variant-numeric: tabular-nums; text-align: right; outline: none; padding: 0 3px; }
-.bfield:focus-within { border-color: var(--blue); }
 .bfield select { background: none; border: 0; color: var(--ink); font: 700 12.5px var(--font-body); outline: none; padding: 0 2px; max-width: 150px; }
-.bfield select option { background: var(--ink-inv); color: var(--ink); }
 .binfo { justify-content: center; gap: 1px; padding-right: 5px; max-width: 300px; align-self: stretch; }
-.bwinprev .bwp { display: block; background: var(--well); border-radius: 6px; color: var(--ink); }
-.bwinprev .bwp path { stroke-linecap: square; }
 /* the window and door designer: boxed sections, sizes with steppers you can also type into, feedback badges */
-#bdecor { align-items: stretch; }
 .bsec { display: flex; flex-direction: column; gap: 3px; padding: 4px 8px 6px; border: 1px solid var(--panel-edge); border-radius: 8px; background: var(--surface-3); }
 .bsech { font: 700 10px var(--font-body); letter-spacing: 0.09em; text-transform: uppercase; color: var(--accent); opacity: 0.85; }
 .bsecb { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 4px 10px; }
-.bnumi { background: var(--well); border: 1px solid var(--panel-edge); border-radius: 7px; padding: 1px; gap: 0; }
 .bnumi:focus-within { border-color: var(--blue); }
-.bnumi .bchip { border: 0; background: none; padding: 2px 6px; display: flex; align-items: center; min-height: 26px; }
-.bnumi .bchip:hover { background: var(--surface-3); }
 .bnumi input { width: 44px; background: none; border: 0; color: var(--ink); font: 700 14px var(--font-body); font-variant-numeric: tabular-nums; text-align: right; outline: none; padding: 0 2px; }
 .bnumi .bu { color: var(--ink-dim); font-size: 11.5px; padding-right: 3px; }
 .bnote { font-size: 10px; color: var(--ink-dim); line-height: 1.1; text-align: center; }
-.bnote.bad { color: var(--danger); }
 .bbadges { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 3px; max-width: 330px; align-self: center; }
 .bbadge { font-size: 11px; line-height: 1; padding: 4px 7px; border-radius: 999px; background: var(--surface-3); border: 1px solid var(--panel-edge); color: var(--ink); white-space: nowrap; }
 .bbadge.k-price { font-weight: 700; color: var(--accent); border-color: var(--accent-soft); }
@@ -113,31 +86,20 @@ body.building #view { cursor: default; }
 .bbadge.k-bad { color: var(--danger); border-color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); white-space: normal; }
 #bdesign { right: 12px; bottom: 120px; width: 318px; max-height: calc(100vh - 230px); overflow-y: auto; padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 7px; z-index: 6; scrollbar-width: thin; }
 #bdesign[hidden] { display: none; }
-#bdesign .bdtitle { font-family: var(--font-display); font-size: 15px; color: var(--accent); }
-#bdesign .bwinprev { align-self: center; }
-#bdesign .bwinprev .bwp { width: 296px; height: auto; }
-#bdesign .bsec { padding: 5px 8px 7px; }
-#bdesign .bitems { flex-wrap: wrap; }
-body.touch #bdesign { right: 6px; left: 6px; width: auto; max-height: 38vh; }
 /* edge handles on a selected door or window: a bar you drag */
 .bhandle.oh-ew { width: 10px; height: 30px; margin: -15px 0 0 -5px; border-radius: 5px; border-width: 2px; border-color: var(--cad); background: var(--cad-ink); }
 .bhandle.oh-ns { width: 30px; height: 10px; margin: -5px 0 0 -15px; border-radius: 5px; border-width: 2px; border-color: var(--cad); background: var(--cad-ink); }
 .binfo .btitle { font-family: var(--font-display); font-size: 14.5px; line-height: 1.15; color: var(--accent); white-space: nowrap; }
 .binfo .bnum { color: var(--ink); font-size: 12px; line-height: 1.2; white-space: normal; }
 #bmain { display: flex; gap: 8px; align-items: stretch; justify-content: center; border-top: 1px solid var(--panel-edge); padding-top: 3px; }
-#bpieces { display: flex; gap: 3px; }
-#bpieces .sep { width: 1px; background: var(--panel-edge); margin: 3px 2px; }
 #bpieces button, #bsnap, #bdone, #bsched { position: relative; display: grid; justify-items: center; align-content: center; gap: 0; min-width: 50px; padding: 2px 4px 2px; }
 #bpieces .name, #baids .name { font-family: var(--font-display); font-size: 12.5px; line-height: 1.1; }
 #buildbar .key { position: absolute; top: 1px; right: 3px; font-size: 9.5px; font-weight: 700; color: var(--ink-dim); opacity: 0.85; }
-#baids { display: flex; gap: 4px; align-items: stretch; padding-left: 8px; border-left: 1px solid var(--panel-edge); }
 #blevel { display: flex; align-items: stretch; min-width: 0; font-size: 12px; color: var(--ink); border: 1px solid var(--panel-edge); border-radius: 6px; }
-#blevel #blname { display: grid; place-items: center; min-width: 54px; padding: 0 2px; font-family: var(--font-display); font-size: 12.5px; }
 #blevel button { padding: 0 4px; display: flex; align-items: center; border-color: transparent; background: none; }
 #blevel button:hover { background: var(--surface-hover); }
 #bundo, #bredo { display: flex; align-items: center; padding: 0 6px; flex: none; }
 #bundo span, #bredo span { display: none; }
-#bfree { font-size: 11.5px; padding: 2px 7px; align-self: center; }
 #bschedp { right: 10px; top: 120px; width: 318px; overflow-y: auto; overscroll-behavior: contain; padding: 8px 12px 10px; font-size: 12.5px; z-index: 6; }
 #bschedp[hidden] { display: none; }
 #bschedp h2 { font-family: var(--font-display); font-weight: 400; font-size: 17px; margin: 0 0 4px; color: var(--accent); display: flex; justify-content: space-between; align-items: baseline; }
@@ -150,11 +112,9 @@ body.touch #bdesign { right: 6px; left: 6px; width: auto; max-height: 38vh; }
 #bschedp .ln b { text-align: right; font-weight: 400; }
 #bschedp .ln em { grid-column: 1 / 4; font-style: normal; font-size: 11px; line-height: 1.25; color: var(--ink-dim); }
 #bschedp .tot { display: flex; justify-content: space-between; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--panel-edge); font-family: var(--font-display); font-size: 16px; }
-#bschedp .none { color: var(--ink-dim); }
 body.touch #bschedp { left: 6px; right: 6px; width: auto; top: 60px; }
 #blabel { position: fixed; left: 0; top: 0; pointer-events: none; background: var(--surface-2); border: 1px solid var(--panel-edge); border-radius: 6px; padding: 3px 9px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; z-index: 5; }
 #blabel[hidden], #bover [hidden] { display: none; }
-#blabel.bad { border-color: var(--danger); color: var(--danger); background: rgba(60, 22, 18, 0.92); }
 #bover { position: fixed; inset: 0; pointer-events: none; z-index: 4; overflow: hidden; }
 #bover > div { position: absolute; left: 0; top: 0; }
 .bdim { margin: -13px 0 0 -40px; min-width: 80px; display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; column-gap: 3px; background: var(--cad-bg); border: 1px solid var(--cad); border-radius: 6px; padding: 2px 8px; color: var(--cad-ink); font: 700 14px var(--font-body); font-variant-numeric: tabular-nums; white-space: nowrap; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5); }
@@ -235,7 +195,6 @@ body.touch .bport:not(.t-link) { width: 26px; height: 26px; margin: -13px 0 0 -1
   #sv .card { flex-wrap: wrap; }
 }
 /* ---------- weather readout (src/weather-view.js) ---------- */
-#wx { position: relative; }
 #wxbtn { display: grid; grid-template-columns: auto auto; column-gap: 5px; align-items: baseline; justify-content: start; padding: 1px 7px; line-height: 1.12; text-align: left; font-variant-numeric: tabular-nums; min-width: 76px; margin: -4px -9px; }
 #wxbtn #wxdate { grid-column: 1 / 3; color: var(--ink-dim); font-size: 11px; }
 #wxbtn #wxtemp { font-weight: 700; font-size: 12px; }
@@ -276,7 +235,6 @@ body.touch #bhint { order: 5; flex-basis: 100%; font-size: 12px; padding: 0 2px;
 body.touch #bacts span, body.touch #buildbar kbd, body.touch #bfold span { display: none; }
 body.touch #bacts .bchip, body.touch #bstop, body.touch #bfold { min-width: 44px; min-height: 40px; justify-content: center; }
 body.touch #bopts, body.touch #bdecor, body.touch #bmain { flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; scrollbar-width: none; max-width: none; }
-body.touch #bopts { padding: 5px 2px; }
 body.touch .bgroup, body.touch #bpieces, body.touch #baids { flex: none; }
 body.touch .bsw { width: 40px; height: 40px; }
 body.touch .bchip, body.touch .btile, body.touch .bfield { min-height: 40px; height: auto; }
@@ -284,7 +242,6 @@ body.touch .bchip, body.touch .btile { min-width: 40px; justify-content: center;
 body.touch #bpieces button, body.touch #bsnap, body.touch #bdone, body.touch #bsched { min-width: 54px; min-height: 46px; }
 body.touch #bundo, body.touch #bredo { min-width: 44px; min-height: 40px; justify-content: center; }
 body.touch #blevel button { min-width: 36px; justify-content: center; }
-body.touch #bfree { min-height: 40px; }
 @media (max-width: 720px) {
   #help { display: none; }
 }
@@ -355,14 +312,10 @@ body.cooking-active #ut { display: none; }
 /* construction (iteration 2c): the Build button, the next-step note, the Build panel, the work prompt, banners */
 #cvnext { top: 310px; left: 16px; width: 252px; padding: 8px 12px 9px; border-left: 3px solid var(--accent); }
 #cvnext[hidden], #cv[hidden], #cvprompt[hidden], #cvbanner[hidden], #cvsand[hidden], #cvact[hidden] { display: none; }
-#cvnext .cvk { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim); }
-#cvnext .cvt { font-family: var(--font-display); font-size: 17px; line-height: 1.15; color: var(--accent); margin: 1px 0 3px; }
-#cvnext .cvl { font-size: 13.5px; line-height: 1.3; }
 #cvnext .cvl kbd, #cvprompt kbd, #cv kbd { font: 700 12px var(--font-body); color: var(--ink-inv); background: var(--accent); border-radius: 4px; padding: 0 5px; margin: 0 2px; }
 #cvnext .cvwhy { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--panel-edge); font-size: 12.5px; line-height: 1.3; color: var(--ink-dim); }
 #cvnext .cvwhy b { color: var(--ink); font-weight: 600; }
 #cvnext .cvrow { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; }
-#cvnext button { font-size: 12.5px; padding: 3px 9px; }
 #cvnext button.go, #cv button.go { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 700; }
 #cv { top: 118px; right: 12px; width: min(420px, calc(100vw - 24px)); max-height: calc(100vh - 220px); display: flex; flex-direction: column; gap: 6px; padding: 10px 12px 12px; z-index: 7; background: var(--surface-2); }
 #cv .cvhead { display: flex; align-items: center; gap: 10px; }
@@ -421,7 +374,6 @@ body.cooking-active #ut { display: none; }
 #cvbanner { top: 132px; left: 50%; transform: translateX(-50%); padding: 9px 22px 10px; text-align: center; pointer-events: none; z-index: 5; transition: opacity 0.5s; border-color: var(--accent); }
 #cvbanner.out { opacity: 0; }
 #cvbanner .t { font-family: var(--font-display); font-size: 25px; color: var(--accent); line-height: 1.1; }
-#cvbanner .l { font-size: 14px; color: var(--ink); }
 #cvbanner.small .t { font-size: 17px; }
 #cvsand { top: 120px; left: 16px; font-size: 12.5px; padding: 5px 10px; z-index: 6; }
 #cvact { right: 22px; bottom: 210px; width: 92px; height: 92px; border-radius: 50%; display: grid; place-items: center; text-align: center; font-family: var(--font-display); font-size: 15px; line-height: 1.1; z-index: 8; border-color: var(--accent); color: var(--accent); touch-action: none; user-select: none; }

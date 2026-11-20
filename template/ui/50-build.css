@@ -10,7 +10,7 @@
 #buildbar { --slot-size: 56px; --tray-h: 76px; --bb-r: calc(var(--r-slot) + 8px); }
 
 /* ---------- the build bar replaces the hotbar row (20-hud.css hides the dock, quest card and vitals) ---------- */
-body.building #ui-lane-bottom > #tools, body.building #tools { display: none; }
+body.building #tools { display: none; }
 
 /* ---------- the container: no surface of its own, its rows carry the surfaces ---------- */
 #buildbar {
