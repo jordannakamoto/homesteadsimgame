@@ -6170,7 +6170,223 @@
     }
     return t0;
   }
-  const roofsShown = () => B.tool === "roof" || B.tool === "erase" || (B.tool === "equip" && fxRoofs()) || (B.tool === "select" && B.showRoofs);
+  // roofs can be picked where plan mode draws them (planView below)
+  const roofsShown = () => pvNow().roof;
+  // ---- what plan mode shows (docs/design/plan-mode-redesign.md 3B). The house as it will look finished, opened only as far
+  // as the task in hand needs: which storeys are drawn, roof on or off, a cut height (or none) and the layer. planView works it
+  // out from the tool, the selection, the control being changed and B.vmode; PV.key says when any of those changed, and
+  // pvApply writes the result to each building once (group.visible, the four clipping planes, the roof's fade, the caps).
+  // A steady view costs one short key string a frame; nothing is written while it holds.
+  const PV = { key: "", ver: 0, cur: null, on: false, rc: null };
+  const VMODES = ["auto", "finished", "cutaway", "section"];
+  const PV_HOLD = 4000;    // ms the foundation or wall-layers view stays after its control was changed
+  const pvFocus = () => { const f = B.vfocus; return f && (f.hold || performance.now() < f.until) ? f.k : ""; };
+  const pvMode = () => (VMODES.includes(B.vmode) ? B.vmode : "auto");
+  const pvKey = () => [B.tool, B.selV, B.version, B.level, pvMode(), B.vcut, B.vpin === B.tool ? 1 : 0, pvFocus(), B.tool === "equip" && fxRoofs() ? 1 : 0, B.showRoofs ? 1 : 0, B.structs.length].join("|");
+  function pvNow() {
+    const k = pvKey();
+    if (k !== PV.key || !PV.cur) ((PV.key = k), (PV.cur = planView()), PV.ver++);
+    return PV.cur;
+  }
+  // a wall run with floor on both sides of every metre of it is inside the house
+  const runInside = (S, g) => g.m.every((e) => S.floors.has(e.d === 0 ? ck(e.i, e.j - 1) : ck(e.i - 1, e.j)) && S.floors.has(ck(e.i, e.j)));
+  // what the selection is, for the view: "roof", "inside" (an inside wall, a floor, a stair or a furnishing), "other", or ""
+  function pvSel() {
+    if (!B.sel.length) return "";
+    let inside = false;
+    for (const q of selRefs()) {
+      if (/roof/.test(q.kind)) return "roof";
+      if (q.kind === "floor" || q.kind === "poly" || q.kind === "stair" || q.kind === "decor" || (q.kind === "run" && runInside(q.S, q.g))) inside = true;
+    }
+    return inside ? "inside" : "other";
+  }
+  // storeys: all | below (current and below) | ground | current. cut: null, { rel } above each cut storey's own floor,
+  // { found: true } just under the finish floor, or { abs } above the building's ground floor (Section). layer: finished |
+  // structure (foundation and floor frame only) | layers (the wall's layers in the cut)
+  function planView() {
+    const t = B.tool,
+      mode = pvMode(),
+      top = B.structs.reduce((m, S) => (S.po ? m : Math.max(m, S.level)), -1),
+      above = top > B.level,
+      roofs = B.structs.some((S) => S.roofs.length || S.rings.some((r) => r.roof) || S.polys.some((p) => p.roofed)),
+      V = (task, storeys, roof, cut, chip, layer) => ({ task, mode, storeys, roof, cut, chip: chip || "", layer: layer || "finished" }),
+      whole = V("whole", "all", true, null),
+      doll = V("dollhouse", "below", false, { rel: 1.2 }, "Cut at 1.2 m");
+    if (mode === "finished") return V("finished", "all", true, null);
+    if (mode === "cutaway") return V("cutaway", "below", false, null);
+    if (mode === "section") return V("section", "all", false, { abs: B.vcut === null || B.vcut === undefined ? pvDefaultCut() : B.vcut });
+    if (B.vpin === t) return V("pinned", "all", true, null);
+    const f = pvFocus();
+    if (f === "found") return V("foundation", "ground", false, { found: true }, "Showing the foundation", "structure");
+    if (f === "ins" || f === "lining") return V("layers", "current", false, { rel: 1.2 }, "Showing inside the walls", "layers");
+    if (t === "door" || t === "window") return V("facade", "below", !above, null, above ? "Storeys above hidden" : "");
+    if (t === "room" || t === "tower" || t === "wall") return V("lifted", "below", false, null, roofs ? "Roof lifted" : "");
+    if (t === "floor" || t === "stairs" || t === "pillar" || t === "decor" || (t === "equip" && !fxRoofs())) return doll;
+    if (t === "select" && !B.showRoofs && pvSel() === "inside") return doll;
+    return whole;   // Select (nothing selected, a roof, an outside piece), Roof, Path, Measure, Remove, Copy, Equip on a roof
+  }
+  // the building the view's numbers are about: the selection's, the one under the pointer, the last one, or the nearest
+  function pvRef() {
+    const q = B.sel.length ? selRefs()[0] : null,
+      h = B.hover && B.hover.F && !B.hover.F.isNew && B.structs.includes(B.hover.F) ? B.hover.F : null;
+    let S = (q && q.S) || h || (B.vref && B.structs.includes(B.vref) ? B.vref : null);
+    if (!S) {
+      let best = 1e9;
+      for (const O of B.structs) {
+        if (O.po || O.cx === undefined) continue;
+        const d = Math.hypot(O.cx - P.x, O.cz - P.z);
+        if (d < best) ((best = d), (S = O));
+      }
+    }
+    if (S && !S.po) B.vref = S;
+    return S && !S.po ? S : null;
+  }
+  // the floor of a building's ground storey: the heights of Section and of the view's ticks are measured from it
+  const pvGround = (S) => {
+    const base = groupOf(S).find((O) => O.level === 0);
+    return base ? base.y0 : S.y0 - S.level * EAVE * S.hs;
+  };
+  // the top of one storey (its roof's ridge, or the wall tops), above its own floor
+  const pvTop = (S) => {
+    let hi = EAVE * S.hs * S.rings.reduce((m, r) => Math.max(m, r.h), 1);
+    for (const m of [S.roof, S.pvShell && S.pvShell.roof]) {
+      if (!m || !m.geometry) continue;
+      const bb = m.geometry.boundingBox || (m.geometry.computeBoundingBox(), m.geometry.boundingBox);
+      if (bb && isFinite(bb.max.y)) hi = Math.max(hi, bb.max.y);
+    }
+    return hi;
+  };
+  // just under the finish floor: on top of the joists (the subfloor and flooring are cut away), on a slab its top, on a stone
+  // plinth the top of the skirt
+  const pvFoundCut = (S) => (S.found === "slab" ? FLOOR_T + 0.002 : S.found && S.found !== "plinth" ? FLOOR_T - 0.018 + 0.002 : 0.03);
+  function pvDefaultCut() {
+    const S = pvRef();
+    if (!S) return 1.2;
+    const cur = groupOf(S).find((O) => O.level === B.level);
+    return Math.round(((cur ? cur.y0 : S.y0) - pvGround(S) + 1.2) * 10) / 10;
+  }
+  // the instrument's numbers for the view control (V2): range, ticks, and the cut in the same metres
+  function pvRange(S) {
+    const key = B.version + "|" + (S ? S.id : "-");
+    if (PV.rc && PV.rc.key === key) return PV.rc;
+    let lo = -0.35,
+      hi = EAVE;
+    const ticks = [];
+    if (S) {
+      const grp = groupOf(S),
+        g0 = pvGround(S),
+        lv = new Map();
+      for (const O of grp) {
+        if (O.level === 0 && O.depth) lo = Math.min(lo, -O.depth);
+        hi = Math.max(hi, O.y0 - g0 + pvTop(O));
+        const y = O.y0 - g0;
+        if (!lv.has(O.level) || y < lv.get(O.level)) lv.set(O.level, y);
+      }
+      for (const [l, y] of [...lv].sort((a, b) => a[0] - b[0])) ticks.push({ y: Math.round(y * 100) / 100, name: LEVEL_NAME(l), kind: "floor", level: l }, { y: Math.round((y + 1.2) * 100) / 100, name: "", kind: "cut", level: l });
+    } else ticks.push({ y: 0, name: "Ground", kind: "floor", level: 0 }, { y: 1.2, name: "", kind: "cut", level: 0 });
+    return (PV.rc = { key, range: [Math.floor(lo * 10) / 10, Math.ceil(hi * 10) / 10], ticks });
+  }
+  // view().viewc: what the view control draws (docs/design/plan-mode-redesign.md section 4)
+  function viewC() {
+    const v = pvNow(),
+      S = pvRef(),
+      rc = pvRange(S),
+      g0 = S ? pvGround(S) : 0,
+      cur = S ? groupOf(S).find((O) => O.level === B.level) : null,
+      base = S ? groupOf(S).find((O) => O.level === 0) || S : null;
+    let cut = null;
+    if (v.cut && v.cut.abs !== undefined) cut = v.cut.abs;
+    else if (v.cut && v.cut.rel !== undefined) cut = (cur ? cur.y0 - g0 : B.level * EAVE) + v.cut.rel;
+    else if (v.cut && v.cut.found) cut = base ? base.y0 - g0 + pvFoundCut(base) : 0;
+    if (cut !== null) cut = Math.round(cut * 100) / 100;
+    let cutText = "";
+    if (cut !== null) {
+      const fl = rc.ticks.filter((k) => k.kind === "floor"),
+        under = fl.filter((k) => k.y <= cut + 1e-6).pop() || fl[0];
+      cutText = under ? Math.abs(cut - under.y).toFixed(2) + " m " + (cut >= under.y ? "above " : "below ") + under.name : cut.toFixed(2) + " m";
+    }
+    return { mode: v.mode, chip: v.chip, cut, range: rc.range, ticks: rc.ticks, left: !!B.vleft, task: v.task, cutText, pinned: B.vpin === B.tool, layer: v.layer, focus: pvFocus() || null };
+  }
+  // the view control's choose ids: view:mode, view:cut, view:unpin (the chip's close), view:left, view:focus
+  function viewChoose(id, v) {
+    if (id === "view:mode") {
+      if (!VMODES.includes(v)) return;
+      if (v === "section" && (B.vcut === null || B.vcut === undefined)) B.vcut = pvDefaultCut();
+      B.vmode = v;
+      B.vpin = null;
+    } else if (id === "view:cut") {
+      const c = +v;
+      if (!isFinite(c)) return;
+      const r = pvRange(pvRef()).range;
+      B.vcut = Math.round(clamp(c, r[0], r[1]) * 100) / 100;
+      B.vmode = "section";
+    } else if (id === "view:unpin") B.vpin = B.tool;    // closing the chip: the finished house until the tool changes
+    else if (id === "view:left") {
+      const on = v === undefined || v === null ? !B.vleft : !!v;
+      if (on === !!B.vleft) return;
+      B.vleft = on;
+      for (const S of B.structs) B.dirty.add(S);       // the blueprint, or the finished look, is drawn by drawMembers
+    } else if (id === "view:focus") {
+      // the inspector reports which make-up control has focus ("found", "ins", "lining"; the "s:" forms too), null when it loses it
+      const k = typeof v === "string" ? v.replace(/^s:/, "") : "";
+      if (k === "found" || k === "ins" || k === "lining") B.vfocus = { k, hold: true };
+      else if (B.vfocus && B.vfocus.hold) B.vfocus = { k: B.vfocus.k, until: performance.now() + PV_HOLD };
+    } else return;
+    B.key = "";
+    B.uiVer = (B.uiVer || 0) + 1;
+    touchUi();
+  }
+  // a make-up control was changed: its view holds for a few seconds
+  const pvTouch = (k) => (B.vfocus = B.vfocus && B.vfocus.hold && B.vfocus.k === k ? B.vfocus : { k, until: performance.now() + PV_HOLD });
+  // write the view to one building: on a change of view or of the building, then each frame only while its cut eases
+  const PV_FAR = 1e6;
+  function pvApply(S, dt) {
+    if (S.pvV === PV.ver && S.pvMain === S.main && !S.pvBusy) return;
+    const v = PV.cur;
+    if (S.pvV !== PV.ver || S.pvMain !== S.main) {
+      S.pvV = PV.ver;
+      S.pvMain = S.main;
+      const g0 = v.cut && v.cut.abs !== undefined ? pvGround(S) : 0,
+        st = v.storeys;
+      let vis = S.po || st === "all" ? true : st === "below" ? S.level <= B.level : st === "ground" ? S.level === 0 : S.level === B.level,
+        cut = null,
+        roof = v.roof;
+      if (v.cut && v.cut.rel !== undefined) cut = S.level === B.level ? v.cut.rel : null;
+      else if (v.cut && v.cut.found) cut = S.level === 0 ? pvFoundCut(S) : null;
+      else if (v.cut && v.cut.abs !== undefined && !S.po) {
+        cut = g0 + v.cut.abs - S.y0;
+        if (cut <= 0.02) vis = false;                   // a storey wholly above the section is not drawn
+        else if (cut >= pvTop(S)) ((cut = null), (roof = true));   // nor cut where the section passes over it
+      }
+      const full = EAVE * S.hs * S.rings.reduce((m, r) => Math.max(m, r.h), 1) + 0.4;
+      if ((cut !== null && cut >= full) || !vis) cut = null;
+      S.group.visible = vis;
+      S.pvRoof = roof;
+      S.pvCut = cut === null ? 99 : cut;
+      S.pvStruct = v.layer === "structure" && cut !== null && S.found && S.found !== "plinth";
+      // the cut is the horizontal plane alone: the other three always clip, so their intersection is that plane
+      for (const pl of [S.near, S.sideA, S.sideB]) (pl.normal.set(0, 1, 0), (pl.constant = -PV_FAR));
+      S.capPl[0].copy(S.near).negate(); S.capPl[1].copy(S.sideA).negate(); S.capPl[2].copy(S.sideB).negate();
+      for (const dr of S.doors) dr.mesh.visible = true;
+      // the structure layer: what stands on the foundation is put away, the foundation and the floor frame (members) stay
+      for (const m of [S.main, S.glow, S.pvShell && S.pvShell.main]) if (m) m.visible = !S.pvStruct;
+      S.pvBusy = true;
+    }
+    // ease the cut (about 0.2 s), as the dollhouse does in play
+    const full = EAVE * S.hs * S.rings.reduce((m, r) => Math.max(m, r.h), 1) + 0.4,
+      want = S.pvCut;
+    if (S.cutH !== want) {
+      const cur = Math.min(S.cutH, full),
+        to = want >= 99 ? full : want,
+        step = dt * 12;
+      const nx = Math.abs(to - cur) <= step || !(dt > 0) ? to : cur + Math.sign(to - cur) * step;
+      S.cutH = want >= 99 && nx >= full ? 99 : nx === to ? want : nx;
+    }
+    S.clip.constant = S.cutH >= 99 ? 1e5 : S.y0 + S.cutH;
+    if (S.pvStruct) S.capMesh && (S.capMesh.visible = false);
+    else capWalls(S);
+    S.pvBusy = S.cutH !== want;
+  }
   function pickAt(opt) {
     if (!pick.valid) return null;
     const wallsOnly = opt === WALLS_ONLY,
@@ -8027,6 +8243,7 @@
     return out;
   }
   function setTool(id) {
+    if (B.tool !== id) B.vpin = null;   // a closed view chip (planView) holds until the tool changes
     if (B.tool !== id && (B.tool === "select" || id !== "select")) B.showRoofs = B.selRoofAuto = false;
     if (B.tool !== id) {
       // Door and Window open the inspector (their designer); other tools leave it as the player last had it
@@ -8770,7 +8987,8 @@
     // the inspector's groups are listed only while it is open (row "d" keeps the old interface's side panel working)
     const insp = inspectorOf(t, g),
       shown = insp.open ? g.map((x) => (x.tier ? x : ((x.row = "d"), x))) : g.filter((x) => x.tier);
-    return { inspector: insp, levels: levelChips(), coach: B.coached ? null : coachSteps(), total: planTotal(), fit: B.fit || null, roofs: !!B.showRoofs, sandbox: sandboxOn(), designTitle: (t === "window" || t === "door") && freeTool() ? (B.fsel ? "Editing the selected " + t : "Designing the next " + t) : t === "roof" ? "Planning the next roof" : oneRoof ? "The selected roof" : insp.title, tool: t, top: t === "tower" ? "room" : t === "copy" ? "select" : t, tools: TOOLS, groups: shown, hint: B.hintText, undo: B.undo.length, redo: B.redo.length, snap: B.snap, free: B.free, level: B.level, levelName: LEVEL_NAME(B.level), busy, sel: B.sel.length, fold: B.fold, sched: B.sched ? schedule() : null };
+    const viewc = viewC();   // what plan mode shows, for the view control (section 3B)
+    return { viewc, inspector: insp, levels: levelChips(), coach: B.coached ? null : coachSteps(), total: planTotal(), fit: B.fit || null, roofs: !!B.showRoofs, sandbox: sandboxOn(), designTitle: (t === "window" || t === "door") && freeTool() ? (B.fsel ? "Editing the selected " + t : "Designing the next " + t) : t === "roof" ? "Planning the next roof" : oneRoof ? "The selected roof" : insp.title, tool: t, top: t === "tower" ? "room" : t === "copy" ? "select" : t, tools: TOOLS, groups: shown, hint: B.hintText, undo: B.undo.length, redo: B.redo.length, snap: B.snap, free: B.free, level: B.level, levelName: LEVEL_NAME(B.level), busy, sel: B.sel.length, fold: B.fold, sched: B.sched ? schedule() : null };
   }
   // ---- a door or window in the view: the gaps either side of it, its sizes, and handles on its edges to resize it
   // the clear gaps from a unit to what stands either side of it along its wall (or the wall's end), as live sizes
@@ -9686,6 +9904,8 @@
       }
       return;
     }
+    if (id.startsWith("view:")) return viewChoose(id, v);
+    if (/^(s:)?(found|ins|lining)$/.test(id)) pvTouch(id.replace("s:", ""));   // its view (planView) shows what was changed
     if (id === "shape") return setTool(v);
     if (id === "roofall") return roofBuilding();
     if (/^(s:)?(rshape|rturn|pitch|pitchn|eave|rake|gutters|rcolor)$/.test(id)) return roofChoose(id, v);
@@ -10778,8 +10998,11 @@
     const on = S.cutH < 99 && S.mem && S.mem.walls && S.mem.walls.length;
     if (!on) { if (S.capMesh) S.capMesh.visible = false; return; }
     const h = S.cutH, opensAt = [];
+    // plan mode draws planned walls finished (drawMembers), so they are capped like built ones; the wall-layers view
+    // (planView) adds the sheathing, the wrap and the insulation to the section
+    const fin = B.on && !B.vleft, lay = fin && PV.cur && PV.cur.layer === "layers";
     for (const w of S.mem.walls) for (const q of w.openings || []) if (w.y0 + q.sill < h && w.y0 + q.sill + q.height > h) opensAt.push(q.id);
-    const key = S.mem.ver + "|" + S.plan.size + "|" + opensAt.join() + "|" + S.mem.walls.filter((w) => w.y0 + (w.h || 0) > h && w.y0 < h).length;
+    const key = S.mem.ver + "|" + S.plan.size + "|" + opensAt.join() + "|" + S.mem.walls.filter((w) => w.y0 + (w.h || 0) > h && w.y0 < h).length + "|" + (fin ? 1 : 0) + (lay ? 1 : 0);
     if (S.capKey !== key) {
       S.capKey = key;
       if (S.capMesh) (S.group.remove(S.capMesh), S.capMesh.geometry.dispose(), (S.capMesh = null));
@@ -10787,11 +11010,11 @@
       for (const w of S.mem.walls) {
         if (w.y0 + (w.h || 0) <= h || w.y0 >= h) continue;
         const ms = (S.mem.byParent.get(w.id) || []).filter((m) => m.draw !== 0 && !CAP_SKIP.has(m.kind) && !(m.kind === "cladding" && m.type === "trim") && m.section && m.stage !== "foundation" && m.stage !== "floor-frame" && m.stage !== "subfloor");
-        if (!ms.length || ms.some((m) => S.plan.has(m.id))) continue;          // still being built: leave it open to see
+        if (!ms.length || (!fin && ms.some((m) => S.plan.has(m.id)))) continue;          // still being built: leave it open to see
         const L = Math.hypot(w.b[0] - w.a[0], w.b[1] - w.a[1]) || 1, ux = (w.b[0] - w.a[0]) / L, uz = (w.b[1] - w.a[1]) / L, N = [-uz, 0, ux];
         let lo = 1e9, hi = -1e9;
         const strips = [];      // [from, to, colour] across the wall: the faces you see in the cut
-        const all = S.mem.byParent.get(w.id) || [], paintOf = (fc) => { const p2 = all.find((q) => q.kind === "paint" && q.surface === "walls" && q.face === fc && !S.plan.has(q.id)); return p2 ? finCol(p2.fin) : null; };
+        const all = S.mem.byParent.get(w.id) || [], paintOf = (fc) => { const p2 = all.find((q) => q.kind === "paint" && q.surface === "walls" && q.face === fc && (fin || !S.plan.has(q.id))); return p2 ? finCol(p2.fin) : null; };
         for (const m of ms) {
           const ax = m.b[0] - m.a[0], ay = m.b[1] - m.a[1], az = m.b[2] - m.a[2], ml = Math.hypot(ax, ay, az) || 1, u = [ax / ml, ay / ml, az / ml], n = m.n;
           const t = [u[1] * n[2] - u[2] * n[1], u[2] * n[0] - u[0] * n[2], u[0] * n[1] - u[1] * n[0]], dot = (v) => Math.abs(v[0] * N[0] + v[2] * N[2]);
@@ -10800,6 +11023,9 @@
           lo = Math.min(lo, c - half); hi = Math.max(hi, c + half);
           if (m.kind === "lining") strips.push([c - half, c + half, paintOf(m.face) || MCOL[m.col] || MCOL.gypsum]);
           else if (m.kind === "cladding") strips.push([c - half, c + half, MCOL[m.col || "siding"] || MCOL.siding]);
+          else if (lay && m.kind === "insulation") strips.push([c - half, c + half, MCOL.batt]);
+          else if (lay && m.kind === "sheathing") strips.push([c - half, c + half, MCOL.osb]);
+          else if (lay && m.kind === "membrane") strips.push([c - half, c + half, MCOL[m.col] || MCOL.wrap]);
         }
         if (!(hi > lo)) continue;
         // along the wall, less the openings the cut passes through
@@ -10835,8 +11061,13 @@
     ZERO4 = new T.Matrix4().makeScale(0, 0, 0);
   function drawMembers(S, st) {
     dropMembers(S);
+    // plan mode shows the house as it will look finished (docs/design/plan-mode-redesign.md 3B.2): planned members are
+    // drawn as if built (the siding, the lining, the paint and the trim are members), with no blueprint ghosts. "Show what
+    // is left to build" (B.vleft), and every mode outside plan, draw the blueprint as before
+    const fin = B.on && !B.vleft,
+      all = st.all || fin;
     const mem = st.mem,
-      P = (id) => S.plan.has(id),
+      P = fin ? () => false : (id) => S.plan.has(id),
       gs = B.gstage || st.cur,
       gi = STAGES.indexOf(gs),
       sk = B.supportKinds || {},
@@ -10874,10 +11105,10 @@
       }
       if (m.draw === 0) continue;
       if (m.stage === "foundation" || m.stage === "floor-frame") sets[0].push(m);
-      else if (roofId) ((st.all || st.finRoof.has(roofId)) && m.kind !== "cladding") || sets[1].push(m);     // the gable's siding stays drawn, like the walls'
-      else if (m.stage === "subfloor" || m.type === "floor-batt") (st.all || st.finFloor.has(m.parent)) || sets[0].push(m);
+      else if (roofId) ((all || st.finRoof.has(roofId)) && m.kind !== "cladding") || sets[1].push(m);     // the gable's siding stays drawn, like the walls'
+      else if (m.stage === "subfloor" || m.type === "floor-batt") (all || st.finFloor.has(m.parent)) || sets[0].push(m);
       else if (m.kind === "cladding" || m.kind === "casing" || m.kind === "base" || (m.kind === "lining" && (m.type === "gypsum" || m.type === "boards"))) sets[0].push(m); // and the trim inside // siding outside and drywall or boards inside stay drawn, even once the wall is finished
-      else (st.all || st.finRun.has(m.parent)) || sets[0].push(m);
+      else (all || st.finRun.has(m.parent)) || sets[0].push(m);
     }
     for (const m of mem.opens) P(m.id) && ghostAdd(m, 0);
     // a thin line where the walls will stand, so the site stays readable
@@ -11005,7 +11236,34 @@
         add(mesh, top === "1", false);
       }
     }
-    if (st.shell && !S.noShell) {
+    S.pvShell = null;
+    if (fin && !st.all) {
+      // what rebuild's built mesh leaves out (everything not finished yet), drawn with the building's own wall, roof and
+      // glass materials, so planned and built parts look the same and are cut by the same planes
+      const Db = st.built,
+        inB = (list) => (x) => !list.includes(x),
+        Dc = { ...S, floors: new Set([...S.floors].filter((k) => !Db.floors.has(k))), walls: new Map([...S.walls].filter(([k]) => !Db.walls.has(k))), segs: S.segs.filter(inB(Db.segs)), polys: S.polys.filter(inB(Db.polys)), roofs: S.roofs.filter(inB(Db.roofs)), rings: S.rings.filter(inB(Db.rings)), stairs: S.stairs.filter(inB(Db.stairs)), pillars: S.pillars.filter(inB(Db.pillars)), decor: [], paths: [], free: [] };
+      // the doors and windows: every unit in a wall drawn here, and a planned unit in a finished wall. A planned door has no
+      // swinging leaf yet (drawLeaves), so its leaf is drawn shut in the mesh ("all")
+      for (const o of S.fopen) {
+        const inDb = st.finRun.has(o.g.id), planned = S.plan.has(o.f.id);
+        if (!inDb || planned) Dc.free.push({ ...o.f, oside: o.f.oside, ghost: planned });
+      }
+      const ga = buildGeo(Dc, S.depth),
+        sh = { main: null, roof: null, glass: null };
+      for (const [k, geo, mat] of [["main", ga.main, S.wallMat], ["roof", ga.roof, S.roofMat], ["glass", ga.glass, S.glassMat]]) {
+        if (!geo.p.length) continue;
+        const mesh = new T.Mesh(geo.build(), mat);
+        mesh.userData.own = true;
+        if (k === "glass") mesh.renderOrder = 2;
+        else mesh.castShadow = mesh.receiveShadow = true;
+        S.group.add(mesh);
+        S.memMeshes.push(mesh);
+        sh[k] = mesh;
+      }
+      S.pvShell = sh;
+      if (sh.main && S.pvStruct) sh.main.visible = false;
+    } else if (st.shell && !S.noShell) {
       const ga = buildGeo(st.shell, S.depth),
         g = ga.main;
       append(g.p, ga.glass.p), append(g.n, ga.glass.n), append(g.c, ga.glass.c);
@@ -12122,6 +12380,8 @@
   const changeFns = [];
   let changeV = 0;
   window.__build = {
+    // what plan mode shows now (section 3B), for tests: the view, its version and what each building was given
+    planViewState: () => ({ ...pvNow(), ver: PV.ver, left: !!B.vleft, viewc: viewC(), structs: B.structs.map((S) => ({ id: S.id, level: S.level, visible: S.group.visible, cutH: S.cutH, clip: S.clip.constant, roofOp: S.roofOp, roof: !!S.pvRoof, structure: !!S.pvStruct, shell: !!S.pvShell, planned: S.plan.size })) }),
     // the piece interface (ARCHITECTURE.md)
     pieces: listPieces,
     openUnits,
@@ -12366,6 +12626,8 @@
       }
       fadeRB.value = homeY !== null ? 1e-4 : G.fadeR ? G.fadeR.value : 1;
       const firstPerson = !!(G.camView && G.camView() === "first");
+      if (B.on !== PV.on) ((PV.on = B.on), (PV.key = ""));   // entering plan mode writes the view afresh
+      if (B.on) pvNow();
       for (const S of B.structs) {
         const [lx, lz] = toLocal(S, P.x, P.z);
         const sameHome = homeY !== null && Math.abs(S.y0 - homeY) < 0.4 && Math.hypot(P.x - S.cx, P.z - S.cz) < S.rad + 5;
@@ -12384,12 +12646,13 @@
         const under = Math.abs(P.y - S.y0) < EAVE * S.hs - 0.4 && (covered(S, ci, cj) || (S.floors.has(ck(ci, cj)) && S.roofs.length > 0 && lx > S.b.i0 && lx < S.b.i1 && lz > S.b.j0 && lz < S.b.j1));
         {
           const within = lx > S.b.i0 + 0.15 && lx < S.b.i1 - 0.15 && lz > S.b.j0 + 0.15 && lz < S.b.j1 - 0.15;
-          S.group.visible = B.on ? S.level <= B.level : !(within && P.y < S.y0 - 0.6);
+          if (B.on) pvApply(S, dt);      // plan mode: the task's view (planView), written on change only
+          else S.group.visible = !(within && P.y < S.y0 - 0.6);
         }
         const headroom = EAVE * S.hs - 0.4;
         const tri = ringAt(S, lx, lz),
           inTower = tri >= 0 && P.y > S.y0 + 1 && P.y < S.y0 + S.rings[tri].h * EAVE * S.hs - 0.5;
-        {
+        if (!B.on) {
           // open the building up while you stand in it, so rooms read like a floor plan
           const onFloor = sameHome;
           const full = EAVE * S.hs * S.rings.reduce((m, r) => Math.max(m, r.h), 1) + 0.4;
@@ -12430,7 +12693,7 @@
         const inRing = ri >= 0 && Math.abs(P.y - S.y0) < headroom;
         const underAny = under || inPoly || (inRing && S.rings[ri].roof) || inTower || (sameHome && homeUnder);
         if (inRing && S.rings[ri].roof && S.rings[ri].sides.every((t) => t) && Math.abs(P.y - (S.y0 + FLOOR_T)) < 0.5) ((sheltered = true), (cosy = Math.max(cosy, S.ringCosy[ri] || 0)));
-        const target = B.on ? (roofsShown() ? 1 : 0) : underAny && !firstPerson ? 0 : 1;
+        const target = B.on ? (S.pvRoof ? 1 : 0) : underAny && !firstPerson ? 0 : 1;
         if (S.roofOp !== target) {
           S.roofOp = clamp(S.roofOp + Math.sign(target - S.roofOp) * dt * 4, 0, 1);
           S.roofMat.opacity = S.roofOp;
