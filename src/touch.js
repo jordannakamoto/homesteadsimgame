@@ -25,7 +25,11 @@
     '<button type="button" id="tbow">' + (peaceful ? "Look" : "Bow") + '</button><button type="button" id="tkick">Kick</button><button type="button" id="tparry">Parry</button>' +
     '<button type="button" id="tdash">Dash</button><button type="button" id="tjump">Jump</button><button type="button" id="troll">Roll</button>' +
     "</div>" +
-    '<button type="button" id="tatk">Attack</button>';
+    '<button type="button" id="tatk">Attack</button>' +
+    // seated on a vehicle (control stack: touch === 'drive'): the left stick drives, these work the machine
+    '<div id="tdrive" role="group" aria-label="Vehicle"><button type="button" id="tbrake">Brake</button><button type="button" id="tuse">Use</button>' +
+    '<button type="button" id="tunhitch" hidden>Unhitch</button><button type="button" id="toff">Off</button></div>' +
+    '<button type="button" id="tpour" hidden>Pour fuel</button>';
   document.body.appendChild(ui);
 
   function enable() {
@@ -142,6 +146,14 @@
       setTimeout(() => (K.AltLeft = false), 140);
     },
   );
+  /* vehicle: Brake is the space bar, Use holds the implement (tips a trailer's bed), Unhitch and Off are taps */
+  const VV = () => window.__vehicles;
+  hold($("tbrake"), () => (K.Space = true), () => (K.Space = false));
+  hold($("tuse"), () => VV() && VV().tip(true), () => VV() && VV().tip(false));
+  hold($("tunhitch"), () => VV() && VV().unhitch());
+  hold($("toff"), () => VV() && VV().dismount());
+  // walking up to a vehicle with fuel to pour: the same hold as R on a keyboard (src/game/vehicles-atv.js)
+  hold($("tpour"), () => window.__fuel && window.__fuel.press(true), () => window.__fuel && window.__fuel.press(false));
   hold($("tbow"), () => (peaceful && G.camView ? G.camView("next") : (M.right = !M.right)));
 
   /* ---------- touches on the view, outside build mode ---------- */
@@ -220,7 +232,7 @@
         else c.pitch = clamp(c.pitch + ry * 0.9 * dt, 0.5, 1.35);
       }
       M.inside = false;
-      const now = B.on ? "build" : P.tool;
+      const now = B.on ? "build" : G.control && G.control.top().touch === "drive" ? "drive" : P.tool;
       if (now !== mode) {
         mode = now;
         ui.dataset.mode = mode;
@@ -233,6 +245,19 @@
         ui.style.setProperty("--lift", Math.max(8, window.innerHeight - r.top + 8) + "px");
         $("tbow").classList.toggle("lit", peaceful ? !!c.view : !!M.right);
         $("tatk").textContent = M.right ? "Loose" : "Attack";
+        if (mode === "drive" && VV()) {
+          const st = VV().status(),
+            tu = $("tuse"),
+            un = $("tunhitch");
+          const lab = st.tips ? "Tip bed" : "Use";
+          if (tu.textContent !== lab) tu.textContent = lab;
+          tu.hidden = !st.hitched; // nothing to work on a bare ATV yet; blades and mowers will show it
+          un.hidden = !st.hitched;
+        }
+        const pr = $("tpour"),
+          rdy = mode === "axe" && !!window.__fuel && window.__fuel.ready();
+        if (pr.hidden === rdy) pr.hidden = !rdy;
+        pr.classList.toggle("ready", rdy);
       }
     }
     requestAnimationFrame(frame);
