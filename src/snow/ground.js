@@ -5,7 +5,7 @@
 // The patches are compiled in only while snow lies (on); off, the materials compile exactly as before.
 import { FIELD_GLSL, LIVE_GLSL } from './shade.js';
 
-const U_NAMES = ['uSnowField', 'uSnowFieldWin', 'uSnowRef', 'uSnowWind', 'uSnowFlags', 'uSnowFlags2', 'uSnowLive', 'uSnowLiveWin', 'uSnowLiveTexel'];
+const U_NAMES = ['uSnowField', 'uSnowFieldWin', 'uSnowRef', 'uSnowWind', 'uSnowFlags', 'uSnowFlags2', 'uSnowLive', 'uSnowLiveWin', 'uSnowLiveTexel', 'uSnowCenter'];
 
 const TERRAIN_F = /* glsl */ `#include <normal_fragment_maps>
   {
@@ -37,8 +37,11 @@ const GRASS_V = /* glsl */ `#include <begin_vertex>
     if (sD > 0.06 + 0.04 * sHash) {
       // winter grass is dead and lies flat under the snow: every tuft whose root is covered is gone, but for one in
       // twelve left standing as a few short pale-straw stalks, thin, a hand above the snow
-      if (fract(sHash * 12.9898) < 1.0 / 12.0) {
-        float sTop = min(sTh, sD + 0.06 + 0.16 * fract(sHash * 7.31));
+      if (fract(sHash * 12.9898) < 1.0 / 16.0) {
+        // where the snow surface has its real depth the stalk stands in it; further out (the ground is only whitened
+        // there) it shows just what would stand clear, so no ring of taller stalks marks where the deep snow ends
+        float sIn = 1.0 - smoothstep(uSnowCenter.z - 7.0, uSnowCenter.z - 0.4, length(sR - uSnowCenter.xy));
+        float sTop = min(sTh, sD * sIn + 0.06 + 0.16 * fract(sHash * 7.31));
         transformed.y *= sTop / max(sTh, 0.05);
         transformed.xz *= 0.45;
         vSnowStraw = 1.0;
@@ -77,7 +80,7 @@ export function createGroundPatches(G, U) {
         sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + def + FIELD_GLSL + LIVE_GLSL + '\nvarying vec3 vSnowW;')
           .replace('#include <normal_fragment_maps>', TERRAIN_F);
       } else {
-        sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + def + FIELD_GLSL + LIVE_GLSL + '\nvarying float vSnowTip; varying float vSnowStraw; float vSnowBury = 0.0;')
+        sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + def + FIELD_GLSL + LIVE_GLSL + '\nuniform vec3 uSnowCenter; varying float vSnowTip; varying float vSnowStraw; float vSnowBury = 0.0;')
           .replace('#include <begin_vertex>', GRASS_V)
           .replace('#include <project_vertex>', '#include <project_vertex>\nif (vSnowBury > 0.5) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);');
         sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + FIELD_GLSL + '\nvarying float vSnowTip; varying float vSnowStraw;')

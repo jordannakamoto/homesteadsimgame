@@ -10,12 +10,13 @@
 // packed path or bare ground, about 55 % at 0.4 m, never below 45 %. Loose snow deeper than 5 cm puffs up at each
 // step and behind fast or spinning wheels (the engine's pooled particles, __game.burst).
 
-const BOOT = { r: 0.065, half: 0.1, side: 0.12 };   // a boot print: half-width, half-length heel to toe, feet apart
+// a boot's hole in snow is wider than the boot (the edge breaks away): half-width, half-length heel to toe, feet apart
+const BOOT = { r: 0.085, half: 0.115, side: 0.13 };
 const BATCH_S = 0.5, FOCUS_M = 8;
 
 export function createActors(G, { stamp, bearing, sample }) {
   const P = G.player;
-  let pts = [], batchT = 0, focus = null, wasAir = false, prevX = null, prevZ = null, travel = 0, side = 1, kickT = 0;
+  let pts = [], batchT = 0, focus = null, wasAir = false, prevX = null, prevZ = null, travel = 0, side = 1, kickT = 0, step = 0;
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const wheels = new Map();                          // unit id -> [[x, z], ...] where each wheel was
   const has = (name) => !!(G.sim.handlers && G.sim.handlers.has && G.sim.handlers.has(name));
@@ -34,14 +35,14 @@ export function createActors(G, { stamp, bearing, sample }) {
     const kBoot = bearing(snow.rho, 330);
     const deep = snow.sinkM > 0.25;
     // landing from a jump: both feet, wide
-    if (wasAir && !P.air) { press({ x0: P.x - rx * 0.15, z0: P.z - rz * 0.15, x1: P.x + rx * 0.15, z1: P.z + rz * 0.15, r: 0.16, k: kBoot, rim: 1, rough: 0.6 }); puff(P.x, P.z, snow, 6); }
+    if (wasAir && !P.air) { press({ x0: P.x - rx * 0.15, z0: P.z - rz * 0.15, x1: P.x + rx * 0.15, z1: P.z + rz * 0.15, r: 0.17, k: kBoot, rim: 1, rough: 1 }); puff(P.x, P.z, snow, 6); }
     wasAir = P.air;
     if (P.air || P.climbY != null || P.standY != null) { prevX = P.x; prevZ = P.z; return; }
     const moved = prevX === null ? 0 : Math.hypot(P.x - prevX, P.z - prevZ);
     if (moved > 1.5) { prevX = P.x; prevZ = P.z; travel = 0; return; }   // a jump in place (teleport, respawn): no prints across it
     if (deep && moved > 0.05) {
-      // wading: the legs plough one trench
-      press({ x0: prevX, z0: prevZ, x1: P.x, z1: P.z, r: 0.26, k: kBoot, rim: 1, rough: 0.5, tread: 0 });
+      // wading: the legs plough a rough trench between the leg holes (not pressed to the bottom: the holes are)
+      press({ x0: prevX, z0: prevZ, x1: P.x, z1: P.z, r: 0.3, k: kBoot * 0.72, rim: 1, rough: 0.8, tread: 0 });
     }
     prevX = P.x; prevZ = P.z;
     travel += moved;
@@ -49,10 +50,23 @@ export function createActors(G, { stamp, bearing, sample }) {
     if (travel < L || P.speed < 0.3) { if (P.speed < 0.3) travel = Math.min(travel, L * 0.5); return; }
     travel -= L; if (travel > L) travel = 0;
     side = -side;
-    if (deep) { puff(P.x, P.z, snow, 3); return; }
-    // the foot lands under the body, a hand's width either side of the line of travel
-    const cx = P.x + rx * BOOT.side * side, cz = P.z + rz * BOOT.side * side;
-    press({ x0: cx - fx * BOOT.half, z0: cz - fz * BOOT.half, x1: cx + fx * BOOT.half, z1: cz + fz * BOOT.half, r: BOOT.r, k: kBoot, rim: 1, rough: 0.25 * Math.min(1, P.speed / 6), tread: 1 });
+    // the foot lands under the body, a hand's width either side of the line of travel; never quite where the last did
+    step++;
+    const j1 = Math.sin(step * 12.9898) * 43758.5453, j2 = Math.sin(step * 78.233) * 12543.123, ja = (j1 - Math.floor(j1)) - 0.5, jb = (j2 - Math.floor(j2)) - 0.5;
+    const cx = P.x + rx * (BOOT.side + ja * 0.05) * side + fx * jb * 0.08, cz = P.z + rz * (BOOT.side + ja * 0.05) * side + fz * jb * 0.08;
+    const tx = fx + rx * (0.18 * side + ja * 0.2), tz = fz + rz * (0.18 * side + ja * 0.2);   // toes turned out a little
+    if (deep) {
+      // a leg hole in the trench, to the bottom
+      press({ x0: cx - tx * 0.06, z0: cz - tz * 0.06, x1: cx + tx * 0.1, z1: cz + tz * 0.1, r: 0.15, k: kBoot, rim: 0.8, rough: 0.6, tread: 0 });
+      puff(P.x, P.z, snow, 3);
+      return;
+    }
+    press({ x0: cx - tx * BOOT.half, z0: cz - tz * BOOT.half, x1: cx + tx * BOOT.half, z1: cz + tz * BOOT.half, r: BOOT.r, k: kBoot, rim: 1, rough: 0.35 + 0.35 * Math.min(1, P.speed / 6), tread: 1, uneven: 0.75 });
+    // deeper than the ankle the foot drags in and out: a shallow groove back from the print
+    if (snow.sinkM > 0.07) {
+      const dl = Math.min(0.45, 0.15 + snow.sinkM * 1.6);
+      stamp({ x0: cx - tx * (BOOT.half + dl), z0: cz - tz * (BOOT.half + dl), x1: cx - tx * BOOT.half, z1: cz - tz * BOOT.half, r: 0.055, k: kBoot * 0.4, rim: 0.5, rough: 0.3, tread: 0 });
+    }
     puff(cx + fx * 0.1, cz + fz * 0.1, snow, 2);
   }
   // powder kicked up where loose snow is deeper than 5 cm: a few soft grains from the engine's particles (pooled there)
@@ -93,7 +107,7 @@ export function createActors(G, { stamp, bearing, sample }) {
           const d = Math.hypot(now[i][0] - was[i][0], now[i][1] - was[i][1]);
           if (d < 0.04) continue;
           if (d > 3) { was[i] = now[i]; continue; }            // a jump (spawned, reset): no rut across it
-          press({ x0: was[i][0], z0: was[i][1], x1: now[i][0], z1: now[i][1], r, k: kT, rim: 1, rough: 0.2 + 0.8 * spin, tread: 2 });
+          press({ x0: was[i][0], z0: was[i][1], x1: now[i][0], z1: now[i][1], r, k: kT, rim: 1, rough: 0.2 + 0.8 * spin, tread: 2, uneven: 0.3 + 0.6 * spin });
           // a fast or spinning wheel throws loose snow up behind it
           if (kick && (spin > 0.25 || Math.abs(b.speed || 0) > 3) && (i >= 2 || now.length === 2)) {
             const ex = now[i][0] - was[i][0], ez = now[i][1] - was[i][1], el = Math.hypot(ex, ez) || 1;
