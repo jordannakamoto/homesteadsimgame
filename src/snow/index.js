@@ -21,6 +21,7 @@ import { createActors } from './actors.js';
 import { createObjects } from './objects.js';
 import { createLumps } from './lumps.js';
 import { createDrape } from './drape.js';
+import { createRoofs } from './roofs.js';
 
 (() => {
   const G = window.__game;
@@ -54,7 +55,7 @@ import { createDrape } from './drape.js';
 
   // look switches, for comparing (kept in localStorage)
   const FLAG_KEY = 'snowFlags';
-  const flags = { surface: true, glints: true, scatter: true, rims: true, bury: true, undulate: true, objects: true, lumps: true, selfShadow: true };
+  const flags = { surface: true, glints: true, scatter: true, rims: true, bury: true, undulate: true, objects: true, lumps: true, selfShadow: true, roofs: true };
   try { Object.assign(flags, JSON.parse(localStorage.getItem(FLAG_KEY) || '{}')); } catch (e) { /* none saved */ }
   function applyFlags() {
     const b = (v) => (v ? 1 : 0);
@@ -97,6 +98,7 @@ import { createDrape } from './drape.js';
   }
   const actors = createActors(G, { stamp, bearing, sample });
   const objects = createObjects(G, U, { stamp });
+  const roofs = createRoofs(G, U);
 
   // the trees round you, for the snowpack (canopy interception, tree wells, where unloaded snow lands): sent when you
   // have moved 16 m or a tree has come down. Only when it is cold enough to snow or snow lies (the first fall is still caught); nothing in summer.
@@ -170,14 +172,14 @@ import { createDrape } from './drape.js';
     field = createField(G, U);
     field.update(P.x, P.z, true);
     setTier(wantTier());
-    objects.set(flags.objects);
+    objects.set(flags.objects); roofs.set(flags.roofs && flags.objects);
   }
   function release() {
     if (!active) return;
     dropSurface();
     field.dispose(); field = null;
     ground.set(false, false);
-    objects.set(false);
+    objects.set(false); roofs.set(false);
     actors.release();
     active = false; tier = 'off';
   }
@@ -215,6 +217,7 @@ import { createDrape } from './drape.js';
     }
     actors.update(dt);
     objects.update(dt);
+    roofs.update(dt, w.snowDepthM);
     // tracks fill in while it snows, rims slump in the wind and the thaw (world time, every 0.25 s)
     decayT += dt;
     if (decayT >= 0.25) {
@@ -253,7 +256,7 @@ import { createDrape } from './drape.js';
       for (const k in o) if (k in flags) flags[k] = !!o[k];
       try { localStorage.setItem(FLAG_KEY, JSON.stringify(flags)); } catch (e) { /* no storage */ }
       applyFlags();
-      if (active) { setTier(wantTier()); objects.set(flags.objects); }
+      if (active) { setTier(wantTier()); objects.set(flags.objects); roofs.set(flags.roofs && flags.objects); }
       return { ...flags };
     },
     info: () => ({

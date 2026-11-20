@@ -367,4 +367,9 @@ Changes:
   is only a dusting. `uSnowStick` (cohesion from temperature) fattens or thins them.
 - `__snow.tune({ albedo, wrap, cavity, shadow, lumps })` changes the look numbers live.
 
-Still open: roofs carry a tint, not a slab with a rounded, overhanging eave; no scour moat round posts and trunks.
+- `roofs.js`: each built roof plane carries a slab: full depth in the field of the roof and up to the ridge, rounded
+  over 38 cm at eaves and rakes, a 10 cm drooping lip past the eave, less on steep pitches. One merged mesh, thickness
+  from a uniform.
+
+Still open: roof snow is the site's depth (no sliding off metal, no pile under the eave, no lee cornice at the ridge);
+no scour moat round posts and trunks.
