@@ -336,8 +336,8 @@ const raf = (page) => page.waitForTimeout(250);   // touch.js settles the sticks
 {
   const { ctx, page, G, step, draw } = await open({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   await G(() => window.__touch.enable()); await step(2); await raf(page);
-  const btns = await G(() => Object.fromEntries(['tbow', 'tjump', 'tuse', 'tkick', 'tparry', 'tdash', 'troll', 'tatk'].map((id) => { const e = document.getElementById(id); return [id, !!e && e.checkVisibility({ checkVisibilityCSS: true })]; })));
-  check('phone: the peaceful game shows Look, Jump and Use, and no combat buttons', btns.tbow && btns.tjump && btns.tuse && !btns.tkick && !btns.tparry && !btns.tdash && !btns.troll && !btns.tatk, JSON.stringify(btns));
+  const btns = await G(() => Object.fromEntries(['tbow', 'tjump', 'tswing', 'tkick', 'tparry', 'tdash', 'troll', 'tatk'].map((id) => { const e = document.getElementById(id); return [id, !!e && e.checkVisibility({ checkVisibilityCSS: true })]; })));
+  check('phone: the peaceful game shows Look, Jump and Use, and no combat buttons', btns.tbow && btns.tjump && btns.tswing && !btns.tkick && !btns.tparry && !btns.tdash && !btns.troll && !btns.tatk, JSON.stringify(btns));
   check('phone: the top bar is a menu button, money, the time and the gear', await G(() => { const m = document.getElementById('hud-menu'), d = document.getElementById('dock'); return !!m && m.getBoundingClientRect().width >= 44 && !d.checkVisibility({ checkVisibilityCSS: true }); }));
   await page.tap('#hud-menu'); await step(2);
   check('phone: the menu opens the dock as a sheet of tiles', await G(() => { const d = document.getElementById('dock'); return d.checkVisibility({ checkVisibilityCSS: true }) && [...d.querySelectorAll('.ui-dock-btn')].filter((b) => !b.hidden).every((b) => b.getBoundingClientRect().height >= 44); }));

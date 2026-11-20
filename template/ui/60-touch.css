@@ -88,13 +88,13 @@ body.touch #touchui .nub { background: color-mix(in srgb, var(--surface-3) 70%, 
 body.touch #touchui .stick.on .nub { background: var(--accent-soft); border-color: var(--accent-edge); }
 body.touch #touchui[data-mode="build"] .stick { width: 104px; height: 104px; }
 /* Use: the axe swing, between the sticks (portrait) or over the right stick (landscape) */
-#tuse {
+#tswing {
   position: fixed; z-index: 5;
   right: calc(max(14px, var(--sa-r)) + 124px); bottom: calc(var(--lift) + 20px);
   touch-action: none; -webkit-user-select: none; user-select: none;
 }
-#tuse span { margin-top: 1px; }
-body:not(.peaceful) #tuse, #touchui:not([data-mode="axe"]) #tuse { display: none; }
+#tswing span { margin-top: 1px; }
+body:not(.peaceful) #tswing, #touchui:not([data-mode="axe"]) #tswing { display: none; }
 body.peaceful #tact { grid-template-columns: repeat(2, 64px); right: max(14px, var(--sa-r)); bottom: calc(var(--lift) + 124px); }
 body.touch #tact button { height: var(--hit); min-height: var(--hit); }
 /* a sheet or drawer is up: the sticks and buttons make way */
@@ -213,7 +213,7 @@ body.touch:has(#bdesign:not([hidden])) #bschedp { right: calc(6px + var(--sa-r))
 
 /* ==================== landscape: the bar between the sticks, the inspector a drawer on the right ==================== */
 @media (orientation: landscape) {
-  body.touch #tuse { right: calc(max(14px, var(--sa-r)) + 20px); bottom: calc(var(--lift) + 124px); }
+  body.touch #tswing { right: calc(max(14px, var(--sa-r)) + 20px); bottom: calc(var(--lift) + 124px); }
   body.peaceful.touch #tact { right: calc(max(14px, var(--sa-r)) + 124px); bottom: calc(var(--lift) + 100px); }
   /* kit panels: a drawer on the right from under the top bar */
   body.touch :is(.ui-panel--side, .ui-panel--modal):not(#bdesign):not(#bschedp),

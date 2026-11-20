@@ -91,6 +91,10 @@
       R('E', 'Get off'),
       R('Hold R', 'Unhitch a trailer (stopped, with a trailer on)'),
       R('Hold left click', 'Tip the trailer bed'),
+      R('Touch', 'Left stick drives; Brake, Use (tips the bed), Unhitch and Off are on the right'),
+    ] },
+    { id: 'fuel', title: 'Fuel the ATV', rows: [
+      R('R', 'On foot beside the ATV, with a fuel can and gasoline from the Supplier (U): hold to pour. The prompt shows the litres'),
     ] },
     { id: 'kitchen', title: 'In the kitchen (K)', rows: [
       R('E', 'Eat from the plate'),
@@ -105,7 +109,7 @@
     { key: 'X', note: 'overlays everywhere; build mode keeps X as Remove while it is open. Vehicle unhitch moved to hold R' },
     { key: 'U / Y / P / N / I / L', note: 'panels outside build mode; build tools inside it (build has first refusal)' },
     { key: '1-9', note: 'the bar slots inside Site, Yard, Garden and Hands; build tools in build mode; tool keys when walking' },
-    { key: 'R', note: 'turns the held thing in Yard and Hands; unhitches (held) on a vehicle; room tool in build mode' },
+    { key: 'R', note: 'turns the held thing in Yard and Hands; unhitches (held) on a vehicle; pours fuel (held) beside the ATV on foot; room tool in build mode' },
     { key: 'F', note: 'Hands when walking; Garden look-closer inside Garden; Floor in build mode' },
     { key: '?', note: 'the sheet (F1 too); in build mode / is Snap' },
   ];

@@ -12,7 +12,10 @@
 // Fuel is conserved: fuelAddedL = sum of fuelL + fuelBurnedL + fuelGoneL (fuel that left with a removed unit).
 //
 // hooks (content): takeFuel(ctx, litres) -> litres actually taken (pays from stock; default: free),
+//                  takeItem(ctx, itemId) -> bool (one bought item handed over for a unit delivered by `deliver`; default: refuses),
 //                  pay(ctx, usd) -> bool (rentals; default: refuses)
+// options (state.options, a missing one reads as the default): topUp (default true) - `topUp` fills the tanks of parked
+//   units free of charge, so a delivery never leaves the machine dry (the owner's no-tedium rule; a setting)
 // kinds: the vehicle records (see vehicles-drive.js); a kind with rentUsdPerDay can be rented.
 // surfaces: { [name]: { mu, slide, roll } } for the page's env.surface (content names the ground; api.surfaces).
 
@@ -46,6 +49,7 @@ export function createVehicleSystem({ name = 'vehicles', kinds, implementKinds =
   if (!kinds) throw new Error('createVehicleSystem needs kinds');
   const takeFuel = hooks.takeFuel || ((ctx, l) => l);
   const pay = hooks.pay || (() => false);
+  const takeItem = hooks.takeItem || (() => false);
   const bad = (reason) => ({ ok: false, reason });
   const unitOf = (s, id) => s.units[id] || null;
 
@@ -92,6 +96,41 @@ export function createVehicleSystem({ name = 'vehicles', kinds, implementKinds =
 
   const commands = {
     [name + '.add']: addUnit,
+    // a bought unit arrives: one `kinds[kind].item` (default: the kind's id) is taken from the buyer's goods and the unit is
+    // set down at x, z with an empty tank (a trailer has none)
+    [name + '.deliver']: (ctx, p) => {
+      const k = kinds[p && p.kind];
+      if (!k) return bad('unknown kind');
+      if (!fin(p.x) || !fin(p.z)) return bad('bad place');
+      const item = k.item || k.id;
+      if (!takeItem(ctx, item)) return bad('not bought');
+      const r = addUnit(ctx, { kind: k.id, x: p.x, z: p.z, yaw: p.yaw, fuelL: 0 });
+      ctx.emit(name + '.delivered', { id: r.id, kind: k.id });
+      return r;
+    },
+    [name + '.setOption']: (ctx, p) => {
+      if (!p || typeof p.topUp !== 'boolean') return bad('unknown option');
+      (ctx.s.options || (ctx.s.options = {})).topUp = p.topUp;
+      return { ok: true, options: { ...ctx.s.options } };
+    },
+    // fill the tank of every parked unit of your own (or one, { id }) for nothing; the litres count as fuel added
+    [name + '.topUp']: (ctx, p) => {
+      const s = ctx.s;
+      if (!(p && p.force) && s.options && s.options.topUp === false) return { ok: true, litres: 0, off: true };
+      let litres = 0;
+      for (const u of Object.values(s.units)) {
+        if (p && p.id && u.id !== p.id) continue;
+        const k = kinds[u.kind];
+        if (!k.fuel || u.owner !== 'own' || seated(u)) continue;
+        const room = round6(k.fuel.tankL - u.fuelL);
+        if (!(room > 1e-6)) continue;
+        u.fuelL = round6(u.fuelL + room);
+        s.totals.fuelAddedL = round6(s.totals.fuelAddedL + room);
+        litres = round6(litres + room);
+      }
+      if (litres > 0) ctx.emit(name + '.topUp', { litres });
+      return { ok: true, litres };
+    },
     [name + '.remove']: (ctx, p) => {
       const u = unitOf(ctx.s, p && p.id);
       if (!u) return bad('no such unit');

@@ -35,10 +35,15 @@ export const VEHICLE_KINDS = Object.freeze({
     grip: { mu: 0.65, slide: 0.85, lateral: 8, rolling: 0.045, loadSens: 0.1 }, // knobby tyres on dry grass (lateral: cornering stiffness per unit load, 1/rad)
     susp: { travel: 0.2, hz: 2.0, damp: 0.32 },                               // 185-215 mm of travel; lightly damped, it bobs
     riderKg: 80,
+    // The rider shifts their weight as ATV riders are taught: into a turn (upper body to the inside and forward over
+    // the bars), the rider's centre of mass moves up to 0.2 m inside and 0.15 m forward as the turn reaches half a g; up
+    // a climb (up on the footrests, leaning over the bars), up to 0.3 m forward at 15 degrees and steeper. About 0.3 s
+    // to shift. It eases the sideways weight transfer (the tip) and keeps weight on the steered front tyres.
+    lean: { inM: 0.2, fwdM: 0.15, g: 0.5, climbM: 0.3, climbRad: deg(15), s: 0.3 },
     seats: [{ id: 'rider', at: [0, 0.886, -0.2], pose: 'straddle', mount: [{ x0: -0.6, x1: 0.4, side: -1 }, { x0: -0.6, x1: 0.4, side: 1 }] }],
     points: [{ id: 'ball', type: 'ball', at: [0, 0.42, -1.12] }, { id: 'front', type: 'front', at: [0, 0.4, 1.1] }],
     hitch: null, cargo: null,
-    fuel: { item: FUEL_ITEM, tankL: 14.8, burnLph: 5 },                       // about three hours flat out
+    fuel: { item: FUEL_ITEM, tankL: 14.8, burnLph: 5, pourLps: 0.4 },   // pourLps: a 20 L can poured through its spout, litres a second                       // about three hours flat out
     look: 'atv',
   }),
   // A small utility trailer with a tipping bed, towed on the ATV's ball: an ATV dump trailer of the common steel kind
@@ -87,9 +92,9 @@ export const IMPLEMENT_KINDS = Object.freeze({});
 
 // Catalog entries, in the format of src/sim/items.js; merged there like the garden's.
 export const ITEMS_VEHICLES = Object.freeze([
-  { id: FUEL_ITEM, name: 'Gasoline', category: 'vehicles', unit: 'L', massKg: 0.74, priceUsd: 1, blurb: 'Sold in 20 L cans. The ATV holds 14 L' },
-  { id: 'fuel_can', name: 'Fuel can, 20 L', category: 'tools_hand', unit: 'each', massKg: 1.6, priceUsd: 30, blurb: 'Carry it to the ATV and pour' },
-  { id: 'trailer_small', name: 'Small utility trailer', category: 'vehicles', unit: 'each', massKg: 90, priceUsd: 450, blurb: 'Tows behind the ATV. 350 kg on a tipping bed' },
+  { id: FUEL_ITEM, name: 'Gasoline', category: 'vehicles', unit: 'L', massKg: 0.74, priceUsd: 1, blurb: 'Poured from a fuel can: stand by the ATV and hold R. Its tank holds 14.8 L' },
+  { id: 'fuel_can', name: 'Fuel can, 20 L', category: 'tools_hand', unit: 'each', massKg: 1.6, priceUsd: 30, blurb: 'With gasoline in stock, stand by the ATV and hold R to pour' },
+  { id: 'trailer_small', name: 'Small utility trailer', category: 'vehicles', unit: 'each', massKg: 90, priceUsd: 450, blurb: 'Delivered to the drop point. Tows behind the ATV: 350 kg on a tipping bed', delivered: true },
 ]);
 
 // Fuel comes out of stock; rentals are paid from the stock's money (the same direct move construction's rentals make).
@@ -102,6 +107,13 @@ export const VEHICLE_HOOKS = Object.freeze({
     const left = Math.round((have - got) * 1e6) / 1e6;
     if (left <= 0) delete st.items[itemId]; else st.items[itemId] = left;
     return got;
+  },
+  // a bought trailer (or other unit) is handed over from stock as `vehicles.deliver` sets it down
+  takeItem(ctx, itemId) {
+    const st = ctx.get('stock'), have = st && st.items[itemId] || 0;
+    if (!(have >= 1)) return false;
+    if (have - 1 <= 0) delete st.items[itemId]; else st.items[itemId] = have - 1;
+    return true;
   },
   pay(ctx, usd) {
     const st = ctx.get('stock');
