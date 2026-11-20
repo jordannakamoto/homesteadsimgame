@@ -61,6 +61,17 @@
 // rolling resistance) and inertia; the hitch force goes both ways (b.hitch = [along F, along R] newtons on the tow unit),
 // so a loaded unbraked trailer pushes on a downhill stop and shoves the tail out in a turn, a trailer with little tongue
 // weight or its load behind the axle sways above a speed, and the 75 degree stop is a hard joint limit (b.jack).
+// Rider assists (kind.assist, optional, wheeled only; feel over the textbook, kept inside the tyres' grip):
+//   yaw: 1/s, how fast the yaw rate is pulled toward the arc the front wheels point along (u tan(steer) / wheelbase),
+//        never past yawG (default 1) of what the side grip the tyres have left (after driving or braking) turns at this
+//        speed (side grip / mass / u), so it never turns the nose faster than the path can follow; a moment the solver
+//        balances with the tyres and the hitch, so it turns in at once and holds the steered circle instead of the
+//        solid axle's push and the tyres' lag. Off in the air and while the front wheels are locked. It comes in from
+//        fromMps to full at fullMps (default from rest), so at a walk the tyres alone turn the machine's real circle.
+//        Towing, the arc it asks for is held to the grip x M / (M + towK x towed mass) (towK default 1); its moment to
+//        yawM (default 0.3) x grip x weight x wheelbase, so a hard shove (a heavy trailer pushing downhill) still wins.
+//   abs: true, the brakes are held at each wheel's peak instead of locking it, so the front still steers while braking
+//        and it stops at the peak grip rather than the sliding grip.
 // Exposed for the page: rpm, gear, spin (0..1, wheels spinning or locked), slip (m/s, the rear tyres sliding sideways:
 // a drift), plow (the front tyres), tip, load, hitch, belt, tslip, bump, land.
 
@@ -69,6 +80,7 @@ export const GRAV = 9.81;
 export const ARTIC_MAX = (75 * Math.PI) / 180;  // a towed unit's stop against its tow unit
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 export const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+const ABS_K = 0.95;                              // an anti-lock brake holds a wheel at this share of its peak
 const ITER = 8;                                  // solver passes per substep
 const U0 = 0.3;                                  // m/s: below this a tyre's slip angle is taken against this speed (a floor
                                                  // for the solver only: at 1 m/s it softened the tyres at a crawl, so a
@@ -514,11 +526,13 @@ export function stepBody(b, kind, input, env, dt = SUB, trailer = null) {
       Fdrive = Math.sign(want) * Fa;
     }
     // brakes: by load on every wheel; the handbrake on the rear. Past a wheel's grip it locks and slides.
+    const abs = !!(kind.assist && kind.assist.abs);
     const brakeWant = kind.brakeG * GRAV * Mo * brake, handWant = hand ? kind.brakeG * GRAV * Mo * 0.6 : 0;
     let brakeRes = 0;
     for (let i = 0; i < 4; i++) {
       const d = (Nt > 0 ? (brakeWant * ld[i]) / Nt : 0) + (i > 1 && Nr > 0 ? (handWant * ld[i]) / Nr : 0);
       if (d <= 0) continue;
+      if (abs && _xu[i] + d > _cap[i] * ABS_K) { const x = ach(i, Math.max(_xu[i], _cap[i] * ABS_K)); brakeRes += Math.max(0, x - _xu[i]); _xu[i] = x; continue; }
       if (_xu[i] + d > _cap[i] && Math.abs(b.u) > 0.3) { _lk[i] = true; locked = true; brakeRes += _cap[i] * slideOf(i); _xu[i] = _cap[i] * slideOf(i) * 0.95; }
       else { const x = ach(i, _xu[i] + d); brakeRes += Math.max(0, x - _xu[i]); _xu[i] = x; }
     }
@@ -574,6 +588,16 @@ export function stepBody(b, kind, input, env, dt = SUB, trailer = null) {
       const nS = ld[i] + ld[i + 1] > 0 ? (ld[i] * ld[i + 1]) / (ld[i] + ld[i + 1]) : 0;
       const kdA = (Cx * nS * tw * tw) / uAbs, capM = Math.min(_cap[i], _cap[i + 1]) * tw * dt;
       if (kdA > 0 && capM > 0) angRow(0, 0, -capM, capM, 1 / (kdA * dt));
+    }
+    // the yaw assist (kind.assist.yaw): toward the steered arc, within the grip, as a damper of rate yaw on the yaw inertia
+    const as = kind.assist;
+    const asK = as && as.yaw > 0 ? clamp((Math.abs(b.u) - (as.fromMps || 0)) / Math.max((as.fullMps || 0) - (as.fromMps || 0), 1e-6), 0, 1) : 0;
+    if (asK > 0 && kc > 0 && !(_lk[0] && _lk[1])) {
+      const tow = mt ? Mo / (Mo + (as.towK ?? 1) * mt.M) : 1;
+      const rCap = ((as.yawG || 1) * Math.min((latF + latR) / Mo, b.mu * GRAV * kc) * tow) / Math.max(Math.abs(b.u), 0.5);   // the side grip left
+      const rK = clamp((b.u * Math.tan(b.steer)) / (kind.wheelbase || 1), -rCap, rCap);
+      const capM = (as.yawM ?? 0.3) * b.mu * W * (kind.wheelbase || 1) * dt;
+      angRow(0, rK, -capM, capM, 1 / (m.I * as.yaw * asK * kc * dt));
     }
   }
 
@@ -791,7 +815,9 @@ export function headingControl(b, kind, mx, mz, { gentle = false } = {}) {
   const lim = steerLimit(kind, b.u);
   // the rider: no more lock than the grip under it can turn (gripSteer), and eases the throttle when the tail steps out
   // or the wheels spin in a turn
-  const sMax = clamp(gripSteer(kind, b.u, b.mu || kind.grip.mu) / Math.max(lim, 0.05), 0.15, 1);
+  // towing, it asks the tyres for less: grip x mass / (mass + half the towed mass), as the keys' rider does
+  const mo = kind.massKg + (b.cargoKg || 0), tow = b.towKg > 0 ? mo / (mo + 0.5 * b.towKg) : 1;
+  const sMax = clamp(gripSteer(kind, b.u, (b.mu || kind.grip.mu) * tow) / Math.max(lim, 0.05), 0.15, 1);
   const ease = clamp(1.6 - b.slip, 0.35, 1) * (b.spin > 0.5 && Math.abs(err) > 0.3 ? 0.6 : 1);
   return { throttle: mag * k * Math.max(0.25, Math.cos(err)) * ease, steer: clamp((err * 1.5) / Math.max(lim, 0.05), -sMax, sMax), brake: 0, handbrake: false };
 }

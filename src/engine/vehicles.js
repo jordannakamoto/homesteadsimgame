@@ -534,7 +534,10 @@
     return null;
   }
   const heading = () => { try { return localStorage.getItem('driveScheme') === 'heading'; } catch (e) { return false; } };
-  const camFollow = () => { try { return localStorage.getItem('driveCamFollow') === '1'; } catch (e) { return false; } };
+  // the follow camera is on for the car keys unless localStorage.driveCamFollow = '0'; never under heading steer (a turning
+  // camera would turn the push with it)
+  const camFollow = () => { try { return localStorage.getItem('driveCamFollow') !== '0'; } catch (e) { return true; } };
+  const CAM_FOLLOW_K = 2;                                  // per second: how fast the orbit eases round behind the nose
   const wrapA = (a) => Math.atan2(Math.sin(a), Math.cos(a));
   function ride(dt, input) {
     const L = seat.L, b = L.body, k = L.kind;
@@ -559,7 +562,9 @@
     }
     // keys drive like a car (W throttle, S brake then reverse, A/D steer the vehicle); a touch stick, or localStorage.driveScheme =
     // 'heading', keeps "push where you want to go" on screen
-    if (input.joy || heading()) drive = VC.headingControl(b, k, input.mx, input.mz, { gentle: input.shift });
+    if (input.joy) seat.joyUsed = true;                  // on a phone: heading steer for the whole ride, no follow camera
+    const keyHeading = input.joy || heading();
+    if (keyHeading) drive = VC.headingControl(b, k, input.mx, input.mz, { gentle: input.shift });
     else drive = VC.carControl(b, k, seat.pedal || (seat.pedal = {}), { fwd: input.kz, turn: input.kx, brake: false, gentle: input.shift }, dt);
     if (input.brake) { drive.brake = 1; drive.throttle = 0; }
     // a nearly dry tank sputters: the throttle cuts in and out a few times a second before the engine stops
@@ -591,13 +596,14 @@
     }
     stepUnit(L, dt, drive);
     poseRider(L, null);
-    // optional follow-behind camera (localStorage.driveCamFollow = '1', default off): the orbit eases round behind the nose while
-    // driving, and lets go for two seconds whenever the player has turned the camera by hand
-    if (camFollow() && seat.phase === 'ride') {
+    // follow-behind camera with the keys (localStorage.driveCamFollow = '0' turns it off): the orbit eases round behind the
+    // nose while driving, so W, A and D keep meaning up, left and right on screen, and lets go for two seconds whenever the
+    // player has turned the camera by hand
+    if (camFollow() && !keyHeading && !seat.joyUsed && seat.phase === 'ride') {
       if (seat.camSet != null && Math.abs(wrapA(G.cam.yaw - seat.camSet)) > 1e-4) seat.camHold = 2;
       seat.camHold = Math.max(0, (seat.camHold || 0) - dt);
       if (!seat.camHold && Math.abs(b.u) > 1) {
-        G.cam.yaw += wrapA(b.yaw + Math.PI - G.cam.yaw) * Math.min(1, 1.2 * dt * Math.min(1, Math.abs(b.u) / 4));
+        G.cam.yaw += wrapA(b.yaw + Math.PI - G.cam.yaw) * Math.min(1, CAM_FOLLOW_K * dt * Math.min(1, Math.abs(b.u) / 4));
         if (G.cam.prevYaw != null) G.cam.prevYaw = G.cam.yaw;
       }
       seat.camSet = G.cam.yaw;

@@ -4,7 +4,7 @@
 // a setting (localStorage.driveScheme = 'heading').
 //
 //   carControl(b, kind, st, { fwd, turn, brake, gentle }, dt)
-//     fwd    -1..1  W = +1 (throttle), S = -1 (brake; once nearly stopped and still held, reverse)
+//     fwd    -1..1  W = +1 (throttle), S = -1 (the brake, full; stopped and still held CAR_REVERSE_HOLD_S, reverse)
 //     turn   -1..1  A = -1 (the rider's left), D = +1 (the rider's right), relative to the vehicle, never the camera. The
 //                   drive model's steer is the other way round: its positive steer turns toward R = the body's local +x,
 //                   which in the engine's y-up world is the rider's LEFT (a rider facing +z has -x at the right hand; the
@@ -14,9 +14,9 @@
 //                   reads the same axis as its differential (D turns right, pivoting when stopped).
 //     brake  bool   the brake pedal / Space; gentle bool  Shift: throttle capped to a gentle share
 //   st: { thr, steer } per-driver scratch (the analogue throttle pedal, the bars), start with {}.
-// Two light rider habits for a wheeled machine, so ordinary keys do not spin it (the physics is untouched):
-//   - the bars: A/D turn them at a rate that falls with speed (full lock in a third of a second at a walk, in about a
-//     second and a quarter at top speed), as a rider steers gently at speed instead of flicking from lock to lock;
+// Light rider habits for a wheeled machine, so ordinary keys do not spin it (the physics is untouched):
+//   - the bars: A/D turn them at a rate that falls with speed (full lock in about 0.15 s at a walk, the useful angle at
+//     speed as quickly, a whole lock-to-lock sweep in about half a second at top speed) and back to centre as fast;
 //   - a hill start: W from a stop on a slope, the rider holds the brake while feeding in throttle and lets it go once the
 //     pedal is most of the way in, so the quad does not roll back first (the old rule braked whenever it rolled back
 //     at all with W held, so on 20 degrees and more it sat braking against its own rollback and never climbed);
@@ -26,11 +26,12 @@
 //     an unbraked trailer push the rig round; S or Space still brake.
 import { gripSteer, steerLimit } from './vehicles-drive.js';
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-export const CAR_STOPPED_MPS = 0.5;     // below this a held S stops braking and starts reversing
+export const CAR_STOPPED_MPS = 0.5;     // below this a held S counts as stopped: it keeps braking, and reverses once held
+export const CAR_REVERSE_HOLD_S = 0.3;  // that long (a tap of S at a standstill only holds the brake)
 export const CAR_GENTLE = 0.35;
 export const CAR_RAMP_UP = 1.6;         // pedal travel per second while held (full throttle in about 0.6 s)
 export const CAR_RAMP_DOWN = 4;         // and back off the pedal
-export const CAR_STEER_RATE = 1.3;       // bar travel (fraction of lock) per second is CAR_STEER_RATE / (0.25 + speed / topMps)
+export const CAR_STEER_RATE = 3;       // bar travel (fraction of lock) per second is CAR_STEER_RATE / (0.25 + speed / topMps)
 export const CAR_BARS_MIN = 0.2;
 export const CAR_TOW_K = 0.5;           // towing, the rider asks the tyres for less: grip x mass / (mass + CAR_TOW_K x towed mass)        // a held key never asks less than this share of the lock
 export const CAR_BACKING_MPS = 1.5;     // W while backing faster than this brakes to a stop first; slower, it is a hill start
@@ -64,8 +65,14 @@ export function carControl(b, kind, st, { fwd = 0, turn = 0, brake = false, gent
     if (b.u < -CAR_BACKING_MPS) { out.brake = want; st.thr = 0; }
     else if (b.u < 0 && st.thr < CAR_HILL_PEDAL * cap) { out.brake = 1; out.throttle = st.thr; }   // a hill start (see above)
     else out.throttle = st.thr;
-  } else if (want < 0) {                                               // S: brake while rolling forward, then reverse while held
-    if (b.u > CAR_STOPPED_MPS && !b.rev) { out.brake = -want; st.thr = 0; } else { b.rev = true; out.throttle = st.thr; }
+  } else if (want < 0) {                                               // S: brake to a stop; held there, reverse
+    if (!b.rev && b.u < -CAR_STOPPED_MPS) b.rev = true;               // already rolling back: keep backing
+    if (!b.rev) {
+      out.brake = 1; st.thr = 0;
+      st.revT = b.u > CAR_STOPPED_MPS ? 0 : (st.revT || 0) + dt;
+      if (st.revT >= CAR_REVERSE_HOLD_S) b.rev = true;
+    }
+    if (b.rev) { out.brake = 0; out.throttle = st.thr; }
   } else {                                                             // no pedal: engine braking coasts down; hold the brake once nearly stopped
     b.rev = false;
     out.throttle = st.thr;

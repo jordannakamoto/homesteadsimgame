@@ -84,9 +84,9 @@
     ] },
     { id: 'vehicle', title: 'On a vehicle', rows: [
       R('W', 'Throttle (hold to build speed)'),
-      R('S', 'Brake; held once stopped, reverse'),
-      R(['A', 'D'], 'Steer left and right, relative to the vehicle'),
-      R('Space', 'Brake'),
+      R('S', 'Brake (anti-lock: you can steer while braking); keep holding once stopped to reverse'),
+      R(['A', 'D'], 'Steer left and right, relative to the vehicle; the camera swings round behind you'),
+      R('Space', 'Brake, never reverses'),
       R('Shift', 'Gentle throttle'),
       R('E', 'Get off'),
       R('Hold R', 'Unhitch a trailer (stopped, with a trailer on)'),

@@ -18,6 +18,7 @@ const CAR = Object.freeze({
   seats: [], points: [], fuel: null,
 });
 const ATV = VEHICLE_KINDS.atv, TR = VEHICLE_KINDS.trailer_small;
+const BARE = { ...ATV, assist: null };          // the tyres and the hitch alone, without the rider's yaw assist and ABS
 const FLAT = { ground: () => 0 };
 const near = (a, b, eps, msg = '') => assert.ok(Math.abs(a - b) <= eps, `${msg} ${a} is not within ${eps} of ${b}`);
 const sum = (a) => a.reduce((s, v) => s + v, 0);
@@ -154,12 +155,12 @@ test('trailer: the tongue weight comes from where the load sits, rests on the to
 
 // a short steering pulse at a steady speed, then straight: how the articulation's swings die away. ratio: the swing a
 // whole cycle later against the first (under 1 it settles; over 1 it grows), lost: it swayed into the stop or spun.
-function sway(v, loadKg, cargoZ) {
+function sway(v, loadKg, cargoZ, K = BARE) {
   const { b, t } = rig(FLAT, loadKg, { cargoZ });
-  run(b, ATV, (q) => ({ throttle: q.u < v ? 1 : 0 }), FLAT, 14, t);
+  run(b, K, (q) => ({ throttle: q.u < v ? 1 : 0 }), FLAT, 14, t);
   const peaks = [];
   let last = 0, dir = 0, lost = false;
-  run(b, ATV, (q, s) => ({ throttle: q.u < v ? 0.6 : 0, steer: s < 0.25 ? 0.35 : 0 }), FLAT, 8, t, (q, s) => {
+  run(b, K, (q, s) => ({ throttle: q.u < v ? 0.6 : 0, steer: s < 0.25 ? 0.35 : 0 }), FLAT, 8, t, (q, s) => {
     const a = t.body.artic, d = Math.sign(a - last);
     if (s > 0.3 && d && dir && d !== dir) peaks.push(Math.abs(last));
     if (d) dir = d;
@@ -180,22 +181,30 @@ test('trailer sway: well loaded it settles at speed; load over or behind the axl
   const b6 = sway(6, 350, -0.2), b12 = sway(12, 350, -0.2);
   assert.ok(settles(b6), 'behind, 6 m/s: ' + JSON.stringify(b6));
   assert.ok(sways(b12), 'behind the axle at 12 m/s sways: ' + JSON.stringify(b12));
+  // the rider's yaw assist (ATV.assist) holds the tow unit to its steered arc, which damps the sway it can feel: over the
+  // axle it now settles at the top speed; far behind it still sways, only later
+  const a18 = sway(18, 350, 0, ATV), ab12 = sway(12, 350, -0.2, ATV);
+  assert.ok(settles(a18), 'with the assist, over the axle at 18 m/s settles: ' + JSON.stringify(a18));
+  assert.ok(!ab12.lost && ab12.ratio < b12.ratio, 'with the assist, behind the axle at 12 m/s sways less: ' + JSON.stringify(ab12));
 });
 
 test('downhill turn: a loaded unbraked trailer pushes the ATV round (jackknife) where the ATV alone, or empty, holds its line', () => {
   const env = { ground: (x, z) => -z * Math.tan(rad(10)), surface: () => VEHICLE_SURFACES.grass };
-  const go = (kg) => {
+  const go = (kg, K = BARE) => {
     let b, t = null;
-    if (kg == null) { b = createBody(ATV, { fuelL: 10 }, env); b.cargoKg = ATV.riderKg; }
+    if (kg == null) { b = createBody(K, { fuelL: 10 }, env); b.cargoKg = K.riderKg; }
     else ({ b, t } = rig(env, kg));
-    run(b, ATV, (q) => ({ throttle: q.u < 7 ? 1 : 0 }), env, 2, t);
+    run(b, K, (q) => ({ throttle: q.u < 7 ? 1 : 0 }), env, 2, t);
     let slip = 0, artic = 0, jack = false;
-    run(b, ATV, { brake: 0.1, steer: 0.3 }, env, 4, t, (q) => { slip = Math.max(slip, q.slip); artic = Math.max(artic, t ? Math.abs(t.body.artic) : 0); jack = jack || q.jack; });
+    run(b, K, { brake: 0.1, steer: 0.3 }, env, 4, t, (q) => { slip = Math.max(slip, q.slip); artic = Math.max(artic, t ? Math.abs(t.body.artic) : 0); jack = jack || q.jack; });
     return { slip, artic, jack };
   };
   const solo = go(null), empty = go(0), full = go(350);
   assert.ok(solo.slip < 0.5 && empty.slip < 0.5 && empty.artic < 0.4, `solo ${solo.slip}, empty ${JSON.stringify(empty)}`);
   assert.ok(full.slip > 2 && full.artic > ARTIC_MAX - 0.01 && full.jack, 'loaded: ' + JSON.stringify(full));
+  // with the rider's yaw assist the loaded rig holds that line (a game's trailer stability, not the physics above)
+  const held = go(350, ATV);
+  assert.ok(!held.jack && held.artic < 0.5, 'loaded, with the assist: ' + JSON.stringify(held));
 });
 
 test('the rig is deterministic and the rider (heading steer) keeps a loaded rig on its line in an ordinary turn', () => {

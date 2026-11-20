@@ -23,7 +23,7 @@ export const VEHICLE_KINDS = Object.freeze({
     engine: {
       idleRpm: 1400, launchRpm: 3200, redRpm: 7000, torqueNm: 32,              // about 20 kW at 6000 rpm
       curve: [[1400, 0.55], [3000, 0.8], [5000, 1], [6500, 0.9], [7200, 0.8]],
-      brakeK: 0.6, creepMps: 0.8, creepG: 0.07,
+      brakeK: 0.9, creepMps: 0.8, creepG: 0.07,
     },
     gears: { ratios: [26, 18.5, 14, 11.5, 9.6], reverse: 30, eff: 0.85, shiftS: 0.3, upRpm: [4300, 6500], downRpm: 2300 },
     // Steering: the mechanical lock (28.5 degrees) at a walk; moving, 23 degrees falling to 9 at top speed. The lock is
@@ -31,8 +31,12 @@ export const VEHICLE_KINDS = Object.freeze({
     // scrubs its inner wheel in a tight turn (a moment of about mu x wheel load x track), the front tyres need a few
     // degrees of slip angle to hold against it, so the quad turns as if its wheels pointed about 5 degrees less. The
     // 23 degrees of lock alone turns it 4.5 m.
-    steerMaxRad: deg(23), steerRate: 1.6, steerSpeedFalloff: 1 - 9 / 23, steerLockRad: deg(28.5), steerLockMps: 2,
-    grip: { mu: 0.65, slide: 0.85, lateral: 8, rolling: 0.045, loadSens: 0.1 }, // knobby tyres on dry grass (lateral: cornering stiffness per unit load, 1/rad)
+    steerMaxRad: deg(23), steerRate: 3, steerSpeedFalloff: 1 - 9 / 23, steerLockRad: deg(28.5), steerLockMps: 2,
+    // The bars turn at 3 rad/s (full lock in about 0.15 s, as quick as a rider's hands).
+    grip: { mu: 0.7, slide: 0.85, lateral: 8, rolling: 0.045, loadSens: 0.1 }, // knobby tyres on dry grass (lateral: cornering stiffness per unit load, 1/rad)
+    // Feel over the textbook (docs/PLAYTEST.md, ATV feel): the nose follows the bars at once above a walk, within the
+    // grip, and anti-lock brakes keep the front steering while braking.
+    assist: { yaw: 12, fromMps: 1.5, fullMps: 3, abs: true },
     susp: { travel: 0.2, hz: 2.0, damp: 0.32 },                               // 185-215 mm of travel; lightly damped, it bobs
     riderKg: 80,
     // The rider shifts their weight as ATV riders are taught: into a turn (upper body to the inside and forward over
@@ -82,8 +86,8 @@ export const VEHICLE_SURFACES = Object.freeze({
   gravel: { mu: 0.92, slide: 0.85, roll: 1 },
   mulch: { mu: 0.85, slide: 0.85, roll: 1.8 },
   sand: { mu: 0.85, slide: 0.8, roll: 3 },
-  snow: { mu: 0.5, slide: 0.8, roll: 1.8 },
-  snow_packed: { mu: 0.32, slide: 0.7, roll: 1.1 },
+  snow: { mu: 0.6, slide: 0.8, roll: 1.8 },
+  snow_packed: { mu: 0.4, slide: 0.7, roll: 1.1 },
   water: { mu: 0.7, slide: 0.8, roll: 1.8 },
   floor: { mu: 1.2, slide: 0.85, roll: 0.5 },
 });
