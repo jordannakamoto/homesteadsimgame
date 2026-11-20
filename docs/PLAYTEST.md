@@ -926,3 +926,22 @@ No new passes; parked units cost nothing per frame beyond the zone check. On you
 - **Dollhouse**: where the cut opens a finished wall, a cap at the cut height shows it in section as one solid thing (the room's colour inside, a pale timber core, the siding's colour outside); no studs, batts or hollows. Walls still being built stay open to see into.
 - **Sawhorses** come with the first lumber delivered for a building when they are away at an earlier site (left where you put them if they are close by).
 - **Insulation**: a wall shows its frame until both its siding and its lining are on, so the batts going in are seen; batts are drawn soft and fibrous, pillowed between the studs, and a batt pressed into its bay gives a puff of fibres. Between the studs, before a batt, the back of the sheathing shows.
+
+## Interface and plan mode redesign (branch `ui-redesign`, designs in `docs/design/ui-redesign.md` and `docs/design/plan-mode-redesign.md`)
+
+**What is new**
+
+- **Two skins.** Cozy (default: warm, rounded, soft shadows) and Minimal (dark, flat, compact). Pick one with the two preview tiles in the settings drawer (the gear); it is remembered.
+- **The HUD** is one frame: vitals and the clock and weather chips on top, the hotbar at the bottom, the launchers (Bag, Shop, Plans, Home, Weather) in a dock on the left, one prompt line and toasts instead of scattered boxes. Panels open as drawers, one at a time; Esc closes the top one.
+- **Graphics button** in the settings drawer (Low and High, blur on and off); **Terrain** is its own submenu there.
+- **Camera**: a close third-person view and a first-person view (cycle them from the camera control); in first person rooms stay whole.
+- **Build bar and inspector**: nine tools, each with its letter; More and Inside open a small flyout. Under the bar is a one-row tray of the choices that matter, and a drawer (More, or double-click a piece) with every exact setting. A hint row with first-run coach chips says what to do next. Storey chips, Undo, Redo, Snap, Materials with the running total.
+- **Door and window designer**: a drawing of the opening on its wall with handles to drag (5 cm steps, Ctrl for 1 cm), a plan view for doors showing which way it opens, tabs for Size and place, Style and Finish, and a fit line that says when a unit was lowered, moved or made smaller and offers fixes. Recent designs are one tap away.
+- **Door models**: French, Dutch, barn, pocket, bifold, patio slider, roll-up garage and a cased opening with no leaf. A pocket door always slides toward the pocket the wall leaves, so it has no direction to choose.
+- **Stairs**: straight, L, U, winder, spiral and grand types, drawn from low to high; width, risers, rail, nosing and material in the inspector; headroom and the floor opening are checked and fixed for you. Old stairs load as straight stairs.
+- **Finished-look plan view**: a plan now looks like the finished house (siding, paint, trim, glass, roof). The view opens up only as far as the task needs and says so in a chip: the roof lifts for walls and rooms, a dollhouse cut at 1.2 m for floors and stairs, the foundation when you change what the house stands on. The view control has Auto, Finished, Cutaway and Section (a height slider on the right). Materials has "Show what is left to build" for the old blueprint.
+- **Phone**: the same layout in `body.touch`: bigger hit areas, the tray scrolls sideways, the extra build controls are in the "..." sheet.
+
+**How to try it**: in both skins, on desktop and phone, plan a two-room house with a great hall, an arched window, a French door opening out, three steps down into a sunken room, an L stair to a loft, a spiral, and porch steps from the ground. Try Cutaway and Section on it, then Show what is left to build.
+
+**Known gaps**: stairs are not built by hand yet; no balconies or curved walls; free openings stay out of angled and round walls (use the rustic pieces); the Section cut shows wall tops open, with no cap.

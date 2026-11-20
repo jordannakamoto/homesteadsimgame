@@ -21,6 +21,9 @@ A browser homestead builder (Stardew-style direction) on a Valheim-style voxel w
   - `test/landscape.smoke.mjs`: the Yard (key 6): digging, paths, stone, pond.
   - `test/chickens.smoke.mjs`: the chickens view.
   - `test/physical-kitchen.smoke.mjs` (`test/cooking.smoke.mjs` runs the same): the kitchen.
+  - `test/ui.smoke.mjs`: the interface kit and both skins (Cozy and Minimal) at desktop and phone size, no overlapping HUD pieces; saves `dist/ui-<skin>-<size>.png`.
+  - `test/designer.smoke.mjs`: the door and window designer (stage handles, fit line, door models, recents).
+  - `test/planview.smoke.mjs`: the plan view (finished look, automatic views, the view control and Section slider); `test/planview-v1.mjs` is its first-version check.
   - `test/shed.e2e.mjs` builds the tutorial shed from bare ground and is the gate before publishing; `test/shed.clumsy.mjs` is the clumsy-player version.
 
 ## The live page
@@ -32,6 +35,8 @@ A browser homestead builder (Stardew-style direction) on a Valheim-style voxel w
 - `src/sim/`: the simulation. All world truth that changes over time lives here: deterministic, fixed ticks, seeded randomness, no DOM or three.js. One system per file, registered in `src/sim/index.js`.
 - `src/engine.js`: world, terrain, trees, grass, water, player, tools, day and night. Ordinary source with real names; edit it directly.
 - `src/build.js`: build mode, furniture and the piece interface. `src/buildui.js`: build mode's bar, options strip and inspector. `src/touch.js`: touch controls. `src/nature.js`: ground cover, shrubs, insects, animals, soft foliage lighting.
+- Interface: all looks live in `template/ui/*.css` (inlined by `build.sh` in name order after the `<style>` in `template/head.html`): `00-tokens` (both skins' tokens), `10-kit` (components), `20-hud`, `30-hotbar`, `40-panels`, `41-stock`, `50-build`, `60-touch`, `90-skin-minimal`. No literal colours; use tokens. `src/engine/ui.js` is the generic kit `window.__ui` (skins, icons, lanes, panels, dock, toasts, prompt line); `src/game/hud.js` wires the game's own elements into it. A new system adds a panel with `__ui.panel` + `__ui.dock.add`. After touching them run `node test/ui.smoke.mjs`.
+- Doors, windows and stairs in build mode: `src/sim/content/openings.js` (catalogue and fit rules), `src/opening-preview.js` (`__openingPreview`: the designer's drawings, string-building only), `src/sim/content/stairs.js` (`__stairs`: stair types and the solver), `src/stairs-geo.js` (`__stairsGeo`: carpentry boxes and drawings), `src/stairs-spiral.js` and `src/stairs-curved.js` (the spiral and curved types). After touching them run `node test/designer.smoke.mjs` and `node --test test/openings.test.mjs test/stairs.test.mjs`.
 - Hands-on water (docs/FIRST_WATER.md): generic `src/sim/core/parts.js`, `src/engine/parts.js`, `src/engine/reach.js` (no water words in these); content `src/sim/content/plumbing-parts.js`, `src/sim/plumbing.js`, `src/water-hands.js`. After touching them run `node test/water.smoke.mjs`.
 - Digging and landscaping: generic `src/sim/core/earthwork.js` (a smooth heightfield, points 10 cm apart: round cut and fill, settling to the angle of repose, rake, flags), content `src/sim/content/landscape.js`, system `src/sim/landscape.js`, view `src/landscape-view.js` (Yard, key 6; the shaped-ground mesh and the terrain's dig mask). The garden reads the shape of the ground. After touching them run `node test/landscape.smoke.mjs`.
 - `src/fxpost.js`: the one post pass (occlusion, depth of field, sun shafts, haze, grade). `src/fxhost.js` + `src/fx.js`: fires, smoke, tree variety, characters.
