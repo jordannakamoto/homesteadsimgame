@@ -231,7 +231,8 @@
     const atv = Object.values(s.units).find((u) => u.kind === 'atv');
     const c = drop || (atv ? { x: atv.x, z: atv.z } : { x: P.x, z: P.z });
     // beside the drop point, clear of the stacks that run along +x from it
-    const spot = V.findSpot(c.x, c.z + 3, { rMin: 0, rMax: 7, rad: 1.2, n: 48 }) || V.findSpot(P.x, P.z, { rMin: 4, rMax: 14, rad: 1.2 });
+    // open ground first (room to hitch and pull away), then anywhere clear
+    const spot = V.findSpot(c.x, c.z + 3, { rMin: 0, rMax: 8, rad: 3, n: 48 }) || V.findSpot(c.x, c.z + 3, { rMin: 0, rMax: 8, rad: 1.2, n: 48 }) || V.findSpot(P.x, P.z, { rMin: 4, rMax: 14, rad: 1.2 });
     if (!spot) { deliverWait = ARRIVE_S - 2; return; }
     const r = sim.commandNow('vehicles.deliver', { kind: 'trailer_small', x: spot.x, z: spot.z, yaw: atv ? atv.yaw : spot.yaw });
     deliverWait = 0;
