@@ -1210,7 +1210,7 @@
   }
 
   /* ================= wiring ================= */
-  window.__nature = { populate, refresh, dispose, animals, bugs, add, KINDS, template };
+  window.__nature = { populate, refresh, dispose, animals, bugs, add, KINDS, template, materials: { litter: litterMat } };
   for (const ch of W.chunks.values()) {
     populate(ch);
     refresh(ch);

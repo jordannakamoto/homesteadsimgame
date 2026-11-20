@@ -12670,6 +12670,8 @@
     roofBuilding,
     // for the construction add-on: where each building stands and how much of it is still only planned
     structs: () => B.structs.map((S) => (syncKnown(S), { id: S.id, ver: S.ver, x: S.cx, z: S.cz, r: S.rad, y0: S.y0, yaw: S.yaw || 0, level: S.level, planned: S.plan.size, sitePlanned: !!S.sitePlanned, found: S.found })),
+    // the scene groups the buildings are drawn in (add-ons that restyle what is drawn: src/snow/objects.js)
+    groups: () => B.structs.map((S) => S.group),
     // every member of one building in its own metres, with the matrix that puts them in the world
     membersOf(structId) {
       const S = B.structs.find((O) => O.id === structId);

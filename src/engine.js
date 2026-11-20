@@ -15,7 +15,7 @@ import { createWaterFx } from './water/water-fx.js';
 import { createReflectProbe } from './water/reflect-probe.js';
 import { createReflectPlane } from './water/reflect-plane.js';
 import { createRippleSim } from './water/ripple-sim.js';
-import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, stringifySave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork, powerNear, vehicleCore, groundRead, setGroundBase, routeFind, frameChannelsFor, frameAttach, frameSnap, frameRayHit, foundationRead, legacyLinkCommands, legacyPrune, convertLegacyLinks } from './sim/index.js';
+import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, stringifySave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork, powerNear, vehicleCore, groundRead, setGroundBase, routeFind, frameChannelsFor, frameAttach, frameSnap, frameRayHit, foundationRead, legacyLinkCommands, legacyPrune, convertLegacyLinks, snowRead } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -2407,6 +2407,7 @@ function updateParticles(dt) {
 // ============================================================ player
 const player = {
   x: 0, z: 0, y: 0, face: 0, faceTarget: 0, walk: 0, speed: 0,
+  groundPace: 1,   // what the ground underfoot does to the walk (0..1), set by add-ons (snow: src/snow/actors.js)
   swing: null, roll: null, rollCd: 0, vy: 0, air: false, jumpHeld: false,
   hp: 100, stamWait: 0, regenWait: 0, kvx: 0, kvz: 0, hurt: 0, dead: 0,
   holdT: 0, tap: 0, charging: null, parry: null, riposte: 0, nextSide: 1, eHeld: false, qHeld: false, mvx: 0, mvz: 0,
@@ -3641,6 +3642,7 @@ const gfxPanel = (() => {
         : (quality.scale === 'auto' ? 'Auto: rendering at ' + Math.round(renderScale() * 100) + '% to hold ' + quality.target + ' fps. ' : '')
           + 'Below 100%, the 3D view is enlarged with a sharpening upscaler; the HUD stays sharp.' }),
       fxMode ? seg('Lighting', [['full', 'Full'], ['no relight', 'No relight'], ['off', 'Off']], fxMode, (m) => { fx.setLighting(m); try { localStorage.setItem('fx-lighting', m); } catch (e) {} }) : '',
+      window.__snow ? seg('Snow', [[true, 'Deep'], [false, 'Ground only']], window.__snow.flags.surface, (v) => window.__snow.set({ surface: v })) : '',
       h('div', { className: 'row' }, h('span', { textContent: 'Screen' }), fs),
       h('div', { className: 'sec', textContent: 'Grass and trees' }),
       chk('drawOrder', 'Draw trees, then grass, then ground', 'Skips pixels that end up covered. Looks the same, runs faster.'),
@@ -4268,6 +4270,7 @@ function updatePlayer(dt) {
       if (P.parry) sp *= 0.5;
       vx = mx * sp; vz = mz * sp;
       if (P.pace) { vx *= P.pace; vz *= P.pace; sp *= P.pace; }   // an add-on working with the hands slows the walk
+      if (P.groundPace < 1) { const g = Math.max(0.3, P.groundPace); vx *= g; vz *= g; sp *= g; }
       if (!P.atk && !P.aiming && !P.charging && !P.parry) P.faceTarget = Math.atan2(mx, mz);
     }
     P.mvx = vx; P.mvz = vz;
@@ -4956,6 +4959,11 @@ window.__game = {
   },
   treeGeo, pineLite: pineLiteGeo, markStockDirty: () => { hudDirty = true; },
   garden: gardenRead, landscape: landscapeRead, earthwork, vehicleCore,
+  snow: snowRead,   // reads of the snowpack (src/sim/snow.js): at, window, bearing, ...; drawn by src/snow/
+  // shared materials add-ons may patch (src/snow/objects.js): trees, crowns and logs; rocks and stumps
+  materials: { tree: treeMat, solid: solidMat },
+  // the sky-visibility map (SKY_MAP above): texture, how much applies, size (m, wrapped)
+  skyVis: { map: U.skyMap, k: U.skyK, size: SKY_MAP_SIZE },
   // runs through a building's frame (src/sim/core/routefind.js over src/sim/content/frame-channels.js)
   servicesLink,   // __build.connect's power and water: a legacy run in the routes store (src/sim/services-legacy.js)
   routes: { find: routeFind, channelsFor: (structId) => frameChannelsFor(structId, window.__build), attach: frameAttach, snap: frameSnap, rayHit: frameRayHit },

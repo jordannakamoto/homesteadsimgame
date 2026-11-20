@@ -83,6 +83,7 @@ export const VEHICLE_SURFACES = Object.freeze({
   mulch: { mu: 0.85, slide: 0.85, roll: 1.8 },
   sand: { mu: 0.85, slide: 0.8, roll: 3 },
   snow: { mu: 0.5, slide: 0.8, roll: 1.8 },
+  snow_packed: { mu: 0.32, slide: 0.7, roll: 1.1 },
   water: { mu: 0.7, slide: 0.8, roll: 1.8 },
   floor: { mu: 1.2, slide: 0.85, roll: 0.5 },
 });
