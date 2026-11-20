@@ -20,12 +20,12 @@ Three workstreams toward "the full home building experience". Each doc has a sum
 ## Decisions from the cohesion check (18 Nov 2026, `/designs/cohesion-wave2.md`)
 
 ### Save-version ledger
-`SAVE_VERSION` on `main` is **3** (v2 packed earthwork grids, v3 moved terrain edits into `sys.ground.macro`). Reserved, in this order, so nobody renumbers a migration already on `main`:
+`SAVE_VERSION` on `main` is **4** (v2 packed earthwork grids, v3 moved terrain edits into `sys.ground.macro`, v4 marks Equip wires and water pipes for their move into the routes store). Taken and reserved, in this order, so nobody renumbers a migration already on `main`:
 
 | Version | Slice | What it migrates |
 |---|---|---|
-| 4 | A5 | the fine 10 cm grid moves from `sys.landscape.grid` to `sys.ground.fine` |
-| 5 | S4 | legacy abstract wire and pipe links in build mode become routes |
+| 4 | S4 (taken, wave 2 S-3) | build mode's Equip wires and water pipes (`world.builds.links`) become legacy runs in `sys.routes`, ids kept; the step marks `world.legacyLinks` and the page converts them (`src/sim/services-legacy.js`) |
+| 5 | A5 | the fine 10 cm grid moves from `sys.landscape.grid` to `sys.ground.fine` (S4 landed first, so A5 moved from 4 to 5) |
 
 Nobody else bumps. If you must change a save's shape, ask for the next number; at merge time take the next free number on the newest `main`.
 

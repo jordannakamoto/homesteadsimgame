@@ -157,6 +157,7 @@ function prepare(pieces) {
     if (!p || typeof p !== 'object') continue;
     if (p.built === false) { if (p.id != null) unbuilt.add(p.id); continue; }
     if (p.id != null) byId.set(p.id, p);
+    if (p.kind === 'floor' && p.type === 'deck') continue;        // a deck is outdoors: no room, no envelope (src/game/deck.js)
     if (p.kind === 'floor' && Array.isArray(p.outline) && p.outline.length >= 3) {
       const loops = [p.outline, ...(p.holes || [])].filter((l) => Array.isArray(l) && l.length >= 3).map((l) => l.map((q) => [q.x, q.z]));
       const base = num(p.y0, 0);

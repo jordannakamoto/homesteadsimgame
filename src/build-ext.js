@@ -9,6 +9,9 @@
      disposes it on the next redraw).
    - serialize / restore / undo: S.ext, an object { [extId]: data } of plain JSON, kept with the structure.
    - view / choose / pointerdown: tools an extension brings (a button on the bar, options, a click on the world).
+   - pickAt / select click / Delete: pick(S, R, h) puts the extension's own pieces under the pointer (Select picks them, its
+     inspector shows, Delete calls remove(key)); bounds(S, h) widens the structure's extent; ground(S, lx, lz, y, h) is a
+     walking surface (a deck's boards).
    See ARCHITECTURE.md, "Adding to build mode". */
 (() => {
   const exts = new Map(), // id -> spec, in registration order
@@ -49,6 +52,7 @@
     }
   }
   let sel = null; // what an extension has selected itself: { ext, key }, shown by its inspector under the Select tool
+  const picked = new Map(); // piece id -> { ext, key } of what pick() last found under the pointer
   const EXT = {
     // build.js hands over what the extension point needs: { refresh(), touch(), selecting(), hints, tools }
     bind(h) {
@@ -99,6 +103,53 @@
     draw(S, add, mem, st) {
       each("draw", (e) => e.draw(S, add, mem, st, own(S, e, {})));
     },
+    // the nearest of the extensions' own pieces along a ray in the structure's frame (build.js pickAt), nearer than bt
+    pick(S, R, bt, hitBox) {
+      let best = null;
+      each("pick", (e) => {
+        const r = e.pick(S, R, own(S, e, { hitBox }));
+        if (r && r.t >= 0 && r.t < (best ? best.t : bt)) best = { t: r.t, id: r.id || EXT.pid(S, e.id, r.key), ext: e.id, key: r.key };
+      });
+      if (best) picked.set(best.id, { ext: best.ext, key: best.key });
+      return best;
+    },
+    // Select clicked id: an extension's piece is selected there (true); anything else clears the extension's selection
+    click(id) {
+      const q = id && picked.get(id);
+      if (q) return (EXT.select(q.ext, q.key), true);
+      if (sel) EXT.select(null);
+      return false;
+    },
+    // Delete with an extension's piece selected: its remove(key); true when it took it
+    remove() {
+      const e = sel && exts.get(sel.ext);
+      if (!e || typeof e.remove !== "function") return false;
+      let ok = false;
+      try {
+        ok = e.remove(sel.key) !== false;
+      } catch (err) {
+        warn(e, "remove", err);
+      }
+      if (ok) EXT.select(null);
+      return ok;
+    },
+    bounds(S) {
+      const out = [];
+      if (S.ext) each("bounds", (e) => { const pts = dataOf(S, e.id) !== null && e.bounds(S, own(S, e, {})); if (pts) for (const p of pts) out.push(p); });
+      return out;
+    },
+    // the highest walking surface the extensions have at (lx, lz) no more than a step above y (all in the structure's frame), or null
+    ground(S, lx, lz, y) {
+      let g = null;
+      each("ground", (e) => {
+        if (dataOf(S, e.id) === null) return;
+        const v = e.ground(S, lx, lz, y, own(S, e, {}));
+        if (v !== null && v !== undefined && (g === null || v > g)) g = v;
+      });
+      return g;
+    },
+    // redraw build mode's bar and options strip (an extension's live readout)
+    touch: () => host && host.touch(),
     isTool: (id) => tools.has(id),
     tools: () => [...tools.values()].map(({ tool }) => ({ id: tool.id, name: tool.name, key: "", code: "", group: tool.group === undefined ? 5 : tool.group, ext: true })),
     // the options strip for an extension's tool, or its inspector

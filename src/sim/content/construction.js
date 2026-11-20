@@ -5,6 +5,7 @@
 // stacks, carrying) and src/sim/construction.js (the system); the page's add-on reads it for its wording.
 
 import { SERVICE_SUPPLY } from './services.js';
+import { DECK_SUPPLY } from './deck.js';
 export { PAINTS, PAINT, SHEENS, SURFACES, finishOf, DECOR } from './decor.js';
 export { PROFILES, REVEAL_M, ENDS, cutWords, FINISH_NAILS_KG_PER_M } from './carpentry.js';
 
@@ -21,7 +22,7 @@ export const STAGES = Object.freeze([
   { id: 'wall-frame', name: 'Wall frames', needs: ['subfloor'], flat: true, verb: 'Frame the walls', what: 'Lay plates and studs flat on the deck, then tilt each wall up.', why: 'Studs carry the roof down to the floor. A header carries the load around a door or window.' },
   { id: 'top-plates', name: 'Top plates', needs: ['wall-frame'], verb: 'Add the top plates', what: 'A second plate along the top, lapping the corners.', why: 'Ties the walls together so they stand as one.' },
   { id: 'roof-frame', name: 'Roof frame', needs: ['top-plates'], verb: 'Set the rafters', what: 'Set the rafters from wall to wall.', why: 'The slope sheds rain and snow. Rafters carry it out to the walls.' },
-  { id: 'roof-deck', name: 'Roof deck', needs: ['roof-frame'], verb: 'Sheet the roof', what: 'Fix sheets on the rafters.', why: 'Makes the roof one stiff surface for the roofing to sit on.' },
+  { id: 'roof-deck', name: 'Roof deck', needs: ['roof-frame', 'porch-frame'], verb: 'Sheet the roof', what: 'Fix sheets on the rafters.', why: 'Makes the roof one stiff surface for the roofing to sit on.' },
   { id: 'dry-in', name: 'Dry-in', needs: ['roof-deck'], verb: 'Dry in the roof', what: 'Drip edge along the eaves, then underlayment strips from the eave up, each lapping the one below, then drip edge up the rakes.', why: 'Water runs downhill: every layer laps over the one below it, so rain is led out over the edge and never under it.' },
   { id: 'roofing', name: 'Roofing', needs: ['dry-in'], verb: 'Lay the roofing', what: 'Work from on the roof: a starter strip at the eave, then course after course up the slope, the ridge cap last. On a steep roof, clip in at a ridge anchor first.', why: 'Keeps the water out. After this the building is dried in.' },
   { id: 'sheathing', name: 'Sheathing', needs: ['top-plates'], parentFirst: ['roof-frame'], verb: 'Sheathe the walls', what: 'Fix sheets to the outside of the studs.', why: 'Stops the frame leaning over sideways in the wind.' },
@@ -38,6 +39,15 @@ export const STAGES = Object.freeze([
   { id: 'carpentry', name: 'Trim carpentry', needs: ['lining', 'finish'], verb: 'Fit the trim', what: 'Casings round the doors and windows, then baseboard along the floor, each piece cut to fit at the sawhorses.', why: 'Covers the gaps where the walls meet the floor and the frames, and finishes the room.' },
   { id: 'decorate', name: 'Paint', needs: ['cladding', 'lining', 'finish', 'carpentry'], verb: 'Paint', what: 'A coat of primer on the new walls, then two coats of colour, each dry before the next; two coats on the trim, which comes primed.', why: 'Seals the drywall or boards and gives the room its colour.' },
   { id: 'trim-out', name: 'Trim-out', needs: ['lining', 'finish', 'decorate'], by: 'services', hint: 'Trim-out: Do it for me, in the Build panel (L)', verb: 'Fit the devices and fixtures', what: 'Outlets, switches and lights into their boxes; breakers into the panel; taps and fixtures onto their stubs.', why: 'The wall is finished now, so what you touch goes on its face.' },
+  // decks (src/sim/content/deck.js, src/game/deck.js): the piers, posts and beam are foundation members; the ledger bolts through
+  // the house's sheathing, so the frame waits for it (a free-standing deck has none: an empty stage counts as done)
+  { id: 'deck-frame', name: 'Deck frame', needs: ['foundation', 'sheathing'], verb: 'Frame the deck', what: 'Bolt the ledger to the house rim through the sheathing, flash it, hang the joists every 40 cm, close the ends with the rim.', why: 'The ledger and the beam carry the joists; the joists carry the boards.' },
+  { id: 'decking', name: 'Decking', needs: ['deck-frame'], verb: 'Lay the deck boards', what: 'Boards across the joists from the house out, a 5 mm gap between them, two screws at every joist. Hold and drag along a row once you have the knack.', why: 'The gaps let the rain through and the boards move with the weather.' },
+  // a porch roof (B-3): its posts, header, wall ledger and rafters are their own stage so the house's order is untouched (an empty
+  // stage counts as done); its sheets, flashing and shingles go in with the house's roof-deck, dry-in and roofing
+  { id: 'porch-frame', name: 'Porch frame', needs: ['top-plates'], verb: 'Frame the porch roof', what: 'Set the 6 x 6 posts on the deck frame, lift the header onto them, bolt the roof ledger to the house wall, then set the rafters from the ledger down to the header.', why: 'The roof is one slope that leans on the house wall and rests on the posts.' },
+  // guards and stairs (B-3): after the boards are down
+  { id: 'rails', name: 'Rails and stairs', needs: ['decking'], verb: 'Build the rails and stairs', what: 'Set the guard posts, run the rails between them, set the balusters; cut the stringers to the rise and run, lay the landing pad, then the risers and treads and the handrail.', why: 'A guard keeps people off a drop of 30 in or more; stairs with even risers are safe to walk without looking.' },
 ]);
 // ---- taping drywall (docs/design/interior-walls.md). Each seam takes the tape and a first coat, then a fill coat and a
 // finish coat, each laid on dry compound, then a light sanding. Setting compound can take the next coat in about an hour
@@ -51,10 +61,12 @@ export const STAGE_ORDER = Object.freeze(STAGES.map((s) => s.id));
 export const SUPPORT = Object.freeze({
   pier: ['footing'], post: ['pier'], skid: ['footing'], slab: ['footing'], stemwall: ['footing'],
   beam: ['pier', 'post', 'footing', 'stemwall'], rafter: ['beam'],
+  rail: ['guardpost'], baluster: ['rail'], stringer: ['landing'], tread: ['stringer'],   // a deck's guard and stair (B-3)
+  joist: ['ledger'],   // a deck's joists hang on its ledger (a house floor has no ledger in its frame stage)
   // drying in and roofing, the order roofers lay them: each layer laps the one below
   membrane: ['drip'], rake: ['membrane'], ridgecap: ['roofing'], downspout: ['gutter'],
 });
-export const SUPPORT_SAYS = Object.freeze({ footing: 'Lay the footings', pier: 'Set the pier blocks', post: 'Set the posts', stemwall: 'Pour the stem wall', beam: 'Set the ridge beam', drip: 'Fit the drip edge along the eaves', membrane: 'Lay the underlayment', roofing: 'Lay every course', gutter: 'Hang the gutter' });
+export const SUPPORT_SAYS = Object.freeze({ ledger: 'Bolt the ledger on', footing: 'Lay the footings', pier: 'Set the pier blocks', post: 'Set the posts', stemwall: 'Pour the stem wall', beam: 'Set the ridge beam', drip: 'Fit the drip edge along the eaves', membrane: 'Lay the underlayment', roofing: 'Lay every course', gutter: 'Hang the gutter', guardpost: 'Set the guard posts', rail: 'Run the rails', landing: 'Lay the landing pad', stringer: 'Cut and set the stringers' });
 
 // ---- what a shopping line is bought as, where the plan's own item is missing or not what a builder buys.
 // Keyed by the line's name (the part of its key after the stage). `each`: one whole unit per member.
@@ -66,7 +78,7 @@ export const LINE_ITEM = Object.freeze({
   window: { itemId: 'window_shed', each: true, label: 'Window' },
 });
 // Lines that are not carried: they sit by the stacks and are used up as the work goes on.
-export const SITE_SUPPLY = Object.freeze(['nails_framing', 'screws_wood', 'screws_structural', ...SERVICE_SUPPLY]);
+export const SITE_SUPPLY = Object.freeze(['nails_framing', 'screws_wood', 'screws_structural', ...SERVICE_SUPPLY, ...DECK_SUPPLY]);
 
 // ---- items the main catalog lacks (the orchestrator merges these into src/sim/items.js). Real figures.
 export const ITEMS_CONSTRUCTION = Object.freeze({
@@ -105,8 +117,8 @@ export const ITEMS_SCAFFOLD = Object.freeze({
 // ---- learn once, then sweep: after nailing a few of a kind by hand, that kind is learned and is set and nailed as you sweep along its run
 export const LEARN = Object.freeze({
   needed: 2,
-  group: Object.freeze({ stud: 'stud', plate: 'plate', header: 'header', joist: 'joist', rafter: 'rafter', beam: 'beam', post: 'post', skid: 'skid', sheathing: 'sheet', membrane: 'sheet', roofing: 'course', lining: 'sheet', cladding: 'sheet', insulation: 'sheet', drip: 'flashing', rake: 'flashing', ridgecap: 'flashing', gutter: 'gutter', downspout: 'gutter' }),
-  says: Object.freeze({ stud: 'frame a stud wall', plate: 'lay wall plates', header: 'frame an opening', joist: 'frame a floor', rafter: 'set rafters', beam: 'set a beam', post: 'set posts', skid: 'lay skids', sheet: 'lay sheets', course: 'lay a roof course', flashing: 'fit drip edge and flashing', gutter: 'hang gutters' }),
+  group: Object.freeze({ stud: 'stud', plate: 'plate', header: 'header', joist: 'joist', rafter: 'rafter', beam: 'beam', post: 'post', skid: 'skid', sheathing: 'sheet', membrane: 'sheet', roofing: 'course', lining: 'sheet', cladding: 'sheet', insulation: 'sheet', drip: 'flashing', rake: 'flashing', ridgecap: 'flashing', gutter: 'gutter', downspout: 'gutter', decking: 'deckboard', tread: 'deckboard', guardpost: 'post', rail: 'rail', baluster: 'baluster', stringer: 'stringer' }),
+  says: Object.freeze({ stud: 'frame a stud wall', plate: 'lay wall plates', header: 'frame an opening', joist: 'frame a floor', rafter: 'set rafters', beam: 'set a beam', post: 'set posts', skid: 'lay skids', sheet: 'lay sheets', course: 'lay a roof course', flashing: 'fit drip edge and flashing', gutter: 'hang gutters', deckboard: 'lay deck boards', rail: 'run guard rails', baluster: 'set balusters', stringer: 'set stair stringers' }),
 });
 export const learnGroup = (kind) => LEARN.group[kind] || null;
 
@@ -115,7 +127,7 @@ export function itemForm(itemId) {
   if (/^(cut_)?(lumber|trim)_|^glulam/.test(itemId)) return 'lumber';
   if (/^board_/.test(itemId)) return 'boards';
   if (/^(osb|plywood|gypsum)_/.test(itemId)) return 'sheet';
-  if (itemId === 'pier_block') return 'block';
+  if (itemId === 'pier_block' || itemId === 'stair_pad') return 'block';
   if (/^(nails|screws)_/.test(itemId) || itemId === 'caulk_acrylic') return 'box';
   if (itemId === 'housewrap' || itemId === 'roof_underlayment' || itemId === 'vapour_barrier' || itemId === 'roof_epdm' || itemId === 'roof_ice_water' || itemId === 'roof_green') return 'roll';
   if (itemId === 'drip_edge' || itemId === 'ridge_cap' || itemId === 'gutter_alu' || itemId === 'downspout_alu') return 'trim';
@@ -255,12 +267,12 @@ export function feelOf(s) {
 
 // ---- work: blows to put in one member of each kind, and how fast the blows come by the best tool owned
 export const WORK = Object.freeze({
-  beats: Object.freeze({ site: 8, pier: 3, post: 2, beam: 4, skid: 4, footing: 4, stemwall: 5, slab: 6, joist: 3, plate: 3, stud: 3, header: 4, rafter: 4, sheathing: 4, membrane: 3, cladding: 6, roofing: 4, insulation: 2, lining: 5, door: 6, window: 4, drip: 2, rake: 2, ridgecap: 3, gutter: 3, downspout: 2 }),
+  beats: Object.freeze({ site: 8, pier: 3, post: 2, beam: 4, skid: 4, footing: 4, stemwall: 5, slab: 6, joist: 3, plate: 3, stud: 3, header: 4, rafter: 4, sheathing: 4, membrane: 3, cladding: 6, roofing: 4, insulation: 2, lining: 5, door: 6, window: 4, drip: 2, rake: 2, ridgecap: 3, gutter: 3, downspout: 2, guardpost: 2, rail: 3, baluster: 1, stringer: 3, tread: 2, landing: 3 }),
   beatS: 0.33,                        // seconds between blows with a hammer
   tools: Object.freeze([{ tool: 'hammer', speed: 1 }, { tool: 'framing_nailer', speed: 3, power: true }]),
   sound: Object.freeze({ pier: 'scrape', footing: 'scrape', slab: 'scrape', stemwall: 'scrape', site: 'dig', sheathing: 'thunk', membrane: 'rustle', roofing: 'thunk', insulation: 'rustle', door: 'thunk', window: 'thunk', gutter: 'thunk' }),
   // by hand: blows to fasten a piece once it is set in place (stamps for a pier block, strokes of the shovel for the site)
-  nails: Object.freeze({ site: 6, pier: 2, post: 1, beam: 2, skid: 2, footing: 2, stemwall: 3, slab: 3, joist: 2, plate: 2, stud: 2, header: 2, rafter: 2, sheathing: 3, membrane: 2, cladding: 3, roofing: 3, insulation: 1, lining: 3, door: 2, window: 2, drip: 2, rake: 2, ridgecap: 2, gutter: 2, downspout: 2 }),
+  nails: Object.freeze({ site: 6, pier: 2, post: 1, beam: 2, skid: 2, footing: 2, stemwall: 3, slab: 3, joist: 2, plate: 2, stud: 2, header: 2, rafter: 2, sheathing: 3, membrane: 2, cladding: 3, roofing: 3, insulation: 1, lining: 3, door: 2, window: 2, drip: 2, rake: 2, ridgecap: 2, gutter: 2, downspout: 2, guardpost: 1, rail: 2, baluster: 1, stringer: 2, tread: 2, landing: 2 }),
   swingS: 0.3,                        // seconds between swings while the button is held
   reachM: 2.1,                        // arm's reach around the character
   guidedSpeed: 2.5,                     // Guided fills a stage in this many times faster than working by hand

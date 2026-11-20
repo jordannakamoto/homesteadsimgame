@@ -3483,7 +3483,7 @@
     // a wall is cut only where it is both above waist height and between the camera and you
     const m = new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide, clippingPlanes: [plane, near, sideA, sideB], clipIntersection: true, clipShadows: true });
     fadeB(m);
-    return texel(m);
+    return solidCut(texel(m));
   }
   // ---- glass: one transparent mesh per structure, no extra render pass. It reflects the sky and the ground by the
   // Fresnel law (faint head-on, nearly a mirror at a glancing angle), catches the sun as a hard glint, tints what is seen
@@ -3693,7 +3693,7 @@
     const i = B.structs.indexOf(S);
     i >= 0 && B.structs.splice(i, 1);
   }
-  const isEmpty = (S) => !S.floors.size && !S.walls.size && !S.roofs.length && !S.segs.length && !S.rings.length && !S.stairs.length && !S.pillars.length && !S.paths.length && !S.decor.length;
+  const isEmpty = (S) => !S.floors.size && !S.walls.size && !S.roofs.length && !S.segs.length && !S.rings.length && !S.stairs.length && !S.pillars.length && !S.paths.length && !S.decor.length && !(S.ext && Object.keys(S.ext).length);
   const ringAt = (S, lx, lz, pad = 0) => S.rings.findIndex((r) => Math.hypot(lx - r.cx, lz - r.cz) < ringInner(r) + pad);
   const covered = (S, i, j) => S.roofs.some((r) => i >= r.i0 && i <= r.i1 && j >= r.j0 && j <= r.j1);
 
@@ -3864,6 +3864,7 @@
         if (r.sides[k]) S.colSegs.push([a[0], a[1], b[0], b[1], r.sides[k]]);
       }
     }
+    for (const [x, z] of EXT.bounds(S)) (ext(Math.floor(x), Math.floor(z)), ext(Math.ceil(x), Math.ceil(z))); // extensions' extent (a deck)
     S.b = { i0, i1, j0, j1 };
     const [cx, cz] = toWorld(S, (i0 + i1) / 2, (j0 + j1) / 2);
     S.cx = cx;
@@ -5725,6 +5726,8 @@
           if (Math.hypot(lx - p[0] - dx * tt, lz - p[1] - dz * tt) < p[4] / 2 + 0.15) ((bt = t), (best = { S, kind: "path", idx, id: p[6] }));
         }
       }
+      const xp = S.ext && EXT.pick(S, R, bt, hitBox); // an extension's own piece (a deck) under the pointer
+      if (xp) ((bt = xp.t), (best = { S, kind: "ext", id: xp.id }));
     }
     return best;
   }
@@ -6964,7 +6967,7 @@
     decor: "Pick a piece, then click to place it. Wall pieces snap to walls.",
     measure: "Click two points to measure between them. Measurements stay until you clear them.",
     erase: "Click a piece to remove it, or drag a box to clear an area.",
-    equip: "Pick a piece of equipment and click to place it: on the ground, a floor, a wall or a roof. Drag from one port dot to another to run a wire or pipe.",
+    equip: "Pick a piece of equipment and click to place it: on the ground, a floor, a wall or a roof. Cable and pipe are run with Hands (F); a flue joins port dot to port dot.",
     copy: "Click where you want a copy.",
   };
   function hint() {
@@ -7212,6 +7215,7 @@
       const now = performance.now(),
         id = B.hoverId,
         hd = handleAt();
+      if (!hd && EXT.click(id)) return void selSet([]); // an extension's piece: its own inspector (src/build-ext.js)
       B.press = { x: e.clientX, y: e.clientY, id: hd ? B.sel[0] : id, hd, shift: e.shiftKey, o: ray.ray.origin.clone(), dir: ray.ray.direction.clone() };
       B.press.dbl = !!(id && !hd && B.lastClick && B.lastClick.id === id && now - B.lastClick.t < 380);
       B.lastClick = { id, t: now };
@@ -8534,6 +8538,7 @@
     if (freeTool() && e.code === "KeyF" && !e.repeat) return (flipFree(), true);
     if (freeTool() && B.fsel && (e.code === "Delete" || e.code === "Backspace") && !e.repeat) return (delFree(), true);
     if ((e.code === "Delete" || e.code === "Backspace") && !e.repeat && B.tool === "equip" && FX.sel) return (choose("fx:del"), true);
+    if ((e.code === "Delete" || e.code === "Backspace") && !e.repeat && B.tool === "select" && !B.sel.length && EXT.remove()) return true; // an extension's selected piece
     if ((e.code === "Delete" || e.code === "Backspace") && !e.repeat) return (B.tool === "select" && B.sel.length ? selDelete() : setTool("erase"), true);
     // E turns the view while it is held; a quick tap picks up the Equip tool
     if (e.code === "KeyE") return (e.repeat || (B.eDown = performance.now()), true);
@@ -9057,7 +9062,7 @@
     FOUNDATIONS = FR.FOUNDATIONS,
     STAGES = FR.STAGES,
     CONCRETE = col(0xb5b2aa),
-    MEMBER_EXTRA = ["area", "thickness", "volume", "size", "plies", "roof", "opening", "height", "fin", "face", "surface", "ends", "profile"];
+    MEMBER_EXTRA = ["area", "thickness", "volume", "size", "plies", "roof", "opening", "height", "fin", "face", "surface", "ends", "profile", "buy", "hw"];
   const Lz = (material, thickness, role) => Object.freeze({ material, thickness, role });
   const footPal = new Map();
   function woodFoot(wm) {
@@ -9404,13 +9409,16 @@
   // boards, the whole outside of a sided wall) opens with the wall when you are inside
   // where the cut opens a piece you look into the box from inside: its back faces are drawn as a flat dark section, so a
   // cut wall reads as solid (the dollhouse look) instead of hollow boxes
-  const capped = (m) => {
+  // where the dollhouse cut slices a piece, its inside faces show: draw them as the piece in section, its own colour flat and a
+  // little darker, so a cut board, frame or door reads as solid wood, not as a hollow box
+  const solidCut = (m) => {
     m.side = T.DoubleSide;
     const before = m.onBeforeCompile, key = m.customProgramCacheKey && m.customProgramCacheKey.call(m);
-    m.onBeforeCompile = (sh, r) => { before && before.call(m, sh, r); sh.fragmentShader = sh.fragmentShader.replace("#include <dithering_fragment>", "#include <dithering_fragment>\n if (!gl_FrontFacing) gl_FragColor = vec4(0.19, 0.155, 0.125, 1.0);"); };
-    m.customProgramCacheKey = () => (key || "") + "|capped";
+    m.onBeforeCompile = (sh, r) => { before && before.call(m, sh, r); sh.fragmentShader = sh.fragmentShader.replace("#include <opaque_fragment>", "#include <opaque_fragment>\n if (!gl_FrontFacing) gl_FragColor = vec4(diffuseColor.rgb * 0.78, 1.0);"); };
+    m.customProgramCacheKey = () => (key || "") + "|solidcut";
     return m;
   };
+  const capped = solidCut;
   const memberMats = (planes) => ({ mem: capped(Object.assign(memMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })), lap: capped(makeLapMat(planes)), grv: capped(makeLapMat(planes, 0.14, true)), bat: capped(makeBattMat(planes)), wrap: capped(Object.assign(wrapMat.clone(), { clippingPlanes: planes, clipIntersection: true, clipShadows: true })), shp: capped(Object.assign(memMat.clone(), { vertexColors: true, clippingPlanes: planes, clipIntersection: true, clipShadows: true })) });
   // trim with mitered ends (docs/design/carpentry.md) is drawn as its real shape, not a box: each end cut at 45 degrees
   // across the face, the long point on the side away from the opening (m.long, along m.n). One small mesh per building
@@ -9439,7 +9447,8 @@
   }
   const isLap = (m) => /^siding/.test(m.col || "") && m.type === "boards";
   const MCOL = { timber: col(0xdcbc8c), osb: col(0xc9a468), wrap: col(0xe8ecea), felt: col(0x3a3d43), batt: col(0xf4b9a8), siding: col(0xb8beb1), sidingDark: col(0x5d4a3b), trim: col(0xefece4), gypsum: col(0xe3e3de), primer: col(0xf4f3ef), pine: col(0xd8b583), concrete: CONCRETE, gravel: col(0x8f8b82) };
-  for (const [k, h] of Object.entries(FR.ROOF_COLORS || {})) MCOL[k] = col(h); // the roofing layers while they go on (src/framing.js)
+  for (const [k, h] of Object.entries(FR.ROOF_COLORS || {})) MCOL[k] = col(h);
+  ((MCOL.pt = col(0xb79e70)), (MCOL.ptboard = col(0xa98f66)), (MCOL.cedar = col(0xb27650))); // deck framing (treated pine) and boards // the roofing layers while they go on (src/framing.js)
   // a wall paint's colour, from its finish key ("sage_eggshell"; src/sim/content/decor.js)
   const FINCOL = new Map(),
     finCol = (fin) => {
@@ -9474,41 +9483,19 @@
       if (S.capMesh) (S.group.remove(S.capMesh), S.capMesh.geometry.dispose(), (S.capMesh = null));
       S.capWallsData = [];
       const pos = [], cols = [];
+      // one outline for the whole building in one flat colour: each closed wall's top across its whole thickness, run on into the
+      // corners where it meets another wall, so there are no seams between layers or at the corners
       for (const w of S.mem.walls) {
         if (w.y0 + (w.h || 0) <= h || w.y0 >= h) continue;
-        const ms = (S.mem.byParent.get(w.id) || []).filter((m) => m.draw !== 0 && WALL_SHELL.has(m.stage) && !(m.kind === "cladding" && m.type === "trim") && m.section);
-        if (!ms.length || ms.some((m) => S.plan.has(m.id))) continue;          // still being built: leave it open to see
-        const L = Math.hypot(w.b[0] - w.a[0], w.b[1] - w.a[1]) || 1, ux = (w.b[0] - w.a[0]) / L, uz = (w.b[1] - w.a[1]) / L, N = [-uz, 0, ux];
-        let lo = 1e9, hi = -1e9;
-        const strips = [];      // [from, to, colour] across the wall: the faces you see in the cut
-        const all = S.mem.byParent.get(w.id) || [], paintOf = (fc) => { const p2 = all.find((q) => q.kind === "paint" && q.surface === "walls" && q.face === fc && !S.plan.has(q.id)); return p2 ? finCol(p2.fin) : null; };
-        for (const m of ms) {
-          const ax = m.b[0] - m.a[0], ay = m.b[1] - m.a[1], az = m.b[2] - m.a[2], ml = Math.hypot(ax, ay, az) || 1, u = [ax / ml, ay / ml, az / ml], n = m.n;
-          const t = [u[1] * n[2] - u[2] * n[1], u[2] * n[0] - u[0] * n[2], u[0] * n[1] - u[1] * n[0]], dot = (v) => Math.abs(v[0] * N[0] + v[2] * N[2]);
-          const c = ((m.a[0] + m.b[0]) / 2 - w.a[0]) * N[0] + ((m.a[2] + m.b[2]) / 2 - w.a[1]) * N[2], half = (dot(t) * m.section.b + dot(n) * m.section.d + dot(u) * ml) / 2;
-          if (half > 0.4) continue;      // a piece lying across the wall is not the wall
-          lo = Math.min(lo, c - half); hi = Math.max(hi, c + half);
-          if (m.kind === "lining") strips.push([c - half, c + half, paintOf(m.face) || MCOL[m.col] || MCOL.gypsum]);
-          else if (m.kind === "cladding") strips.push([c - half, c + half, MCOL[m.col || "siding"] || MCOL.siding]);
-        }
-        if (!(hi > lo)) continue;
-        (S.capWallsData || (S.capWallsData = [])).push({ w, L, ux, uz, N, lo, hi, strips, top: w.y0 + (w.h || 0) });
-        // along the wall, less the openings the cut passes through
-        const gaps = (w.openings || []).filter((q) => opensAt.includes(q.id)).map((q) => [q.offset + 0.02, q.offset + q.width - 0.02]).sort((p, q) => p[0] - q[0]);    // over the jambs too
-        let x = 0;
-        // the core across the whole thickness, then each face's strip a hair above it
+        const d = wallThick(S, w);
+        if (!d) continue;                     // still being built: leave it open to see
+        const { L, ux, uz, N, lo, hi } = d, [e0, e1] = capEnds(S, w, hi - lo);
+        S.capWallsData.push({ w, L, ux, uz, N, lo, hi, top: w.y0 + (w.h || 0) });
+        const gaps = (w.openings || []).filter((q) => opensAt.includes(q.id) && q.kind === "door").map((q) => [q.offset + 0.02, q.offset + q.width - 0.02]).sort((p, q) => p[0] - q[0]);    // a doorway stays open; a window is solid in the cut
         const band = (xa, xb, o0, o1, y, c) => { const P = (s2, o) => [w.a[0] + ux * s2 + N[0] * o, y, w.a[1] + uz * s2 + N[2] * o]; for (const q of [P(xa, o0), P(xb, o0), P(xb, o1), P(xa, o0), P(xb, o1), P(xa, o1)]) (pos.push(...q), cols.push(c[0], c[1], c[2])); };
-        const quad = (xa, xb) => { band(xa, xb, lo, hi, 0, CAP_CORE); for (const [o0, o1, c] of strips) band(xa, xb, o0, o1, 0.002, c); };
-        for (const [ga, gb] of gaps) { if (ga - x > 0.01) quad(x, ga); x = Math.max(x, gb); }
-        if (L - x > 0.01) quad(x, L);
-        // a door or window the cut passes through: its frame posts are solid in section too (white, across the unit's depth), and
-        // a window's sash across the middle; a doorway stays open between its posts
-        for (const q of w.openings || []) {
-          if (!opensAt.includes(q.id)) continue;
-          const e = q.offset + q.width, fw = 0.05, FR = MCOL.trim;
-          if (q.kind === "door") { band(q.offset, q.offset + fw + 0.02, lo, hi, 0.003, FR); band(e - fw - 0.02, e, lo, hi, 0.003, FR); }
-          else { band(q.offset, e, lo, hi, 0.003, FR); band(q.offset + fw, e - fw, -0.004, 0.004, 0.0045, CAP_GLASS); }     // and the glass, a pale line
-        }
+        let x = -e0;
+        for (const [ga, gb] of gaps) { if (ga - x > 0.01) band(x, ga, lo, hi, 0, CAP_CORE); x = Math.max(x, gb); }
+        if (L + e1 - x > 0.01) band(x, L + e1, lo, hi, 0, CAP_CORE);
       }
       if (pos.length) {
         const g = new T.BufferGeometry();
@@ -9545,7 +9532,7 @@
     _pl[0].copy(S.near).applyMatrix4(_im); _pl[1].copy(S.sideA).applyMatrix4(_im); _pl[2].copy(S.sideB).applyMatrix4(_im);
     const val = (pl, x, z) => pl.normal.x * x + pl.normal.z * z + pl.constant;    // kept where >= 0 (the planes stand upright)
     for (const d of S.capWallsData || []) {
-      const { w, L, ux, uz, N, lo, hi, strips, top } = d;
+      const { w, L, ux, uz, N, lo, hi, top } = d;
       if (top <= h + 0.02) continue;
       for (let i = 0; i < 3; i++) {
         const pl = _pl[i], nu = pl.normal.x * ux + pl.normal.z * uz;
@@ -9559,11 +9546,11 @@
         // up from the cut to the top of the wall, less an opening the plane passes through
         let ys = [[h, top]];
         // (only the clear opening between the jambs: the jambs and the wall round them are capped like the wall)
-        for (const q of w.openings || []) if (tc > q.offset + 0.02 && tc < q.offset + q.width - 0.02) ys = ys.flatMap(([y0, y1]) => [[y0, Math.min(y1, w.y0 + q.sill + (q.kind === "door" ? 0 : 0.02))], [Math.max(y0, w.y0 + q.sill + q.height - 0.02), y1]].filter(([p0, p1]) => p1 - p0 > 0.01));
+        for (const q of w.openings || []) if (q.kind === "door" && tc > q.offset + 0.02 && tc < q.offset + q.width - 0.02) ys = ys.flatMap(([y0, y1]) => [[y0, Math.min(y1, w.y0 + q.sill + (q.kind === "door" ? 0 : 0.02))], [Math.max(y0, w.y0 + q.sill + q.height - 0.02), y1]].filter(([p0, p1]) => p1 - p0 > 0.01));
         const nr = [pl.normal.x, 0, pl.normal.z], sh = -0.0015;      // a hair toward the cut side, off the clipped faces
         const pt = (o, y) => { const t = at(o); return [w.a[0] + ux * t + N[0] * o + nr[0] * sh, y, w.a[1] + uz * t + N[2] * o + nr[2] * sh]; };
         const quad = (o0, o1, y0, y1, col, e = 0) => { const a = pt(o0, y0), b = pt(o1, y0), c = pt(o1, y1), dd = pt(o0, y1); for (const q of [a, b, c, dd]) ((q[0] -= nr[0] * e), (q[2] -= nr[2] * e)); tri(a, b, c, nr, col); tri(a, c, dd, nr, col); };
-        for (const [y0, y1] of ys) { quad(lo, hi, y0, y1, CAP_CORE); for (const [o0, o1, col2] of strips) quad(o0, o1, y0, y1, col2, 0.0015); }
+        for (const [y0, y1] of ys) quad(lo, hi, y0, y1, CAP_CORE);
       }
     }
     g.setDrawRange(0, n);
@@ -9573,19 +9560,29 @@
   // ---- the openings of a finished wall, lined (docs/design/carpentry.md): a jamb board up each side and across the head, and a
   // sill board under a window, across the wall's whole thickness, so an opening shows finished wood, not the inside of the wall,
   // from any side and in the dollhouse cut. Primed white, or the building's trim colour
+  // how far a wall's cap runs on past each end: across the thickness of the wall it meets there, so a corner is closed
+  function capEnds(S, w, th) {
+    const near = (p) => S.mem.walls.some((o) => {
+      if (o === w) return false;
+      const dx = o.b[0] - o.a[0], dz = o.b[1] - o.a[1], l2 = dx * dx + dz * dz || 1, t = Math.max(0, Math.min(1, ((p[0] - o.a[0]) * dx + (p[1] - o.a[1]) * dz) / l2));
+      return Math.hypot(o.a[0] + dx * t - p[0], o.a[1] + dz * t - p[1]) < 0.25 && Math.abs(o.y0 - w.y0) < 0.3;
+    });
+    return [near(w.a) ? th / 2 + 0.02 : 0, near(w.b) ? th / 2 + 0.02 : 0];
+  }
   function wallThick(S, w) {
     const ms = (S.mem.byParent.get(w.id) || []).filter((m) => m.draw !== 0 && WALL_SHELL.has(m.stage) && !(m.kind === "cladding" && m.type === "trim") && m.section);
     if (!ms.length || ms.some((m) => S.plan.has(m.id))) return null;
     const L = Math.hypot(w.b[0] - w.a[0], w.b[1] - w.a[1]) || 1, ux = (w.b[0] - w.a[0]) / L, uz = (w.b[1] - w.a[1]) / L, N = [-uz, 0, ux];
-    let lo = 1e9, hi = -1e9;
+    let lo = 1e9, hi = -1e9, top = -1e9;
     for (const m of ms) {
       const ax = m.b[0] - m.a[0], ay = m.b[1] - m.a[1], az = m.b[2] - m.a[2], ml = Math.hypot(ax, ay, az) || 1, u = [ax / ml, ay / ml, az / ml], n = m.n;
       const t = [u[1] * n[2] - u[2] * n[1], u[2] * n[0] - u[0] * n[2], u[0] * n[1] - u[1] * n[0]], dot = (v) => Math.abs(v[0] * N[0] + v[2] * N[2]);
       const c = ((m.a[0] + m.b[0]) / 2 - w.a[0]) * N[0] + ((m.a[2] + m.b[2]) / 2 - w.a[1]) * N[2], half = (dot(t) * m.section.b + dot(n) * m.section.d + dot(u) * ml) / 2;
       if (half > 0.4) continue;
       lo = Math.min(lo, c - half); hi = Math.max(hi, c + half);
+      top = Math.max(top, Math.max(m.a[1], m.b[1]) + (Math.abs(n[1]) * m.section.d + Math.abs(t[1]) * m.section.b) / 2);
     }
-    return hi > lo ? { L, ux, uz, N, lo, hi } : null;
+    return hi > lo ? { L, ux, uz, N, lo, hi, top } : null;
   }
   function jambGeo(S) {
     if (!S.mem.walls) return null;
@@ -9599,9 +9596,15 @@
       q(P(-1, 1, -1), P(-1, 1, 1), P(1, 1, 1), P(1, 1, -1)); q(P(-1, -1, -1), P(1, -1, -1), P(1, -1, 1), P(-1, -1, 1));
     };
     for (const w of S.mem.walls) {
-      if (!(w.openings || []).length) continue;
       const d = wallThick(S, w);
       if (!d) continue;
+      // the top of a closed wall: one flat cap over its whole thickness (plates and stud ends under it), into the corners
+      {
+        const [e0, e1] = capEnds(S, w, d.hi - d.lo), K = CAP_CORE, y = d.top + 0.002;
+        const P = (s2, o) => [w.a[0] + d.ux * s2 + d.N[0] * o, y, w.a[1] + d.uz * s2 + d.N[2] * o];
+        for (const q of [P(-e0, d.lo), P(d.L + e1, d.lo), P(d.L + e1, d.hi), P(-e0, d.lo), P(d.L + e1, d.hi), P(-e0, d.hi)]) (pos.push(q[0], q[1], q[2]), cols.push(K[0], K[1], K[2]));
+      }
+      if (!(w.openings || []).length) continue;
       const { ux, uz, N, lo, hi } = d, om = (lo + hi) / 2, oh = (hi - lo) / 2 + 0.001, yb = w.y0 + (w.foot === undefined ? FLOOR_T : w.foot);
       const at = (sv, y) => [w.a[0] + ux * sv + N[0] * om, y, w.a[1] + uz * sv + N[2] * om];
       const U = [ux, 0, uz], X = [N[0] * oh, 0, N[2] * oh];
@@ -10154,7 +10157,9 @@
     const pv = [];
     if (eq) {
       // water ports get no dots: pipes are fitted by hand, part by part (docs/FIRST_WATER.md). Wires and flues stay here for now.
-      for (const f of FX.list) for (const p of (fxDef(f.fixture) || { ports: [] }).ports) if (p.type !== "water") pv.push({ p: portPos(f, p.id), type: p.type, fid: f.id, pid: p.id, from: !!FX.from && FX.from.piece === f.id && FX.from.port === p.id });
+      // power ports too once cable is run with Hands (services, src/services-hands.js): Equip keeps only flues
+      const noPower = !!window.__servicesHands;
+      for (const f of FX.list) for (const p of (fxDef(f.fixture) || { ports: [] }).ports) if (p.type !== "water" && !(noPower && p.type === "power")) pv.push({ p: portPos(f, p.id), type: p.type, fid: f.id, pid: p.id, from: !!FX.from && FX.from.piece === f.id && FX.from.port === p.id });
       for (const ln of FX.links) {
         const r = linkRoute(ln);
         r && pv.push({ p: [(r.pts[1][0] + r.pts[3][0]) / 2, r.pts[1][1], (r.pts[1][2] + r.pts[3][2]) / 2], type: "link", lid: ln.id, text: fmtM(r.len), sel: ln.id === FX.sel });
@@ -10314,9 +10319,14 @@
     const c = CONN[pa.type];
     if (!c) return no("Nothing can be run from a " + pa.type + " port yet.");
     if (FX.links.some((l) => (l.from.piece === a && l.from.port === ap && l.to.piece === b && l.to.port === bp) || (l.from.piece === b && l.from.port === bp && l.to.piece === a && l.to.port === ap))) return no("These two ports are already joined.");
-    pushUndo();
     const ln = { id: newPid(), kind: c.kind, from: { piece: a, port: ap }, to: { piece: b, port: bp }, material: (opts && opts.material) || c.material };
     ln[c.key] = (opts && opts[c.key]) || c.def;
+    // power and water are runs in the routes store now (services): one connection model, kept by the simulation
+    if ((pa.type === "power" || pa.type === "water") && G.servicesLink && G.sim && G.sim.handlers.has("routes.addRun")) {
+      const r = linkRoute(ln);
+      return G.servicesLink({ ...ln, pts: r ? r.pts : [], lengthM: r ? r.len : 0 });
+    }
+    pushUndo();
     FX.links.push(ln);
     FX.sel = ln.id;
     fxTouch();
@@ -10935,9 +10945,22 @@
     else S.ext[id] = JSON.parse(JSON.stringify(data));
     S.ver++;
     S.pc = null;
-    rebuild(S);
+    if (isEmpty(S)) ((disposeStruct(S)), B.version++); // nothing left (a free-standing deck removed)
+    else rebuild(S);
     touchUi();
     return true;
+  }
+  // a new structure that holds only an extension's data (a free-standing deck): F = { ox, oz, yaw, y0 } (y0 its datum)
+  function extCreate(F, id, data) {
+    if (!EXT.get(id) || !F || ![F.ox, F.oz, F.yaw, F.y0].every(Number.isFinite)) return null;
+    pushUndo();
+    const S = newStruct({ ox: F.ox, oz: F.oz, yaw: F.yaw, y0: F.y0, level: 0, fresh: true });
+    S.found = "piers";
+    S.ext = { [id]: JSON.parse(JSON.stringify(data)) };
+    rebuild(S);
+    B.version++;
+    touchUi();
+    return S.id;
   }
   EXT.bind({ hints: HINTS, tools: TOOLS, touch: touchUi, selecting: () => B.sel.length > 0,
     refresh() {
@@ -10970,6 +10993,7 @@
     // the extension point (ARCHITECTURE.md, "Adding to build mode"): extend(spec), setExt(structId, id, data), getExt(structId, id)
     extend: EXT.extend,
     setExt,
+    extCreate,
     getExt(structId, id) {
       const S = B.structs.find((O) => O.id === structId);
       return S && S.ext && S.ext[id] !== undefined ? JSON.parse(JSON.stringify(S.ext[id])) : null;
@@ -11141,6 +11165,8 @@
         }
         const sh = stairH(S, lx, lz);
         if (sh !== null && y >= S.y0 + sh - 0.65) g = Math.max(g, S.y0 + sh);
+        const xg = S.ext ? EXT.ground(S, lx, lz, y - S.y0) : null; // an extension's walking surface (a deck), in the structure's y
+        if (xg !== null && y >= S.y0 + xg - 0.65) g = Math.max(g, S.y0 + xg);
       }
       return g;
     },
@@ -11371,6 +11397,29 @@
     addFixtures: fxAdd,
     setFixtureSetting: fxSetting,
     connect: fxConnect,
+    // services (S4): where a port is, and the old Equip wires and water pipes, for their move into the routes store
+    portPos(fixtureId, portId) {
+      const f = FX.list.find((q) => q.id === fixtureId),
+        d = f && fxDef(f.fixture);
+      return d && d.ports.some((p) => p.id === portId) ? portPos(f, portId) : null;
+    },
+    legacyLinks() {
+      const out = [];
+      for (const ln of FX.links) {
+        if (!(ln.kind === "wire" || (ln.kind === "pipe" && !((ln.diameterMm || 0) >= 100)))) continue;
+        const r = linkRoute(ln);
+        if (r) out.push({ ...ln, from: { ...ln.from }, to: { ...ln.to }, pts: r.pts, lengthM: r.len });
+      }
+      return out;
+    },
+    dropLegacyLinks(ids) {
+      const drop = new Set(ids || []),
+        n = FX.links.length;
+      FX.links = FX.links.filter((l) => !drop.has(l.id));
+      if (FX.sel && drop.has(FX.sel)) FX.sel = null;
+      if (n !== FX.links.length) fxTouch();
+      return n - FX.links.length;
+    },
     removeFixture(id) {
       const ok = fxRemove(id);
       ok && fxTouch();
