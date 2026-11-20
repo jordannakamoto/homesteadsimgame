@@ -330,3 +330,41 @@ Proposed, not done (other sessions are in these files):
 2. Objects, knocking snow off, kick-up, walking speed, wheel surfaces.
 3. Later: the snow shovel and a plough blade as tools, roof snow as its own store (sliding off metal roofs into piles
    under the eaves), refreeze and ice, the consumers in 5.8.
+
+## 7. Revision after the first playtest: shape
+
+The first build's tracks were clean capsules with a smooth ridge, a boot print was under three texels wide, sunlit
+snow sat at the tone curve's top so relief vanished, and the deep snow ended in a visible disc from the high camera.
+
+What snow does (Fearing 2000, Filhol and Sturm 2019, Schmidt and Gluns 1991, Schmidt and Pomeroy 1990):
+
+- It lands on whatever faces the sky, then slumps to an angle of repose that rises with temperature (cohesion): about
+  35 to 40 degrees cold and dry, near vertical and overhanging close to 0 C. So a cap is widest at its base and
+  rounded; on a narrow support its height is limited by the support's half-width.
+- On a bough it starts as a ridge on the top line, bridges between twigs by cohesion into one cushion along the
+  bough, and saturates as the bough bends and sheds. Flat boughs carry most; bare limbs a thin line and fork wedges.
+- Disturbed snow breaks into clumps: walls fall in, what is pushed out lies in lumps.
+- It mounds where something is under it (it drapes: thin snow follows the shape, deep snow smooths it away), where
+  the wind drops it (lees), and where it falls from above (drip lines, eaves); it hollows round trunks (tree wells).
+
+Changes:
+
+- Live texture 2.5 cm a texel (2048 on High, 1024 on Medium); a fourth, 5 cm ring under the player. The fragment
+  reads the mip that matches the pixel, not the ring.
+- Stamps: the edge is warped by world-anchored noise, the floor is lumpy, the rim is a jittered grid of domes
+  (`clumps`), a few thrown further; `uneven` per presser (feet 0.75 to 1, tyres 0.3, blades low). Clump height
+  `min(0.16, 0.5 S)`; clumps that fell back in keep a quarter of it.
+- Feet: wider prints, toes out, jittered, a drag groove behind each from ankle depth; wading is a 60 cm rough trench
+  with a leg hole to the bottom at each stride.
+- The rut's own shadow: three taps of the live height toward the sun (the snow mesh casts none). Sky occlusion in a
+  rut is now slight: cutting the blue sky light left the warm sun and turned rut floors tan.
+- `drape.js`: rocks, stumps and logs as soft domes in a 20 cm texture; the surface banks up against the ones that
+  stand clear and pillows over the ones it has covered, flattening with depth. `lumps.js`: low tussock hummocks and
+  small fallen clumps, the clumps thick where a crown hides the sky.
+- The surface's thickness fades on a circle, and grass stalks beyond it show only what would stand clear, so nothing
+  marks where the deep snow ends.
+- `clumps.js`: cushions along evergreen boughs and caps on rocks, stumps and logs, as instances; crown whitening
+  is only a dusting. `uSnowStick` (cohesion from temperature) fattens or thins them.
+- `__snow.tune({ albedo, wrap, cavity, shadow, lumps })` changes the look numbers live.
+
+Still open: roofs carry a tint, not a slab with a rounded, overhanging eave; no scour moat round posts and trunks.

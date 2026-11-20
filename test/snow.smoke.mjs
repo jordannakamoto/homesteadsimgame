@@ -29,7 +29,7 @@ check('the storm lies on the reference pack', depth > 0.3, depth.toFixed(3) + ' 
 await t.frames(3);
 let info = await G(() => __snow.info());
 check('field built and snow active', info.active && info.fieldBuilt && info.fieldMaxD > 0.3, JSON.stringify(info));
-check('full path on the forced software renderer', info.tier === 'high' && info.triangles > 70000 && info.live === 1024, info.tier + ' ' + info.triangles);
+check('full path on the forced software renderer', info.tier === 'high' && info.triangles > 70000 && info.live === 2048, info.tier + ' ' + info.triangles);
 check('terrain and grass patched', info.groundPatched === true);
 check('objects patched (trees, rocks, ground cover)', info.objects >= 3, 'materials ' + info.objects);
 

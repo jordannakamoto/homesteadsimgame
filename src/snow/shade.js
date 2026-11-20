@@ -37,9 +37,9 @@ export const LIVE_GLSL = /* glsl */ `
 uniform sampler2D uSnowLive; uniform vec4 uSnowLiveWin; uniform float uSnowLiveTexel;
 bool snowInLive(vec2 w, float margin) { vec2 d = abs(w - uSnowLiveWin.xy); return uSnowLiveWin.w > 0.5 && max(d.x, d.y) < uSnowLiveWin.z * 0.5 - margin; }
 vec4 snowLive(vec2 w, float lod) { return textureLod(uSnowLive, w / uSnowLiveWin.z, lod); }
-// height the live layer adds (m), S the column's squash: pressed down, a rim pushed up beside the print (about a
-// quarter of what a boot displaces goes sideways; the ring's area is about 1.45 times the print's), kicked clumps
-float snowLiveH(vec4 l, float S) { return -l.r * S + uSnowFlags.z * 0.17 * S * l.g * (1.0 - smoothstep(0.0, 0.25, l.r)) + 0.02 * l.b; }`;
+// height the live layer adds (m), S the column's squash: pressed down; what was pushed out lying beside the print in
+// clumps (up to half the squash, 16 cm at most; the ones that fell back in make the floor lumpy); crumbs
+float snowLiveH(vec4 l, float S) { return -l.r * S + uSnowFlags.z * min(0.16, 0.5 * S) * l.g * (1.0 - 0.75 * smoothstep(0.1, 0.6, l.r)) + 0.012 * l.b; }`;
 // The ground under the snow: the terrain mesh's height at 0.5 m lattice points, interpolated over each 0.5 m cell
 // split along the same diagonal as the terrain's 1 m quads, so it is the drawn terrain exactly.
 export const GROUND_GLSL = /* glsl */ `
@@ -64,17 +64,33 @@ float snowUndulate(vec2 w) {
 // ---------------------------------------------------------------- the snow surface's material
 const V_PARS = FIELD_GLSL + LIVE_GLSL + GROUND_GLSL + /* glsl */ `
 uniform vec3 uSnowCenter; uniform sampler2D uSkyMap; uniform float uSkyK; uniform float uSkySize;
-varying vec3 vSnowW; varying vec4 vSnowA; varying vec4 vSnowF; varying vec2 vSnowSlope; varying float vSnowSky;`;
+uniform sampler2D uSnowLumps; uniform sampler2D uSnowDrape; uniform vec4 uSnowTune; uniform vec4 uSnowTune2;
+varying vec3 vSnowW; varying vec4 vSnowA; varying vec4 vSnowF; varying vec2 vSnowSlope; varying float vSnowSky;
+// Snow never lies as a sheet: it pillows over what it buried (tufts, stones) and is pocked with what fell from the
+// crowns. A small tiling height texture (12.8 m, 2.5 cm): r mounds, g small fallen clumps (thick where the sky is hidden
+// by a crown); its strength wanders so the tile never shows.
+float snowLumpH(vec2 w, float D0, float sky, float lod) {
+  vec4 t = textureLod(uSnowLumps, w / 12.8, lod);
+  // what it buried (drape.js: rocks, stumps, logs; metres above the ground): banked up against the ones that stand
+  // clear of it (to a third of its depth), a pillow over the ones it covers, flattening as they go deeper
+  float ho = texture(uSnowDrape, w / 51.2).r * 1.5;
+  float drape = min(ho, 0.35 * D0 + 0.02) * exp(-max(D0 - ho, 0.0) / 0.35);
+  return uSnowTune2.y * (drape + smoothstep(0.03, 0.14, D0) * (0.025 * t.r * (0.5 + snowNoise2(w / 6.3)) + 0.04 * t.g * (0.12 + 1.7 * (1.0 - sky))));
+}`;
 const V_BEGIN = /* glsl */ `
   vec2 sw = uSnowCenter.xy + position.xz;
   float sRing = position.y;
   vec4 sF = snowField(sw);
   // the snow's thickness fades to nothing over the last 5 m of the surface, where the whitened ground takes over
-  float sEf = 1.0 - smoothstep(uSnowCenter.z - 5.0, uSnowCenter.z - 0.4, max(abs(position.x), abs(position.z)));
+  // (round, not square: from high above a square of deeper snow would show)
+  float sEf = 1.0 - smoothstep(uSnowCenter.z - 7.0, uSnowCenter.z - 0.4, length(position.xz));
+  float sLodV = sRing + uSnowTune2.x;                        // the live texture's mip whose texel matches this ring's vertices
   float sS = snowSquash(sF) * sEf;
   float sBase = sF.x * snowUndulate(sw) * sEf;
-  vec4 sL = snowLive(sw, sRing);
-  float sTh = sBase * (1.0 - sL.a) + snowLiveH(sL, sS);
+  vec4 sL = snowLive(sw, sLodV);
+  vSnowSky = mix(1.0, texture(uSkyMap, (sw + 0.5) / uSkySize).r, uSkyK);
+  float sLump = snowLumpH(sw, sF.x, vSnowSky, sLodV) * sEf;
+  float sTh = (sBase + sLump * (1.0 - sL.r)) * (1.0 - sL.a) + snowLiveH(sL, sS);
   float sG = snowGround(sw);
   float sH = sG + 0.015 + sTh;
   // the field-scale slope: the ground and the untouched snow half a metre either side
@@ -84,14 +100,20 @@ const V_BEGIN = /* glsl */ `
   float hN = snowGround(sw + sE.yx) + snowField(sw + sE.yx).x * snowUndulate(sw + sE.yx) * sEf;
   float hS = snowGround(sw - sE.yx) + snowField(sw - sE.yx).x * snowUndulate(sw - sE.yx) * sEf;
   vSnowSlope = vec2(hE - hW, hN - hS);
-  vSnowW = vec3(sw.x, sH, sw.y); vSnowA = vec4(sBase, sS, sRing, sTh); vSnowF = sF;
-  // the engine's sky visibility (crowns overhead, hollows): the forest floor's snow is dimmer, as its ground is
-  vSnowSky = mix(1.0, texture(uSkyMap, (sw + 0.5) / uSkySize).r, uSkyK);
+  vSnowW = vec3(sw.x, sH, sw.y); vSnowA = vec4(sBase, sS, sEf, sTh); vSnowF = sF;
   vec3 transformed = vec3(sw.x, sH, sw.y);`;
 const F_PARS = FIELD_GLSL + LIVE_GLSL + /* glsl */ `
-uniform int uSnowView;
+uniform int uSnowView; uniform sampler2D uSnowLumps; uniform sampler2D uSnowDrape; uniform vec4 uSnowTune; uniform vec4 uSnowTune2; uniform vec3 uSnowSun;
 varying vec3 vSnowW; varying vec4 vSnowA; varying vec4 vSnowF; varying vec2 vSnowSlope; varying float vSnowSky;
-vec3 gSnN, gSnNs, gSnW; float gSnRim, gSnGlint, gSnPx, gSnCav;
+vec3 gSnN, gSnNs, gSnW; float gSnRim, gSnGlint, gSnPx, gSnCav, gSnShade;
+float snowLumpH(vec2 w, float D0, float sky, float lod) {
+  vec4 t = textureLod(uSnowLumps, w / 12.8, lod);
+  // what it buried (drape.js: rocks, stumps, logs; metres above the ground): banked up against the ones that stand
+  // clear of it (to a third of its depth), a pillow over the ones it covers, flattening as they go deeper
+  float ho = texture(uSnowDrape, w / 51.2).r * 1.5;
+  float drape = min(ho, 0.35 * D0 + 0.02) * exp(-max(D0 - ho, 0.0) / 0.35);
+  return uSnowTune2.y * (drape + smoothstep(0.03, 0.14, D0) * (0.025 * t.r * (0.5 + snowNoise2(w / 6.3)) + 0.04 * t.g * (0.12 + 1.7 * (1.0 - sky))));
+}
 float snH(vec2 w, float lod, float S, float base) { vec4 l = snowLive(w, lod); return snowLiveH(l, S) - base * l.a; }`;
 // replaces lights_lambert_pars_fragment: same structure and signatures as three r187's Lambert
 const F_LIGHT = /* glsl */ `
@@ -122,17 +144,19 @@ void RE_Direct_Snow(const in IncidentLight directLight, const in vec3 geometryPo
   vec3 N = geometryNormal, L = directLight.direction, V = geometryViewDir;
   float ndl = dot(N, L);
   // light wraps past the terminator (multiple scattering) and comes back bluer where it travelled far
-  float wrap = mix(saturate(ndl), clamp((ndl + 0.35) / 1.35, 0.0, 1.0), uSnowFlags.y);
+  float wrap = mix(saturate(ndl), clamp((ndl + uSnowTune.y) / (1.0 + uSnowTune.y), 0.0, 1.0), uSnowFlags.y);
   vec3 tint = mix(vec3(1.0), mix(vec3(0.60, 0.80, 1.0), vec3(1.0), smoothstep(0.0, 0.5, ndl)), uSnowFlags.y);
   vec3 lam = BRDF_Lambert(material.diffuseColor);
   float sky = mix(1.0, vSnowSky, 0.35);              // as the terrain: a little of the sun is really sky light
-  reflectedLight.directDiffuse += directLight.color * wrap * tint * lam * sky;
+  // gSnShade: the sun hidden by the rut's own wall or a clump beside it (the live texture's horizon toward the sun)
+  vec3 sun = directLight.color * gSnShade;
+  reflectedLight.directDiffuse += sun * wrap * tint * lam * sky;
   // thin raised lips lit from behind glow
-  reflectedLight.directDiffuse += directLight.color * lam * 0.35 * gSnRim * pow(clamp(dot(V, -L) * 0.5 + 0.5, 0.0, 1.0), 3.0);
+  reflectedLight.directDiffuse += sun * lam * 0.35 * gSnRim * pow(clamp(dot(V, -L) * 0.5 + 0.5, 0.0, 1.0), 3.0);
   // glints, in world space so the facets stay where they are
   if (gSnGlint > 0.0 && ndl > 0.0) {
     vec3 Lw = normalize((vec4(L, 0.0) * viewMatrix).xyz), Vw = normalize((vec4(V, 0.0) * viewMatrix).xyz);
-    reflectedLight.directDiffuse += directLight.color * snowGlints(gSnW.xz, gSnNs, Vw, Lw, gSnPx) * 1.2 * gSnGlint;
+    reflectedLight.directDiffuse += sun * snowGlints(gSnW.xz, gSnNs, Vw, Lw, gSnPx) * 1.2 * gSnGlint;
   }
   // wet or crusted snow: a broad low sheen toward the sun
   reflectedLight.directDiffuse += directLight.color * uSnowRef.w * 0.05 * pow(saturate(dot(N, normalize(L + V))), 12.0);
@@ -140,37 +164,58 @@ void RE_Direct_Snow(const in IncidentLight directLight, const in vec3 geometryPo
 void RE_IndirectDiffuse_Snow(const in vec3 irradiance, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in LambertMaterial material, inout ReflectedLight reflectedLight) {
   // sky light: the blue of the open sky (snow in shade is lit by nothing else), hidden in a rut and under crowns, and
   // what does reach the bottom of a rut is bluer still
-  vec3 skyTint = vec3(0.86, 0.95, 1.12) * mix(vec3(1.0), vec3(0.8, 0.9, 1.05), min(gSnCav * 1.6, 1.0));
+  vec3 skyTint = vec3(0.86, 0.95, 1.12);
   reflectedLight.indirectDiffuse += irradiance * BRDF_Lambert(material.diffuseColor) * (1.0 - gSnCav) * vSnowSky * skyTint;
 }
 #define RE_Direct RE_Direct_Snow
 #define RE_IndirectDiffuse RE_IndirectDiffuse_Snow`;
 const F_MAIN = /* glsl */ `
-  float snLod = vSnowA.z, snTx = uSnowLiveTexel * exp2(snLod), snS = vSnowA.y, snBase = vSnowA.x;
+  // the live texture is read at the mip that matches this pixel, not this ring: a print stays sharp as far as it can be seen
+  gSnPx = max(length(dFdx(vSnowW)), length(dFdy(vSnowW)));
+  float snLod = clamp(log2(max(gSnPx, 1e-4) / uSnowLiveTexel), 0.0, 7.0), snTx = uSnowLiveTexel * exp2(snLod), snS = vSnowA.y, snBase = vSnowA.x;
   vec4 snL = snowLive(vSnowW.xz, snLod);
-  float snThick = snBase * (1.0 - snL.a) + snowLiveH(snL, snS);
+  float snP = snL.r;
+  float snLuK = vSnowA.z * (1.0 - snP), snLuLod = snLod, snLuE = max(0.04, snTx);
+  float snLu = snowLumpH(vSnowW.xz, vSnowF.x, vSnowSky, snLuLod) * snLuK;
+  float snThick = (snBase + snLu) * (1.0 - snL.a) + snowLiveH(snL, snS);
   // where less than 2 to 4 cm of snow is left, the whitened ground below shows (with grass tips through it)
   if (snThick < 0.02 + 0.02 * snowHash12(floor(vSnowW.xz * 20.0) + 0.5)) discard;
-  float snP = snL.r;
   vec2 snE = vec2(snTx, 0.0);
+  float snH0 = snH(vSnowW.xz, snLod, snS, snBase);
   float snHx = snH(vSnowW.xz + snE.xy, snLod, snS, snBase) - snH(vSnowW.xz - snE.xy, snLod, snS, snBase);
   float snHz = snH(vSnowW.xz + snE.yx, snLod, snS, snBase) - snH(vSnowW.xz - snE.yx, snLod, snS, snBase);
-  gSnNs = normalize(vec3(-(vSnowSlope.x + snHx / (2.0 * snTx)), 1.0, -(vSnowSlope.y + snHz / (2.0 * snTx))));
-  gSnPx = max(length(dFdx(vSnowW)), length(dFdy(vSnowW)));
+  // the mounds' own slope
+  vec2 snLg = vec2(snowLumpH(vSnowW.xz + vec2(snLuE, 0.0), vSnowF.x, vSnowSky, snLuLod), snowLumpH(vSnowW.xz + vec2(0.0, snLuE), vSnowF.x, vSnowSky, snLuLod)) * snLuK - snLu;
+  gSnNs = normalize(vec3(-(vSnowSlope.x + snHx / (2.0 * snTx) + snLg.x / snLuE), 1.0, -(vSnowSlope.y + snHz / (2.0 * snTx) + snLg.y / snLuE)));
   // grains: a faint micro relief close up, off where the snow is packed smooth
   float snM = 0.5 * (1.0 - snP) * (1.0 - smoothstep(0.004, 0.025, gSnPx)) * uSnowFlags.y;
   vec2 snQ = vSnowW.xz * 28.0; float snN0 = snowNoise2(snQ);
   gSnN = normalize(gSnNs + snM * vec3(snN0 - snowNoise2(snQ + vec2(0.31, 0.0)), 0.0, snN0 - snowNoise2(snQ + vec2(0.0, 0.31))));
   gSnW = vSnowW;
-  gSnCav = clamp((snL.r - snowLive(vSnowW.xz, snLod + 3.5).r) * snS * 6.0, 0.0, 0.6);
+  gSnCav = clamp((snL.r - snowLive(vSnowW.xz, snLod + 3.0).r) * snS * uSnowTune.z, 0.0, 0.35);
   gSnRim = uSnowFlags.z * snL.g * (1.0 - smoothstep(0.0, 0.25, snL.r));
-  gSnGlint = uSnowFlags.x * clamp(uSnowRef.z, 0.0, 1.0) * (1.0 - snP) * (1.0 - snL.b);`;
+  gSnGlint = uSnowFlags.x * clamp(uSnowRef.z, 0.0, 1.0) * (1.0 - snP) * (1.0 - snL.b);
+  // the rut's own shadow: walk the live texture toward the sun; a wall or clump standing above the sun's ray hides it.
+  // (The snow mesh casts no shadow of its own; this is what makes a print read from above.)
+  gSnShade = 1.0;
+  {
+    float sl = length(uSnowSun.xz);
+    if (sl > 1e-3 && uSnowSun.y > 0.03 && uSnowTune.w > 0.0) {
+      vec2 sd = uSnowSun.xz / sl; float tanE = uSnowSun.y / sl, occ = 0.0;
+      for (int i = 0; i < 3; i++) {
+        float dd = snTx * (i == 0 ? 2.0 : (i == 1 ? 5.0 : 11.0));
+        float hs = snH(vSnowW.xz + sd * dd, snLod + float(i), snS, snBase);
+        occ = max(occ, (hs - snH0 - dd * tanE) / (0.015 + dd * 0.3));
+      }
+      gSnShade = 1.0 - uSnowTune.w * clamp(occ, 0.0, 1.0);
+    }
+  }`;
 const F_COLOR = /* glsl */ `#include <color_fragment>
   {
     vec3 a = snowAlbedo(vSnowF.y, snP);
     // a rut pressed to within a few cm of the ground shows the dirt through it
-    a = mix(a, vec3(0.31, 0.28, 0.23), (1.0 - smoothstep(0.03, 0.07, snThick)) * smoothstep(0.3, 0.8, snP) * 0.55);
-    diffuseColor.rgb = a;
+    a = mix(a, vec3(0.31, 0.28, 0.23), (1.0 - smoothstep(0.02, 0.05, snThick)) * smoothstep(0.3, 0.8, snP) * 0.55);
+    diffuseColor.rgb = a * uSnowTune.x;
   }`;
 const F_DEBUG = /* glsl */ `#include <dithering_fragment>
   if (uSnowView == 1) gl_FragColor = vec4(snL.r, snL.g * 2.0, snL.b, 1.0);
@@ -179,7 +224,7 @@ const F_DEBUG = /* glsl */ `#include <dithering_fragment>
   else if (uSnowView == 4) gl_FragColor = vec4(gSnN * 0.5 + 0.5, 1.0);`;
 
 export const VIEWS = { press: 1, depth: 2, packed: 3, normal: 4 };
-const SURF_U = ['uSnowField', 'uSnowFieldWin', 'uSnowRef', 'uSnowWind', 'uSnowFlags', 'uSnowFlags2', 'uSnowLive', 'uSnowLiveWin', 'uSnowLiveTexel', 'uSnowGround', 'uSnowCenter', 'uSnowView', 'uSkyMap', 'uSkyK', 'uSkySize'];
+const SURF_U = ['uSnowField', 'uSnowFieldWin', 'uSnowRef', 'uSnowWind', 'uSnowFlags', 'uSnowFlags2', 'uSnowLive', 'uSnowLiveWin', 'uSnowLiveTexel', 'uSnowGround', 'uSnowCenter', 'uSnowView', 'uSkyMap', 'uSkyK', 'uSkySize', 'uSnowLumps', 'uSnowDrape', 'uSnowTune', 'uSnowTune2', 'uSnowSun'];
 
 // The snow surface's material: receives shadows, fog and the scene's lights like everything else.
 export function createSurfaceMaterial(T, U) {
@@ -197,6 +242,6 @@ export function createSurfaceMaterial(T, U) {
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize(mat3(viewMatrix) * gSnN);')
       .replace('#include <dithering_fragment>', F_DEBUG);
   };
-  mat.customProgramCacheKey = () => 'snow-surface-2';
+  mat.customProgramCacheKey = () => 'snow-surface-3';
   return mat;
 }

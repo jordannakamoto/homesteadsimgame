@@ -2,13 +2,13 @@
    simulation's snowpack (__game.snow, src/sim/snow.js) and owns no truth of its own: footprints and ruts here are a
    picture, the packed path they make is sent to the sim and stays.
      field.js   the snowpack and the ground under it as two small textures round the player (CPU-filled)
-     live.js    the 5 cm deformation texture: footprints, ruts, rims (drawn on the GPU, only when something presses)
+     live.js    the 2.5 cm deformation texture: footprints, ruts, rims (drawn on the GPU, only when something presses)
      surface.js the nested-ring mesh of the snow surface; shade.js its material and the shared GLSL
      ground.js  the terrain whitened and the grass weighed down by the field; actors.js the feet and wheels
      objects.js snow on things that face up (buildings, rocks, logs, vehicles, tree crowns), never under a roof;
                 crowns knocked clear when a tree is chopped, felled or sheds in the wind
    Tiers: Low, a software renderer or no half-float targets: the whitened ground and grass only. Medium: a 25.6 m
-   surface and a 512 texture. High and Ultra: 51.2 m and 1024.
+   surface and a 1024 texture. High and Ultra: 51.2 m and 2048 (2.5 cm a texel).
    Summer costs nothing: no texture, no patched material, no mesh until snow first lies, and all of it is released
    again when the last of it has gone. Reaches the game only through window.__game; exposes window.__snow. */
 import { gpuCaps } from './gpu.js';
@@ -19,6 +19,8 @@ import { FIELD_GLSL, LIVE_GLSL, GROUND_GLSL, createSurfaceMaterial, VIEWS } from
 import { createGroundPatches } from './ground.js';
 import { createActors } from './actors.js';
 import { createObjects } from './objects.js';
+import { createLumps } from './lumps.js';
+import { createDrape } from './drape.js';
 
 (() => {
   const G = window.__game;
@@ -42,24 +44,29 @@ import { createObjects } from './objects.js';
     uSnowFlags: { value: new T.Vector4(1, 1, 1, 1) },                               // glints, scatter, rims, undulate
     uSnowFlags2: { value: new T.Vector4(1, 1, 0, 0) },                              // bury, surface
     uSnowView: { value: 0 },
+    uSnowLumps: { value: null }, uSnowDrape: { value: null },                                                    // mounds and fallen clumps (lumps.js)
+    uSnowTune: { value: new T.Vector4(0.92, 0.12, 5, 1) },                           // albedo x, light wrap, rut sky-shadow gain, rut sun-shadow strength
+    uSnowTune2: { value: new T.Vector4(1, 1, 0, 0) },                               // live mip of the finest ring, mounds x
+    uSnowSun: G.skyU && G.skyU.uGSunDir ? G.skyU.uGSunDir : { value: new T.Vector3(0.3, 0.8, 0.3) },
     // the engine's sky-visibility map (__game.skyVis), so snow under crowns and in hollows is dimmer as its ground is
     uSkyMap: G.skyVis ? G.skyVis.map : { value: null }, uSkyK: G.skyVis ? G.skyVis.k : { value: 0 }, uSkySize: { value: G.skyVis ? G.skyVis.size : 512 },
   };
 
   // look switches, for comparing (kept in localStorage)
   const FLAG_KEY = 'snowFlags';
-  const flags = { surface: true, glints: true, scatter: true, rims: true, bury: true, undulate: true, objects: true };
+  const flags = { surface: true, glints: true, scatter: true, rims: true, bury: true, undulate: true, objects: true, lumps: true, selfShadow: true };
   try { Object.assign(flags, JSON.parse(localStorage.getItem(FLAG_KEY) || '{}')); } catch (e) { /* none saved */ }
   function applyFlags() {
     const b = (v) => (v ? 1 : 0);
     U.uSnowFlags.value.set(b(flags.glints), b(flags.scatter), b(flags.rims), b(flags.undulate));
     U.uSnowFlags2.value.set(b(flags.bury), b(flags.surface), 0, 0);
+    U.uSnowTune2.value.y = b(flags.lumps); U.uSnowTune.value.w = flags.selfShadow ? 1 : 0;
   }
   applyFlags();
 
   const caps = gpuCaps(G.renderer, 'snowLive');   // localStorage.snowLive = 'force' runs the full path on a software renderer
   const ground = createGroundPatches(G, U);
-  let active = false, tier = 'off', field = null, live = null, surf = null, mesh = null, mat = null;
+  let active = false, tier = 'off', field = null, live = null, surf = null, mesh = null, mat = null, drape = null;
   let checkT = 1, goneT = 0, tierT = 0, decayT = 0, lastFall = null, lastT = null;
   const stat = { stamps: 0, stampsSec: 0, secT: 0, secN: 0, ms: 0, msN: 0, msAvg: 0 };
   const onStamp = [];
@@ -132,7 +139,10 @@ import { createObjects } from './objects.js';
     if (mesh) { G.scene.remove(mesh); surf.geo.dispose(); mat.dispose(); }
     if (live) live.dispose();
     if (field) field.groundOff();
+    if (drape) { drape.dispose(); drape = null; }
+    if (U.uSnowLumps.value) { U.uSnowLumps.value.dispose(); U.uSnowLumps.value = null; }
     mesh = surf = mat = live = null;
+    U.uSnowCenter.value.z = 0;
   }
   function setTier(t) {
     if (t === tier) return;
@@ -140,7 +150,11 @@ import { createObjects } from './objects.js';
     tier = t;
     if (t === 'medium' || t === 'high') {
       field.groundOn();
-      live = createLive(G, U, t === 'high' ? { n: 1024, m: 51.2 } : { n: 512, m: 25.6 });
+      // 2.5 cm a texel: a boot print is six texels wide
+      live = createLive(G, U, t === 'high' ? { n: 2048, m: 51.2 } : { n: 1024, m: 25.6 });
+      U.uSnowTune2.value.x = t === 'high' ? 1 : 2;
+      U.uSnowLumps.value = createLumps(T);
+      drape = createDrape(G, U);
       surf = buildSurface(T, RINGS[t]);
       mat = createSurfaceMaterial(T, U);
       mesh = new T.Mesh(surf.geo, mat);
@@ -195,6 +209,7 @@ import { createObjects } from './objects.js';
       const cx = Math.round(P.x / SNAP) * SNAP, cz = Math.round(P.z / SNAP) * SNAP;
       U.uSnowCenter.value.set(cx, cz, surf.half);
       field.groundUpdate(cx, cz);
+      drape.update(dt, cx, cz);
       const c = live.centre;
       if (!c || c[0] !== cx || c[1] !== cz) live.follow(cx, cz);
     }
@@ -228,6 +243,8 @@ import { createObjects } from './objects.js';
     uniforms: U,
     glsl: { field: FIELD_GLSL, live: LIVE_GLSL, ground: GROUND_GLSL },
     stamp, onStamp, flags,
+    // look numbers, live: tune({ albedo, wrap, cavity, shadow, lumps })
+    tune(o = {}) { const a = U.uSnowTune.value, b2 = U.uSnowTune2.value; if (o.albedo != null) a.x = o.albedo; if (o.wrap != null) a.y = o.wrap; if (o.cavity != null) a.z = o.cavity; if (o.shadow != null) a.w = o.shadow; if (o.lumps != null) b2.y = o.lumps; return { albedo: a.x, wrap: a.y, cavity: a.z, shadow: a.w, lumps: b2.y }; },
     // snow on a material's upward faces (kind: 'object', 'rock', 'tree', 'litter'), compiled in only while snow lies
     cover: (material, opts) => objects.cover(material, opts),
     // the snowpack at a point (sim units: depth0M, depthM, packed, rho, sinkM)
