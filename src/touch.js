@@ -41,7 +41,20 @@
   }
   if (window.matchMedia && matchMedia("(pointer: coarse)").matches) enable();
   window.addEventListener("pointerdown", (e) => e.pointerType === "touch" && enable(), true);
-  window.__touch = { enable };
+  // back to desktop mode (tests; also a hybrid laptop could call it): sticks and held buttons let go, the layout hides
+  function disable() {
+    if (!on) return;
+    on = false;
+    document.body.classList.remove("touch");
+    ui.hidden = true;
+    K.joyX = K.joyY = 0;
+    rx = ry = 0;
+    ui.querySelectorAll(".on").forEach((el) => el.classList.remove("on"));
+    ui.querySelectorAll(".nub").forEach((el) => (el.style.transform = ""));
+    mode = "";
+    B.uiVer++;
+  }
+  window.__touch = { enable, disable, get on() { return on; } };
 
   /* ---------- sticks ---------- */
   function stick(el, cb) {
