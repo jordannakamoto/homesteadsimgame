@@ -561,7 +561,7 @@
     }
     return I[x.icon] ? svg(I[x.icon], size > 30 ? 26 : 22) : "";
   }
-  const card = (x, n, m, pressed) => '<button type="button" class="btile bcard" data-g="' + n + '" data-i="' + m + '" title="' + esc(x.name) + '" aria-label="' + esc(x.name) + '" aria-pressed="' + pressed + '">' + pic(x) + '<span class="nm">' + esc(x.name) + "</span></button>";
+  const card = (x, n, m, pressed) => '<button type="button" class="btile bcard' + (x.svg ? " bsvgc" : "") + '" data-g="' + n + '" data-i="' + m + '" title="' + esc(x.name) + '" aria-label="' + esc(x.name) + '" aria-pressed="' + pressed + '">' + pic(x) + '<span class="nm">' + esc(x.name) + "</span></button>";
   // a catalogue card in the tray (a door or window type, or a recent design): its drawing beside its whole name
   function ocard(x, n, m, pressed) {
     const sz = /^(.*?)\s+(\d+(?:\.\d+)?\s*×\s*\d+(?:\.\d+)?)$/.exec(x.name || ""),
@@ -876,7 +876,8 @@
     if (!s) return;
     e.preventDefault();
     const p = stageM(e.clientX, e.clientY, el);
-    sdrag = { k: h.dataset.h, id: e.pointerId, x: e.clientX, y: e.clientY, u0: p.u, y0: p.y, s, sent: "", ctrl: e.ctrlKey || e.metaKey, n0: Array.isArray(B.undo) ? B.undo.length : -1 };
+    sdrag = { k: h.dataset.h, id: e.pointerId, x: e.clientX, y: e.clientY, u0: p.u, y0: p.y, s, sent: "", ctrl: e.ctrlKey || e.metaKey };
+    BL.choose("o:drag", "begin");
     try {
       dstage.setPointerCapture(e.pointerId);
     } catch (err) {}
@@ -894,8 +895,7 @@
     sdragRaf && cancelAnimationFrame(sdragRaf);
     e.type === "pointerup" && stageStep();
     // one drag is one step to undo
-    const n0 = sdrag.n0;
-    if (n0 >= 0 && B.undo.length > n0 + 1 && B.undo.length < 200) B.undo.splice(n0 + 1);
+    BL.choose("o:drag", "end");
     sdrag = null;
     delete dstage.dataset.drag;
     back();

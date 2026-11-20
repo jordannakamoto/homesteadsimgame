@@ -123,6 +123,7 @@ body.touch #bfit { flex: 0 1 auto; }
 body.touch #bopts, body.touch #bdecor { padding: 5px 0 6px 8px; gap: 0 14px; }
 body.touch #bopts, body.touch #bopts.bocats { height: auto; min-height: 0; }
 body.touch #bopts .bcard { height: var(--hit); min-height: var(--hit); }
+body.touch #bopts .bcard.bsvgc { height: 62px; min-height: 62px; }
 body.touch #buildbar .bocard { width: 128px; min-width: 128px; max-width: 128px; height: 48px; min-height: 48px; }
 body.touch #buildbar .brecent .bocard { width: 140px; min-width: 140px; max-width: 140px; }
 body.touch .btrayend { padding: 0 8px 0 10px; }

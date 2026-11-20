@@ -700,6 +700,8 @@
   const hands = (spec) => handsOf(norm(spec));
   function handsOf(s) {
     if (s.kind !== "door" || s.op === "roll" || s.op === "open") return [];
+    // a pocket door always slides toward the pocket the wall's framing leaves on one side: nothing to choose
+    if (s.op === "pocket" || s.t.frame === "pocket") return [];
     if (SLIDES.has(s.op) || s.t.surface) {
       const fl = travel(s, false) < 0 ? 0 : 1;
       return [{ flip: fl, out: null, label: "Slides left" }, { flip: 1 - fl, out: null, label: "Slides right" }];

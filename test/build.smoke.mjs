@@ -122,6 +122,11 @@ async function open(opts) {
     await G(() => __build.choose('level:set', 1)); await page.keyboard.press('KeyR'); await step(2);
     await drag(await at(0, 0, 2.96), await at(5, 4, 2.96));
     await G(() => __build.choose('level:set', 0)); await page.keyboard.press('KeyZ'); await step(2);
+    check('stair cards are drawn at 40 px, like the door cards', await G(() => { const b = document.querySelector('#bopts .bcard svg.st-thumb'); return !!b && Math.round(b.getBoundingClientRect().width) === 40; }));
+    await G(() => __build.choose('level:set', 0)); await page.keyboard.press('PageUp'); await step(1);
+    check('one PageUp moves up one storey', await G(() => __build.state.level === 1));
+    await page.keyboard.press('PageDown'); await step(1);
+    check('one PageDown moves down one storey', await G(() => __build.state.level === 0));
     check('the Stairs tray has a card with a drawing for every type, and Material', await G(() => document.querySelectorAll('#bopts .bcard svg.st-thumb').length >= 8 && __build.view().groups.some((g) => g.id === 'st:mat' && g.tier)));
     await drag(await at(0.5, 0.5), await at(4.6, 0.5));
     const st = await G(() => __build.pieces().filter((p) => p.kind === 'stair'));

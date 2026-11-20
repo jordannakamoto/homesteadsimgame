@@ -144,6 +144,9 @@ body.building #tools { display: none; }
   box-shadow: none;
 }
 .bcard > svg { width: 22px; height: 22px; flex: none; }
+/* a card whose picture is a drawing made elsewhere (the stair types): as big as the door and window cards' */
+.bcard.bsvgc { height: 62px; min-height: 62px; min-width: 62px; }
+.bcard.bsvgc > svg { width: 40px; height: 40px; }
 .bcard .nm {
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font: var(--fw-strong) 10.5px/1.15 var(--font-body); color: var(--ink-dim);
