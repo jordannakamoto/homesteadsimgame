@@ -35,6 +35,11 @@ export const VEHICLE_KINDS = Object.freeze({
     grip: { mu: 0.65, slide: 0.85, lateral: 8, rolling: 0.045, loadSens: 0.1 }, // knobby tyres on dry grass (lateral: cornering stiffness per unit load, 1/rad)
     susp: { travel: 0.2, hz: 2.0, damp: 0.32 },                               // 185-215 mm of travel; lightly damped, it bobs
     riderKg: 80,
+    // The rider shifts their weight as ATV riders are taught: into a turn (upper body to the inside and forward over
+    // the bars), the rider's centre of mass moves up to 0.2 m inside and 0.15 m forward as the turn reaches half a g; up
+    // a climb (up on the footrests, leaning over the bars), up to 0.3 m forward at 15 degrees and steeper. About 0.3 s
+    // to shift. It eases the sideways weight transfer (the tip) and keeps weight on the steered front tyres.
+    lean: { inM: 0.2, fwdM: 0.15, g: 0.5, climbM: 0.3, climbRad: deg(15), s: 0.3 },
     seats: [{ id: 'rider', at: [0, 0.886, -0.2], pose: 'straddle', mount: [{ x0: -0.6, x1: 0.4, side: -1 }, { x0: -0.6, x1: 0.4, side: 1 }] }],
     points: [{ id: 'ball', type: 'ball', at: [0, 0.42, -1.12] }, { id: 'front', type: 'front', at: [0, 0.4, 1.1] }],
     hitch: null, cargo: null,
