@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createGameSim, calendar as C, DAY, HOUR, ITEMS, FIXTURES_ELECTRICAL as CAT, powerAvailableAt, powerNear, electricalOverlay } from '../src/sim/index.js';
 import { planeOfArray, ocvAt } from '../src/sim/electrical.js';
 import { fixture, link, setSite, house } from './helpers/pieces.mjs';
+import { BENCH, benchOnly } from './helpers/bench.mjs';
 
 const wire = (a, ap, b, bp, gauge, lengthM) => link('wire', a, ap, b, bp, { gauge, lengthM });
 const E = (sim) => sim.state.sys.electrical;
@@ -394,11 +395,13 @@ test('with nothing electrical built the system does nothing, and 40 devices cost
   assert.deepEqual(after, JSON.parse(before));
   // cost by difference: the same 20 days with and without the homestead
   const time = (pieces) => { const s = createGameSim(5); if (pieces) setSite(s, pieces); s.runDays(1); const t = performance.now(); s.runDays(20); return (performance.now() - t) / (20 * 1440); };
-  time(homestead());   // warm up
-  let best = Infinity;
-  for (let k = 0; k < 3; k++) best = Math.min(best, time(homestead()) - time(null));
-  console.log('electrical cost with 40 devices:', (best * 1000).toFixed(1), 'us per step');
-  assert.ok(best < 0.03, 'budget 0.03 ms per step, measured ' + best.toFixed(4));
+  if (BENCH) {   // wall-clock budget: BENCH=1 only
+    time(homestead());   // warm up
+    let best = Infinity;
+    for (let k = 0; k < 3; k++) best = Math.min(best, time(homestead()) - time(null));
+    console.log('electrical cost with 40 devices:', (best * 1000).toFixed(1), 'us per step');
+    assert.ok(best < 0.03, 'budget 0.03 ms per step, measured ' + best.toFixed(4));
+  }
   assert.ok(sys);
 });
 

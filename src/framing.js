@@ -4,8 +4,8 @@
    Pure arithmetic: no DOM, no three.js. The page reads it as window.__framing; tests read globalThis.__framing. */
 (() => {
   // the order a building is raised in (docs/CONSTRUCTION.md)
-  const STAGES = ["site", "foundation", "floor-frame", "subfloor", "wall-frame", "top-plates", "roof-frame", "roof-deck", "dry-in", "roofing", "sheathing", "wrap", "openings", "cladding", "gutters", "rough-in", "insulation", "lining", "finish", "carpentry", "decorate", "trim-out", "services"];
-  const STAGE_NAME = { site: "Site", foundation: "Foundation", "floor-frame": "Floor frame", subfloor: "Subfloor", "wall-frame": "Wall frames", "top-plates": "Top plates", "roof-frame": "Roof frame", "roof-deck": "Roof deck", "dry-in": "Dry-in", roofing: "Roofing", sheathing: "Sheathing", wrap: "Wrap", openings: "Windows and doors", cladding: "Cladding", gutters: "Gutters", "rough-in": "Rough-in", insulation: "Insulation", lining: "Lining", finish: "Tape and mud", carpentry: "Trim carpentry", decorate: "Paint", "trim-out": "Trim-out", services: "Services" };
+  const STAGES = ["site", "foundation", "floor-frame", "subfloor", "wall-frame", "top-plates", "roof-frame", "roof-deck", "dry-in", "roofing", "sheathing", "wrap", "openings", "cladding", "gutters", "rough-in", "insulation", "lining", "finish", "carpentry", "decorate", "trim-out", "services", "deck-frame", "decking", "porch-frame", "rails"];
+  const STAGE_NAME = { site: "Site", foundation: "Foundation", "floor-frame": "Floor frame", subfloor: "Subfloor", "wall-frame": "Wall frames", "top-plates": "Top plates", "roof-frame": "Roof frame", "roof-deck": "Roof deck", "dry-in": "Dry-in", roofing: "Roofing", sheathing: "Sheathing", wrap: "Wrap", openings: "Windows and doors", cladding: "Cladding", gutters: "Gutters", "rough-in": "Rough-in", insulation: "Insulation", lining: "Lining", finish: "Tape and mud", carpentry: "Trim carpentry", decorate: "Paint", "trim-out": "Trim-out", services: "Services", "deck-frame": "Deck frame", decking: "Decking", "porch-frame": "Porch frame", rails: "Rails and stairs" };
   // actual (not nominal) sizes of North American lumber, metres: [breadth, depth]
   const LUMBER = { "2x4": [0.038, 0.089], "2x6": [0.038, 0.14], "2x8": [0.038, 0.184], "2x10": [0.038, 0.235], "2x12": [0.038, 0.286], glulam: [0.09, 0.225], "4x4": [0.089, 0.089], "6x6": [0.14, 0.14] };
   const SHEET = { w: 1.22, l: 2.44 };
@@ -744,7 +744,7 @@
         });
       }
       // last, the caps: a single slope's top edge, or a hip
-      if (capped && pl.run && rect && !(r.ridges || []).length)
+      if (capped && pl.run && rect && !pl.lean && !(r.ridges || []).length)
         for (const [a, b] of lengths(EL, TRIM_LEN)) M(out, id(pl.id, "cp"), "ridgecap", "top", "roofing", pl.id, r.mat || "thatch", 0.03, 0.2, on(a, F.top - 0.1 * cs, base + 0.03), on(b, F.top - 0.1 * cs, base + 0.03), inPlane, { col: cv.col });
       if (capped && pl.run && !rect && pts.length >= 3 && !r.hips) {
         const h0 = on(F.st[1][0], F.st[1][1], base + 0.03),
@@ -863,8 +863,21 @@
     for (const f of desc.floors || []) floorMembers(out, f, desc.found || "plinth", spec);
     for (const w of desc.walls || []) wallMembers(out, w, spec);
     for (const r of desc.roofs || []) roofMembers(out, r, spec);
+    // building elements added by other files (decks, porches, lofts...): desc.extras, each { kind, id, ... } drawn by its kind
+    for (const x of desc.extras || []) {
+      const fn = EXTRA.get(x.kind);
+      fn && fn(out, x, desc, HELP);
+    }
     paintOver(out, spec.deco);
     return out;
+  }
+  // register(kind, fn(out, el, desc, h)): fn pushes the members of one desc.extras element of that kind; h holds the
+  // same helpers the walls, floors and roofs use (M makes a member, see above). See ARCHITECTURE.md "Adding to build mode".
+  const EXTRA = new Map(),
+    HELP = Object.freeze({ M, LUMBER, SHEET, FLOOR_T, splice, sheetRows, spans, STAGES });
+  function register(kind, fn) {
+    if (typeof fn !== "function") throw new Error("framing.register: " + kind + " needs a function");
+    EXTRA.set(kind, fn);
   }
 
   /* ---------- what to buy ---------- */
@@ -884,6 +897,7 @@
       sz = k === "header" ? m.size : m.section ? sizeOf(m) : null,
       lum = (label, why, plies) => [label + sz, sz ? "lumber_" + sz : null, "m", m.length * (plies || 1), label + " (" + (sz || "timber").replace("x", " x ") + ")", why];
     if (k === "site") return null;
+    if (m.buy) return m.buy; // an element added by another file (a deck) says what it is bought as
     if (k === "stud") return lum(t === "gable" ? "Gable studs" : "Studs", t === "gable" ? "Short uprights that fill the triangle under the roof at each end." : "The uprights inside your walls. They carry the roof down to the floor.");
     if (k === "plate") return t === "sill" && m.stage === "floor-frame" ? lum("Sill plates", "Boards bolted flat on top of the foundation wall. The floor frame sits on them.") : lum("Wall plates", "The boards along the bottom and top of each wall. The studs are nailed between them.");
     if (k === "header" && m.size === "glulam") return ["Beams" + sz, "glulam_90x225", "m", m.length, "Engineered beam (90 x 225)", "A glued-laminated beam over a wide opening. Plain boards would sag across it."];
@@ -975,6 +989,14 @@
       if (q[2] === "m" && /^lumber_/.test(q[1] || "")) nails.set(m.stage + "|nails_framing", (nails.get(m.stage + "|nails_framing") || 0) + m.length * 0.025);
       else if (q[2] === "m" && /^trim_/.test(q[1] || "")) nails.set(m.stage + "|nails_finish", (nails.get(m.stage + "|nails_finish") || 0) + m.length * 0.008);
       else if (q[2] === "sheet") nails.set(m.stage + "|screws_wood", (nails.get(m.stage + "|screws_wood") || 0) + m.area * 0.06);
+      // hardware a member takes (a deck's hangers, lags, screws): m.hw = [[itemId, qty, unit, label, why], ...], one line per item and stage
+      for (const w of m.hw || []) {
+        const hk = m.stage + "|hw:" + w[0];
+        let hl = lines.get(hk);
+        if (!hl) lines.set(hk, (hl = { key: hk, members: [], stage: m.stage, itemId: w[0], qty: 0, unit: w[2], label: w[3], why: w[4], count: 0 }));
+        hl.qty += w[1];
+        hl.count++;
+      }
     }
     for (const [key, kg] of nails) {
       const [stage, item] = key.split("|");
@@ -991,5 +1013,5 @@
     return out.sort((p, q) => STAGES.indexOf(p.stage) - STAGES.indexOf(q.stage) || (p.label < q.label ? -1 : 1));
   }
 
-  globalThis.__framing = { planeFrame, COVERING, coveringOf, ROOF_COLORS, packSheets, packSticks, STOCK, MAX_RUN, splice, STAGES, STAGE_NAME, LUMBER, SHEET, FOUNDATIONS, generate, materialsList, floorMembers, wallMembers, roofMembers, FLOOR_T };
+  globalThis.__framing = { planeFrame, COVERING, coveringOf, ROOF_COLORS, packSheets, packSticks, STOCK, MAX_RUN, splice, STAGES, STAGE_NAME, LUMBER, SHEET, FOUNDATIONS, generate, register, materialsList, floorMembers, wallMembers, roofMembers, FLOOR_T };
 })();

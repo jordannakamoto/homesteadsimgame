@@ -194,28 +194,39 @@
     '<button id="bsched" class="ui-btn" type="button" aria-pressed="false" title="Materials: what the plan needs, stage by stage, and what it costs">' + svg(I.list, 18) + '<span class="name">Materials</span><b class="tot" hidden></b></button>' +
     '<button id="bdone" class="ui-slot" type="button" title="Leave build mode (B)">' + svg(I.done, 20) + '<span class="name">Done</span><span class="key ui-key">B</span></button></div></div>';
   const pieces = $("bpieces"),
-    TOOLS = BL.view().tools,
     letterOf = (t) => t.letter || BL.TOOL_LETTER[t.id] || "",
     toolOf = (id) => TOOLS.find((t) => t.id === id),
-    // the group slots and their members, in the bar's order
-    GRP = { more: { name: "More", tools: TOOLS.filter((t) => t.cat === "more") }, inside: { name: "Inside", tools: TOOLS.filter((t) => t.cat === "inside") } },
-    lastOf = { more: GRP.more.tools[0].id, inside: GRP.inside.tools[0].id },
+    CATS = new Set(["select", "shell", "door", "window", "more", "inside", "remove"]),
+    catOf = (t) => (CATS.has(t.cat) ? t.cat : "more"),
+    lastOf = {},
     groupOfTool = (id) => (GRP.more.tools.some((t) => t.id === id) ? "more" : GRP.inside.tools.some((t) => t.id === id) ? "inside" : "");
-  const slotTitle = (t) => t.name + " (" + letterOf(t) + ")" + (t.tip ? ". " + t.tip : "");
+  // the tools come from view(): build.js's own and the extensions' (src/build-ext.js, a deck), filed under their cat.
+  // An extension that registers later redraws the slots (renderBar compares toolsKey)
+  let TOOLS = [],
+    GRP = null,
+    toolsKey = "";
+  pieces.dataset.slots = "1";      // src/build-ext.js leaves the bar to these slots
+  const slotTitle = (t) => t.name + (letterOf(t) ? " (" + letterOf(t) + ")" : "") + (t.tip ? ". " + t.tip : "");
   const slotInner = (t, caret) => svg(I[t.id], 24) + '<span class="name">' + esc(t.name) + '</span><span class="key ui-key">' + esc(letterOf(t)) + "</span>" + (caret ? '<span class="caret" aria-hidden="true"></span>' : "");
-  {
+  function drawSlots(tools) {
+    TOOLS = tools;
+    toolsKey = tools.map((t) => t.id + ":" + catOf(t)).join();
+    for (const t of tools) if (t.icon && !I[t.id]) I[t.id] = t.icon;      // an extension brings its own icon
+    GRP = { more: { name: "More", tools: TOOLS.filter((t) => catOf(t) === "more") }, inside: { name: "Inside", tools: TOOLS.filter((t) => catOf(t) === "inside") } };
+    for (const k in GRP) if (!toolOf(lastOf[k]) || !GRP[k].tools.some((t) => t.id === lastOf[k])) lastOf[k] = GRP[k].tools[0].id;
     let html = "";
     for (const [n, cluster] of [["select"], ["shell", "door", "window"], ["more", "inside"], ["remove"]].entries()) {
       if (n) html += '<span class="sep" aria-hidden="true"></span>';
       for (const cat of cluster) {
         if (GRP[cat]) {
           const t = toolOf(lastOf[cat]);
-          html += '<button type="button" data-group="' + cat + '" data-cur="' + t.id + '" aria-pressed="false" aria-haspopup="menu" aria-expanded="false" title="' + esc(GRP[cat].name + ": " + GRP[cat].tools.map((x) => x.name + " " + letterOf(x)).join(", ") + ". Click again for the list.") + '">' + slotInner(t, true) + "</button>";
-        } else for (const t of TOOLS.filter((x) => x.cat === cat)) html += '<button type="button" data-piece="' + t.id + '" title="' + esc(slotTitle(t)) + '" aria-pressed="false">' + slotInner(t) + "</button>";
+          html += '<button type="button" data-group="' + cat + '" data-cur="' + t.id + '" aria-pressed="false" aria-haspopup="menu" aria-expanded="false" title="' + esc(GRP[cat].name + ": " + GRP[cat].tools.map((x) => x.name + (letterOf(x) ? " " + letterOf(x) : "")).join(", ") + ". Click again for the list.") + '">' + slotInner(t, true) + "</button>";
+        } else for (const t of TOOLS.filter((x) => catOf(x) === cat)) html += '<button type="button" data-piece="' + t.id + '" title="' + esc(slotTitle(t)) + '" aria-pressed="false">' + slotInner(t) + "</button>";
       }
     }
     pieces.innerHTML = html;
   }
+  drawSlots(BL.view().tools);
   const back = () => canvas.focus();
   // a group slot shows the member last used; it picks that one, and on the pressed slot (or a long press) lists them all
   const fly = document.createElement("div");
@@ -1065,6 +1076,7 @@
     coachKey = "";
   window.addEventListener("resize", () => ((uiV = -1), flyClose()));
   function renderBar(v) {
+    if (v.tools.length !== TOOLS.length || v.tools.map((t) => t.id + ":" + catOf(t)).join() !== toolsKey) (flyClose(), drawSlots(v.tools));
     // which slot is pressed; a group slot takes the face of the member in hand
     const g = groupOfTool(v.top);
     if (g && lastOf[g] !== v.top) {

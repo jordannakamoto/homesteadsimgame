@@ -192,27 +192,46 @@ export function shed(g, x, z, r = 0.7, slope = REPOSE, maxM3 = 0.004) {
 export function settle(g, x, z, r = 0.8, slope = REPOSE, iters = 40, firmOnly = false, mask = null) {
   const s = g.step, i0 = Math.floor((x - r) / s), i1 = Math.ceil((x + r) / s), j0 = Math.floor((z - r) / s), j1 = Math.ceil((z + r) / s);
   const lim = slope * s * 1000, limFirm = Math.max(slope, FIRM) * s * 1000, soil = code(g, 'soil');
+  // This is the hot loop of every dig, push and pour, so tiles are looked up through a cache local to this call
+  // (nothing else adds or drops tiles while it runs) instead of a string key and a fresh array per neighbour.
+  // Same points, same order, same arithmetic as before: the results are identical.
+  const T = g.T, cache = new Map();
+  const tileAt = (tx, tz, make) => {
+    const ck = tx * 1e6 + tz;
+    let t = cache.get(ck);
+    if (t === undefined) { t = g.tiles[tileKey(tx, tz)] || null; cache.set(ck, t); }
+    if (!t && make) { t = tileOf(g, tx * T, tz * T, true)[0]; cache.set(ck, t); }
+    return t;
+  };
   for (let it = 0; it < iters; it++) {
     let moved = 0;
-    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
-      const a = tileOf(g, i, j, false);
-      if (!a || a[0].s[a[1]] === 0) continue;
-      const loose = (a[0].f[a[1]] & LOOSE_BIT) || a[0].l[a[1]] > 0, la = loose ? lim : limFirm;
-      if (loose && firmOnly) continue;
-      if (mask && !mask(i, j)) continue;
-      for (const [di, dj, dl] of OFF8) {
-        if (mask && !mask(i + di, j + dj)) continue;
-        const ha = a[0].h[a[1]], b = tileOf(g, i + di, j + dj, false), hb = b ? b[0].h[b[1]] : 0, d = ha - hb, lm = la * dl;
-        if ((a[0].f[a[1]] ^ (b ? b[0].f[b[1]] : 0)) & WALL_BIT) continue;
-        if (d <= lm + 1) continue;
-        const mv = Math.round((d - lm) * 0.15);
-        if (mv < 1) continue;
-        const bb = b || tileOf(g, i + di, j + dj, true);
-        a[0].h[a[1]] -= mv; bb[0].h[bb[1]] += mv;
-        if (a[0].l[a[1]]) a[0].l[a[1]] = Math.max(0, a[0].l[a[1]] - mv);
-        if (bb[0].s[bb[1]] === 0) bb[0].s[bb[1]] = a[0].l[a[1]] ? a[0].s[a[1]] : soil;
-        bb[0].f[bb[1]] |= LOOSE_BIT;                       // what slid down is loose where it lands
-        moved += mv;
+    for (let j = j0; j <= j1; j++) {
+      const tz = Math.floor(j / T);
+      for (let i = i0; i <= i1; i++) {
+        const tx = Math.floor(i / T), A = tileAt(tx, tz, false);
+        if (!A) continue;
+        const na = (j - tz * T) * T + (i - tx * T);
+        if (A.s[na] === 0) continue;
+        const loose = (A.f[na] & LOOSE_BIT) || A.l[na] > 0, la = loose ? lim : limFirm;
+        if (loose && firmOnly) continue;
+        if (mask && !mask(i, j)) continue;
+        for (let o = 0; o < 8; o++) {
+          const di = OFF8[o][0], dj = OFF8[o][1], dl = OFF8[o][2], bi = i + di, bj = j + dj;
+          if (mask && !mask(bi, bj)) continue;
+          const btx = Math.floor(bi / T), btz = Math.floor(bj / T), nb = (bj - btz * T) * T + (bi - btx * T);
+          const B = tileAt(btx, btz, false);
+          const ha = A.h[na], hb = B ? B.h[nb] : 0, d = ha - hb, lm = la * dl;
+          if ((A.f[na] ^ (B ? B.f[nb] : 0)) & WALL_BIT) continue;
+          if (d <= lm + 1) continue;
+          const mv = Math.round((d - lm) * 0.15);
+          if (mv < 1) continue;
+          const BB = B || tileAt(btx, btz, true);
+          A.h[na] -= mv; BB.h[nb] += mv;
+          if (A.l[na]) A.l[na] = Math.max(0, A.l[na] - mv);
+          if (BB.s[nb] === 0) BB.s[nb] = A.l[na] ? A.s[na] : soil;
+          BB.f[nb] |= LOOSE_BIT;                       // what slid down is loose where it lands
+          moved += mv;
+        }
       }
     }
     if (!moved) break;

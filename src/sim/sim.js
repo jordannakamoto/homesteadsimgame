@@ -37,19 +37,18 @@ export function createSim({ seed = 1, systems = [], record = false } = {}) {
     return sim;
   };
 
+  // A context is built for every system step (a dozen a tick), so it must be cheap: the functions on it depend only
+  // on the system, so they are made once per registered system (its kit, kept on the sim's own copy of the system)
+  // and shared; each step allocates one small Ctx and nothing else. get, rng and emit stay own properties because
+  // systems pass them around unbound (c.get, ctx.emit).
+  const getState = (name) => S().sys[name];          // read another system's state
+  const emitFn = (type, data) => emit(type, data);
+  function kitFor(sys) {
+    if (!sys.__kit) Object.defineProperty(sys, '__kit', { value: { name: sys.name, rng: (name) => sim.rng(sys.name + (name ? ':' + name : '')) } });
+    return sys.__kit;
+  }
   function ctxFor(sys, dt = sys.every * TICK) {
-    const st = S();
-    return {
-      sim, state: st, t: st.t, tick: st.tick, dt,
-      // seasonal clock (see time.js): use lifeDt and lifeT for growth, ageing and other slow processes
-      lifeScale: YEAR_DAYS_REAL / st.yearDays, lifeDt: dt * (YEAR_DAYS_REAL / st.yearDays), lifeT: st.lifeT,
-      ct: calendarT(st.t, st.lifeT),                 // pass this, not t, to the calendar functions
-      get s() { return st.sys[sys.name]; },
-      set s(v) { st.sys[sys.name] = v; },
-      get: (name) => st.sys[name],                    // read another system's state
-      rng: (name) => sim.rng(sys.name + (name ? ':' + name : '')),
-      emit: (type, data) => emit(type, data),
-    };
+    return new Ctx(sim, S(), kitFor(sys), dt, getState, emitFn);
   }
   function emit(type, data) { for (const fn of sim.listeners) fn(type, data, S()); }
   sim.listen = (fn) => { sim.listeners.push(fn); return () => { sim.listeners = sim.listeners.filter((f) => f !== fn); }; };
@@ -79,8 +78,10 @@ export function createSim({ seed = 1, systems = [], record = false } = {}) {
         h.fn(ctxFor(h.sys), c.payload);
       }
     }
-    for (const sys of sim.systems) {
-      if (sys.step && st.tick % sys.every === 0) sys.step(ctxFor(sys));
+    const systems = sim.systems;
+    for (let i = 0; i < systems.length; i++) {
+      const sys = systems[i];
+      if (sys.step && st.tick % sys.every === 0) sys.step(new Ctx(sim, st, kitFor(sys), sys.every * TICK, getState, emitFn));
     }
     st.tick++; st.t += TICK; st.lifeT += TICK * (YEAR_DAYS_REAL / st.yearDays);
   }
@@ -125,6 +126,22 @@ export function createSim({ seed = 1, systems = [], record = false } = {}) {
 
   for (const s of systems) sim.register(s);
   return sim;
+}
+
+// What a system's step and command handlers receive. s is an accessor on the prototype, so a copy made with
+// { ...ctx } has no s: derive instead (const c = Object.create(ctx); c.t = ...).
+class Ctx {
+  constructor(sim, st, kit, dt, get, emit) {
+    this.sim = sim; this.state = st; this.t = st.t; this.tick = st.tick; this.dt = dt;
+    // seasonal clock (see time.js): use lifeDt and lifeT for growth, ageing and other slow processes
+    const ls = YEAR_DAYS_REAL / st.yearDays;
+    this.lifeScale = ls; this.lifeDt = dt * ls; this.lifeT = st.lifeT;
+    this.ct = calendarT(st.t, st.lifeT);              // pass this, not t, to the calendar functions
+    this.get = get; this.rng = kit.rng; this.emit = emit;
+    this.sysName = kit.name;
+  }
+  get s() { return this.state.sys[this.sysName]; }
+  set s(v) { this.state.sys[this.sysName] = v; }
 }
 
 // Order-independent-of-insertion hash of any JSON value (FNV-1a over a canonical form).

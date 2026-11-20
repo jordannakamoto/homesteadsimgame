@@ -16,3 +16,23 @@ Three workstreams toward "the full home building experience". Each doc has a sum
 - One barrow: the ground design suggests the vehicles core own a single barrow entity with a tub implement, replacing the construction and landscape barrows. Decide when vehicles V7 lands.
 - Under-slab rough-in: services registers what must be in the ground before a pour with `foundation.needRoughIn`.
 - Interior walls and services (reconciled 18 Nov): stage order `... gutters, rough-in, insulation, lining, finish, trim-out, services`; `trim-out` needs `finish`. Services checks and opens walls by their lining pieces (`<wall>.ln<face>.<k>`, taped seams `<wall>.jt<face>.<k>`); boxes are set proud of the studs by the lining's thickness so they are flush with the finished wall. The interior "trim" slice is renamed **finish carpentry** (stage `carpentry`: casings, baseboard) so it is not confused with services' Trim-out (devices and fixtures).
+
+## Decisions from the cohesion check (18 Nov 2026, `/designs/cohesion-wave2.md`)
+
+### Save-version ledger
+`SAVE_VERSION` on `main` is **4** (v2 packed earthwork grids, v3 moved terrain edits into `sys.ground.macro`, v4 marks Equip wires and water pipes for their move into the routes store). Taken and reserved, in this order, so nobody renumbers a migration already on `main`:
+
+| Version | Slice | What it migrates |
+|---|---|---|
+| 4 | S4 (taken, wave 2 S-3) | build mode's Equip wires and water pipes (`world.builds.links`) become legacy runs in `sys.routes`, ids kept; the step marks `world.legacyLinks` and the page converts them (`src/sim/services-legacy.js`) |
+| 5 | A5 | the fine 10 cm grid moves from `sys.landscape.grid` to `sys.ground.fine` (S4 landed first, so A5 moved from 4 to 5) |
+
+Nobody else bumps. If you must change a save's shape, ask for the next number; at merge time take the next free number on the newest `main`.
+
+### Other decisions
+- **One barrow.** The barrow becomes a vehicles-core unit kind (hand-pushed possession) whose tub holds stacks, bulk m3 or a concrete batch. The construction, landscape and foundation barrow commands become thin shims over it (slice G-2, after G-1, X2 and B-1). The duplicate `wheelbarrow` item (content/construction.js and content/landscape.js) goes with it.
+- **X means overlays everywhere.** Unhitching moved to a held prompt at the tongue (hold R, landed with K1). Never put a second job on X.
+- **Help is on ? and F1.** H belongs to the Hens. The controls sheet is drawn from the key map `src/game/keymap.js`; when a key moves, move its row.
+- The 2/3/4 magic terrain brush is sandbox-only (`localStorage.sandbox = '1'`).
+- Kit parts stay the yard and above-ground pipe model; routes are in-building. Hints say so.
+- New building elements (decks, porches, lofts, skylights, chimneys) go through the build extension point (`__build.extend`, `__framing.register`), not into `build.js`.

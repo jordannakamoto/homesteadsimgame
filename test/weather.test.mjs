@@ -1,8 +1,9 @@
 // Calendar, sun and weather: checked against known physical relationships. node --test test/
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createGameSim, calendar as C, CLIMATES, conditionWord, DAY, HOUR, START_T, TICK } from '../src/sim/index.js';
+import { createGameSim, createSim, weather, calendar as C, CLIMATES, conditionWord, DAY, HOUR, START_T, TICK } from '../src/sim/index.js';
 import { dewPointFrom, saturationVapourHPa } from '../src/sim/weather.js';
+import { BENCH, benchOnly } from './helpers/bench.mjs';
 
 const DEG = Math.PI / 180;
 const at = (doy, hour, year = 0) => (doy - C.START_DAY_OF_YEAR + 365 * year) * DAY + hour * HOUR;   // world time of a date
@@ -68,13 +69,15 @@ test('clear-sky irradiance: 850-1050 W/m2 at a midsummer noon, never negative, n
   assert.ok(energy > 1700 && energy < 2300, String(energy));
 });
 
-// One long run per climate, sampled at every weather step, shared by the tests below.
+// One long run per climate, sampled at every weather step, shared by the tests below. The weather reads no other
+// system, so these runs register it alone: the same numbers as in the full game (checked bit for bit), about 20x
+// faster. Determinism and saves with every system are checked further down.
 const YEARS = 12;
 const runs = new Map();
 function climateRun(id, seed = 2024) {
   const key = id + ':' + seed;
   if (runs.has(key)) return runs.get(key);
-  const sim = createGameSim(seed);
+  const sim = createSim({ seed, systems: [weather] });
   sim.command('weather.setSite', { climate: id });
   sim.runTicks(STEP);
   sim.runDays(60);                                     // let the snowpack and the soil settle
@@ -219,7 +222,7 @@ test('the site can be changed by command, and bad sites are refused', () => {
   assert.ok(Math.abs(saturationVapourHPa(0) - 6.112) < 1e-9 && Math.abs(saturationVapourHPa(20) - 23.37) < 0.1);
 });
 
-test('a year of weather runs fast, well under 0.02 ms a step', () => {
+test('a year of weather runs fast, well under 0.02 ms a step', benchOnly, () => {
   const s = createGameSim(31);
   const sys = s.systems.find((x) => x.name === 'weather'), step = sys.step;
   let ms = 0, n = 0;

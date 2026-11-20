@@ -26,7 +26,7 @@ together is not fun before any water flows, the slice is not finished.
 
 ## What changes from the original brief, and why
 
-- **No physics engine here** (Rapier is a later plan in `docs/FOUNDATIONS.md`). Loose parts
+- **No physics engine here** (Rapier is a later plan in `docs/PLATFORM.md`). Loose parts
   use a small scripted tumble-and-settle, like felled logs and pickups already do. Parts at
   rest are instanced and static. No rigid bodies on installed plumbing either way.
 - **Third-person camera, so the character holds the part** (the hands rule), not the camera.

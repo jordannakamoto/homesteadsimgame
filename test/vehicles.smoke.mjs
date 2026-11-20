@@ -29,7 +29,7 @@ await page.keyboard.down('KeyW'); await frames(40); await page.keyboard.up('KeyW
 await frames(25);
 const on = await G(() => ({ top: __game.control.top().id, driven: __vehicles.driven(), seats: Object.values(__game.sim.state.sys.vehicles.units)[0].seats }));
 check('walking into its side mounts it', on.top === 'seat' && on.driven === id, JSON.stringify(on));
-await page.keyboard.press('Digit2'); await frames(2);
+await page.keyboard.press('Digit5'); await frames(2);
 check('tools are locked while seated', await G(() => __game.player.tool === 'axe'));
 
 // drive: point the camera along its nose and hold W
@@ -46,14 +46,27 @@ check('a drive substep costs well under 0.1 ms', us < 100 && cost.msPerFrame / M
 const synced = await G((id) => __game.sim.state.sys.vehicles.units[id], id);
 check('the pose reaches the sim while driving', Math.hypot(synced.x - b0.x, synced.z - b0.z) > 1, JSON.stringify(synced).slice(0, 120));
 
+// car keys are vehicle-relative: with the camera turned square across the nose, W still goes straight ahead and D turns it right
+await G((id) => { __game.cam.yaw = __vehicles.body(id).yaw + Math.PI / 2; }, id);
+const c0 = await G((id) => __vehicles.body(id), id);
+await page.keyboard.down('KeyW'); await frames(12);
+const c1 = await G((id) => __vehicles.body(id), id);
+await page.keyboard.down('KeyD'); await frames(12);
+const c2 = await G((id) => __vehicles.body(id), id);       // sampled with D held: the wheels are over to the right
+await page.keyboard.up('KeyD'); await page.keyboard.up('KeyW');
+const wr = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+check('with the camera across the nose, W still drives straight ahead', Math.abs(wr(c1.yaw - c0.yaw)) < 0.1, wr(c1.yaw - c0.yaw).toFixed(3));
+check('D steers the vehicle right whatever the camera sees', c2.steer > 0.05, 'steer ' + c2.steer.toFixed(3) + ' at ' + c2.speed.toFixed(1) + ' m/s');
+await page.keyboard.down('Space'); await frames(90); await page.keyboard.up('Space');
+
 // E: brakes, then steps off
 await page.keyboard.press('KeyE'); await frames(150);
 const off = await G((id) => ({ top: __game.control.top().id, u: __game.sim.state.sys.vehicles.units[id], b: __vehicles.body(id), P: { x: __game.player.x, z: __game.player.z } }), id);
 check('E stops it and steps off', off.top === 'walk' && !Object.values(off.u.seats).some(Boolean) && Math.abs(off.u.x - off.b.x) < 0.05, JSON.stringify({ top: off.top, sx: off.u.x, bx: off.b.x }));
 const d = Math.hypot(off.P.x - off.b.x, off.P.z - off.b.z);
 check('put down beside it', d > 0.6 && d < 2.2, d.toFixed(2));
-await page.keyboard.press('Digit2'); await frames(2);
-check('tools come back on foot', await G(() => __game.player.tool === 'dig'));
+await page.keyboard.press('Digit5'); await frames(2);
+check('tools come back on foot', await G(() => __game.player.tool === 'garden'));
 await page.keyboard.press('Digit1');
 
 // reload: parked where it was left; then seated at save time comes back seated

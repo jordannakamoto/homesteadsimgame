@@ -15,7 +15,7 @@ import { createWaterFx } from './water/water-fx.js';
 import { createReflectProbe } from './water/reflect-probe.js';
 import { createReflectPlane } from './water/reflect-plane.js';
 import { createRippleSim } from './water/ripple-sim.js';
-import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, stringifySave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork, powerNear, vehicleCore, groundRead, setGroundBase, routeFind, frameChannelsFor, frameAttach, frameSnap, frameRayHit, foundationRead } from './sim/index.js';
+import { createGameSim, mapPieces, PLACEABLE_FIXTURES, runStockCommand, setCounter, stockMassKg, canAfford, toolAvailable, MATERIALS, ITEMS, ITEM_CATEGORIES, material, unitVolumeM3, rValuePer100mm, makeSave, readSave, stringifySave, f32ToBase64, base64ToF32, clockText, SPEEDS, WORLD_SECONDS_PER_REAL_SECOND, gardenRead, starterYard, rotationTo, streamLook, landscapeRead, earthwork, powerNear, vehicleCore, groundRead, setGroundBase, routeFind, frameChannelsFor, frameAttach, frameSnap, frameRayHit, foundationRead, legacyLinkCommands, legacyPrune, convertLegacyLinks } from './sim/index.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -2684,23 +2684,29 @@ control.guards.push(() => player.tool === 'build' ? 'build mode' : window.__game
   : player.climbY != null ? 'climbing' : player.standY != null ? 'standing on something' : window.__reach?.on || window.__hands?.isOpen ? 'hands busy'
   : sim.state.sys.construction?.carried ? 'arms full' : null);
 const cursor = { x: 0, y: 0, z: 0, valid: false };
+const SANDBOX_TERRAIN = (() => { try { return localStorage.getItem('sandbox') === '1'; } catch (e) { return false; } })();
+if (!SANDBOX_TERRAIN) for (const b of document.querySelectorAll('#tools button[data-tool="dig"], #tools button[data-tool="raise"], #tools button[data-tool="level"]')) b.hidden = true;
 window.addEventListener('keydown', (e) => {
   if (e.target && e.target.tagName === 'INPUT') return;
   keys[e.code] = true;
   if (!(window.__build && window.__build.key(e))) {          // build mode gets first refusal on every key
     if (e.code === 'Digit1') setTool('axe');
-    if (e.code === 'Digit2') setTool('dig');
-    if (e.code === 'Digit3') setTool('raise');
-    if (e.code === 'Digit4') setTool('level');
+    if (SANDBOX_TERRAIN) {                                   // the magic terrain brush: sandbox only (localStorage.sandbox = '1')
+      if (e.code === 'Digit2') setTool('dig');
+      if (e.code === 'Digit3') setTool('raise');
+      if (e.code === 'Digit4') setTool('level');
+    }
   }
+  if (e.code === 'Escape' && player.tool !== 'build' && (player.tool === 'dig' || player.tool === 'raise' || player.tool === 'level')) setTool('axe');
   if (player.tool !== 'build') {                             // build mode uses these keys itself; its speed buttons still work
     if (e.code === 'Semicolon') stepSpeed(-1);
     if (e.code === 'Quote') stepSpeed(1);
     if (e.code === 'Backquote') setSpeed(simCtl.speed ? 0 : 1);
   }
   if (e.code === 'KeyG') cycleQuality();
+  // the controls sheet: ? or F1 (H is the Hens'); src/game/keymap.js renders it
+  if ((e.code === 'F1' || (e.code === 'Slash' && e.shiftKey)) && !e.repeat && player.tool !== 'build') { e.preventDefault(); const h = document.getElementById('help'); if (h.hidden && window.__keymap) window.__keymap.render(); h.hidden = !h.hidden; }
   if (e.code === 'KeyV' && !e.repeat && player.tool !== 'build') camView('next');
-  if (e.code === 'KeyH') { const h = document.getElementById('help'); h.hidden = !h.hidden; }
   if (e.altKey || ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'AltLeft', 'AltRight'].includes(e.code)) e.preventDefault();
 });
 window.addEventListener('keyup', (e) => { keys[e.code] = false; if (e.code === 'AltLeft' || e.code === 'AltRight') e.preventDefault(); });
@@ -3394,10 +3400,37 @@ function syncSite() {
   build.ensureLoaded();
   if (simCtl.newWorld) { simCtl.newWorld = false; placeStartingWell(build); flushMacro(); }
   if (build.version === simCtl.siteV) return;
-  const version = build.version;
-  sim.commandNow('site.setPieces', { pieces: mapPieces(build.pieces()) });
+  legacyLinksToRoutes(build);                   // may drop links from build mode, so before the version is read
+  const version = build.version, pieces = build.pieces();
+  pruneLegacyRuns(pieces);
+  sim.commandNow('site.setPieces', { pieces: mapPieces(pieces) });
   sim.commandNow('structure.recheck');          // judge the building as it now stands, even while time is paused
   simCtl.siteV = version;
+}
+// Services S4: build mode's old Equip wires and water pipes (an older save, or build mode's own copy) become runs in the
+// routes store, keeping their ids (src/sim/services-legacy.js). Done whenever build mode changes, so a link brought back
+// by an undo goes the same way; a no-op once there are none. Flues stay build mode links.
+function legacyLinksToRoutes(build) {
+  if (!build.legacyLinks || !sim.handlers.has('routes.addRun')) return;
+  const links = build.legacyLinks();
+  if (!links.length) { simCtl.legacyLinks = false; return; }
+  const res = convertLegacyLinks(sim, links);
+  for (const r of res.refused) if (/already joined/.test(r.reason)) res.ids.push(r.id);   // a second link between two joined ports
+  if (res.ids.length) build.dropLegacyLinks(res.ids);
+  simCtl.legacyLinks = false;
+}
+// Equipment taken away takes its legacy runs with it, as it took its links in build mode.
+function pruneLegacyRuns(pieces) {
+  const R = sim.state.sys.routes;
+  if (!R || !Object.keys(R.nodes).some((k) => k.startsWith('lg:'))) return;
+  for (const [n, p] of legacyPrune(R, new Set(pieces.map((q) => q.id)))) sim.commandNow(n, p);
+}
+// __build.connect for power and water: one link as a legacy run, now. { ok, id } or { ok: false, reason }.
+function servicesLink(ln) {
+  const c = legacyLinkCommands(sim.state.sys.routes, ln);
+  if (!c.ok) return c;
+  for (const [n, p] of c.cmds) { const r = sim.commandNow(n, p); if (r && r.ok === false) return r; }
+  return { ok: true, id: c.id };
 }
 // live: hand the simulation state by reference (for saveGame, which only stringifies it: no 4 MB deep copy)
 function saveData(live = false) {
@@ -3426,6 +3459,7 @@ function applySave(raw) {
   for (const id of (w.removed || [])) world.removed.add(id);
   world.wood = w.wood || 0; world.stone = w.stone || 0;
   simCtl.builds = w.builds || null;
+  simCtl.legacyLinks = !!w.legacyLinks;         // save v4: it has Equip wires or pipes to move into the routes store
   if (w.player) { player.x = w.player.x; player.z = w.player.z; }
   if (w.cam) { cam.yaw = cam.prevYaw = w.cam.yaw; cam.pitch = w.cam.pitch; cam.dist = w.cam.dist; }
   return true;
@@ -4879,6 +4913,8 @@ window.__game = {
     do: (name, payload) => { const r = runStockCommand(sim, name, payload); hudDirty = true; return r; },
   },
   saveGame, saveData: () => saveData(), setSpeed,
+  // test hook: advance n fixed-length frames (update + one draw) synchronously, no wall-clock wait; smokes use it instead of sleeps
+  stepFrames: (n = 1, dt = 1 / 60) => { for (let i = 0; i < n; i++) step(dt); render(); return n; },
   // what a save costs: bytes as stored (earthwork grids packed) and as plain JSON
   saveSize: () => { const d = saveData(true); return { bytes: stringifySave(d).length, plainBytes: JSON.stringify(d).length }; }, get speed() { return simCtl.speed; },
   enemies, spawnEnemy, arrows, fireArrow, MOVES, startMove, juice, updateHud, waveHeight, depthState, lockQuality: () => { autoDropped = true; }, world, player, cam, keys, mouse, cursor, step, render, heightAt, fellTree, applyBrush, setQuality, renderer, THREE,
@@ -4921,6 +4957,7 @@ window.__game = {
   treeGeo, pineLite: pineLiteGeo, markStockDirty: () => { hudDirty = true; },
   garden: gardenRead, landscape: landscapeRead, earthwork, vehicleCore,
   // runs through a building's frame (src/sim/core/routefind.js over src/sim/content/frame-channels.js)
+  servicesLink,   // __build.connect's power and water: a legacy run in the routes store (src/sim/services-legacy.js)
   routes: { find: routeFind, channelsFor: (structId) => frameChannelsFor(structId, window.__build), attach: frameAttach, snap: frameSnap, rayHit: frameRayHit },
   // the landscape view's hooks: the ground it shapes is walked on, and shows through the terrain where dug
   setRelief: (fn) => { reliefFn = fn; }, digMask: { win: DIG.uDigWin, enable: enableDigMask },

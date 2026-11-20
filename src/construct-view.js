@@ -507,7 +507,7 @@
   const segDist = (px, pz, a, b) => { const dx = b.x - a.x, dz = b.z - a.z, L = dx * dx + dz * dz, t = L > 1e-9 ? Math.max(0, Math.min(1, ((px - a.x) * dx + (pz - a.z) * dz) / L)) : 0; return Math.hypot(px - a.x - dx * t, pz - a.z - dz * t); };
 
   // ---- nail points: where a builder really nails. A stick takes a nail at each end; a sheet takes a few along its edges.
-  const STICKS = new Set(['post', 'beam', 'skid', 'joist', 'plate', 'stud', 'header', 'rafter', 'drip', 'rake', 'ridgecap', 'gutter', 'downspout']);
+  const STICKS = new Set(['guardpost', 'rail', 'baluster', 'stringer', 'post', 'beam', 'skid', 'joist', 'plate', 'stud', 'header', 'rafter', 'drip', 'rake', 'ridgecap', 'gutter', 'downspout']);
   const SHEETS = new Set(['sheathing', 'membrane', 'roofing', 'lining', 'insulation', 'cladding']);
   // the layer that hides a stage's nail heads once it is complete
   const COVER = { 'floor-frame': 'subfloor', subfloor: 'lining', 'wall-frame': 'lining', 'top-plates': 'lining', 'roof-frame': 'roof-deck', 'roof-deck': 'dry-in', 'dry-in': 'roofing', sheathing: 'wrap', wrap: 'cladding', carpentry: 'decorate' };   // trim: the nail holes are filled and painted over
@@ -559,9 +559,14 @@
     const pr = S().progress[id], g = geom(id);
     if (!pr || !g || pr.done) return;
     const by = new Map();
+    // a wall closed in (its frame, sheathing, siding and lining all on): its nails are behind the faces, or filled; none shows
+    const open = new Set(), SHELL = /^(wall-frame|top-plates|sheathing|wrap|cladding|lining)$/;
+    for (const mid in pr.members) { const pm = pr.members[mid]; if (pm.parent && SHELL.test(pm.stage) && !pm.built) open.add(pm.parent); }
+    const closed = (pm) => pm.parent && g.walls.has(pm.parent) && !open.has(pm.parent);
     for (const mid in pr.members) {
       const pm = pr.members[mid];
       if ((!pm.built && !(pm.need > 0 && pm.got >= pm.need - 1e-6)) || V.sawing.has(mid) || V.flights.has(mid)) continue;
+      if (pm.built && SHELL.test(pm.stage) && closed(pm)) continue;
       if (pm.kind === 'joint' || pm.kind === 'prime' || pm.kind === 'paint') continue;     // spread on, not nailed
       if (pm.built && pm.kind === 'cladding') continue;          // siding is blind-nailed: the next course covers the nails
       if (pm.built && pm.kind === 'lining' && (pm.stage !== 'lining' || !geom(id).byId.get(mid) || geom(id).byId.get(mid).type !== 'gypsum' || api.stageComplete(pr, 'finish'))) continue;   // boards are blind-nailed; drywall screws are mudded over
@@ -845,6 +850,11 @@
     if (!m0 || !ln0 || m0.type === 'ridge' || pm0.kind === 'door' || pm0.kind === 'window' || pm0.kind === 'site') return [];
     if (pm0.kind === 'rafter' && !Object.values(pr.members).some((q) => q.kind === 'rafter' && q.built)) return [];
     const mx = (m0.a[0] + m0.b[0]) / 2, mz = (m0.a[2] + m0.b[2]) / 2, out = [];
+    if (m0.deck) {         // deck boards: one gesture lays the next rows out from the house, as many as the gesture setting (Feel) says
+      const k = C.gestureOf(S().options), rows = [];
+      for (const mid of plan(pr.id).inst) { const pm = pr.members[mid], m = g.byId.get(mid); if (mid !== ctx.mid && pm && m && m.deck && pm.parent === pm0.parent && pm.need - pm.got > 1e-6 && m.row >= m0.row && m.row < m0.row + k) rows.push({ mid, k: (m.row - m0.row) * 1000 + Math.hypot((m.a[0] + m.b[0]) / 2 - mx, (m.a[2] + m.b[2]) / 2 - mz) }); }
+      return rows.sort((a, b) => a.k - b.k).map((o) => o.mid);
+    }
     if (m0.course) {       // a roof course: the rest of this course along the eave, then the course above it, as many pieces as a click sets
       const rows = [];
       for (const mid of plan(pr.id).inst) { const pm = pr.members[mid], m = g.byId.get(mid); if (mid !== ctx.mid && pm && m && m.course && pm.kind === pm0.kind && pm.parent === pm0.parent && pm.need - pm.got > 1e-6 && m.row >= m0.row && m.row <= m0.row + 1) rows.push({ mid, k: (m.row - m0.row) * 1000 + Math.hypot((m.a[0] + m.b[0]) / 2 - mx, (m.a[2] + m.b[2]) / 2 - mz) }); }
@@ -1151,6 +1161,14 @@
   function handAct(ctx) {
     if (ctx.act === 'mud' || ctx.act === 'sand') { mudAct(ctx); return; }
     if (ctx.act === 'roll' || ctx.act === 'caulk') { paintAct(ctx); return; }
+    {
+      // the aim can be a moment behind the work: a piece set by the click before (a click sets a few, one after another) is
+      // nailed now, not set again; one already done is passed over
+      const pr0 = S().progress[ctx.id], pm0 = pr0 && pr0.members[ctx.mid];
+      if (!pm0 || pm0.built) { V.rev++; return; }
+      const ln0 = pm0.line ? pr0.lines[pm0.line] : null;
+      if (ctx.act === 'set' && (!ln0 || pm0.need - pm0.got < 1e-6)) ctx = { ...ctx, act: 'nail' };
+    }
     V.lastAct = ctx.act;
     const pr = S().progress[ctx.id], g = geom(ctx.id), pm = pr.members[ctx.mid], m = g.byId.get(ctx.mid), P = G.player;
     const hw = m && C.STAGE[pm.stage].flat ? g.walls.get(pm.parent) : null, layer = hw ? pm.parent : 'main';
@@ -1625,6 +1643,18 @@
       else if (ctx.act === 'take') { const r = cmd('takeLadder'); if (r.ok) sounds.play('thunk'); else flash('Put down what you are carrying first'); }
     }
   }
+  // a piece that goes on wet in coats (seams, primer, paint, caulk): can it go on now? And how long until the coat under it is dry
+  function coatReady(pr, id) {
+    const pm = pr.members[id], t = G.sim.state.t;
+    if (pm.dryAt && t + 1e-6 < pm.dryAt) return false;
+    if (pm.kind === 'caulk') { const tp = pr.members[id.replace(/\.ck$/, '')]; return !tp || !!tp.built; }
+    if (pm.kind === 'paint') { const u = pr.members[id.replace('.pt', '.pr')]; return !u || (!!u.built && !(u.dryAt && t + 1e-6 < u.dryAt)); }
+    return true;
+  }
+  function dryLeft(pr, id) {
+    const pm = pr.members[id], t = G.sim.state.t, u = pm.kind === 'paint' ? pr.members[id.replace('.pt', '.pr')] : null;
+    return Math.max(pm.dryAt ? pm.dryAt - t : 0, u && u.dryAt ? u.dryAt - t : 0, 60);
+  }
   function startAuto(id, stage, guided) {
     const pr = S().progress[id];
     if (!pr) return;
@@ -1674,7 +1704,9 @@
     onCancel(j) { V.working = null; redraw(j.id); },
   });
   const vTmp = new T.Vector3();
-  const reason = (r, kind, mid) => r.held ? r.reason : r.reason === 'support missing' ? ((C.SUPPORT_SAYS[r.missing] || 'Set the supports') + ' first') : (kind === 'door' || kind === 'window') && (r.reason === 'stage not open' || r.reason === 'frame not finished') ? (r.reason === 'frame not finished' ? 'Frame the opening first' : 'Wrap the wall before the ' + kind + ' goes in') : ({ 'no material': 'You need ' + (r.itemId ? stackName(r.itemId) : 'material') + ' for that', 'wrong material': 'That needs ' + (r.itemId ? stackName(r.itemId) : 'something else'), 'no fasteners': 'Out of ' + (r.itemId ? low(CAT[r.itemId].name) : 'fasteners') + ': buy more in the Supplier (U)', 'stage not open': 'Not yet: an earlier stage comes first', 'cut first': 'Cut it at the sawhorses first', 'no sawhorses': 'The sawhorses come with the lumber', 'nothing to cut': 'Nothing left to cut' })[r.reason] || 'That cannot go in yet';
+  const reason = (r, kind, mid) => r.held ? r.reason : r.reason === 'support missing' ? ((C.SUPPORT_SAYS[r.missing] || 'Set the supports') + ' first') : (kind === 'door' || kind === 'window') && (r.reason === 'stage not open' || r.reason === 'frame not finished') ? (r.reason === 'frame not finished' ? 'Frame the opening first' : 'Wrap the wall before the ' + kind + ' goes in') : ({ 'no material': 'You need ' + (r.itemId ? stackName(r.itemId) : 'material') + ' for that', 'wrong material': 'That needs ' + (r.itemId ? stackName(r.itemId) : 'something else'), 'no fasteners': 'Out of ' + (r.itemId ? low(CAT[r.itemId].name) : 'fasteners') + ': buy more in the Supplier (U)', 'stage not open': 'Not yet: an earlier stage comes first', 'not yet': 'Not yet: an earlier stage comes first', 'cut first': 'Cut it at the sawhorses first', 'no sawhorses': 'The sawhorses come with the lumber', 'nothing to cut': 'Nothing left to cut',
+      'already set': 'Already in place: nail it', 'already built': 'That one is done', 'set the trim first': 'Nail the trim up first, then caulk it', 'prime first': 'Prime it first: colour goes on over dry primer', 'wet': 'Still wet: let it dry first',
+      'not cut on site': 'That one comes cut to size', 'one frame at a time': 'Finish the frame you are on first', 'frame not finished': 'Finish the frame first', 'hands full': 'Your hands are full: put that down first', 'too far': 'Too far: get closer' })[r.reason] || 'That cannot go in yet (' + r.reason + ')';
   function autoCan(s, pr, mid, ln, c) {
     const pm = pr.members[mid], sn = api.stockNeed(s, pr, mid);
     if (pm.prep) return true;                   // cut and waiting at the sawhorses
@@ -1751,7 +1783,10 @@
       if (V.raise) tickRaise(dt, true);
       else if (pl.raise) { V.raise = { id: A.id, parent: pl.raise, p: 0, angle: geom(A.id).walls.get(pl.raise).flat, creak: 0 }; redraw(A.id); }
       else if (!W.job) {
-        const q = pl.inst.filter((id) => pr.members[id].stage === A.stage);
+        // only what can go on now: not a coat while the one under it is wet, not caulk before its trim is nailed, not colour
+        // before primer. Everything left drying: wait for it (the clock can be sped up), rather than stop
+        const all = pl.inst.filter((id) => pr.members[id].stage === A.stage), q = all.filter((id) => coatReady(pr, id));
+        if (!q.length && all.length) { const m2 = Math.ceil(Math.min(...all.map((id) => dryLeft(pr, id))) / 60); if (!(V.hintT > 0)) flash('Waiting for it to dry: about ' + m2 + ' min (speed the clock up to wait less)'); return; }
         if (!q.length) { const was = A.stage; stopAuto(); if (!api.stageComplete(pr, was)) flash('Stopped: ' + C.STAGE[was].name + ' is waiting on something else'); return; }
         const ln = lineOf(pr, q[0]), pm = pr.members[q[0]], c = s.carried;
         if (A.guided || !ln || pm.need - pm.got < 1e-6) beginMember(A.id, q[0], A.guided ? 'stacks' : 'carried');
@@ -1883,6 +1918,7 @@
     const out = { k: pr.name + ' · ' + C.STAGE_ORDER.filter((q) => pl.view.stages.some((w) => w.id === q)).indexOf(v.id) + ' of ' + pl.view.stages.length + ' stages done', title: v.name, stage: v.id, what: v.what, why: v.why };
     out.k = pr.name + ' · stage ' + (pl.view.stages.indexOf(v) + 1) + ' of ' + pl.view.stages.length;
     { const fh = (v.id === 'site' || v.id === 'foundation') && window.__foundation && window.__foundation.owns(pr.id) ? window.__foundation.hint(pr.id) : null;
+      if (!fh && (v.id === 'site' || v.id === 'foundation') && C.STAGE[v.id].hint && st && ['slab', 'stemwall', 'piers'].includes(st.found)) return { ...out, line: C.STAGE[v.id].hint.replace(/\((\d)\)/, '(<kbd>$1</kbd>)'), target: at };   // signpost: the Site tool (7)
       if (fh) return { ...out, line: fh, target: at, btn: Object.values(pr.lines).every((l) => l.ordered <= 1e-9) && pl.view.toOrderUsd > 0 ? ['order:all', 'Order everything, ' + money(pl.view.toOrderUsd)] : null }; }
     if (Object.values(pr.lines).every((l) => l.ordered <= 1e-9) && pl.view.toOrderUsd > 0) return { ...out, line: 'Order the materials. While they are on their way, level the ground: stand on the plan and hold <kbd>E</kbd>.', btn: ['order:all', 'Order everything, ' + money(pl.view.toOrderUsd)], target: at };
     if (V.auto && V.auto.id === pr.id) return { ...out, line: (V.auto.guided ? 'Building. ' : 'Working until it is done. ') + '<kbd>E</kbd> stops.', target: at };

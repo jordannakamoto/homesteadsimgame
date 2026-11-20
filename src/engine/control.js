@@ -46,13 +46,14 @@ export function createControl({ player, cam, keys, mouse }) {
   }
 
   // ---- input
-  const input = { mx: 0, mz: 0, ix: 0, iz: 0, a: false, b: false, brake: false, shift: false };
+  const input = { mx: 0, mz: 0, ix: 0, iz: 0, kx: 0, kz: 0, joy: false, a: false, b: false, brake: false, shift: false };   // kx, kz: the keys alone (-1..1); joy: a touch stick is pushed
   function readInput() {
     let ix = 0, iz = 0;
     if (keys.KeyW || keys.ArrowUp) iz += 1;
     if (keys.KeyS || keys.ArrowDown) iz -= 1;
     if (keys.KeyD || keys.ArrowRight) ix += 1;
     if (keys.KeyA || keys.ArrowLeft) ix -= 1;
+    input.kx = ix; input.kz = iz; input.joy = !!(keys.joyX || keys.joyY);
     ix += keys.joyX || 0; iz += keys.joyY || 0;
     const il = Math.hypot(ix, iz);
     if (il > 1) { ix /= il; iz /= il; }

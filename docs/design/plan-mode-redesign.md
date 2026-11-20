@@ -210,6 +210,10 @@ A selected stair has handles at its foot and its head (drag to re-fit: the step 
 
 Not connected yet. A stair is still one piece that is not made of members (`src/build.js` near 9201): it appears with the shell stage, and nobody cuts stringers. This plan gives the piece the numbers a later construction step needs (stringer length, tread and riser counts, baluster count) and adds them to the Materials list as lines if `FR.materialsList` takes extra lines without change; cutting and setting a stair by hand is a follow-up, not in this plan.
 
+### 3A.8 Follow-up: deck stairs and the stair solver (after merging main's decks)
+
+Main's decks (`src/sim/content/deck.js`, `planStair`) carry their own stair: from an open edge down to a precast pad at grade, risers at most 7-3/4 in and treads 10 in (IRC R311.7.5), solved against the terrain at the foot (the drop depends on the run, so it iterates), and emitted as framing members (2 x 12 stringers cut to the rise and run, treads, pads, handrails) that construction builds. The stair tool's solver (`src/sim/content/stairs.js`, type `deck`) lays out the same kind of stair as geometry only, with its own riser rule (190 mm max, aim 178 mm) and no members. They are left separate for now: unifying them means one rule set (the deck's IRC figures or `RULES.riser`), a ground-following foot in `solve` (`run` from the terrain), and deck members built from a `solve` layout. Then `planStair` becomes `solve({ type: 'deck', rise: drop, width: w, ... })` plus the pads, and the drawn deck steps and the stair tool's Deck steps agree. Until then a change to riser or tread rules goes in both files.
+
 ## 3B. What plan mode shows
 
 ### 3B.1 Today

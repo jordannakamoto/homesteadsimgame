@@ -7,11 +7,13 @@
 //                                                surface(x, z) -> a name in the vehicles system's api.surfaces
 //     units(), unit(id), driven() -> id | null, kinds(),
 //     mount(id, seat?), dismount(),              also done by walking into a mount zone / pressing E
-//     body(id) -> { x, y, z, yaw, pitch, roll, speed, rpm, gear } the live pose,
+//     body(id) -> { x, y, z, yaw, pitch, roll, speed, rpm, gear, ... } the live pose and the drive model's readings:
+//                slip / plow (rear / front tyres sliding, m/s), spin, tip, mu, load (N per wheel), hitch (N on the ball,
+//                [along, across]), tongue (N), artic (a towed unit's), belt / tslip (tracks, m/s), jack,
 //     bedPoint(id, out), nearest(x, z, r) -> id | null, spawn(kind, x?, z?, yaw?) -> id (debug and tests),
 //     findSpot(x, z, { rMin, rMax, rad, away }) -> { x, z, yaw } | null   a clear, dry, flat place near a point
 //     unstick(id), stats(),
-//     towing: hitch(id?) (the driven unit to the nearest towed unit in reach), unhitch() (X while seated),
+//     towing: hitch(id?) (the driven unit to the nearest towed unit in reach), unhitch() (hold R while seated and stopped),
 //     cargo:  setCargo(id, groups, kg)  what lies on a unit's bed: groups = [{ n, w, h, l, color }] (pieces, metres,
 //             laid along the bed, layer on layer); kg is what it weighs (the drive model tows it),
 //             flyFrom(id, { x, y, z })  the next pieces added fly onto the bed from there,
@@ -35,7 +37,7 @@
   if (!G || !G.control || !G.vehicleCore) return;
   const T = G.THREE, VC = G.vehicleCore, control = G.control, P = G.player, pm = G.pm, SUB = VC.SUB;
   const canvas = G.renderer.domElement;
-  const MAX_SUB = 4, SYNC_S = 0.5, HOP_S = 0.3, OFF_MPS = 1.5, ZONE_HOLD_S = 0.25, TIP_WARN = 0.8, TIP_OVER_S = 0.35;
+  const MAX_SUB = 4, SYNC_S = 0.5, HOP_S = 0.3, OFF_MPS = 1.5, ZONE_HOLD_S = 0.25, TIP_WARN = 0.8, TIP_OVER_S = 0.35, UNHITCH_HOLD_S = 0.6;
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const sysDef = () => G.sim.systems.find((s) => s.name === 'vehicles') || null;
   const S = () => G.sim.state.sys.vehicles || null;
@@ -53,9 +55,17 @@
   document.body.appendChild(line);
   // with the interface kit the line is a toast in the top lane; without it, a line near the bottom of the view
   function say(t, s = 2) {
-    sayT = s;
+    sayT = s; hintOn = false;
     if (window.__ui && window.__ui.toast) { if (t) window.__ui.toast(t, { seconds: s }); return; }
     line.textContent = t; line.style.display = t ? 'block' : 'none';
+  }
+  // a standing prompt (key chip + words) shown while nothing else is being said; chip() comes from game/keymap.js when loaded
+  let hintOn = false;
+  const kc = (k) => (window.__keymap ? window.__keymap.chip(k) : '<b>' + k + '</b>');
+  function hint(html) {
+    if (!html) { if (hintOn) { line.style.display = 'none'; hintOn = false; } return; }
+    if (sayT > 0) return;
+    line.innerHTML = html; line.style.display = 'block'; hintOn = true;
   }
 
   // ---------------------------------------------------------------- models
@@ -403,7 +413,7 @@
     L.towL = Lt; wakeTowed(L, Lt);
     L.body.u *= 0.2; guide.visible = false;
     G.cam.shake = Math.min(0.4, G.cam.shake + 0.09);
-    say(Lt.kind.cargo && Lt.kind.cargo.tips ? 'Hitched. X unhitches; hold the left button to tip the bed.' : 'Hitched. X unhitches.', 3);
+    say(Lt.kind.cargo && Lt.kind.cargo.tips ? 'Hitched. Hold R to unhitch; hold the left button to tip the bed.' : 'Hitched. Hold R to unhitch.', 3);
     return true;
   }
   function unhitch() {
@@ -434,7 +444,7 @@
     const r = G.sim.commandNow('vehicles.sit', { id, seat: seatId, actor: 'player' });
     if (!r.ok) { say(r.reason === 'seat taken' ? 'Someone is on it.' : 'Cannot get on: ' + r.reason + '.'); return r; }
     enterSeat(L, r.seat, { x: P.x, y: P.y, z: P.z });
-    if (!localStorage.getItem('veh:told')) { say('Push where you want to go. Space brakes, Shift is gentle throttle, E gets off.', 5); localStorage.setItem('veh:told', '1'); }
+    if (!localStorage.getItem('veh:told')) { say('W drives, S brakes then reverses, A and D steer, Space brakes, Shift is gentle throttle, E gets off.', 5); localStorage.setItem('veh:told', '1'); }
     return { ok: true };
   }
   function enterSeat(L, seatId, from) {
@@ -488,6 +498,9 @@
     }
     return null;
   }
+  const heading = () => { try { return localStorage.getItem('driveScheme') === 'heading'; } catch (e) { return false; } };
+  const camFollow = () => { try { return localStorage.getItem('driveCamFollow') === '1'; } catch (e) { return false; } };
+  const wrapA = (a) => Math.atan2(Math.sin(a), Math.cos(a));
   function ride(dt, input) {
     const L = seat.L, b = L.body, k = L.kind;
     seat.t += dt;
@@ -509,7 +522,10 @@
       if (f >= 1) finishOff();
       return;
     }
-    drive = VC.headingControl(b, k, input.mx, input.mz, { gentle: input.shift });
+    // keys drive like a car (W throttle, S brake then reverse, A/D steer the vehicle); a touch stick, or localStorage.driveScheme =
+    // 'heading', keeps "push where you want to go" on screen
+    if (input.joy || heading()) drive = VC.headingControl(b, k, input.mx, input.mz, { gentle: input.shift });
+    else drive = VC.carControl(b, k, seat.pedal || (seat.pedal = {}), { fwd: input.kz, turn: input.kx, brake: false, gentle: input.shift }, dt);
     if (input.brake) { drive.brake = 1; drive.throttle = 0; }
     {                                                      // what it tows: the sim says; the live body follows the ball
       const u = S().units[L.id], Lt = u && u.towing ? live.get(u.towing) || null : null;
@@ -517,6 +533,12 @@
       if (Lt) { Lt.bedWant = !!(seat.useDown && Lt.kind.cargo && Lt.kind.cargo.tips); guide.visible = false; }
       else if (k.points && k.points.length) hitchGuide(L);
       if (seat.useDown && !Lt && warnT <= 0) { say('Nothing to tip: hitch a trailer first.', 1.2); warnT = 1.2; }
+      // unhitching is a held R at the tongue (X belongs to the overlays everywhere); the prompt shows while stopped with a trailer on
+      if (Lt && seat.phase === 'ride' && Math.abs(b.u) <= 0.5) {
+        seat.rHold = seat.rDown ? (seat.rHold || 0) + dt : 0;
+        if (seat.rHold >= UNHITCH_HOLD_S) { seat.rHold = 0; seat.rDown = false; unhitch(); }
+        else hint(seat.rHold > 0 ? 'Unhitching ' + Math.round(100 * seat.rHold / UNHITCH_HOLD_S) + '%' : 'Hold ' + kc('R') + ' to unhitch');
+      } else { seat.rHold = 0; hint(null); }
     }
     if (seat.offReq) {
       if (Math.abs(b.u) < OFF_MPS) {
@@ -528,6 +550,17 @@
     }
     stepUnit(L, dt, drive);
     poseRider(L, null);
+    // optional follow-behind camera (localStorage.driveCamFollow = '1', default off): the orbit eases round behind the nose while
+    // driving, and lets go for two seconds whenever the player has turned the camera by hand
+    if (camFollow() && seat.phase === 'ride') {
+      if (seat.camSet != null && Math.abs(wrapA(G.cam.yaw - seat.camSet)) > 1e-4) seat.camHold = 2;
+      seat.camHold = Math.max(0, (seat.camHold || 0) - dt);
+      if (!seat.camHold && Math.abs(b.u) > 1) {
+        G.cam.yaw += wrapA(b.yaw + Math.PI - G.cam.yaw) * Math.min(1, 1.2 * dt * Math.min(1, Math.abs(b.u) / 4));
+        if (G.cam.prevYaw != null) G.cam.prevYaw = G.cam.yaw;
+      }
+      seat.camSet = G.cam.yaw;
+    }
     // the camera: a little further out with speed; a shake on a hard landing or a knock
     seat.poss.cam.distK = 1 + 0.15 * Math.min(1, Math.abs(b.u) / k.topMps);
     if (L.land > 0.8) { G.cam.shake = Math.min(0.55, G.cam.shake + 0.06 * L.land); landPuff(L); }
@@ -553,7 +586,7 @@
     if (L.towL) { L.towL.bedWant = false; park(L.towL, S().units[L.towL.id]); }
     guide.visible = false;
     const h = seat.poss;
-    seat = null;
+    hint(null); seat = null;
     control.pop(h, 'off');
     P.x = to.x; P.z = to.z; P.y = to.y;
     releaseRider(yaw);
@@ -566,7 +599,7 @@
     const hw = L.kind.dims.w / 2 + 0.9, o = VC.toWorld(b, dir * hw, 0, {});
     G.pushOut(o, 0.28);
     const h = seat.poss;
-    seat = null;
+    hint(null); seat = null;
     control.pop(h, 'tip');
     P.x = o.x; P.z = o.z; P.y = G.groundAt(o.x, o.z, b.y + 1);
     releaseRider(b.yaw);
@@ -684,7 +717,7 @@
 
   // ---------------------------------------------------------------- keys and clicks while seated
   // While seated the walking keys that would switch tools, open build mode or act with the hands are the seat's:
-  // E steps off, the rest are swallowed. Panels (stock, weather, help, quality, speed) still open.
+  // E steps off, hold R unhitches, the rest are swallowed. Panels (stock, weather, help, quality, speed) still open.
   const BLOCK = /^(Digit\d|Key[EQFRCBLKXZ])$/;
   window.addEventListener('keydown', (e) => {
     if (!seat || !BLOCK.test(e.code)) return;
@@ -692,8 +725,10 @@
     if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return;
     e.stopImmediatePropagation(); e.preventDefault();
     if (e.code === 'KeyE' && !e.repeat) seat.offReq = true;
-    if (e.code === 'KeyX' && !e.repeat) unhitch();
+    if (e.code === 'KeyR') seat.rDown = true;               // held: unhitch (see ride)
   }, true);
+  window.addEventListener('keyup', (e) => { if (seat && e.code === 'KeyR') seat.rDown = false; }, true);
+  window.addEventListener('blur', () => { if (seat) seat.rDown = false; });
   window.addEventListener('pointerdown', (e) => {
     if (!seat || e.target !== canvas || e.pointerType !== 'mouse') return;
     e.stopImmediatePropagation();
@@ -743,7 +778,8 @@
       const L = live.get(id);
       if (!L) return null;
       const p = L.pose, b = L.body;
-      return { x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch, roll: p.roll, steer: p.steer, speed: b.u, slip: b.slip, spin: b.spin, rpm: b.rpm, gear: b.gear, tip: b.tip, air: b.air, fuelL: b.fuelL, surface: L.surf };
+      return { x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch, roll: p.roll, steer: p.steer, speed: b.u, slip: b.slip, spin: b.spin, rpm: b.rpm, gear: b.gear, tip: b.tip, air: b.air, fuelL: b.fuelL, surface: L.surf,
+        plow: b.plow, mu: b.mu, load: b.load.slice(), hitch: b.hitch.slice(), tongue: b.tongue, artic: b.artic, belt: b.belt.slice(), tslip: b.tslip.slice(), jack: b.jack };
     },
     bedPoint(id, out = {}) {
       const L = live.get(id), c = L && L.kind.cargo;

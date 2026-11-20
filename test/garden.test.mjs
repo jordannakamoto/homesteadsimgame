@@ -333,7 +333,7 @@ test('the same weather in a 365-day and a 20-day year gives the same yield per p
   // weather that follows the seasonal clock (sun from the calendar date) but has no fronts: like for like
   const seasonal = () => {
     const w = stubWeather({ meanC: 16, rangeC: 10, cloud: 0.4, rainMmDay: 8, rainEvery: 2 }), step = w.step;
-    w.step = (ctx) => step({ ...ctx, t: ctx.ct ?? ctx.t });
+    w.step = (ctx) => { const c = Object.create(ctx); c.t = ctx.ct ?? ctx.t; step(c); };
     return w;
   };
   hoeEvery = 1;
