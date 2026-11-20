@@ -301,7 +301,8 @@ function step(ctx) {
   if (!hasTiles && !(W.snowSweMm > 0) && s.canopyMm === 0 && s.freshMm === 0 && dFallRef === 0) { s.seen.fall = fall; s.seen.melt = W.totals.meltMm; return; }
   let changed = false;
   // crown store
-  if (dFallRef > 0 && s.obstacles.trees.some((t) => t[4])) s.canopyMm += dFallRef * CANOPY.gain * (1 - s.canopyMm / CANOPY.capMm);
+  // gains 0.45 of the fall, saturating at the cap (in closed form, so one large fall in a step cannot overshoot it)
+  if (dFallRef > 0 && s.obstacles.trees.some((t) => t[4])) s.canopyMm += (CANOPY.capMm - s.canopyMm) * (1 - Math.exp(-dFallRef * CANOPY.gain / CANOPY.capMm));
   if (s.canopyMm > 0) {
     const tau = T > 0 ? CANOPY.tauWarm : W.windMs > CANOPY.windyMs ? CANOPY.tauWindy : CANOPY.tauCalm, shed = s.canopyMm * (1 - Math.exp(-dt / tau));
     s.canopyMm -= shed; s.totals.sublim += CANOPY.sublimated * shed; s.unloadMm += (1 - CANOPY.sublimated) * shed;

@@ -24,12 +24,13 @@ vec4 snowField(vec2 w) {
 }
 // the most this column can be pressed down (m): the gap between its density and packed snow's
 float snowSquash(vec4 F) { return F.x * clamp(1.0 - F.y * (600.0 / 450.0), 0.0, 0.9); }
-// albedo, linear: fresh powder, a week old, a touch darker when wet or packed
+// albedo, linear: fresh powder, a week old, a touch darker when wet or packed. Cool on purpose: the engine's grade and
+// haze are warm (set for grass and soil), and snow that is neutral before them reads beige after them.
 vec3 snowAlbedo(float rho600, float packed) {
   float age = max(smoothstep(0.2, 0.5, rho600) - uSnowRef.z * 0.6, 0.0);
-  vec3 a = mix(vec3(0.86, 0.89, 0.93), vec3(0.76, 0.78, 0.80), age);
-  // x 0.8: the engine's exposure is set for grass and soil; at full albedo open snow tone-maps to flat paper white
-  return a * 0.8 * (1.0 - 0.1 * uSnowRef.w) * (1.0 - 0.06 * packed);
+  vec3 a = mix(vec3(0.88, 0.93, 1.0), vec3(0.80, 0.85, 0.91), age);
+  // x 0.9: at full albedo open snow in sun tone-maps to flat paper white
+  return a * 0.9 * (1.0 - 0.08 * uSnowRef.w) * (1.0 - 0.06 * packed);
 }`;
 // The live deformation: press, rim, rough, cleared, in a toroidal window of uSnowLiveWin.z metres round its centre.
 export const LIVE_GLSL = /* glsl */ `
@@ -62,8 +63,8 @@ float snowUndulate(vec2 w) {
 
 // ---------------------------------------------------------------- the snow surface's material
 const V_PARS = FIELD_GLSL + LIVE_GLSL + GROUND_GLSL + /* glsl */ `
-uniform vec3 uSnowCenter;
-varying vec3 vSnowW; varying vec4 vSnowA; varying vec4 vSnowF; varying vec2 vSnowSlope;`;
+uniform vec3 uSnowCenter; uniform sampler2D uSkyMap; uniform float uSkyK; uniform float uSkySize;
+varying vec3 vSnowW; varying vec4 vSnowA; varying vec4 vSnowF; varying vec2 vSnowSlope; varying float vSnowSky;`;
 const V_BEGIN = /* glsl */ `
   vec2 sw = uSnowCenter.xy + position.xz;
   float sRing = position.y;
@@ -84,10 +85,12 @@ const V_BEGIN = /* glsl */ `
   float hS = snowGround(sw - sE.yx) + snowField(sw - sE.yx).x * snowUndulate(sw - sE.yx) * sEf;
   vSnowSlope = vec2(hE - hW, hN - hS);
   vSnowW = vec3(sw.x, sH, sw.y); vSnowA = vec4(sBase, sS, sRing, sTh); vSnowF = sF;
+  // the engine's sky visibility (crowns overhead, hollows): the forest floor's snow is dimmer, as its ground is
+  vSnowSky = mix(1.0, texture(uSkyMap, (sw + 0.5) / uSkySize).r, uSkyK);
   vec3 transformed = vec3(sw.x, sH, sw.y);`;
 const F_PARS = FIELD_GLSL + LIVE_GLSL + /* glsl */ `
 uniform int uSnowView;
-varying vec3 vSnowW; varying vec4 vSnowA; varying vec4 vSnowF; varying vec2 vSnowSlope;
+varying vec3 vSnowW; varying vec4 vSnowA; varying vec4 vSnowF; varying vec2 vSnowSlope; varying float vSnowSky;
 vec3 gSnN, gSnNs, gSnW; float gSnRim, gSnGlint, gSnPx, gSnCav;
 float snH(vec2 w, float lod, float S, float base) { vec4 l = snowLive(w, lod); return snowLiveH(l, S) - base * l.a; }`;
 // replaces lights_lambert_pars_fragment: same structure and signatures as three r187's Lambert
@@ -122,7 +125,8 @@ void RE_Direct_Snow(const in IncidentLight directLight, const in vec3 geometryPo
   float wrap = mix(saturate(ndl), clamp((ndl + 0.35) / 1.35, 0.0, 1.0), uSnowFlags.y);
   vec3 tint = mix(vec3(1.0), mix(vec3(0.60, 0.80, 1.0), vec3(1.0), smoothstep(0.0, 0.5, ndl)), uSnowFlags.y);
   vec3 lam = BRDF_Lambert(material.diffuseColor);
-  reflectedLight.directDiffuse += directLight.color * wrap * tint * lam;
+  float sky = mix(1.0, vSnowSky, 0.35);              // as the terrain: a little of the sun is really sky light
+  reflectedLight.directDiffuse += directLight.color * wrap * tint * lam * sky;
   // thin raised lips lit from behind glow
   reflectedLight.directDiffuse += directLight.color * lam * 0.35 * gSnRim * pow(clamp(dot(V, -L) * 0.5 + 0.5, 0.0, 1.0), 3.0);
   // glints, in world space so the facets stay where they are
@@ -134,8 +138,10 @@ void RE_Direct_Snow(const in IncidentLight directLight, const in vec3 geometryPo
   reflectedLight.directDiffuse += directLight.color * uSnowRef.w * 0.05 * pow(saturate(dot(N, normalize(L + V))), 12.0);
 }
 void RE_IndirectDiffuse_Snow(const in vec3 irradiance, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in LambertMaterial material, inout ReflectedLight reflectedLight) {
-  // sky light hidden in a rut, and what does reach the bottom is bluer
-  reflectedLight.indirectDiffuse += irradiance * BRDF_Lambert(material.diffuseColor) * (1.0 - gSnCav) * mix(vec3(1.0), vec3(0.8, 0.9, 1.05), min(gSnCav * 1.6, 1.0));
+  // sky light: the blue of the open sky (snow in shade is lit by nothing else), hidden in a rut and under crowns, and
+  // what does reach the bottom of a rut is bluer still
+  vec3 skyTint = vec3(0.86, 0.95, 1.12) * mix(vec3(1.0), vec3(0.8, 0.9, 1.05), min(gSnCav * 1.6, 1.0));
+  reflectedLight.indirectDiffuse += irradiance * BRDF_Lambert(material.diffuseColor) * (1.0 - gSnCav) * vSnowSky * skyTint;
 }
 #define RE_Direct RE_Direct_Snow
 #define RE_IndirectDiffuse RE_IndirectDiffuse_Snow`;
@@ -173,7 +179,7 @@ const F_DEBUG = /* glsl */ `#include <dithering_fragment>
   else if (uSnowView == 4) gl_FragColor = vec4(gSnN * 0.5 + 0.5, 1.0);`;
 
 export const VIEWS = { press: 1, depth: 2, packed: 3, normal: 4 };
-const SURF_U = ['uSnowField', 'uSnowFieldWin', 'uSnowRef', 'uSnowWind', 'uSnowFlags', 'uSnowFlags2', 'uSnowLive', 'uSnowLiveWin', 'uSnowLiveTexel', 'uSnowGround', 'uSnowCenter', 'uSnowView'];
+const SURF_U = ['uSnowField', 'uSnowFieldWin', 'uSnowRef', 'uSnowWind', 'uSnowFlags', 'uSnowFlags2', 'uSnowLive', 'uSnowLiveWin', 'uSnowLiveTexel', 'uSnowGround', 'uSnowCenter', 'uSnowView', 'uSkyMap', 'uSkyK', 'uSkySize'];
 
 // The snow surface's material: receives shadows, fog and the scene's lights like everything else.
 export function createSurfaceMaterial(T, U) {
@@ -191,6 +197,6 @@ export function createSurfaceMaterial(T, U) {
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize(mat3(viewMatrix) * gSnN);')
       .replace('#include <dithering_fragment>', F_DEBUG);
   };
-  mat.customProgramCacheKey = () => 'snow-surface-1';
+  mat.customProgramCacheKey = () => 'snow-surface-2';
   return mat;
 }

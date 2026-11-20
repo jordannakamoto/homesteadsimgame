@@ -18,11 +18,12 @@ const TERRAIN_F = /* glsl */ `#include <normal_fragment_maps>
     // thin snow lies in patches; from about 4 cm it covers
     float sN = snowNoise2(vSnowW.xz * 0.45) * 0.65 + snowNoise2(vSnowW.xz * 2.1) * 0.35;
     float sCov = smoothstep(0.03 * sN, 0.03 * sN + 0.012, sD) * smoothstep(0.5, 0.85, dot(normal, normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz)));
-    // the ground's light is softer (it wraps further) than the snow surface's: a touch darker here so they meet
-    diffuseColor.rgb = mix(diffuseColor.rgb, snowAlbedo(sF.y, sP) * 0.86, sCov);
+    // the ground's light is softer (it wraps further) than the snow surface's, and its sky light is not tinted: a touch
+    // darker and bluer here so they meet
+    diffuseColor.rgb = mix(diffuseColor.rgb, snowAlbedo(sF.y, sP) * vec3(0.82, 0.85, 0.9), sCov);
   }`;
 const GRASS_V = /* glsl */ `#include <begin_vertex>
-  vSnowTip = 0.0;
+  vSnowTip = 0.0; vSnowStraw = 0.0;
   #ifdef USE_INSTANCING
   if (uSnowFlags2.x > 0.5) {
     vec2 sR = instanceMatrix[3].xz;
@@ -32,16 +33,29 @@ const GRASS_V = /* glsl */ `#include <begin_vertex>
     if (snowInLive(sR, 0.2)) { vec4 l = textureLod(uSnowLive, sR / uSnowLiveWin.z, 2.0); sD = sF.x * (1.0 - l.a) - max(sF.z, l.r) * snowSquash(sF); }
     #endif
     float sTh = 0.62 * length(instanceMatrix[1].xyz);            // the tuft's height
-    float sK = clamp(sD / max(sTh, 0.05), 0.0, 1.5);
-    // weighed down and splayed by the snow; buried when what is left would not clear it
-    float sSq = 0.75 * min(sK * 2.5, 1.0);                       // snow lies on the blades and flattens them
-    transformed.y *= 1.0 - sSq;
-    transformed.xz *= 1.0 + 0.4 * min(sK, 1.0);
-    vSnowTip = sK > 0.0 ? clamp(sK * 2.0, 0.0, 0.85) * smoothstep(0.1, 1.0, position.y / 0.62) : 0.0;
-    vSnowBury = (sTh * (1.0 - sSq) < sD + 0.03) ? 1.0 : 0.0;
+    float sHash = snowHash12(floor(sR * 37.0) + 0.5);
+    if (sD > 0.06 + 0.04 * sHash) {
+      // winter grass is dead and lies flat under the snow: every tuft whose root is covered is gone, but for one in
+      // twelve left standing as a few short pale-straw stalks, thin, a hand above the snow
+      if (fract(sHash * 12.9898) < 1.0 / 12.0) {
+        float sTop = min(sTh, sD + 0.06 + 0.16 * fract(sHash * 7.31));
+        transformed.y *= sTop / max(sTh, 0.05);
+        transformed.xz *= 0.45;
+        vSnowStraw = 1.0;
+      } else vSnowBury = 1.0;
+    } else {
+      float sK = clamp(sD / max(sTh, 0.05), 0.0, 1.5);
+      // first snow: weighed down and splayed by it; buried when what is left would not clear it
+      float sSq = 0.75 * min(sK * 2.5, 1.0);                     // snow lies on the blades and flattens them
+      transformed.y *= 1.0 - sSq;
+      transformed.xz *= 1.0 + 0.4 * min(sK, 1.0);
+      vSnowTip = sK > 0.0 ? clamp(sK * 2.0, 0.0, 0.85) * smoothstep(0.1, 1.0, position.y / 0.62) : 0.0;
+      vSnowBury = (sTh * (1.0 - sSq) < sD + 0.03) ? 1.0 : 0.0;
+    }
   }
   #endif`;
 const GRASS_F = /* glsl */ `
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.50, 0.43, 0.27), vSnowStraw);   // dead straw, pale
   diffuseColor.rgb = mix(diffuseColor.rgb, snowAlbedo(uSnowRef.y, 0.0) * 0.8, vSnowTip);
   #include <lights_lambert_fragment>`;
 
@@ -63,10 +77,10 @@ export function createGroundPatches(G, U) {
         sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + def + FIELD_GLSL + LIVE_GLSL + '\nvarying vec3 vSnowW;')
           .replace('#include <normal_fragment_maps>', TERRAIN_F);
       } else {
-        sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + def + FIELD_GLSL + LIVE_GLSL + '\nvarying float vSnowTip; float vSnowBury = 0.0;')
+        sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + def + FIELD_GLSL + LIVE_GLSL + '\nvarying float vSnowTip; varying float vSnowStraw; float vSnowBury = 0.0;')
           .replace('#include <begin_vertex>', GRASS_V)
           .replace('#include <project_vertex>', '#include <project_vertex>\nif (vSnowBury > 0.5) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);');
-        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + FIELD_GLSL + '\nvarying float vSnowTip;')
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + FIELD_GLSL + '\nvarying float vSnowTip; varying float vSnowStraw;')
           .replace('#include <lights_lambert_fragment>', GRASS_F);
       }
     };

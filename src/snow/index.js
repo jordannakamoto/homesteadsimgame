@@ -5,6 +5,8 @@
      live.js    the 5 cm deformation texture: footprints, ruts, rims (drawn on the GPU, only when something presses)
      surface.js the nested-ring mesh of the snow surface; shade.js its material and the shared GLSL
      ground.js  the terrain whitened and the grass weighed down by the field; actors.js the feet and wheels
+     objects.js snow on things that face up (buildings, rocks, logs, vehicles, tree crowns), never under a roof;
+                crowns knocked clear when a tree is chopped, felled or sheds in the wind
    Tiers: Low, a software renderer or no half-float targets: the whitened ground and grass only. Medium: a 25.6 m
    surface and a 512 texture. High and Ultra: 51.2 m and 1024.
    Summer costs nothing: no texture, no patched material, no mesh until snow first lies, and all of it is released
@@ -16,6 +18,7 @@ import { buildSurface, RINGS, SNAP } from './surface.js';
 import { FIELD_GLSL, LIVE_GLSL, GROUND_GLSL, createSurfaceMaterial, VIEWS } from './shade.js';
 import { createGroundPatches } from './ground.js';
 import { createActors } from './actors.js';
+import { createObjects } from './objects.js';
 
 (() => {
   const G = window.__game;
@@ -39,11 +42,13 @@ import { createActors } from './actors.js';
     uSnowFlags: { value: new T.Vector4(1, 1, 1, 1) },                               // glints, scatter, rims, undulate
     uSnowFlags2: { value: new T.Vector4(1, 1, 0, 0) },                              // bury, surface
     uSnowView: { value: 0 },
+    // the engine's sky-visibility map (__game.skyVis), so snow under crowns and in hollows is dimmer as its ground is
+    uSkyMap: G.skyVis ? G.skyVis.map : { value: null }, uSkyK: G.skyVis ? G.skyVis.k : { value: 0 }, uSkySize: { value: G.skyVis ? G.skyVis.size : 512 },
   };
 
   // look switches, for comparing (kept in localStorage)
   const FLAG_KEY = 'snowFlags';
-  const flags = { surface: true, glints: true, scatter: true, rims: true, bury: true, undulate: true };
+  const flags = { surface: true, glints: true, scatter: true, rims: true, bury: true, undulate: true, objects: true };
   try { Object.assign(flags, JSON.parse(localStorage.getItem(FLAG_KEY) || '{}')); } catch (e) { /* none saved */ }
   function applyFlags() {
     const b = (v) => (v ? 1 : 0);
@@ -84,6 +89,38 @@ import { createActors } from './actors.js';
     return live ? live.stamp(s) : false;
   }
   const actors = createActors(G, { stamp, bearing, sample });
+  const objects = createObjects(G, U, { stamp });
+
+  // the trees round you, for the snowpack (canopy interception, tree wells, where unloaded snow lands): sent when you
+  // have moved 16 m or a tree has come down. Only when it is cold enough to snow or snow lies (the first fall is still caught); nothing in summer.
+  const CROWN_R = [0.25, 0.25, 0.4];
+  let treesAt = null, treesRemoved = -1;
+  function sendTrees() {
+    if (!has('snow.setObstacles') || !G.world || !G.treeKinds) return;
+    // only when it is cold enough to snow, or snow lies (the first fall of the winter is still caught)
+    const w = W();
+    if (!w || (w.tempC > 3 && !(w.snowSweMm > 0) && !active)) return;
+    const removed = G.world.removed ? G.world.removed.size : 0;
+    if (treesAt && Math.hypot(P.x - treesAt[0], P.z - treesAt[1]) < 16 && removed === treesRemoved) return;
+    treesAt = [P.x, P.z]; treesRemoved = removed;
+    const trees = [];
+    for (const c of G.world.chunks.values()) {
+      if (Math.abs(c.ox + (G.chunkSize || 32) / 2 - P.x) > 72 || Math.abs(c.oz + (G.chunkSize || 32) / 2 - P.z) > 72) continue;
+      for (const tr of c.trees) {
+        if (!tr.alive || Math.abs(tr.x - P.x) > 56 || Math.abs(tr.z - P.z) > 56 || trees.length >= 2500) continue;
+        const h = G.treeKinds[tr.type].h * tr.scale;
+        trees.push([+tr.x.toFixed(2), +tr.z.toFixed(2), +Math.min(20, Math.max(0.3, CROWN_R[tr.type] * h)).toFixed(2), +h.toFixed(2), tr.type === 0 ? 1 : 0]);
+      }
+    }
+    try { G.sim.command('snow.setObstacles', { trees }); } catch (e) { /* refused: try again after the next move */ }
+  }
+  // the wind's unloading of the crowns (the sim's snow.unload): a tree or two near you lets go
+  let simSeen = null;
+  function watchSim() {
+    if (G.sim === simSeen) return;
+    simSeen = G.sim; treesAt = null;
+    G.sim.listen((type) => { if (type === 'snow.unload' && active) objects.unloadNear(); });
+  }
 
   function wantTier() {
     if (!flags.surface || !caps.ok) return 'whiten';
@@ -119,18 +156,25 @@ import { createActors } from './actors.js';
     field = createField(G, U);
     field.update(P.x, P.z, true);
     setTier(wantTier());
+    objects.set(flags.objects);
   }
   function release() {
     if (!active) return;
     dropSurface();
     field.dispose(); field = null;
     ground.set(false, false);
+    objects.set(false);
+    actors.release();
     active = false; tier = 'off';
   }
 
+  let treesT = 0;
   function update(dt) {
     const w = W();
     if (!w) return;
+    watchSim();
+    treesT -= dt;
+    if (treesT <= 0) { treesT = 1; sendTrees(); }
     if (!active) { checkT += dt; if (checkT < 1) return; checkT = 0; if (lies()) activate(); else return; }
     const st = G.sim.state;
     // the reference pack and the weather, as the shaders want them
@@ -155,6 +199,7 @@ import { createActors } from './actors.js';
       if (!c || c[0] !== cx || c[1] !== cz) live.follow(cx, cz);
     }
     actors.update(dt);
+    objects.update(dt);
     // tracks fill in while it snows, rims slump in the wind and the thaw (world time, every 0.25 s)
     decayT += dt;
     if (decayT >= 0.25) {
@@ -183,13 +228,15 @@ import { createActors } from './actors.js';
     uniforms: U,
     glsl: { field: FIELD_GLSL, live: LIVE_GLSL, ground: GROUND_GLSL },
     stamp, onStamp, flags,
+    // snow on a material's upward faces (kind: 'object', 'rock', 'tree', 'litter'), compiled in only while snow lies
+    cover: (material, opts) => objects.cover(material, opts),
     // the snowpack at a point (sim units: depth0M, depthM, packed, rho, sinkM)
     at: (x, z) => ({ ...sample(x, z) }),
     set(o = {}) {
       for (const k in o) if (k in flags) flags[k] = !!o[k];
       try { localStorage.setItem(FLAG_KEY, JSON.stringify(flags)); } catch (e) { /* no storage */ }
       applyFlags();
-      if (active) setTier(wantTier());
+      if (active) { setTier(wantTier()); objects.set(flags.objects); }
       return { ...flags };
     },
     info: () => ({
@@ -197,6 +244,7 @@ import { createActors } from './actors.js';
       fieldBuilt: !!(field && field.built), fieldRev: field ? field.rev : 0, fieldMaxD: field ? +field.maxD.toFixed(3) : 0,
       groundSnow: clamp(((W() && W().snowDepthM) || 0) / 0.12, 0, 1), groundPatched: ground.patched && ground.on,
       stampsPerSec: stat.stampsSec, stamps: stat.stamps, stampsDrawn: live ? live.total : 0, liveDraws: live ? live.draws : 0,
+      objects: objects.on ? objects.count : 0, roofCells: objects.roofCells, pace: +actors.pace.toFixed(3),
       triangles: surf ? surf.triangles : 0, live: live ? live.n : 0, msPerFrame: +stat.msAvg.toFixed(3), pendingTreads: actors.pending(),
     }),
     debug: {
@@ -218,11 +266,19 @@ import { createActors } from './actors.js';
         const w = W(); w.snowSweMm = 0; w.snowDepthM = 0;
         const s = SS();
         if (s && s.grid && s.grid.tiles) { for (const k in s.grid.tiles) { const t = s.grid.tiles[k]; if (t.h) t.h.fill(0); if (t.l) t.l.fill(0); } s.rev++; s.grid.rev++; }
+        // and off the crowns: nothing left to unload onto the ground
+        if (s) { s.canopyMm = 0; s.freshMm = 0; for (const k in s.meta || {}) s.meta[k].unload = s.unloadMm; }
         if (field) { field.update(P.x, P.z, true); if (live) live.reseed(); }
         return true;
       },
       view(name) { U.uSnowView.value = name ? VIEWS[name] || 0 : 0; return U.uSnowView.value; },
       flush: () => actors.flush(),
+      // knock the snow off the nearest tree's crown (as an axe blow does)
+      knock(x = P.x, z = P.z) {
+        let best = null, bd = 1e9;
+        for (const c of G.world.chunks.values()) for (const tr of c.trees) { const d = Math.hypot(tr.x - x, tr.z - z); if (tr.alive && d < bd) { bd = d; best = tr; } }
+        return best ? objects.knock(best, false) : false;
+      },
       release, activate,
       get field() { return field; }, get live() { return live; }, get mesh() { return mesh; },
     },

@@ -273,6 +273,12 @@ snow is smoother (micro normal off) and a touch darker; wet or crusted snow gets
   fragment is not below a roof (`uSnowRoof`: a top-down height of roofs and upper floors, 0.5 m, rasterised from the
   pieces when the build version changes). Applied to build mode's materials, rocks, logs, tree crowns, the ATV and
   trailer. Amount from the reference depth; tree crowns from `canopyMm`.
+  As built: the roof map is 192 x 192 RGBA32F on the field's grid (nearest): the roof plane's height at the cell
+  centre, its x and z slope, and the cell's highest point (the plane is capped there, so a ridge cell does not bare a
+  strip); snow needs `y >= roof - 0.35 m`. Buildings are found through `__build.groups()`, vehicles through
+  `__vehicles.roots()`, trees and rocks through `__game.materials`, ground cover through `__nature.materials` (sunk
+  into the snow by its depth). The page sends the trees round you (`snow.setObstacles`) every 16 m whenever it is below 3 C or snow lies, so the
+  first fall is intercepted.
 - **Knocking snow off** (the Yōtei trick): chopping or bumping a tree, or the wind's `snow.unload` event, clears that
   crown (up to 8 recent shake points in a uniform), drops a burst of clumps and powder, and stamps clump craters into
   the live texture under the drip line.
@@ -289,6 +295,7 @@ Low: whitening only (field-driven). Medium: 512 live texture, two rings. High an
 ## 4. What it changes in play
 
 - Walking speed drops with the boot's sink (to 55 % at 40 cm): you make paths because paths are faster, and they stay.
+  As built: `player.groundPace` (the engine multiplies it into the walk), `1 - 0.55 * (1 - exp(-sink / 0.25))`, eased.
 - Wheels read the local snow: `snow` (loose, drag grows with depth), `snow_packed` (slicker, no drag), bare where cleared.
 - Shovelled and ploughed snow goes somewhere and stays there until it melts, last of all.
 

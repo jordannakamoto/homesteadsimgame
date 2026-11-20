@@ -2407,6 +2407,7 @@ function updateParticles(dt) {
 // ============================================================ player
 const player = {
   x: 0, z: 0, y: 0, face: 0, faceTarget: 0, walk: 0, speed: 0,
+  groundPace: 1,   // what the ground underfoot does to the walk (0..1), set by add-ons (snow: src/snow/actors.js)
   swing: null, roll: null, rollCd: 0, vy: 0, air: false, jumpHeld: false,
   hp: 100, stamWait: 0, regenWait: 0, kvx: 0, kvz: 0, hurt: 0, dead: 0,
   holdT: 0, tap: 0, charging: null, parry: null, riposte: 0, nextSide: 1, eHeld: false, qHeld: false, mvx: 0, mvz: 0,
@@ -4269,6 +4270,7 @@ function updatePlayer(dt) {
       if (P.parry) sp *= 0.5;
       vx = mx * sp; vz = mz * sp;
       if (P.pace) { vx *= P.pace; vz *= P.pace; sp *= P.pace; }   // an add-on working with the hands slows the walk
+      if (P.groundPace < 1) { const g = Math.max(0.3, P.groundPace); vx *= g; vz *= g; sp *= g; }
       if (!P.atk && !P.aiming && !P.charging && !P.parry) P.faceTarget = Math.atan2(mx, mz);
     }
     P.mvx = vx; P.mvz = vz;
@@ -4958,6 +4960,10 @@ window.__game = {
   treeGeo, pineLite: pineLiteGeo, markStockDirty: () => { hudDirty = true; },
   garden: gardenRead, landscape: landscapeRead, earthwork, vehicleCore,
   snow: snowRead,   // reads of the snowpack (src/sim/snow.js): at, window, bearing, ...; drawn by src/snow/
+  // shared materials add-ons may patch (src/snow/objects.js): trees, crowns and logs; rocks and stumps
+  materials: { tree: treeMat, solid: solidMat },
+  // the sky-visibility map (SKY_MAP above): texture, how much applies, size (m, wrapped)
+  skyVis: { map: U.skyMap, k: U.skyK, size: SKY_MAP_SIZE },
   // runs through a building's frame (src/sim/core/routefind.js over src/sim/content/frame-channels.js)
   servicesLink,   // __build.connect's power and water: a legacy run in the routes store (src/sim/services-legacy.js)
   routes: { find: routeFind, channelsFor: (structId) => frameChannelsFor(structId, window.__build), attach: frameAttach, snap: frameSnap, rayHit: frameRayHit },

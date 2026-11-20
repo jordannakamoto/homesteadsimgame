@@ -188,9 +188,20 @@
 
   // ---- what the ground is under a wheel, by the names in the vehicles system's surfaces table
   const LAYER = { gravel: 'gravel', crushed: 'gravel', dg: 'gravel', slate: 'gravel', marble: 'gravel', lava: 'gravel', riverrock: 'gravel', woodchips: 'mulch', bark: 'mulch', sand: 'sand' };
+  // the snow where the wheel is (the snowpack, __game.snow): loose and deeper than 3 cm, or packed and more than 1 cm
+  const SNOW_AT = { sweMm: 0, depthM: 0, depth0M: 0, packed: 0, rho: 100, sinkM: 0 };
+  function snowAt(x, z, wx) {
+    if (G.snow && G.snow.at && G.sim.state.sys.snow) return G.snow.at(G.sim.state, x, z, SNOW_AT);
+    SNOW_AT.depthM = wx ? wx.snowDepthM : 0; SNOW_AT.packed = 0;
+    return SNOW_AT;
+  }
   function surface(x, z) {
     const st = G.sim.state, wx = st.sys.weather, wet = !!wx && wx.rainMmH > 0.1;
-    if (wx && wx.snowDepthM > 0.03) return 'snow';
+    if (wx && (wx.snowSweMm > 0 || st.sys.snow)) {
+      const s = snowAt(x, z, wx);
+      if (s.depthM > 0.03 && s.packed < 0.5) return 'snow';
+      if (s.depthM > 0.01 && s.packed >= 0.5) return 'snow_packed';
+    }
     const sw = G.streamWaterAt(x, z);
     if ((sw && sw.depth > 0.03) || G.heightAt(x, z) < G.sea) return 'water';
     const L = G.landscape, rel = L ? L.reliefAt(st, x, z) : 0, th = G.heightAt(x, z) + rel;

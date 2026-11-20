@@ -798,6 +798,8 @@
     },
     findSpot,
     get gen() { return gen; },
+    roots: () => [...live.values()].map((L) => L.root),                 // what each unit is drawn as (add-ons that restyle it)
+    surfaceAt: (x, z) => (content.surface ? content.surface(x, z) : null),   // the ground's name under a point
     hitch(id) {                                            // the driven unit onto the nearest loose towed unit in reach (tests, console)
       if (!seat) return { ok: false, reason: 'not seated' };
       const L = seat.L, best = nearestTongue(L, 0.6), Lt = id ? live.get(id) : best && best.Lt;
