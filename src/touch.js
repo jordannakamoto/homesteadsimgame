@@ -50,7 +50,20 @@
     B.uiVer++;
   }
   window.addEventListener("pointerdown", (e) => e.pointerType === "touch" && enable(), true);
-  window.__touch = { enable };
+  // back to desktop mode (tests; also a hybrid laptop could call it): sticks and held buttons let go, the layout hides
+  function disable() {
+    if (!on) return;
+    on = false;
+    document.body.classList.remove("touch");
+    ui.hidden = true;
+    K.joyX = K.joyY = 0;
+    rx = ry = 0;
+    ui.querySelectorAll(".on").forEach((el) => el.classList.remove("on"));
+    ui.querySelectorAll(".nub").forEach((el) => (el.style.transform = ""));
+    mode = "";
+    B.uiVer++;
+  }
+  window.__touch = { enable, disable, get on() { return on; } };
 
   /* ---------- the phone's top bar: a menu button for the dock, and the speed row behind the time chip ---------- */
   const outside = (e, ...els) => !els.some((el) => el && el.contains(e.target));
