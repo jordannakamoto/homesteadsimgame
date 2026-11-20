@@ -57,7 +57,7 @@
     { id: 'build', title: 'Build mode (B)', rows: [
       R(['V', '1'], 'Select'),
       R(['R', 'N', 'F', 'O'], 'Room, Wall, Floor, Roof (2 to 5). Press a tool’s key again to step through its styles'),
-      R(['J', 'U', 'Z', 'P'], 'Door, Window, Stairs, Pillar (6 to 9); L Path (0); C Furnish; Y Measure; X Remove'),
+      R(['J', 'U', 'Z', 'P'], 'Door, Window, Stairs, Pillar (6 to 9); L Path (0); H Deck; C Furnish; Y Measure; X Remove'),
       R('E', 'Hold to turn the view; tap for Equip'),
       R(['PgUp', 'PgDn'], 'Level up and down ([ ] too); Shift for wall height'),
       R(['+', '−'], 'Lift'),
@@ -91,6 +91,10 @@
       R('E', 'Get off'),
       R('Hold R', 'Unhitch a trailer (stopped, with a trailer on)'),
       R('Hold left click', 'Tip the trailer bed'),
+      R('Touch', 'Left stick drives; Brake, Use (tips the bed), Unhitch and Off are on the right'),
+    ] },
+    { id: 'fuel', title: 'Fuel the ATV', rows: [
+      R('R', 'On foot beside the ATV, with a fuel can and gasoline from the Supplier (U): hold to pour. The prompt shows the litres'),
     ] },
     { id: 'kitchen', title: 'In the kitchen (K)', rows: [
       R('E', 'Eat from the plate'),
@@ -101,11 +105,11 @@
 
   // keys more than one thing wants, and who wins (so a new binding can be checked against this list)
   const CLASHES = [
-    { key: 'H', note: 'Hens (chickens-view, capture) wins over the kitchen heat map while the kitchen is open only because the kitchen swallows keys first' },
+    { key: 'H', note: 'Deck in build mode (build has first refusal; the chickens view ignores keys there). Hens (chickens-view, capture) wins over the kitchen heat map while the kitchen is open only because the kitchen swallows keys first' },
     { key: 'X', note: 'overlays everywhere; build mode keeps X as Remove while it is open. Vehicle unhitch moved to hold R' },
     { key: 'U / Y / P / N / I / L', note: 'panels outside build mode; build tools inside it (build has first refusal)' },
     { key: '1-9', note: 'the bar slots inside Site, Yard, Garden and Hands; build tools in build mode; tool keys when walking' },
-    { key: 'R', note: 'turns the held thing in Yard and Hands; unhitches (held) on a vehicle; room tool in build mode' },
+    { key: 'R', note: 'turns the held thing in Yard and Hands; unhitches (held) on a vehicle; pours fuel (held) beside the ATV on foot; room tool in build mode' },
     { key: 'F', note: 'Hands when walking; Garden look-closer inside Garden; Floor in build mode' },
     { key: '?', note: 'the sheet (F1 too); in build mode / is Snap' },
   ];

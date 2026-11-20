@@ -1,1 +1,257 @@
-/* ui: touch (stub) */
+/* ui: touch (body.touch, set by src/touch.js). The phone frame of docs/design/ui-redesign.md section 3 and build mode on a
+   phone (docs/design/plan-mode-redesign.md section 2.8), portrait and landscape. Targets are at least --hit (44px).
+   - Top bar: menu button (#hud-menu: the dock as a sheet of tiles), money; one chip with time and weather, then the
+     gear. Tapping the time (#hud-clock) shows the speed row under it. Wood and stone are in the Bag.
+   - Sticks 112px (104 in build mode) ride above the hotbar, or drop to the corners when the hotbar stands between them.
+     Peaceful: Look, Jump and one Use button; the combat buttons carry .cb and hide.
+   - Build mode: hint row (one fixed height), tray, bar. The bar's nine slots scroll sideways; Undo, "..." (#bxtra) and
+     Done stay. The "..." sheet (#baidsheet) holds Redo, Snap, the storeys, Roofs and Materials.
+   - The inspector (#bdesign) is a bottom sheet above the bar: peek (the stage and the fit line) or .full (to the top
+     bar). In landscape it is a drawer on the right and the hint row moves up between the top bar's ends.
+   - body.b-sheet (inspector up) and body.ui-sheet (a kit panel up) hide the sticks and buttons. */
+
+/* ==================== top bar ==================== */
+#hud-menu { display: none; }
+body.touch #stock { gap: 6px; }
+body.touch #stock > .item:not(.money) { display: none; }
+body.touch #stock > #shelter:not([hidden]) { display: inline-flex; }
+body.touch #hud-menu {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--hit); min-width: var(--hit); height: var(--hit); padding: 0;
+  border-radius: var(--r-pill); background: var(--surface-1); box-shadow: var(--shadow-1);
+}
+body.touch #hud-menu .ui-ic { width: 22px; height: 22px; }
+body.touch #hud-menu[aria-expanded="true"] { background: var(--select-bg); color: var(--select-ink); border-color: var(--select-edge); }
+/* the coin and the clock's sun go (the money's colour and the weather chip say enough): the bar fits 360px */
+body.touch #stock > .item.money { height: var(--hit); padding: 0 12px; gap: 0; }
+body.touch #stock > .item.money .ui-ic, body.touch #hud-clock > .ui-ic { display: none; }
+body.touch #stock > .item.money .num { font-size: var(--fs-lg); min-width: 0; }
+
+/* one chip: the time joined to the weather; then the gear */
+body.touch #hud-top { gap: 6px; }
+body.touch #hud-top .hud-row { gap: 0; }
+body.touch #hud-clock {
+  height: var(--hit); gap: 6px; padding: 0 8px 0 10px; cursor: pointer;
+  border-top-right-radius: 0; border-bottom-right-radius: 0; border-right-width: 0;
+}
+body.touch #hud-clock .pair { display: none; }
+body.touch #hud-top #wxbtn { height: var(--hit); padding: 0 12px 0 6px; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+body.touch #hud-top #wxbtn #wxdate { display: none; }
+body.touch #hud-top #hud-gear { width: var(--hit); min-width: var(--hit); height: var(--hit); margin-left: 6px; }
+/* the speed row (and the graphics button) only while the time chip is open; it shows the day too */
+body.touch #hud-top .hud-row + .hud-row { display: none; gap: 6px; }
+body.touch #hud-top.hud-open .hud-row + .hud-row { display: flex; }
+body.touch #hud-top.hud-open #hud-clock .pair { display: inline-flex; }
+body.touch #hud-clock[aria-expanded="true"] { background: var(--select-bg); color: var(--select-ink); }
+body.touch #hud-top #speed { height: var(--hit); }
+body.touch #hud-top #speed > button { min-width: 42px; }
+body.touch #hud-top #hud-gfx { width: var(--hit); min-width: var(--hit); height: var(--hit); }
+body.touch:has(#hud-top.hud-open) #vitals { opacity: 0; pointer-events: none; }
+
+/* vitals: under the money, short meters */
+body.touch #vitals { top: calc(var(--lane-edge) + var(--sa-t) + 52px); left: calc(var(--lane-edge) + var(--sa-l)); gap: var(--sp-3); padding: 5px 12px 5px 8px; }
+body.touch #vitals .track { width: 56px; height: 9px; }
+body.touch #vitals .bar .ui-ic { width: 18px; height: 18px; }
+
+/* the dock is a sheet of tiles under the menu button */
+body.touch #ui-lane-left > #dock { display: none; }
+body.touch.hud-menu-open:not(.building) #ui-lane-left > #dock {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-2);
+  position: fixed; z-index: 30;
+  top: calc(var(--lane-edge) + var(--sa-t) + var(--hit) + 6px); left: calc(var(--lane-edge) + var(--sa-l));
+  width: min(300px, calc(100vw - 2 * var(--lane-edge))); padding: var(--sp-3);
+  background: var(--surface-2); border: var(--border-w) solid var(--edge); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  animation: bfly-in var(--t) var(--ease) both;
+}
+body.touch #dock .ui-dock-btn { width: auto; min-height: 72px; gap: 4px; }
+body.touch #dock .ui-dock-btn .nm { font-size: var(--fs-sm); }
+body.touch #dock .ui-dock-btn[hidden] { display: none; }
+
+/* the quest card is one line until tapped */
+body.touch #ui-lane-left > #cvnext.ui-card { width: auto; max-width: min(280px, calc(100vw - 2 * var(--lane-edge))); padding: 6px 12px 7px; border-left-width: 4px; cursor: pointer; }
+body.touch #cvnext .cvt { font-size: var(--fs-md); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.touch #cvnext:not(.open) :is(.cvk, .cvl, .cvrow, .cvwhy) { display: none; }
+body.touch #cvnext.open .cvt { white-space: normal; }
+
+/* toasts under the top bar */
+body.touch #ui-lane-toast { top: calc(var(--sa-t) + 104px); }
+body.touch.building #ui-lane-toast { top: calc(var(--sa-t) + 58px); }
+
+/* ==================== sticks and buttons ==================== */
+body.touch #touchui .stick {
+  width: 112px; height: 112px;
+  background: color-mix(in srgb, var(--surface-1) 32%, transparent);
+  border: var(--border-w) solid color-mix(in srgb, var(--edge-strong) 55%, transparent);
+}
+body.touch #touchui .nub { background: color-mix(in srgb, var(--surface-3) 70%, transparent); border: var(--border-w) solid var(--edge-strong); }
+body.touch #touchui .stick.on .nub { background: var(--accent-soft); border-color: var(--accent-edge); }
+body.touch #touchui[data-mode="build"] .stick { width: 104px; height: 104px; }
+/* Use: the axe swing, between the sticks (portrait) or over the right stick (landscape) */
+#tswing {
+  position: fixed; z-index: 5;
+  right: calc(max(14px, var(--sa-r)) + 124px); bottom: calc(var(--lift) + 20px);
+  touch-action: none; -webkit-user-select: none; user-select: none;
+}
+#tswing span { margin-top: 1px; }
+body:not(.peaceful) #tswing, #touchui:not([data-mode="axe"]) #tswing { display: none; }
+body.peaceful #tact { grid-template-columns: repeat(2, 64px); right: max(14px, var(--sa-r)); bottom: calc(var(--lift) + 124px); }
+body.touch #tact button { height: var(--hit); min-height: var(--hit); }
+/* a sheet or drawer is up: the sticks and buttons make way */
+body.ui-sheet #touchui, body.b-sheet #touchui { display: none; }
+
+/* ==================== build mode ==================== */
+/* the hint row: coach chips, one or two lines of hint, the selection's actions; one fixed height */
+body.touch #bhead {
+  flex-wrap: nowrap; align-items: center; gap: 6px;
+  height: var(--hit); min-height: var(--hit); padding: 3px 4px 3px 10px; overflow: hidden;
+}
+body.touch #bhead:has(> #bcoach:not([hidden])) { padding-left: 4px; }
+body.touch #bhint {
+  order: 0; flex: 1 1 0; min-width: 0; padding: 0;
+  font-size: var(--fs-xs); line-height: 1.25; white-space: normal;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+}
+body.touch #bcoach { padding-right: 4px; }
+body.touch .bcoach { min-height: 34px; }
+body.touch #bacts { flex: 0 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+body.touch #bacts::-webkit-scrollbar { display: none; }
+body.touch #bacts .bchip, body.touch #bstop { min-width: var(--hit); min-height: 36px; height: 36px; padding: 0 9px; }
+body.touch #bfit { flex: 0 1 auto; }
+
+/* the tray: one row of cards, scrolled sideways */
+body.touch #bopts, body.touch #bdecor { padding: 5px 0 6px 8px; gap: 0 14px; }
+body.touch #bopts, body.touch #bopts.bocats { height: auto; min-height: 0; }
+body.touch #bopts .bcard { height: var(--hit); min-height: var(--hit); }
+body.touch #bopts .bcard.bsvgc { height: 62px; min-height: 62px; }
+body.touch #buildbar .bocard { width: 128px; min-width: 128px; max-width: 128px; height: 48px; min-height: 48px; }
+body.touch #buildbar .brecent .bocard { width: 140px; min-width: 140px; max-width: 140px; }
+body.touch .btrayend { padding: 0 8px 0 10px; }
+body.touch .btool, body.touch #bmore { min-height: var(--hit); height: var(--hit); }
+body.touch .btool { width: var(--hit); min-width: var(--hit); }
+/* family tabs: a taller reach than they look */
+body.touch .btabl > [role="tab"] { height: auto; padding: 9px 7px; margin: -9px 0; }
+
+/* the bar: the slots scroll; Undo, "..." and Done stay at the right */
+body.touch #buildbar > #bmain { margin-top: 0; }
+body.touch #bmain { flex-wrap: nowrap; justify-content: flex-start; gap: 4px; padding: 4px; overflow: hidden; }
+body.touch #bpieces {
+  flex: 1 1 auto; min-width: 0; gap: 3px;
+  overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: none;
+}
+body.touch #bpieces::-webkit-scrollbar { display: none; }
+body.touch #bpieces button { flex: none; width: 54px; min-width: 54px; height: 50px; min-height: 50px; padding: 5px 1px 3px; }
+body.touch #bpieces button > svg { width: 24px; height: 24px; }
+body.touch #bpieces button .name { max-width: 52px; font-size: 10.5px; }
+body.touch #bpieces .sep { margin: 8px 1px; }
+body.touch #bpieces .caret { right: 4px; top: 4px; }
+body.touch #baids { flex: none; gap: 4px; padding-left: 4px; }
+body.touch #baids > .sep { display: none; }
+body.touch #bundo, body.touch #bxtra { width: var(--hit); min-width: var(--hit); height: var(--hit); min-height: var(--hit); }
+body.touch #baids #bdone { width: 54px; min-width: 54px; height: 50px; min-height: 50px; padding: 5px 1px 3px; }
+#bxtra { display: none; }
+body.touch #bxtra { display: inline-flex; align-items: center; justify-content: center; padding: 0; border-radius: var(--r-pill); }
+body.touch #bxtra[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent-edge); color: var(--pressed-ink); }
+/* the "..." sheet */
+#baidsheet {
+  position: fixed; z-index: 22; right: 6px; bottom: 80px;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2);
+  max-width: calc(100vw - 12px); padding: 10px;
+  color: var(--ink); background: var(--surface-2);
+  border: var(--border-w) solid var(--edge); border-radius: var(--r-lg); box-shadow: var(--shadow-2);
+  animation: bfly-in var(--t) var(--ease) both;
+}
+#baidsheet[hidden], body:not(.building) #baidsheet { display: none; }
+#baidsheet :is(#bredo, #bsnap) { width: var(--hit); min-width: var(--hit); height: var(--hit); min-height: var(--hit); }
+#baidsheet #blevel.ui-seg { height: var(--hit); }
+#baidsheet #blevel.ui-seg > button { min-width: 40px; }
+#baidsheet :is(#broofs, #bsched) { height: var(--hit); min-height: var(--hit); }
+
+/* the group flyout: a row of named tiles */
+body.touch #bfly button { width: 72px; height: 64px; }
+
+/* handles on the wall: a bigger grip (the hit radius is 22px in build.js) */
+body.touch .bhandle { width: 20px; height: 20px; margin: -10px 0 0 -10px; }
+body.touch .bhandle.oh-ew { width: 14px; height: 36px; margin: -18px 0 0 -7px; }
+body.touch .bhandle.oh-ns { width: 36px; height: 14px; margin: -7px 0 0 -18px; }
+
+/* ---------- the inspector: a bottom sheet above the bar, peek or full ---------- */
+#bdgrow { display: none; }
+body.touch #bdesign {
+  left: calc(6px + var(--sa-l)); right: calc(6px + var(--sa-r)); width: auto; max-width: none;
+  top: auto; height: auto; max-height: 40vh; padding-bottom: 0;
+  border-radius: var(--r-lg); border-bottom: var(--border-w) solid var(--edge);
+}
+body.touch #bdesign.bdes { max-height: none; }
+body.touch #bdesign.full { top: calc(var(--hud-top-h) + var(--sa-t)); max-height: none; }
+body.touch #bdesign::before { position: absolute; top: 5px; left: 50%; margin: 0 0 0 -20px; }
+body.touch #bdesign > .ui-panel__head { gap: 6px; padding: 8px 4px 4px 10px; cursor: pointer; }
+body.touch #bdesign > .ui-panel__head > .bdic { width: 32px; height: 32px; }
+body.touch #bdgrow { display: inline-flex; align-items: center; justify-content: center; flex: none; border-radius: var(--r-pill); }
+body.touch #bdgrow svg { transition: transform var(--t) var(--ease); }
+body.touch #bdesign.full #bdgrow svg { transform: rotate(180deg); }
+/* peek: the stage and the fit line; full: the tabs, the blocks and the foot too */
+@media (orientation: portrait) { body.touch #bdesign.bdes:not(.full) > :is(#bdtabs, #bdbody, #bdfoot) { display: none; } }
+body.touch #bdesign.bdes #bdfit { margin: 6px 10px 8px; padding: 5px 10px; }
+body.touch #bdesign.full #bdfit { margin-bottom: 0; }
+body.touch :is(#bdfit, #bfit) .bfix { min-height: 36px; }
+/* the stage keeps its drawing's proportions (drags are measured from them) at a phone's height */
+body.touch #bdstage { margin: 6px 10px 0; }
+body.touch #bdstage .bstrow { justify-content: center; }
+body.touch #bdstage :is(.bstel, .bstpl, .bstel:only-child) { flex: none; }
+body.touch #bdstage svg { width: auto; height: 112px; }
+/* its handles reach 44px: a wide transparent stroke round each edge's hit strip */
+body.touch #bdstage .op-h:not([data-h="move"]) { stroke: transparent; stroke-width: 32px; vector-effect: non-scaling-stroke; }
+body.touch #bdesign #bdtabs { margin: 8px 10px 0; }
+body.touch #bdesign #bdtabs > [role="tab"] { min-height: 40px; }
+body.touch #bdesign .bnumi { flex-wrap: nowrap; }
+body.touch #buildbar .bnumi input, body.touch #bdesign .bnumi input { width: 46px; }
+body.touch #bdesign .bnumi .bchip, body.touch #bdesign .bstep .bchip { width: 40px; min-width: 40px; height: 40px; min-height: 40px; }
+body.touch #bdesign .bdblk .bitems.ui-seg > .bchip { min-height: 40px; }
+/* Materials beside it: the same width, over it */
+body.touch:has(#bdesign:not([hidden])) #bschedp { right: calc(6px + var(--sa-r)); z-index: 21; }
+
+/* ==================== landscape: the bar between the sticks, the inspector a drawer on the right ==================== */
+@media (orientation: landscape) {
+  body.touch #tswing { right: calc(max(14px, var(--sa-r)) + 20px); bottom: calc(var(--lift) + 124px); }
+  body.peaceful.touch #tact { right: calc(max(14px, var(--sa-r)) + 124px); bottom: calc(var(--lift) + 100px); }
+  /* kit panels: a drawer on the right from under the top bar */
+  body.touch :is(.ui-panel--side, .ui-panel--modal):not(#bdesign):not(#bschedp),
+  body.touch :is(#sv, #ck, #ut, #cv, #wxpanel, #status, #gfxsettings).ui-panel--side {
+    top: calc(var(--hud-top-h) + var(--sa-t)) !important; bottom: 0; left: auto; right: var(--sa-r);
+    width: min(380px, 60vw); max-height: none !important;
+    border-radius: var(--r-lg) 0 0 0; animation-name: ui-drawer-in;
+  }
+  body.touch.building #buildbar { left: calc(var(--sa-l) + 128px); right: calc(var(--sa-r) + 128px); }
+  body.touch.building.b-sheet #buildbar { left: calc(6px + var(--sa-l)); right: calc(var(--sa-r) + 354px); }
+  /* the hint row goes up, between the money and the clock */
+  body.touch #bhead {
+    position: fixed; z-index: 11; top: calc(var(--lane-edge) + var(--sa-t));
+    left: calc(var(--sa-l) + 196px); right: calc(var(--sa-r) + 226px); width: auto; max-width: none;
+  }
+  body.touch #bdesign, body.touch #bdesign.full {
+    top: calc(var(--hud-top-h) + var(--sa-t)); bottom: calc(6px + var(--sa-b)) !important;
+    left: auto; right: calc(6px + var(--sa-r)); width: 340px; max-height: none;
+    overflow-y: auto; overscroll-behavior: contain; animation-name: ui-drawer-in;
+  }
+  body.touch #bdesign #bdbody { flex: none; overflow: visible; }
+  body.touch #bdgrow { display: none; }
+  body.touch #bdesign > .ui-panel__head { cursor: auto; }
+  body.touch #bdstage svg { height: 128px; }
+  body.touch #bschedp { left: auto; right: calc(6px + var(--sa-r)); width: 360px; top: calc(var(--hud-top-h) + var(--sa-t)); bottom: calc(6px + var(--sa-b)) !important; }
+  body.touch:has(#bdesign:not([hidden])) #bschedp { right: calc(6px + var(--sa-r) + 346px); }
+}
+
+/* ==================== view (step V2): the view control in the "..." sheet, the chip, Section's slider ==================== */
+#baidsheet #bview.ui-seg { height: var(--hit); }
+#baidsheet #bview.ui-seg > button { min-width: var(--hit); padding: 0 9px; }
+#baidsheet #bview .nm { display: inline; }
+body.touch #bvchip.ui-tag { min-height: 32px; font-size: var(--fs-xs); }
+body.touch #bvchip .x { width: 32px; min-width: 32px; height: 32px; min-height: 32px; }
+/* 44 px wide on the right edge; in portrait it stops above the look stick */
+body.touch #bvcut { width: var(--hit); padding: 20px 0; }
+body.touch #bvcut .cut > i { width: 30px; height: 18px; top: -10px; margin-left: -15px; }
+body.touch #bvcut .cut .val { top: -13px; }
+@media (orientation: portrait) {
+  body.touch #bvcut { bottom: calc(var(--bvcut-b, 120px) + 118px); }
+}

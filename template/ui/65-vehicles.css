@@ -1,0 +1,18 @@
+/* ui: vehicles. The HUD chip while seated (#veh, a .ui-chip in the context lane) and the touch drive layout (#tdrive). */
+#veh[hidden], #veh [hidden] { display: none; }
+#veh { gap: 8px; padding: 0 12px; }
+#veh .sep { display: inline-flex; align-items: baseline; gap: 4px; padding-left: 8px; border-left: 1px solid var(--edge); }
+#veh .v { min-width: 1.2ch; text-align: right; }
+#veh .tag { color: var(--tone, var(--ink-dim)); }
+#veh.is-bad .tag { color: var(--danger); }
+#veh.is-warn .tag { color: var(--warn); }
+/* touch: the left stick drives; these sit on the right where the action buttons are on foot */
+#tdrive, #tpour { display: none; }
+#touchui[data-mode="drive"] #tdrive { display: grid; }
+#tdrive { position: fixed; right: max(10px, env(safe-area-inset-right)); bottom: calc(var(--lift) + 10px); grid-template-columns: repeat(2, 84px); gap: 8px; z-index: 5; }
+#tdrive button { height: 52px; border-radius: 26px; padding: 0; font-size: 14px; touch-action: none; }
+#tdrive button.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+#tdrive button[hidden] { display: none; }
+#tdrive #toff { grid-column: 1 / -1; }
+#touchui[data-mode="axe"] #tpour.ready { display: block; position: fixed; right: max(10px, env(safe-area-inset-right)); bottom: calc(var(--lift) + 200px); width: 120px; height: 52px; border-radius: 26px; z-index: 5; touch-action: none; }
+#tpour.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }

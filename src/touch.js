@@ -1,4 +1,10 @@
-/* Touch controls: two thumb sticks and action buttons. Build mode needs no extra buttons: its bar holds every tool and option. */
+/* Touch controls: two thumb sticks and action buttons, and the phone frame (docs/design/ui-redesign.md section 3 and
+   plan-mode-redesign.md section 2.8). Peaceful game: Look, Jump and one Use button (the axe swing); the combat buttons
+   carry class cb and only show with combat on. On a phone the top bar is a menu button (the dock as a sheet of tiles),
+   money, and one time-and-weather chip (a tap shows the speed row) with the gear. Build mode: the nine slots scroll
+   sideways with Undo, "..." and Done pinned at the right; Redo, Snap, the storeys, Roofs and Materials sit in the "..."
+   sheet. The inspector is a bottom sheet above the bar with two heights, peek (the stage and the fit line) and full;
+   in landscape it is a drawer on the right and the bar sits between the sticks. */
 (() => {
   const G = window.__game,
     BL = window.__build;
@@ -9,7 +15,8 @@
     M = G.mouse,
     $ = (id) => document.getElementById(id),
     canvas = $("view"),
-    clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    clamp = (v, a, b) => Math.max(a, Math.min(b, v)),
+    icon = (n) => (window.__ui && window.__ui.icon ? window.__ui.icon(n) : "");
   const peaceful = document.body.classList.contains("peaceful"); // combat off: the bow button is the view button
   let on = false,
     rx = 0,
@@ -22,10 +29,15 @@
     '<div class="stick" id="tsl" role="group" aria-label="Move"><div class="nub"></div></div>' +
     '<div class="stick" id="tsr" role="group" aria-label="Turn the view"><div class="nub"></div></div>' +
     '<div id="tact" role="group" aria-label="Actions">' +
-    '<button type="button" id="tbow">' + (peaceful ? "Look" : "Bow") + '</button><button type="button" id="tkick">Kick</button><button type="button" id="tparry">Parry</button>' +
-    '<button type="button" id="tdash">Dash</button><button type="button" id="tjump">Jump</button><button type="button" id="troll">Roll</button>' +
+    '<button type="button" id="tbow">' + (peaceful ? "Look" : "Bow") + '</button><button type="button" id="tkick" class="cb">Kick</button><button type="button" id="tparry" class="cb">Parry</button>' +
+    '<button type="button" id="tdash" class="cb">Dash</button><button type="button" id="tjump">Jump</button><button type="button" id="troll" class="cb">Roll</button>' +
     "</div>" +
-    '<button type="button" id="tatk">Attack</button>';
+    '<button type="button" id="tatk" class="cb">Attack</button>' +
+    '<button type="button" id="tswing" class="ui-fab" aria-label="Use: swing the tool in hand">' + icon("axe") + "<span>Use</span></button>" +
+    // seated on a vehicle (control stack: touch === 'drive'): the left stick drives, these work the machine
+    '<div id="tdrive" role="group" aria-label="Vehicle"><button type="button" id="tbrake">Brake</button><button type="button" id="tuse">Use</button>' +
+    '<button type="button" id="tunhitch" hidden>Unhitch</button><button type="button" id="toff">Off</button></div>' +
+    '<button type="button" id="tpour" hidden>Pour fuel</button>';
   document.body.appendChild(ui);
 
   function enable() {
@@ -33,11 +45,136 @@
     on = true;
     document.body.classList.add("touch");
     ui.hidden = false;
+    hudFrame();
+    buildFrame();
     B.uiVer++;
   }
-  if (window.matchMedia && matchMedia("(pointer: coarse)").matches) enable();
   window.addEventListener("pointerdown", (e) => e.pointerType === "touch" && enable(), true);
-  window.__touch = { enable };
+  // back to desktop mode (tests; also a hybrid laptop could call it): sticks and held buttons let go, the layout hides
+  function disable() {
+    if (!on) return;
+    on = false;
+    document.body.classList.remove("touch");
+    ui.hidden = true;
+    K.joyX = K.joyY = 0;
+    rx = ry = 0;
+    ui.querySelectorAll(".on").forEach((el) => el.classList.remove("on"));
+    ui.querySelectorAll(".nub").forEach((el) => (el.style.transform = ""));
+    mode = "";
+    B.uiVer++;
+  }
+  window.__touch = { enable, disable, get on() { return on; } };
+
+  /* ---------- the phone's top bar: a menu button for the dock, and the speed row behind the time chip ---------- */
+  const outside = (e, ...els) => !els.some((el) => el && el.contains(e.target));
+  let hudDone = false;
+  function hudFrame() {
+    if (hudDone) return;
+    hudDone = true;
+    const stock = $("stock"),
+      dock = $("dock"),
+      top = $("hud-top"),
+      clock = $("hud-clock"),
+      gear = $("hud-gear");
+    if (stock && dock) {
+      const menu = document.createElement("button");
+      menu.type = "button";
+      menu.id = "hud-menu";
+      menu.className = "panel ui-btn ui-btn--icon";
+      menu.setAttribute("aria-label", "Menu: Bag, Shop, Hens, Home, Build");
+      menu.setAttribute("aria-expanded", "false");
+      menu.innerHTML = icon("menu");
+      stock.insertBefore(menu, stock.firstChild);
+      const show = (v) => (document.body.classList.toggle("hud-menu-open", v), menu.setAttribute("aria-expanded", String(v)));
+      menu.addEventListener("click", () => show(!document.body.classList.contains("hud-menu-open")));
+      // a tile opens its panel and the sheet goes away
+      dock.addEventListener("click", (e) => e.target.closest("button") && show(false));
+      window.addEventListener("pointerdown", (e) => document.body.classList.contains("hud-menu-open") && outside(e, menu, dock) && show(false), true);
+    }
+    if (top && clock) {
+      // one chip with the time and the weather, then the gear; tapping the time shows the speed row under it
+      const rows = top.querySelectorAll(".hud-row");
+      if (gear && rows[0]) rows[0].appendChild(gear);
+      clock.setAttribute("role", "button");
+      clock.tabIndex = 0;
+      clock.setAttribute("aria-expanded", "false");
+      clock.title = "Time and speed";
+      const show = (v) => (top.classList.toggle("hud-open", v), clock.setAttribute("aria-expanded", String(v)));
+      clock.addEventListener("click", () => show(!top.classList.contains("hud-open")));
+      window.addEventListener("pointerdown", (e) => top.classList.contains("hud-open") && outside(e, top) && show(false), true);
+    }
+    // the quest card is one line; a tap opens it
+    const next = $("cvnext");
+    next && next.addEventListener("click", (e) => e.target.closest("button") || next.classList.toggle("open"));
+  }
+
+  /* ---------- build mode on a phone ---------- */
+  // The "..." sheet holds Redo, Snap, the storeys, Roofs and Materials (moved, so buildui.js's listeners still hold).
+  // The inspector gets a button that switches its sheet between peek and full.
+  let buildDone = false,
+    xsheet = null,
+    xbtn = null;
+  function xshow(v) {
+    if (!xsheet || xsheet.hidden === !v) return;
+    xsheet.hidden = !v;
+    xbtn.setAttribute("aria-expanded", String(v));
+    if (!v) return;
+    const r = $("bmain").getBoundingClientRect();
+    xsheet.style.bottom = Math.round(window.innerHeight - r.top + 8) + "px";
+    xsheet.style.right = Math.round(window.innerWidth - r.right) + "px";
+  }
+  function buildFrame() {
+    const aids = $("baids"),
+      dp = $("bdesign");
+    if (buildDone || !aids || !dp) return;
+    buildDone = true;
+    xbtn = document.createElement("button");
+    xbtn.type = "button";
+    xbtn.id = "bxtra";
+    xbtn.className = "ui-btn ui-btn--icon";
+    xbtn.setAttribute("aria-label", "More: redo, snap, storeys, roofs, materials");
+    xbtn.setAttribute("aria-haspopup", "true");
+    xbtn.setAttribute("aria-expanded", "false");
+    xbtn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><circle cx="5.5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="18.5" cy="12" r="2"/></svg>';
+    xsheet = document.createElement("div");
+    xsheet.id = "baidsheet";
+    xsheet.hidden = true;
+    xsheet.setAttribute("role", "group");
+    xsheet.setAttribute("aria-label", "More for the plan");
+    for (const id of ["bredo", "bsnap", "blevel", "bview", "bsched"]) $(id) && xsheet.appendChild($(id));
+    document.body.appendChild(xsheet);
+    const undo = $("bundo");
+    undo && undo.nextSibling ? aids.insertBefore(xbtn, undo.nextSibling) : aids.insertBefore(xbtn, aids.firstChild);
+    xbtn.addEventListener("click", () => xshow(xsheet.hidden));
+    // Materials opens a drawer of its own; the rest may be pressed more than once
+    $("bsched") && $("bsched").addEventListener("click", () => xshow(false));
+    window.addEventListener("pointerdown", (e) => !xsheet.hidden && outside(e, xsheet, xbtn) && xshow(false), true);
+    window.addEventListener("resize", () => xshow(false));
+    const head = dp.querySelector(".ui-panel__head"),
+      close = head && head.querySelector(".ui-close");
+    if (head && close) {
+      const grow = document.createElement("button");
+      grow.type = "button";
+      grow.id = "bdgrow";
+      grow.className = "ui-btn ui-btn--icon";
+      grow.setAttribute("aria-expanded", "false");
+      grow.setAttribute("aria-label", "Show every setting");
+      grow.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 14.5l6-6 6 6"/></svg>';
+      head.insertBefore(grow, close);
+      grow.addEventListener("click", () => sheetFull(!dp.classList.contains("full")));
+      // the sheet's head (not its buttons) also switches it
+      head.addEventListener("click", (e) => e.target.closest("button") || sheetFull(!dp.classList.contains("full")));
+    }
+  }
+  function sheetFull(v) {
+    const dp = $("bdesign"),
+      g = $("bdgrow");
+    if (!dp || dp.classList.contains("full") === v) return;
+    dp.classList.toggle("full", v);
+    if (g) (g.setAttribute("aria-expanded", String(v)), g.setAttribute("aria-label", v ? "Show less" : "Show every setting"));
+    B.uiVer++;
+  }
+
 
   /* ---------- sticks ---------- */
   function stick(el, cb) {
@@ -111,6 +248,7 @@
     P.levelTarget = P.y;
   };
   hold($("tatk"), strike, () => (M.left = false));
+  hold($("tswing"), strike, () => (M.left = false));
   hold(
     $("tjump"),
     () => (K.Space = true),
@@ -142,6 +280,14 @@
       setTimeout(() => (K.AltLeft = false), 140);
     },
   );
+  /* vehicle: Brake is the space bar, Use holds the implement (tips a trailer's bed), Unhitch and Off are taps */
+  const VV = () => window.__vehicles;
+  hold($("tbrake"), () => (K.Space = true), () => (K.Space = false));
+  hold($("tuse"), () => VV() && VV().tip(true), () => VV() && VV().tip(false));
+  hold($("tunhitch"), () => VV() && VV().unhitch());
+  hold($("toff"), () => VV() && VV().dismount());
+  // walking up to a vehicle with fuel to pour: the same hold as R on a keyboard (src/game/vehicles-atv.js)
+  hold($("tpour"), () => window.__fuel && window.__fuel.press(true), () => window.__fuel && window.__fuel.press(false));
   hold($("tbow"), () => (peaceful && G.camView ? G.camView("next") : (M.right = !M.right)));
 
   /* ---------- touches on the view, outside build mode ---------- */
@@ -202,7 +348,10 @@
   /* ---------- every frame ---------- */
   let last = performance.now(),
     n = 0,
-    mode = "";
+    mode = "",
+    sheetUp = false,
+    liftV = -1,
+    slotV = -1;
   function frame(t) {
     const dt = Math.min(0.05, (t - last) / 1000);
     last = t;
@@ -220,22 +369,69 @@
         else c.pitch = clamp(c.pitch + ry * 0.9 * dt, 0.5, 1.35);
       }
       M.inside = false;
-      const now = B.on ? "build" : P.tool;
+      const now = B.on ? "build" : G.control && G.control.top().touch === "drive" ? "drive" : P.tool;
       if (now !== mode) {
         mode = now;
         ui.dataset.mode = mode;
         if (mode !== "axe") M.right = false;
       }
       if (n++ % 6 === 0) {
-        // the sticks ride just above whichever bar is at the bottom
-        const bar = B.on ? $("buildbar") : $("tools"),
-          r = bar.getBoundingClientRect();
-        ui.style.setProperty("--lift", Math.max(8, window.innerHeight - r.top + 8) + "px");
+        // the inspector is a sheet (or, in landscape, a drawer): the sticks and buttons make way while it is up
+        const dp = $("bdesign"),
+          up = B.on && !!dp && !dp.hidden;
+        if (up !== sheetUp) {
+          sheetUp = up;
+          document.body.classList.toggle("b-sheet", up);
+          up || sheetFull(false);
+        }
+        if (!B.on) xshow(false);
+        // the sticks ride just above whatever is at the bottom where they stand, and drop to the corners when it
+        // stands between them (landscape)
+        let r = null;
+        if (B.on) r = $("buildbar").getBoundingClientRect();
+        else
+          for (const el of $("ui-lane-bottom") ? $("ui-lane-bottom").children : [])
+            if (!el.hidden && el.offsetWidth) {
+              const q = el.getBoundingClientRect();
+              r = r ? { left: Math.min(r.left, q.left), right: Math.max(r.right, q.right), top: Math.min(r.top, q.top) } : q;
+            }
+        const L = $("tsl").getBoundingClientRect(),
+          R = $("tsr").getBoundingClientRect(),
+          over = r && ((r.left < L.right && r.right > L.left) || (r.left < R.right && r.right > R.left)),
+          lf = over ? Math.max(8, Math.round(window.innerHeight - r.top + 8)) : 8;
+        if (lf !== liftV) ui.style.setProperty("--lift", (liftV = lf) + "px");
         $("tbow").classList.toggle("lit", peaceful ? !!c.view : !!M.right);
         $("tatk").textContent = M.right ? "Loose" : "Attack";
+        if (mode === "drive" && VV()) {
+          const st = VV().status(),
+            tu = $("tuse"),
+            un = $("tunhitch");
+          const lab = st.tips ? "Tip bed" : "Use";
+          if (tu.textContent !== lab) tu.textContent = lab;
+          tu.hidden = !st.hitched; // nothing to work on a bare ATV yet; blades and mowers will show it
+          un.hidden = !st.hitched;
+        }
+        const pr = $("tpour"),
+          rdy = mode === "axe" && !!window.__fuel && window.__fuel.ready();
+        if (pr.hidden === rdy) pr.hidden = !rdy;
+        pr.classList.toggle("ready", rdy);
+      }
+      // the tool in hand stays in sight in the sideways-scrolling row of slots
+      if (B.on && B.uiVer !== slotV) {
+        slotV = B.uiVer;
+        const row = $("bpieces"),
+          b = row && row.querySelector('button[aria-pressed="true"]');
+        if (b && row.scrollWidth > row.clientWidth) {
+          const q = b.getBoundingClientRect(),
+            x0 = q.left - row.getBoundingClientRect().left + row.scrollLeft,
+            x1 = x0 + q.width;
+          if (x0 < row.scrollLeft) row.scrollLeft = x0 - 8;
+          else if (x1 > row.scrollLeft + row.clientWidth) row.scrollLeft = x1 - row.clientWidth + 8;
+        }
       }
     }
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
+  if (window.matchMedia && matchMedia("(pointer: coarse)").matches) enable();
 })();

@@ -58,7 +58,7 @@ check('redo puts it back', r.member && r.ext && r.ext.posts.length === 1, JSON.s
 // the tool: a button on the bar, its options, its choose() ids
 await page.keyboard.press('KeyB'); await step(20);
 const tool = await G(() => { __build.setTool('xpost-tool'); const v = __build.view(); __build.choose('x:xpost-tool:size', 3);
-  return { inTools: v.tools.some((t) => t.id === 'xpost-tool'), button: !!document.querySelector('#bpieces button[data-piece="xpost-tool"]'), opts: v.groups.some((q) => /Posts/.test(JSON.stringify(q))), chosen: window.__xpostChosen, top: v.top }; });
+  return { inTools: v.tools.some((t) => t.id === 'xpost-tool'), button: !!document.querySelector('#bpieces [data-group="more"]') && /\bPost\b/.test(document.querySelector('#bpieces [data-group="more"]').title), opts: v.groups.some((q) => /Posts/.test(JSON.stringify(q))), chosen: window.__xpostChosen, top: v.top }; });
 check('the tool is on the bar with its options', tool.inTools && tool.button && tool.opts && tool.top === 'xpost-tool', JSON.stringify(tool));
 check('its options report through choose()', JSON.stringify(tool.chosen) === '["size",3]');
 await G(() => __build.setTool('select')); await page.keyboard.press('KeyB'); await step(6);

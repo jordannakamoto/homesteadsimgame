@@ -18,7 +18,7 @@ await page.goto(file, { waitUntil: 'domcontentloaded', timeout: 120000 }); await
 await G(() => { __game.lockQuality(); __game.setQuality('low'); });
 await frames(5);
 const st = await G(() => ({ s: __game.sim.state.sys.vehicles, P: { x: __game.player.x, z: __game.player.z } }));
-const ids = Object.keys(st.s.units).filter((k) => st.s.units[k].kind === 'atv');     // the trailer given with it is a second unit
+const ids = Object.keys(st.s.units).filter((k) => st.s.units[k].kind === 'atv');     // (no trailer comes with it any more: it is bought at the Supplier)
 check('a new world has the starter ATV, once', st.s.starter && ids.length === 1, JSON.stringify(st.s.units[ids[0]] || {}).slice(0, 160));
 const id = ids[0];
 
@@ -31,12 +31,19 @@ const on = await G(() => ({ top: __game.control.top().id, driven: __vehicles.dri
 check('walking into its side mounts it', on.top === 'seat' && on.driven === id, JSON.stringify(on));
 await page.keyboard.press('Digit5'); await frames(2);
 check('tools are locked while seated', await G(() => __game.player.tool === 'axe'));
+// V6: the HUD chip and the touch drive layout while seated
+await G(() => window.__touch.enable()); await frames(12);
+const hud = await G(() => ({ chip: !document.getElementById('veh').hidden, mode: document.getElementById('touchui').dataset.mode, touch: __game.control.top().touch,
+  brake: getComputedStyle(document.getElementById('tbrake')).display, off: getComputedStyle(document.getElementById('toff')).display, use: document.getElementById('tuse').hidden }));
+check('seated: the chip shows and the touch layout is the drive one', hud.chip && hud.mode === 'drive' && hud.touch === 'drive' && hud.brake !== 'none' && hud.off !== 'none' && hud.use, JSON.stringify(hud));
+// back to desktop mode: the keys below are the keyboard checks (touch mode on must not change them either: see the hybrid check after the reload)
+await G(() => window.__touch.disable()); await frames(3);
 
 // drive: point the camera along its nose and hold W
 await G((id) => { const u = __vehicles.body(id); __game.cam.yaw = u.yaw + Math.PI; }, id);
 const b0 = await G((id) => __vehicles.body(id), id);
 await G(() => __vehicles.stats());
-await page.keyboard.down('KeyW'); await frames(120);
+await page.keyboard.down('KeyW'); await frames(40);
 const b1 = await G((id) => __vehicles.body(id), id);
 const cost = await G(() => __vehicles.stats());
 await page.keyboard.up('KeyW');
@@ -46,17 +53,20 @@ check('a drive substep costs well under 0.1 ms', us < 100 && cost.msPerFrame / M
 const synced = await G((id) => __game.sim.state.sys.vehicles.units[id], id);
 check('the pose reaches the sim while driving', Math.hypot(synced.x - b0.x, synced.z - b0.z) > 1, JSON.stringify(synced).slice(0, 120));
 
+// stop well short of the pond east of the well (an ATV that drives in is stuck: no dry spot to step off to), then test the keys
+await page.keyboard.down('Space'); await frames(90); await page.keyboard.up('Space');
 // car keys are vehicle-relative: with the camera turned square across the nose, W still goes straight ahead and D turns it right
 await G((id) => { __game.cam.yaw = __vehicles.body(id).yaw + Math.PI / 2; }, id);
 const c0 = await G((id) => __vehicles.body(id), id);
-await page.keyboard.down('KeyW'); await frames(12);
+await page.keyboard.down('KeyW'); await frames(10);
 const c1 = await G((id) => __vehicles.body(id), id);
-await page.keyboard.down('KeyD'); await frames(12);
+await page.keyboard.down('KeyD'); await frames(10);
 const c2 = await G((id) => __vehicles.body(id), id);       // sampled with D held: the wheels are over to the right
 await page.keyboard.up('KeyD'); await page.keyboard.up('KeyW');
 const wr = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 check('with the camera across the nose, W still drives straight ahead', Math.abs(wr(c1.yaw - c0.yaw)) < 0.1, wr(c1.yaw - c0.yaw).toFixed(3));
-check('D steers the vehicle right whatever the camera sees', c2.steer > 0.05, 'steer ' + c2.steer.toFixed(3) + ' at ' + c2.speed.toFixed(1) + ' m/s');
+// the drive model's positive steer turns toward the body's local +x, the rider's left: D (the rider's right) is negative
+check('D steers the vehicle to the rider\'s right whatever the camera sees', c2.steer < -0.05, 'steer ' + c2.steer.toFixed(3) + ' at ' + c2.speed.toFixed(1) + ' m/s');
 await page.keyboard.down('Space'); await frames(90); await page.keyboard.up('Space');
 
 // E: brakes, then steps off

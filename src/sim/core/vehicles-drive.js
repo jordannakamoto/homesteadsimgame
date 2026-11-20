@@ -4,7 +4,12 @@
 // (src/sim/core/vehicles.js). Every feel parameter is a record field (docs: the kind record in ARCHITECTURE.md).
 //
 // Frame: a body at yaw faces F = (sin yaw, cos yaw) in (x, z), the engine's convention (facing = atan2(dx, dz)).
-// Its right is R = (cos yaw, -sin yaw): a positive yaw rate turns the nose toward R, positive steer turns that way.
+// R = (cos yaw, -sin yaw) is the body's local +x: a positive yaw rate turns the nose toward R, positive steer turns that
+// way. "Right" and "left" in this file (wheel names, roll) are along R, but in the engine's y-up world R is the RIDER'S
+// LEFT (a rider facing +z has -x at the right hand; the chase camera sees -R on the right of the screen), so a key for
+// the rider's right asks for negative steer (carControl). The physics is mirror-symmetric, so only that mapping cares.
+// A rider record (kind.lean = { inM, fwdM, g, climbM, climbRad, s }) shifts the rider's weight into a turn and forward
+// up a climb (b.lean, b.leanC); gripSteer(kind, u, mu) is the wheel angle a rider uses at speed; b.towKg the towed mass.
 // pitch > 0 is nose up; roll > 0 is the right side up. Local points are [x (along R), y, z (along F)] from the origin,
 // which is the middle between the axles at ground height (towed: the middle of its axle).
 //
@@ -120,6 +125,7 @@ function derOf(kind) {
     izz: kind.izz != null ? kind.izz : (kind.massKg * ((c ? Math.max(sl, kind.dims.l - Lh) : kind.dims.l) ** 2 + kind.dims.w ** 2)) / 12,
     N0: (kind.grip.loadN || ((kind.massKg + (kind.riderKg || 0)) * GRAV) / (axles.length === 1 ? 2 : 4)),
     ls: kind.grip.loadSens != null ? kind.grip.loadSens : 0.1,
+    lean: kind.lean && !c && seat && !tracked && !towed ? kind.lean : null,   // a rider on the seat who shifts in a turn
   };
   DER.set(kind, d);
   return d;
@@ -127,7 +133,7 @@ function derOf(kind) {
 // the unit with its load: mass, where its centre of mass is (z, height) and its yaw inertia about it
 function massOf(kind, b, D, out) {
   const m = kind.massKg, c = b.cargoKg > 0 ? b.cargoKg : 0, M = m + c;
-  const cz = b.cargoZ != null ? b.cargoZ : D.loadAt[0];
+  const cz = (b.cargoZ != null ? b.cargoZ : D.loadAt[0]) + (D.lean ? Math.max(D.lean.fwdM * Math.abs(b.lean || 0), (D.lean.climbM || 0) * (b.leanC || 0)) : 0);
   const z = (m * D.cgZ + c * cz) / M, y = (m * kind.cgH + c * D.loadAt[1]) / M;
   out.M = M; out.z = z; out.y = y;
   out.I = D.izz + m * (D.cgZ - z) ** 2 + c * (D.loadI + (cz - z) ** 2);
@@ -159,6 +165,16 @@ export function steerLimit(kind, u) {
   if (!(lock > line)) return line;
   const v0 = kind.steerLockMps || 2, w = clamp((a - v0) / v0, 0, 1);
   return lock + (line - lock) * w * w * (3 - 2 * w);
+}
+// The front wheel angle that asks the tyres for about all their grip at this speed, on ground of grip mu (b.mu): the
+// kinematic angle of the tightest circle the grip holds (wheelbase x 0.9 mu g / u^2) plus the slip angle the tyres run
+// at near their peak (half of mu over the cornering stiffness: the front's less the rear's). More lock than this at
+// speed only slides the front tyres (the front plows and the circle grows); a rider at speed steers about this much.
+// Measured on the ATV (dry grass, speed held): the tightest steady circle comes at 16, 9, 5-6 and 4 degrees at 5, 8,
+// 12 and 15 m/s; this gives 19, 9.6, 5.3 and 4.2.
+export function gripSteer(kind, u, mu = kind.grip.mu) {
+  const L = kind.wheelbase || 1, u2 = Math.max(u * u, 1e-6);
+  return Math.atan((L * 0.9 * mu * GRAV) / u2) + (0.5 * mu) / (kind.grip.lateral || 8);
 }
 const susp = (kind) => kind.susp || { travel: 0.15, hz: 2, damp: 0.4 };
 const RPM = 60 / (2 * Math.PI);
@@ -206,7 +222,7 @@ export function createBody(kind, { x = 0, z = 0, yaw = 0, fuelL = Infinity, carg
   const b = {
     x, z, yaw, u: 0, w: 0, r: 0,
     y: 0, vy: 0, gy: 0, pitch: 0, vp: 0, roll: 0, vr: 0,
-    steer: 0, air: false, contact: [0, 0, 0, 0], sF0: 0.5, jack: false,
+    steer: 0, air: false, contact: [0, 0, 0, 0], sF0: 0.5, jack: false, lean: 0, leanC: 0, towKg: 0,
     ax: 0, ay: 0, slip: 0, plow: 0, mu: kind.grip.mu, bump: 0, land: 0, stalled: null, rev: false, artic: 0, ra: 0,
     gear: 1, rpm: kind.engine ? kind.engine.idleRpm : 0, shiftT: 0, spin: 0, spinning: false, tip: 0,
     load: [0, 0, 0, 0], fy: [0, 0], hitch: [0, 0], tongue: 0, belt: [0, 0], tslip: [0, 0], cargoZ: null, jackHold: false,
@@ -359,6 +375,14 @@ export function stepBody(b, kind, input, env, dt = SUB, trailer = null) {
   [b.roll, b.vr] = angSpring(b.roll, b.vr, tRoll + Math.atan((b.ay / GRAV) * kind.cgH / kind.track) * transfer, s, kc, dt);
   b.roll = clamp(b.roll, -0.6, 0.6); b.pitch = clamp(b.pitch, -0.9, 0.9);
 
+  // the rider shifts into the turn (kind.lean): toward the inside as the turn asks for sideways grip, and forward; and
+  // forward up a climb (b.leanC 0..1, full at climbRad nose up), to keep weight on the front wheels
+  if (D.lean) {
+    const want = kc > 0 ? clamp((b.u * b.r) / ((D.lean.g || 0.5) * GRAV), -1, 1) : 0, k = Math.min(1, dt / (D.lean.s || 0.3));
+    const wantC = b.u > -0.5 ? clamp(t.sinLong / Math.sin(D.lean.climbRad || 0.26), 0, 1) : 0;
+    b.lean = (b.lean || 0) + (want - (b.lean || 0)) * k;
+    b.leanC = (b.leanC || 0) + (wantC - (b.leanC || 0)) * k;
+  }
   // mass, the trailer's tongue weight
   const m = massOf(kind, b, D, _m), Mo = m.M;
   const tk = trailer && trailer.kind, tb = trailer && trailer.body;
@@ -369,7 +393,7 @@ export function stepBody(b, kind, input, env, dt = SUB, trailer = null) {
     T = (mt.M * GRAV * Math.cos(tb.pitch) * mt.z) / Dt.Lh;          // the share of its weight its tongue puts on the ball
     tb.tongue = T;
   }
-  b.tongue = T;
+  b.tongue = T; b.towKg = mt ? mt.M : 0;
   const zb = pt ? pt.at[2] : 0, hb = pt ? pt.at[1] : 0;
 
   // 3. wheel loads: static share, tongue, longitudinal and lateral transfer, the hitch's pull and side force
@@ -379,7 +403,8 @@ export function stepBody(b, kind, input, env, dt = SUB, trailer = null) {
   Nf = clamp(Nf, 0, W + Tn);
   const Nr = W + Tn - Nf, Nt = Nf + Nr;
   b.sF0 = clamp((Mo * (m.z - D.zr) + (T / GRAV) * (zb - D.zr)) / (L * (Mo + T / GRAV)), 0, 1);
-  const latM = -Mo * (b.ay + GRAV * sinLat) * m.y * kc;              // moment onto the right wheels (minus: the left)
+  let latM = -Mo * (b.ay + GRAV * sinLat) * m.y * kc;                // moment onto the right wheels (minus: the left)
+  if (D.lean && b.cargoKg > 0) latM += b.cargoKg * GRAV * cosT * D.lean.inM * b.lean * kc;   // the rider's weight moved inside
   const dNf = Nt > 0 ? (latM * Nf) / Nt / kind.track : 0, dNr = (Nt > 0 ? (latM * Nr) / Nt : 0) / kind.track + (b.hitch[1] * hb) / kind.track;
   const ld = b.load;
   ld[0] = Nf / 2 - dNf; ld[1] = Nf / 2 + dNf; ld[2] = Nr / 2 - dNr; ld[3] = Nr / 2 + dNr;
@@ -538,12 +563,16 @@ export function stepBody(b, kind, input, env, dt = SUB, trailer = null) {
     qR = axle(D.zr, D.steerR, Nr, latR, lkR, 2);
     // a solid driven axle turns both wheels at one speed, so in a turn the inner wheel pushes and the outer drags: a
     // moment against the yaw (longitudinal slip stiffness grip.longStiff per unit load, default 12) up to what the
-    // lighter wheel can grip. The push of a quad's solid rear axle; a lifted inner wheel frees it.
+    // lighter wheel can grip. The push of a quad's solid rear axle; a lifted inner wheel frees it. The engine drives the
+    // axle with a torque, not at a set speed, so the axle's speed floats between its wheels' and their two slip
+    // stiffnesses act in series (N1 N2 / (N1 + N2)): in a fast turn the weight goes to the outer wheel, the light inner
+    // one can push little, and the axle lets the quad turn (equal loads: Cx N track^2 / 2u, as before).
     const Cx = g.longStiff || 12, tw = kind.track;
     for (let a = 0; a < 2; a++) {
       const i = a * 2;
       if (!(a ? D.drvR : D.drvF) || (a ? D.openR : D.openF)) continue;
-      const kdA = (Cx * (ld[i] + ld[i + 1]) * tw * tw) / (4 * uAbs), capM = Math.min(_cap[i], _cap[i + 1]) * tw * dt;
+      const nS = ld[i] + ld[i + 1] > 0 ? (ld[i] * ld[i + 1]) / (ld[i] + ld[i + 1]) : 0;
+      const kdA = (Cx * nS * tw * tw) / uAbs, capM = Math.min(_cap[i], _cap[i + 1]) * tw * dt;
       if (kdA > 0 && capM > 0) angRow(0, 0, -capM, capM, 1 / (kdA * dt));
     }
   }
@@ -760,10 +789,9 @@ export function headingControl(b, kind, mx, mz, { gentle = false } = {}) {
   // tracks: slow down to turn (turning drags the tracks sideways and takes the power the straight run would)
   if (tracked) { const st = clamp(err * 2, -1, 1); return { throttle: mag * k * Math.max(0, Math.cos(err)) * (1 - 0.7 * Math.abs(st)), steer: st, brake: 0, handbrake: false }; }
   const lim = steerLimit(kind, b.u);
-  // the rider: no more lock than the grip under it can turn (three quarters of mu g sideways), and eases the throttle
-  // when the tail steps out or the wheels spin in a turn
-  const u2 = b.u * b.u, grip = Math.atan((0.75 * (b.mu || kind.grip.mu) * GRAV * (kind.wheelbase || 1)) / Math.max(u2, 1e-6));
-  const sMax = clamp(grip / Math.max(lim, 0.05), 0.15, 1);
+  // the rider: no more lock than the grip under it can turn (gripSteer), and eases the throttle when the tail steps out
+  // or the wheels spin in a turn
+  const sMax = clamp(gripSteer(kind, b.u, b.mu || kind.grip.mu) / Math.max(lim, 0.05), 0.15, 1);
   const ease = clamp(1.6 - b.slip, 0.35, 1) * (b.spin > 0.5 && Math.abs(err) > 0.3 ? 0.6 : 1);
   return { throttle: mag * k * Math.max(0.25, Math.cos(err)) * ease, steer: clamp((err * 1.5) / Math.max(lim, 0.05), -sMax, sMax), brake: 0, handbrake: false };
 }

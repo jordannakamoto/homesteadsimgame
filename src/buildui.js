@@ -1,6 +1,7 @@
-/* Build mode's interface: the tool palette, the options strip that doubles as the property inspector, and what is
-   drawn over the view (live dimensions with their typed fields, the snap marker, wall handles, measurements).
-   It only draws what window.__build.view() describes and reports clicks through window.__build.choose(). */
+/* Build mode's interface: the bar (which tool), the tray above it (what kind the next click draws), the inspector
+   drawer (every property with exact numbers), and what is drawn over the view (live dimensions with their typed fields,
+   the snap marker, wall handles, measurements). It only draws what window.__build.view() describes and reports clicks
+   through window.__build.choose(). */
 (() => {
   const G = window.__game,
     BL = window.__build;
@@ -131,6 +132,16 @@
     "t-dome": '<path d="M4.500 19a7.500 10 0 0 1 15 0z"/>',
     "p-pillar": '<path d="M7.500 20h9M9.500 20V7M14.500 20V7M7 7h10M8.500 4.500h7"/>',
     "p-chimney": '<path d="M8 20.500V9h8v11.500M6.500 9h11M9.500 9V6h5v3"/><path d="M12 3.500c1-.800 1-1.700 2-2" opacity=".6"/>',
+    "v-auto": '<path d="M4 19.5V10.2l8-6.2 8 6.2v9.3z"/><path d="M12 10.300l1.050 2.350 2.350 1.050-2.350 1.050L12 17.100l-1.050-2.350-2.350-1.050 2.350-1.050z" fill="currentColor" stroke-width="1"/>',
+    "v-finished": '<path d="M2.500 11L12 3.500 21.500 11"/><path d="M5 9.300v10.200h14V9.300M10 19.500v-5h4v5"/>',
+    "v-cutaway": '<path d="M3 8.500L12 2.500l9 6"/><path d="M5 12.500v7h14v-7" /><path d="M5 12.500h3M16 12.500h3M10.500 12.500h3" opacity=".55"/>',
+    "v-section": '<path d="M5 13V9.200l7-5.200 7 5.200V13" opacity=".35" stroke-dasharray="2 2.200"/><path d="M2 13h20M5 13v6.500h14V13"/>',
+    eye: '<path d="M2.5 12s3.6-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.6 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>',
+    list: '<path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4"/>',
+    close: '<path d="M7 7l10 10M17 7L7 17"/>',
+    sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+    right: '<path d="M9.5 6l6 6-6 6"/>',
+    warn: '<path d="M12 4l9 16H3z"/><path d="M12 10v4.5M12 17.3v.2"/>',
   };
   // a small picture of a material, drawn from its two colours
   function swatch(sw) {
@@ -154,245 +165,791 @@
   }
 
   /* ---------- the bar ---------- */
-  // Three slim rows: a hint line (with what can be done to the selection), the options strip, the tools. The
-  // options strip folds away (`) for an even lower bar; build mode shifts the view up by half the bar's height.
+  // the view control's four modes: id, name, what it shows
+  const VIEWS = [
+    ["auto", "Auto", "opens the house as far as the tool in hand needs"],
+    ["finished", "Finished", "the whole house, roof on"],
+    ["cutaway", "Cutaway", "roof off, storeys above hidden, walls whole"],
+    ["section", "Section", "cut the walls at a height you choose"],
+  ];
+  // Three surfaces, each with one job (docs/design/plan-mode-redesign.md section 2): the bar says which tool, the tray
+  // above it (#bopts) what kind of thing the next click draws, and the inspector (#bdesign, a drawer on the right) every
+  // property with its exact number. A slim hint row sits on top: the first-run chips, one sentence, the selection's
+  // actions. Nine slots: More and Inside are group slots with a flyout (#bfly) of their members.
   bar.innerHTML =
-    '<div id="bhead"><span id="bhint" aria-live="polite"></span><button id="bstop" class="ui-btn ui-btn--go" type="button" hidden>' + svg(I.stop, 14) + '<span>Stop</span><kbd>Esc</kbd></button><span class="grow"></span><div id="bacts" role="group" aria-label="Selection"></div>' +
-    '<button id="bfold" class="ui-btn ui-btn--ghost" type="button" title="Hide or show the options ( ` )" aria-expanded="true"><span>Options</span>' + svg(I.down, 14) + "</button></div>" +
-    '<div id="bopts" role="group" aria-label="Options"></div><div id="bdecor" role="group" aria-label="Pieces" hidden></div>' +
+    '<div id="bhead"><div id="bcoach" role="group" aria-label="Your first house" hidden></div><span id="bhint" aria-live="polite"></span><span id="bfit" role="status" hidden></span><button id="bstop" class="ui-btn ui-btn--go" type="button" hidden>' + svg(I.stop, 14) + '<span>Stop</span><kbd>Esc</kbd></button><span class="grow"></span><div id="bacts" role="group" aria-label="Selection"></div>' +
+    '<span id="bvchip" class="ui-tag" role="status" hidden>' + svg(I.eye, 14) + '<span class="t"></span><button type="button" class="x" aria-label="Show the whole house" title="Show the whole house until the tool changes">' + svg(I.close, 12) + "</button></span></div>" +
+    '<div id="bopts" role="group" aria-label="What the next click draws"></div><div id="bdecor" role="group" aria-label="Pieces" hidden></div>' +
     '<div id="bmain"><div id="bpieces" role="group" aria-label="Build tools"></div><div id="baids">' +
-    '<button id="bsnap" class="ui-slot" type="button" aria-pressed="true" title="Snap to the grid, to ends, middles and walls, and to round angles ( / ). Hold Ctrl to place freely.">' + svg(I.snap, 20) + '<span class="name">Snap</span><span class="key ui-key">/</span></button>' +
-    '<div id="blevel" class="ui-step" title="The storey you are working on (Page Up, Page Down)"><button id="bldn" type="button" aria-label="Storey down">' + svg(I.down, 16) + '</button><span id="blname" class="n">Ground</span><button id="blup" type="button" aria-label="Storey up">' + svg(I.up, 16) + "</button></div>" +
-    '<button id="bsched" class="ui-slot" type="button" aria-pressed="false" title="The schedule: what this building needs, stage by stage">' + svg('<path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4"/>', 20) + '<span class="name">List</span></button>' +
-    '<button id="bfree" class="ui-btn" type="button" aria-pressed="true" title="When off, pieces cost wood and removing them refunds it">Free</button>' +
-    '<button id="bundo" class="ui-btn ui-btn--icon" type="button" title="Undo (Ctrl+Z)" aria-label="Undo">' + svg(I.undo, 18) + '<span>Undo</span></button><button id="bredo" class="ui-btn ui-btn--icon" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">' + svg(I.redo, 18) + "<span>Redo</span></button>" +
+    '<button id="bundo" class="ui-btn ui-btn--icon" type="button" title="Undo (Ctrl+Z)" aria-label="Undo">' + svg(I.undo, 18) + "</button>" +
+    '<button id="bredo" class="ui-btn ui-btn--icon" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">' + svg(I.redo, 18) + "</button>" +
+    '<button id="bsnap" class="ui-btn ui-btn--icon" type="button" aria-pressed="true" aria-label="Snap" title="Snap to the grid, to ends, middles and walls, and to round angles ( / ). Hold Ctrl to place freely.">' + svg(I.snap, 18) + "</button>" +
+    '<span class="sep" aria-hidden="true"></span>' +
+    '<div id="blevel" class="ui-seg" role="group" aria-label="Storey (Page Up, Page Down)"></div>' +
+    // what plan mode shows (docs/design/plan-mode-redesign.md 3B.4): Auto follows the task, the other three pin a view
+    '<div id="bview" class="ui-seg" role="group" aria-label="What plan mode shows" hidden>' +
+    VIEWS.map((m) => '<button type="button" data-m="' + m[0] + '" aria-pressed="false" title="' + esc(m[1] + ": " + m[2]) + '" aria-label="' + esc(m[1]) + '">' + svg(I["v-" + m[0]], 18) + '<span class="nm">' + esc(m[1]) + "</span></button>").join("") +
+    "</div>" +
+    '<span class="sep" aria-hidden="true"></span>' +
+    '<button id="bsched" class="ui-btn" type="button" aria-pressed="false" title="Materials: what the plan needs, stage by stage, and what it costs">' + svg(I.list, 18) + '<span class="name">Materials</span><b class="tot" hidden></b></button>' +
     '<button id="bdone" class="ui-slot" type="button" title="Leave build mode (B)">' + svg(I.done, 20) + '<span class="name">Done</span><span class="key ui-key">B</span></button></div></div>';
-  const pieces = $("bpieces");
-  let grp = -1;
-  for (const t of BL.view().tools) {
-    if (t.group !== grp && grp >= 0) pieces.insertAdjacentHTML("beforeend", '<span class="sep" aria-hidden="true"></span>');
-    grp = t.group;
-    const letter = BL.TOOL_LETTER[t.id] || "";
-    pieces.insertAdjacentHTML("beforeend", '<button type="button" data-piece="' + t.id + '" title="' + t.name + " (" + letter + (t.key === letter ? "" : " or " + t.key) + ')" aria-pressed="false">' + svg(I[t.id], 19) + '<span class="name">' + t.name + '</span><span class="key ui-key">' + letter + "</span></button>");
+  const pieces = $("bpieces"),
+    letterOf = (t) => t.letter || BL.TOOL_LETTER[t.id] || "",
+    toolOf = (id) => TOOLS.find((t) => t.id === id),
+    CATS = new Set(["select", "shell", "door", "window", "more", "inside", "remove"]),
+    catOf = (t) => (CATS.has(t.cat) ? t.cat : "more"),
+    lastOf = {},
+    groupOfTool = (id) => (GRP.more.tools.some((t) => t.id === id) ? "more" : GRP.inside.tools.some((t) => t.id === id) ? "inside" : "");
+  // the tools come from view(): build.js's own and the extensions' (src/build-ext.js, a deck), filed under their cat.
+  // An extension that registers later redraws the slots (renderBar compares toolsKey)
+  let TOOLS = [],
+    GRP = null,
+    toolsKey = "";
+  pieces.dataset.slots = "1";      // src/build-ext.js leaves the bar to these slots
+  const slotTitle = (t) => t.name + (letterOf(t) ? " (" + letterOf(t) + ")" : "") + (t.tip ? ". " + t.tip : "");
+  const slotInner = (t, caret) => svg(I[t.id], 24) + '<span class="name">' + esc(t.name) + '</span><span class="key ui-key">' + esc(letterOf(t)) + "</span>" + (caret ? '<span class="caret" aria-hidden="true"></span>' : "");
+  function drawSlots(tools) {
+    TOOLS = tools;
+    toolsKey = tools.map((t) => t.id + ":" + catOf(t)).join();
+    for (const t of tools) if (t.icon && !I[t.id]) I[t.id] = t.icon;      // an extension brings its own icon
+    GRP = { more: { name: "More", tools: TOOLS.filter((t) => catOf(t) === "more") }, inside: { name: "Inside", tools: TOOLS.filter((t) => catOf(t) === "inside") } };
+    for (const k in GRP) if (!toolOf(lastOf[k]) || !GRP[k].tools.some((t) => t.id === lastOf[k])) lastOf[k] = GRP[k].tools[0].id;
+    let html = "";
+    for (const [n, cluster] of [["select"], ["shell", "door", "window"], ["more", "inside"], ["remove"]].entries()) {
+      if (n) html += '<span class="sep" aria-hidden="true"></span>';
+      for (const cat of cluster) {
+        if (GRP[cat]) {
+          const t = toolOf(lastOf[cat]);
+          html += '<button type="button" data-group="' + cat + '" data-cur="' + t.id + '" aria-pressed="false" aria-haspopup="menu" aria-expanded="false" title="' + esc(GRP[cat].name + ": " + GRP[cat].tools.map((x) => x.name + (letterOf(x) ? " " + letterOf(x) : "")).join(", ") + ". Click again for the list.") + '">' + slotInner(t, true) + "</button>";
+        } else for (const t of TOOLS.filter((x) => catOf(x) === cat)) html += '<button type="button" data-piece="' + t.id + '" title="' + esc(slotTitle(t)) + '" aria-pressed="false">' + slotInner(t) + "</button>";
+      }
+    }
+    pieces.innerHTML = html;
   }
+  drawSlots(BL.view().tools);
   const back = () => canvas.focus();
-  pieces.addEventListener("click", (e) => {
+  // a group slot shows the member last used; it picks that one, and on the pressed slot (or a long press) lists them all
+  const fly = document.createElement("div");
+  fly.id = "bfly";
+  fly.hidden = true;
+  fly.setAttribute("role", "menu");
+  document.body.appendChild(fly);
+  let flyFor = "",
+    flyTop = "",
+    holdT = 0,
+    held = false;
+  function flyClose() {
+    if (fly.hidden) return;
+    fly.hidden = true;
+    const s = pieces.querySelector('[data-group="' + flyFor + '"]');
+    s && s.setAttribute("aria-expanded", "false");
+    flyFor = "";
+  }
+  function flyOpen(gname) {
+    const slot = pieces.querySelector('[data-group="' + gname + '"]'),
+      top = BL.view().top;
+    flyFor = gname;
+    flyTop = top;
+    fly.innerHTML =
+      '<div class="bfh">' + esc(GRP[gname].name) + '</div><div class="bfi">' +
+      GRP[gname].tools.map((t) => '<button type="button" role="menuitemradio" data-piece="' + t.id + '" aria-pressed="' + (t.id === top) + '" title="' + esc(slotTitle(t)) + '">' + svg(I[t.id], 28) + '<span class="name">' + esc(t.name) + '</span><span class="key ui-key">' + esc(letterOf(t)) + "</span></button>").join("") +
+      "</div>";
+    fly.hidden = false;
+    slot.setAttribute("aria-expanded", "true");
+    const r = slot.getBoundingClientRect(),
+      w = fly.offsetWidth;
+    fly.style.left = Math.round(Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2))) + "px";
+    fly.style.bottom = Math.round(window.innerHeight - r.top + 14) + "px";
+  }
+  fly.addEventListener("click", (e) => {
     const b = e.target.closest("button[data-piece]");
-    b && (BL.setTool(b.dataset.piece), back());
+    if (!b) return;
+    flyClose();
+    BL.setTool(b.dataset.piece);
+    back();
   });
+  pieces.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.dataset.piece) return (flyClose(), BL.setTool(b.dataset.piece), back());
+    const gname = b.dataset.group;
+    if (!gname) return;
+    if (held) return void (held = false);
+    if (flyFor === gname) return flyClose();
+    if (b.getAttribute("aria-pressed") === "true") return flyOpen(gname);
+    flyClose();
+    BL.setTool(lastOf[gname]);
+    back();
+  });
+  pieces.addEventListener("pointerdown", (e) => {
+    const b = e.target.closest("button[data-group]");
+    if (!b) return;
+    held = false;
+    clearTimeout(holdT);
+    holdT = setTimeout(() => ((held = true), flyOpen(b.dataset.group)), 450);
+  });
+  for (const ev of ["pointerup", "pointerleave", "pointercancel"]) pieces.addEventListener(ev, () => clearTimeout(holdT));
+  document.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (!fly.hidden && !fly.contains(e.target) && !e.target.closest("#bpieces [data-group]")) flyClose();
+    },
+    true,
+  );
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key === "Escape" && !fly.hidden) (flyClose(), e.stopImmediatePropagation(), e.preventDefault());
+    },
+    true,
+  );
   const press = (id, what, v) => $(id).addEventListener("click", () => (BL.choose(what, v), back()));
   press("bundo", "undo");
   press("bredo", "redo");
   press("bsnap", "snap");
-  press("bfree", "free");
   press("bdone", "done");
   press("bstop", "stop");
-  press("blup", "level", 1);
-  press("bldn", "level", -1);
-  press("bfold", "fold");
   press("bsched", "sched");
-  // the schedule: the bill of materials by stage, in a panel at the side
+  // the storeys that exist, the cellar (dim until one is dug) and one empty storey above the top
+  $("blevel").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-l]");
+    b && (BL.choose("level:set", +b.dataset.l), back());
+  });
+  // the view: Auto, Finished, Cutaway, Section; the task view's chip closes to Finished until the tool changes
+  $("bview").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-m]");
+    b && (BL.choose("view:mode", b.dataset.m), back());
+  });
+  $("bvchip").lastChild.addEventListener("click", () => (BL.choose("view:unpin"), back()));
+  // Section's height: an instrument on the right edge of the view, from the foundation's foot to the ridge. A drag sends
+  // at most one height a frame; the line follows the pointer at once.
+  const cutEl = document.createElement("div");
+  cutEl.id = "bvcut";
+  cutEl.hidden = true;
+  cutEl.tabIndex = 0;
+  cutEl.setAttribute("role", "slider");
+  cutEl.setAttribute("aria-orientation", "vertical");
+  cutEl.setAttribute("aria-label", "Section height");
+  cutEl.innerHTML = '<div class="tr"><div class="tk"></div><div class="cut"><span class="val"></span><i></i></div></div>';
+  document.body.appendChild(cutEl);
+  const cutTr = cutEl.firstChild,
+    cutTk = cutTr.firstChild,
+    cutLine = cutTr.lastChild;
+  let cutVc = null,
+    cutKey = "",
+    cutDrag = -1,
+    cutWant = null,
+    cutSent = null,
+    cutRaf = 0;
+  const cutRange = () => (cutVc && cutVc.range && cutVc.range[1] > cutVc.range[0] ? cutVc.range : null);
+  const cutSnap = (y) => {
+    const r = cutRange();
+    return r ? Math.round(Math.max(r[0], Math.min(r[1], y)) * 10) / 10 : y;
+  };
+  // a tick at a storey's floor (the others are the 1.2 m marks)
+  const isFloor = (t) => (t.kind ? t.kind === "floor" : !!t.name && !/^\+|1\.2/.test(String(t.name)));
+  // "1.20 m above Ground": from the highest storey floor at or below the cut (below the lowest one, "below")
+  function cutLabel(y) {
+    if (y === null || y === undefined || !isFinite(y)) return "";
+    const fl = ((cutVc && cutVc.ticks) || []).filter(isFloor).sort((a, b) => a.y - b.y),
+      f = fl.filter((t) => t.y <= y + 1e-6).pop() || fl[0];
+    return f ? Math.abs(y - f.y).toFixed(2) + " m " + (y >= f.y - 1e-6 ? "above " : "below ") + f.name : y.toFixed(2) + " m";
+  }
+  function cutShow(y) {
+    const r = cutRange();
+    if (!r || y === null || y === undefined) return;
+    cutLine.style.top = (((r[1] - y) / (r[1] - r[0])) * 100).toFixed(2) + "%";
+    text(cutLine.firstChild, cutLabel(y));
+    cutEl.setAttribute("aria-valuenow", y.toFixed(1));
+    cutEl.setAttribute("aria-valuetext", cutLabel(y));
+  }
+  function cutSend(y) {
+    cutWant = cutSnap(y);
+    cutShow(cutWant);
+    if (!cutRaf)
+      cutRaf = requestAnimationFrame(() => {
+        cutRaf = 0;
+        if (cutWant !== null && cutWant !== cutSent) ((cutSent = cutWant), BL.choose("view:cut", cutWant));
+      });
+  }
+  const cutAt = (cy) => {
+    const r = cutRange(),
+      b = cutTr.getBoundingClientRect();
+    return r ? r[1] - ((cy - b.top) / Math.max(1, b.height)) * (r[1] - r[0]) : null;
+  };
+  cutEl.addEventListener("pointerdown", (e) => {
+    if (!cutRange()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    cutDrag = e.pointerId;
+    cutEl.setPointerCapture(e.pointerId);
+    cutEl.classList.add("drag");
+    cutSend(cutAt(e.clientY));
+  });
+  cutEl.addEventListener("pointermove", (e) => e.pointerId === cutDrag && cutSend(cutAt(e.clientY)));
+  for (const ev of ["pointerup", "pointercancel", "lostpointercapture"])
+    cutEl.addEventListener(ev, (e) => {
+      if (e.pointerId !== cutDrag) return;
+      cutDrag = -1;
+      cutEl.classList.remove("drag");
+      uiV = -1;
+    });
+  cutEl.addEventListener("keydown", (e) => {
+    const r = cutRange(),
+      now = cutWant !== null ? cutWant : cutVc && cutVc.cut;
+    if (!r || now === null || now === undefined) return;
+    const d = { ArrowUp: 0.1, ArrowRight: 0.1, ArrowDown: -0.1, ArrowLeft: -0.1 }[e.key];
+    const to = d ? now + d : e.key === "Home" ? r[0] : e.key === "End" ? r[1] : null;
+    if (to === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    cutSend(to);
+  });
+  function renderCut(vc) {
+    cutVc = vc;
+    const on = !!(vc && vc.mode === "section" && cutRange());
+    show(cutEl, on);
+    if (!on) return void ((cutWant = cutSent = null), (cutKey = ""));
+    const r = cutRange(),
+      k = JSON.stringify([r, vc.ticks]);
+    if (k !== cutKey) {
+      cutKey = k;
+      cutEl.setAttribute("aria-valuemin", r[0].toFixed(1));
+      cutEl.setAttribute("aria-valuemax", r[1].toFixed(1));
+      cutTk.innerHTML = (vc.ticks || [])
+        .filter((t) => t.y >= r[0] - 1e-6 && t.y <= r[1] + 1e-6)
+        .map((t) => {
+          const floor = isFloor(t);
+          return '<i class="' + (floor ? "fl" : "mk") + '" style="top:' + (((r[1] - t.y) / (r[1] - r[0])) * 100).toFixed(2) + '%">' + (floor ? "<b>" + esc(t.name) + "</b>" : "") + "</i>";
+        })
+        .join("");
+    }
+    // while a drag is live the line follows the pointer; afterwards it shows what the view settled on
+    if (cutDrag < 0 && vc.cut !== null && vc.cut !== undefined) ((cutWant = null), (cutSent = vc.cut), cutShow(vc.cut));
+  }
+  // where the slider stands: the right edge of the view, clear of the drawers and above the bar (and a phone's sheet)
+  function placeCut() {
+    if (cutEl.hidden) return;
+    let bottom = bar.getBoundingClientRect().top,
+      right = window.innerWidth;
+    for (const p of [dpanel, sched]) {
+      if (p.hidden) continue;
+      // layout boxes, not the drawer's slide-in transform
+      const w = p.offsetWidth;
+      if (!w) continue;
+      if (w > window.innerWidth * 0.6) bottom = Math.min(bottom, p.offsetTop);
+      else right = Math.min(right, p.offsetLeft);
+    }
+    const b = Math.round(window.innerHeight - bottom + 12) + "px",
+      rt = right < window.innerWidth ? Math.round(window.innerWidth - right + 8) + "px" : "";
+    cutEl.style.getPropertyValue("--bvcut-b") !== b && cutEl.style.setProperty("--bvcut-b", b);
+    cutEl.style.getPropertyValue("--bvcut-r") !== rt && (rt ? cutEl.style.setProperty("--bvcut-r", rt) : cutEl.style.removeProperty("--bvcut-r"));
+    // too little room left (a phone's sheet is up): put it away until there is
+    cutEl.classList.remove("squeezed");
+    cutEl.offsetHeight < 110 && cutEl.classList.add("squeezed");
+  }
+  // the first-run chips: a room, a door, a roof, then Done. A chip picks its tool.
+  let coachV = [];
+  $("bcoach").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-n]"),
+      c = b && coachV[+b.dataset.n];
+    if (!c) return;
+    c.tool ? BL.setTool(c.tool) : BL.choose("done");
+    back();
+  });
+  // the schedule: the bill of materials by stage, in a drawer at the side
   const sched = document.createElement("div");
   sched.id = "bschedp";
   sched.className = "panel ui-panel ui-panel--side";
   sched.hidden = true;
+  sched.innerHTML = '<div class="ui-panel__head">' + svg(I.list, 24) + '<div class="bph"><h2>Materials</h2><small></small></div><button type="button" class="ui-close" data-x="sched" aria-label="Close the materials" title="Close">' + svg(I.close, 18) + '</button></div>' +
+    '<button type="button" class="bschv" role="switch" aria-checked="false" data-x="left" hidden title="Draw the plan as a blueprint: the parts still to build in blue, each later stage as a ghost"><span>Show what is left to build</span><i aria-hidden="true"></i></button>' +
+    '<div class="bschb"></div><div class="bschf"></div>';
   document.body.appendChild(sched);
   const money = (v) => "$" + Math.round(v).toLocaleString("en-US");
-  function renderSched(d) {
+  let schedHtml = "";
+  function renderSched(d, v) {
     sched.hidden = !d;
     $("bsched").setAttribute("aria-pressed", d ? "true" : "false");
-    if (!d) return;
-    sched.style.bottom = (B.barH || 130) + 10 + "px";
-    sched.innerHTML =
-      "<h2>Schedule<small>" + esc(d.title) + "</small></h2>" +
-      (d.stages.length
+    if (!d) return void (schedHtml = "");
+    // the blueprint switch (plan mode otherwise draws planned parts finished)
+    const sw = sched.querySelector(".bschv"),
+      vc = v.viewc;
+    show(sw, !!vc && !v.sandbox);
+    vc && sw.getAttribute("aria-checked") !== String(!!vc.left) && sw.setAttribute("aria-checked", String(!!vc.left));
+    const body =
+      d.stages.length
         ? d.stages
             .map((st) => '<section><h3><span>' + esc(st.name) + "</span><small>" + (st.built === st.of ? "built" : st.built ? st.built + " of " + st.of + " built" : "planned") + "</small><b>" + money(st.cost) + "</b></h3>" + st.lines.map((ln) => '<div class="ln" title="' + esc(ln.why) + '"><span>' + esc(ln.label) + "</span><i>" + esc(ln.qty) + "</i><b>" + (ln.missing ? "not sold yet" : money(ln.cost)) + "</b><em>" + esc(ln.why) + "</em></div>").join("") + "</section>")
-            .join("") + '<div class="tot"><span>Total</span><b>' + money(d.total) + "</b></div>"
-        : '<p class="none">Nothing to list yet. Draw a room, or set down a plan.</p>');
+            .join("")
+        : '<p class="none">Nothing to list yet. Draw a room, or set down a plan.</p>',
+      foot =
+        (d.stages.length ? '<div class="tot"><span>Total</span><b>' + money(d.total) + "</b></div>" : "") +
+        (v.sandbox ? '<p class="bsbx">Sandbox: built as you draw</p>' : '<button type="button" class="ui-btn ui-btn--go" data-x="order">' + svg(I.done, 18) + "<span>Order materials</span></button>"),
+      html = d.title + "\u0000" + body + "\u0000" + foot;
+    if (html === schedHtml) return;
+    schedHtml = html;
+    sched.querySelector(".bph small").textContent = d.title;
+    const b = sched.querySelector(".bschb"),
+      top = b.scrollTop;
+    b.innerHTML = body;
+    b.scrollTop = top;
+    sched.querySelector(".bschf").innerHTML = foot;
   }
+  sched.addEventListener("click", (e) => {
+    const x = e.target.closest("[data-x]");
+    if (!x) return;
+    if (x.dataset.x === "sched") return (BL.choose("sched"), back());
+    if (x.dataset.x === "left") return (BL.choose("view:left", x.getAttribute("aria-checked") !== "true"), back());
+    // order: leave plan mode and open the Build panel, where the plan's materials are bought
+    BL.choose("sched");
+    BL.choose("done");
+    const cvb = $("cvb"),
+      cv = $("cv");
+    cvb && (!cv || cv.hidden) && cvb.click();
+  });
 
-  /* ---------- the window designer's drawing: the window to scale on its wall, floor to eave ---------- */
-  function winPreview(g) {
-    const H = 128,
-      W = 176,
-      k = Math.min((H - 22) / Math.max(g.wallH, g.h + g.sill + 0.2), (W - 48) / Math.max(g.w, 0.5)),
-      L = g.look,
-      ww = g.w * k,
-      wh = g.h * k,
-      x0 = (W - ww) / 2,
-      yF = H - 6,
-      y0 = yF - (g.sill + g.h) * k,
-      y1 = yF - g.sill * k,
-      fw = Math.max(1.5, (L.slim ? 0.04 : 0.055) * k),
-      gx0 = x0 + fw,
-      gx1 = x0 + ww - fw,
-      gy0 = y0 + fw,
-      gy1 = y1 - fw,
-      hw = (gx1 - gx0) / 2,
-      cx = (gx0 + gx1) / 2,
-      shape = L.shape || "rect",
-      f = (v) => Math.round(v * 10) / 10;
-    // the glass outline as a path
-    let glass;
-    if (shape === "round") glass = '<ellipse cx="' + f(cx) + '" cy="' + f((gy0 + gy1) / 2) + '" rx="' + f(hw) + '" ry="' + f((gy1 - gy0) / 2) + '"/>';
-    else if (shape === "half") glass = '<path d="M' + f(gx0) + " " + f(gy1) + "A" + f(hw) + " " + f(gy1 - gy0) + " 0 0 1 " + f(gx1) + " " + f(gy1) + 'Z"/>';
-    else if (shape === "arch") {
-      const r = Math.min(hw, (gy1 - gy0) * 0.45);
-      glass = '<path d="M' + f(gx0) + " " + f(gy1) + "V" + f(gy0 + r) + "A" + f(hw) + " " + f(r) + " 0 0 1 " + f(gx1) + " " + f(gy0 + r) + "V" + f(gy1) + 'Z"/>';
-    } else if (shape === "gothic") {
-      const r = Math.min(hw * 1.732, (gy1 - gy0) * 0.6);
-      glass = '<path d="M' + f(gx0) + " " + f(gy1) + "V" + f(gy0 + r) + "Q" + f(gx0) + " " + f(gy0 + r * 0.25) + " " + f(cx) + " " + f(gy0) + "Q" + f(gx1) + " " + f(gy0 + r * 0.25) + " " + f(gx1) + " " + f(gy0 + r) + "V" + f(gy1) + 'Z"/>';
-    } else glass = '<rect x="' + f(gx0) + '" y="' + f(gy0) + '" width="' + f(gx1 - gx0) + '" height="' + f(gy1 - gy0) + '"/>';
-    let lines = "";
-    const ln = (a, b, c, d, w2) => (lines += '<path d="M' + f(a) + " " + f(b) + "L" + f(c) + " " + f(d) + '" stroke-width="' + w2 + '"/>');
-    const [lx, ly] = L.lites;
-    for (let i = 1; i < lx; i++) ln(gx0 + ((gx1 - gx0) * i) / lx, gy0, gx0 + ((gx1 - gx0) * i) / lx, gy1, 2);
-    for (let j = 1; j < ly; j++) ln(gx0, gy0 + ((gy1 - gy0) * j) / ly, gx1, gy0 + ((gy1 - gy0) * j) / ly, 2);
-    if (g.op === "double_hung" && shape === "rect") ln(gx0, (gy0 + gy1) / 2, gx1, (gy0 + gy1) / 2, 2.2);
-    // the grille, drawn per pane
-    const gr = L.grille,
-      [nx, ny] = L.grid;
-    for (let i = 0; i < lx; i++)
-      for (let j = 0; j < ly; j++) {
-        const a = gx0 + ((gx1 - gx0) * i) / lx,
-          b = gx0 + ((gx1 - gx0) * (i + 1)) / lx,
-          p = gy0 + ((gy1 - gy0) * j) / ly,
-          q = gy0 + ((gy1 - gy0) * (j + 1)) / ly;
-        if (gr === "colonial") {
-          for (let u = 1; u < nx; u++) ln(a + ((b - a) * u) / nx, p, a + ((b - a) * u) / nx, q, 0.8);
-          for (let v = 1; v < ny; v++) ln(a, p + ((q - p) * v) / ny, b, p + ((q - p) * v) / ny, 0.8);
-        } else if (gr === "cottage" || gr === "craftsman") {
-          const yc = g.op === "double_hung" ? (p + q) / 2 : p + (q - p) * (gr === "cottage" ? 0.36 : 0.34),
-            n = gr === "craftsman" ? Math.max(2, nx) : nx;
-          g.op === "double_hung" || ln(a, yc, b, yc, 0.8);
-          for (let u = 1; u < n; u++) ln(a + ((b - a) * u) / n, p, a + ((b - a) * u) / n, yc, 0.8);
-          if (gr === "cottage" && g.op === "double_hung") for (let v = 1; v < Math.round(ny / 2); v++) ln(a, p + ((yc - p) * v) / Math.round(ny / 2), b, p + ((yc - p) * v) / Math.round(ny / 2), 0.8);
-        } else if (gr === "farmhouse") ln((a + b) / 2, p, (a + b) / 2, q, 0.8), g.op === "double_hung" || ln(a, (p + q) / 2, b, (p + q) / 2, 0.8);
-        else if (gr === "prairie") {
-          const e = Math.min(0.09 * k, 0.2 * Math.min(b - a, q - p));
-          ln(a + e, p, a + e, q, 0.8), ln(b - e, p, b - e, q, 0.8), ln(a, p + e, b, p + e, 0.8), ln(a, q - e, b, q - e, 0.8);
-        } else if (gr === "diamond") {
-          const sx = (b - a) / nx;
-          for (let u = -ny * 2; u <= nx + ny * 2; u++) ln(a + u * sx, q, a + u * sx + (q - p) * (sx / ((q - p) / ny)), p, 0.7), ln(a + u * sx, q, a + u * sx - (q - p) * (sx / ((q - p) / ny)), p, 0.7);
-        } else if (gr === "sunburst") {
-          const n = Math.max(4, nx + 3);
-          for (let u = 1; u < n; u++) ln((a + b) / 2, q, (a + b) / 2 + Math.cos((Math.PI * u) / n) * (b - a), q - Math.sin((Math.PI * u) / n) * (b - a), 0.8);
-        }
-      }
-    // dimension lines: the width over it, the height beside it, the sill from the floor
-    const dl = (x1, y1, x2, y2, tx, ty, t, anchor) => '<path d="M' + f(x1) + " " + f(y1) + "L" + f(x2) + " " + f(y2) + '" stroke="#9fe3ff" stroke-width=".8" marker-start="url(#' + "IDa" + ')" marker-end="url(#' + "IDa" + ')"/><text x="' + f(tx) + '" y="' + f(ty) + '" font-size="8" fill="#9fe3ff" text-anchor="' + (anchor || "middle") + '">' + t + "</text>";
-    const m2 = (v) => (Math.round(v * 100) / 100).toFixed(2);
-    let dims = dl(x0, y0 - 5, x0 + ww, y0 - 5, x0 + ww / 2, y0 - 8, m2(g.w)) + dl(x0 + ww + 5, y0, x0 + ww + 5, y1, x0 + ww + 8, (y0 + y1) / 2 + 3, m2(g.h), "start");
-    if (g.sill > 0.04) dims += dl(x0 - 5, y1, x0 - 5, yF, x0 - 8, (y1 + yF) / 2 + 3, m2(g.sill), "end");
-    const id = "wpc" + ((Math.random() * 1e6) | 0);
-    dims = dims.split("IDa").join(id + "a");
-    return (
-      '<svg class="bwp" viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '" aria-label="Window preview">' +
-      '<defs><marker id="' + id + 'a" viewBox="0 0 6 6" refX="3" refY="3" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L6 3L0 6z" fill="#9fe3ff"/></marker><clipPath id="' + id + '">' + glass + '</clipPath><linearGradient id="' + id + 'g" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#cfe3ef"/><stop offset=".55" stop-color="#7d9fb4"/><stop offset=".56" stop-color="#4c5f58"/><stop offset="1" stop-color="#3a4741"/></linearGradient></defs>' +
-      '<rect x="0" y="' + f(yF - g.wallH * k) + '" width="' + W + '" height="' + f(g.wallH * k) + '" fill="rgba(255,255,255,.06)"/>' +
-      '<path d="M0 ' + f(yF) + "H" + W + '" stroke="currentColor" stroke-width="1.2" opacity=".6"/>' +
-      '<path d="M0 ' + f(yF - g.wallH * k) + "H" + W + '" stroke="currentColor" stroke-width=".8" stroke-dasharray="3 3" opacity=".4"/>' +
-      '<rect x="' + f(x0) + '" y="' + f(y0) + '" width="' + f(ww) + '" height="' + f(wh) + '" fill="' + g.finish + '" stroke="rgba(0,0,0,.4)" stroke-width=".6"/>' +
-      '<g fill="url(#' + id + 'g)">' + glass + "</g>" +
-      '<g clip-path="url(#' + id + ')" stroke="' + g.finish + '" fill="none">' + lines + "</g>" +
-      dims +
-      "</svg>"
-    );
-  }
-
-  /* ---------- the options strip and inspector ---------- */
+  /* ---------- the tray (what the next click draws) and the inspector (everything else, with exact numbers) ---------- */
   const opts = $("bopts"),
     row2 = $("bdecor"),
-    // the window and door designer: a panel docked at the right, above the bar, clear of the wall being worked on
+    // the inspector: a drawer on the right, above the bar, clear of the wall being worked on. The same drawer for the
+    // next piece and for the selected one; it is also the door and window designer.
     dpanel = document.createElement("div");
   dpanel.id = "bdesign";
   dpanel.className = "panel ui-panel ui-panel--side";
   dpanel.hidden = true;
+  dpanel.setAttribute("role", "region");
+  // head, then the door and window designer's stage (sticky: outside the scrolling body), the fit line, the designer's
+  // tabs, the body and the foot
+  dpanel.innerHTML =
+    '<div class="ui-panel__head"><span class="bdic"></span><div class="bph"><h2></h2><small></small></div><button type="button" class="ui-close" aria-label="Close the details" title="Close (More opens it again)">' + svg(I.close, 18) + "</button></div>" +
+    '<div id="bdstage" hidden></div><div id="bdfit" role="status" hidden></div><div id="bdtabs" class="ui-tabs" role="tablist" aria-label="Designer" hidden></div><div id="bdbody"></div><div id="bdfoot" hidden></div>';
   document.body.appendChild(dpanel);
-  let groups = [];
+  const dbody = $("bdbody"),
+    dfit = $("bdfit"),
+    dfoot = $("bdfoot"),
+    dstage = $("bdstage"),
+    dtabs = $("bdtabs");
+  dpanel.querySelector(".ui-close").addEventListener("click", () => (BL.choose("insp"), back()));
+  // the make-up controls (Stands on, Insulation, Inside) open the view onto what they change while they have focus
+  const MAKEUP = /^(s:)?(found|ins|lining)$/;
+  let focusK = "";
+  const makeupOf = (el) => {
+    const c = el && el.closest && el.closest("[data-g]"),
+      g = c && groups[+c.dataset.g];
+    return g && MAKEUP.test(g.id || "") ? g.id : "";
+  };
+  function focusTell(k) {
+    if (k === focusK) return;
+    focusK = k;
+    BL.choose("view:focus", k || null);
+  }
+  for (const el of [opts, dpanel]) {
+    el.addEventListener("focusin", (e) => focusTell(makeupOf(e.target)));
+    el.addEventListener("focusout", (e) => focusTell(makeupOf(e.relatedTarget)));
+  }
+  let groups = [],
+    lastV = null,
+    tabTool = "";
+  const tabSel = {};
   const keyHint = (k) => (k ? "<kbd>" + esc(k) + "</kbd>" : "");
-  function groupHtml(g, n) {
-    const lab = (extra) => '<span class="blab">' + esc(g.label || "") + (extra !== undefined ? ' <b class="bval">' + esc(extra) + "</b>" : "") + keyHint(g.key) + "</span>";
-    const cur = g.items ? g.items.find((x) => x.v === g.value) : null;
+  const same = (a, b) => a === b || (a !== null && b !== null && typeof a === "object" && typeof b === "object" && JSON.stringify(a) === JSON.stringify(b));
+  // a tray or inspector card: the picture (an opening's drawing when the item names one, else its icon) and its name.
+  // Opening drawings are made once per type (or recent design) and size, then reused.
+  const thumbs = new Map();
+  function pic(x, size = 30) {
+    if (x.svg) return x.svg;   // a drawing view() made itself (the stair types, by __stairsGeo)
+    if ((x.thumb || x.spec) && window.__openingPreview) {
+      const k = (x.spec ? JSON.stringify(x.spec) : x.thumb) + "@" + size;
+      if (!thumbs.has(k)) {
+        let h = "";
+        try {
+          h = window.__openingPreview.draw(x.spec || x.thumb, { size: "thumb", width: size, height: size, label: x.name });
+        } catch (e) {}
+        thumbs.set(k, h);
+      }
+      if (thumbs.get(k)) return thumbs.get(k);
+    }
+    return I[x.icon] ? svg(I[x.icon], size > 30 ? 26 : 22) : "";
+  }
+  const card = (x, n, m, pressed) => '<button type="button" class="btile bcard' + (x.svg ? " bsvgc" : "") + '" data-g="' + n + '" data-i="' + m + '" title="' + esc(x.name) + '" aria-label="' + esc(x.name) + '" aria-pressed="' + pressed + '">' + pic(x) + '<span class="nm">' + esc(x.name) + "</span></button>";
+  // a catalogue card in the tray (a door or window type, or a recent design): its drawing beside its whole name
+  function ocard(x, n, m, pressed) {
+    const sz = /^(.*?)\s+(\d+(?:\.\d+)?\s*×\s*\d+(?:\.\d+)?)$/.exec(x.name || ""),
+      name = sz ? sz[1] : x.name;
+    return '<button type="button" class="btile bcard bocard" data-g="' + n + '" data-i="' + m + '" title="' + esc(x.name + (x.note ? ". " + x.note : "")) + '" aria-label="' + esc(x.name) + '" aria-pressed="' + pressed + '"><span class="th">' + pic(x, 40) + '</span><span class="nm' + (sz ? " sz" : "") + '"><b>' + esc(name) + "</b>" + (sz ? "<small>" + esc(sz[2]) + "</small>" : "") + "</span></button>";
+  }
+  function groupHtml(g, n, inTray) {
+    const lab = (extra) => '<span class="blab">' + esc(g.label || "") + (extra !== undefined ? ' <b class="bval">' + esc(extra) + "</b>" : "") + (inTray ? "" : keyHint(g.key)) + "</span>";
+    const cur = g.items ? g.items.find((x) => same(x.v, g.value)) : null;
+    const tip = inTray && g.key ? ' title="' + esc((g.label || "") + " (" + g.key + ")") + '"' : "";
     if (g.type === "num")
       return '<div class="bgroup bnumg">' + lab() + '<div class="bitems bnumi ui-step"><button type="button" class="bchip" data-g="' + n + '" data-i="-1" aria-label="Less">' + svg(I.minus, 13) + '</button><input type="text" inputmode="decimal" autocomplete="off" data-g="' + n + '" value="' + esc(g.value) + '" aria-label="' + esc(g.label) + '"><span class="bu u">' + esc(g.unit || "") + '</span><button type="button" class="bchip" data-g="' + n + '" data-i="1" aria-label="More">' + svg(I.plus, 13) + "</button></div>" + (g.note ? '<span class="bnote' + (g.bad ? " bad" : "") + '">' + esc(g.note) + "</span>" : "") + "</div>";
     if (g.type === "badges") return '<div class="bgroup bbadges">' + g.items.map((x) => '<span class="bbadge ui-tag' + (x.k ? " k-" + x.k : "") + '"' + (x.title ? ' title="' + esc(x.title) + '"' : "") + ">" + esc(x.text) + "</span>").join("") + "</div>";
-    if (g.type === "winprev") return '<div class="bgroup bwinprev">' + lab() + winPreview(g) + "</div>";
     if (g.type === "info") return '<div class="bgroup binfo"><span class="btitle">' + esc(g.title) + '</span><span class="bnum">' + esc(g.text) + "</span></div>";
-    if (g.type === "swatches") return '<div class="bgroup">' + lab(cur ? cur.name : g.value === null ? "mixed" : "") + '<div class="bitems">' + g.items.map((x, m) => '<button type="button" class="bsw" data-g="' + n + '" data-i="' + m + '" title="' + esc(x.name) + '" aria-label="' + esc(x.name) + '" aria-pressed="' + (x.v === g.value) + '">' + swatch(x.sw) + "</button>").join("") + "</div></div>";
-    // tiles are icons; the label above names the one that is chosen (or the one under the pointer)
-    if (g.type === "tiles") return '<div class="bgroup">' + lab(cur ? cur.name : g.value === null ? "mixed" : "") + '<div class="bitems ui-seg">' + g.items.map((x, m) => '<button type="button" class="btile" data-g="' + n + '" data-i="' + m + '" title="' + esc(x.name) + '" aria-label="' + esc(x.name) + '" aria-pressed="' + (x.v === g.value) + '">' + svg(I[x.icon], 19) + "</button>").join("") + "</div></div>";
-    if (g.type === "chips") return '<div class="bgroup">' + (g.label ? lab(cur && cur.note ? cur.note : undefined) : "") + '<div class="bitems ui-seg">' + g.items.map((x, m) => '<button type="button" class="bchip" data-g="' + n + '" data-i="' + m + '" aria-pressed="' + (x.v === g.value) + '"' + (x.note ? ' title="' + esc(x.note) + '"' : "") + ">" + esc(x.name) + "</button>").join("") + "</div></div>";
+    if (g.type === "swatches") return '<div class="bgroup"' + tip + ">" + lab(cur ? cur.name : g.value === null ? "mixed" : "") + '<div class="bitems">' + g.items.map((x, m) => '<button type="button" class="bsw" data-g="' + n + '" data-i="' + m + '" title="' + esc(x.name) + '" aria-label="' + esc(x.name) + '" aria-pressed="' + same(x.v, g.value) + '">' + swatch(x.sw) + "</button>").join("") + "</div></div>";
+    // tiles are named cards: a picture and its name, the chosen one marked
+    if (g.type === "tiles") return '<div class="bgroup"' + tip + ">" + lab(cur ? cur.name : g.value === null ? "mixed" : "") + '<div class="bitems bcards">' + g.items.map((x, m) => card(x, n, m, same(x.v, g.value))).join("") + "</div></div>";
+    if (g.type === "chips") return '<div class="bgroup" data-id="' + esc(g.id || "") + '"' + tip + ">" + (g.label ? lab(cur && cur.note ? cur.note : undefined) : "") + '<div class="bitems ui-seg">' + g.items.map((x, m) => '<button type="button" class="bchip" data-g="' + n + '" data-i="' + m + '" aria-pressed="' + same(x.v, g.value) + '"' + (x.note ? ' title="' + esc(x.note) + '"' : "") + ">" + esc(x.name) + "</button>").join("") + "</div></div>";
     if (g.type === "stepper") return '<div class="bgroup">' + lab() + '<div class="bitems bstep ui-step"><button type="button" class="bchip" data-g="' + n + '" data-i="-1" aria-label="Less">' + svg(I.minus, 14) + '</button><span class="bnum n">' + esc(g.text) + '</span><button type="button" class="bchip" data-g="' + n + '" data-i="1" aria-label="More">' + svg(I.plus, 14) + "</button></div></div>";
     if (g.type === "toggle") return '<div class="bgroup"><span class="blab">&nbsp;</span><div class="bitems"><button type="button" class="btile" data-g="' + n + '" aria-pressed="' + !!g.on + '" title="' + esc(g.title || g.name) + '">' + svg(I[g.icon], 17) + "<span>" + esc(g.name) + "</span></button></div></div>";
-    if (g.type === "action") return '<div class="bgroup"><span class="blab">' + (g.key ? keyHint(g.key) : "&nbsp;") + '</span><div class="bitems"><button type="button" class="btile' + (g.danger ? " danger" : "") + '" data-g="' + n + '"' + (g.title ? ' title="' + esc(g.title) + '"' : "") + ">" + svg(I[g.icon], 17) + "<span>" + esc(g.name) + "</span></button></div></div>";
+    if (g.type === "action") return '<div class="bgroup"><span class="blab">' + (g.key && !inTray ? keyHint(g.key) : "&nbsp;") + '</span><div class="bitems"><button type="button" class="btile' + (g.danger ? " danger" : "") + '" data-g="' + n + '" title="' + esc((g.title || g.name) + (g.key ? " (" + g.key + ")" : "")) + '">' + svg(I[g.icon], 17) + "<span>" + esc(g.name) + "</span></button></div></div>";
     if (g.type === "field") return '<div class="bgroup">' + lab() + '<div class="bitems bfield" title="' + esc(g.title || "") + '"><input type="text" inputmode="decimal" autocomplete="off" data-g="' + n + '" value="' + esc(g.value) + '" aria-label="' + esc(g.label) + '"' + (g.locked ? " disabled" : "") + "><span>" + esc(g.unit) + "</span></div></div>";
     if (g.type === "select") return '<div class="bgroup">' + lab() + '<div class="bitems bfield" title="' + esc(g.title || "") + '"><select data-g="' + n + '" aria-label="' + esc(g.label) + '">' + g.items.map((x, m) => '<option value="' + m + '"' + (x.v === g.value ? " selected" : "") + ">" + esc(x.name) + "</option>").join("") + "</select></div></div>";
     return "";
   }
-  function renderOpts(v) {
-    groups = v.groups;
-    const first = [],
-      second = [],
-      third = [];
-    // what can be done with the selection sits in the top row
-    const acts = [];
-    // groups with a section name are boxed together under it
-    let sec = null;
-    const put = (arr, html, g) => {
-      if (g.sec) {
-        if (!sec || sec.name !== g.sec || sec.arr !== arr) ((sec = { name: g.sec, arr, html: [] }), arr.push(sec));
-        sec.html.push(html);
-      } else ((sec = null), arr.push(html));
-    };
-    groups.forEach((g, n) => {
-      if (g.type === "action" && g.id.startsWith("s:")) acts.push('<button type="button" class="bchip' + (g.danger ? " danger" : "") + '" data-g="' + n + '" title="' + esc(g.title || g.name) + (g.key ? " (" + esc(g.key) + ")" : "") + '">' + svg(I[g.icon], 15) + "<span>" + esc(g.name) + "</span></button>");
-      else put(g.row === "d" ? third : g.row === 2 ? second : first, groupHtml(g, n), g);
-    });
-    const flat = (arr) => arr.map((x) => (typeof x === "string" ? x : '<div class="bsec ui-card"><div class="bsech">' + esc(x.name) + '</div><div class="bsecb">' + x.html.join("") + "</div></div>")).join("");
-    $("bacts").innerHTML = acts.join("");
-    opts.innerHTML = flat(first);
-    opts.hidden = !first.length;
-    row2.innerHTML = flat(second);
-    const was = dpanel.querySelector("input:focus");
-    dpanel.innerHTML = third.length ? '<div class="bdtitle">' + esc(v.designTitle || "Designer") + "</div>" + flat(third) : "";
-    dpanel.hidden = !third.length;
-    if (was) {
-      const again = dpanel.querySelector('input[data-g="' + was.dataset.g + '"]');
-      again && again.focus();
+  // several tile groups in a row with one id (a catalogue by family): one row of cards under family tabs
+  function tabbedHtml(run, toolKey) {
+    const key = toolKey + ":" + run[0].g.id;
+    const holder = run.find((r) => "value" in r.g),
+      val = holder ? holder.g.value : undefined;
+    let a = tabSel[key];
+    if (a === undefined || a >= run.length) {
+      a = run.findIndex((r) => r.g.cur);
+      if (a < 0) a = run.findIndex((r) => r.g.items.some((x) => same(x.v, val)));
+      if (a < 0) a = 0;
     }
-    row2.hidden = !second.length;
+    const { g, n } = run[a],
+      cat = g.id === "otype";   // the door or window catalogue: drawings and whole names
+    return (
+      '<div class="bgroup btabbed' + (cat ? " bocat" : "") + '"><div class="blab btabl" role="tablist">' +
+      run.map((r, k) => '<button type="button" role="tab" data-tab="' + esc(key) + '" data-k="' + k + '" aria-selected="' + (k === a) + '"' + (r.g.note ? ' title="' + esc(r.g.note) + '"' : "") + ">" + esc(r.g.label || "") + "</button>").join("") +
+      (cat && g.note ? '<span class="btabn">' + esc(g.note) + "</span>" : "") +
+      '</div><div class="bitems bcards">' + g.items.map((x, m) => (cat ? ocard : card)(x, n, m, same(x.v, val))).join("") + "</div></div>"
+    );
   }
+  const setHtml = (el, html) => {
+    if (el._h === html) return false;
+    el._h = html;
+    el.innerHTML = html;
+    return true;
+  };
+  // the door and window designer (docs/design/plan-mode-redesign.md section 3.1): a stage drawn to scale with handles, a
+  // door's plan view, the fit line, tabs (Size & place, Style, Finish) and the foot. Its sizes are fixed so a drag in the
+  // stage can be turned back into metres from the drawing's own data-k, data-ox and data-oy.
+  const stageW = (g) => (g.plan ? 220 : 356),
+    stageH = (g) => (g.plan ? 168 : 172),
+    dtabSel = {};
+  let stageV = null,
+    stageKey = "",
+    stageCache = "";
+  function stageHtml(g) {
+    if (g.kind === "stairs") return g.svg ? '<div class="bstrow"><div class="bstel">' + g.svg + "</div></div>" : "";   // the stair's side view, drawn by __stairsGeo
+    const P = window.__openingPreview;
+    if (!P || !g.spec) return "";
+    try {
+      const sel = g.mode === "sel",
+        win = g.kind === "window",
+        tip = win ? (sel ? "Drag an edge to resize, the middle to move" : "Drag an edge to resize, the middle to raise") : sel ? "Drag an edge to resize, the middle to slide" : "Drag an edge to resize";
+      let h = '<div class="bstrow"><div class="bstel">' + P.draw(g.spec, { size: "stage", wall: g.wall, at: g.at, hand: g.hand, anchor: g.anchor, handles: true, width: stageW(g), height: stageH(g) }) + "</div>",
+        cap = "";
+      // a door's plan view beside it: its quarters are the buttons for which way it opens
+      if (g.plan) {
+        const pl = P.plan(g.spec, g.hand, { width: 132, height: stageH(g) });
+        if (pl) {
+          const hs = P.hands(g.spec),
+            on = hs.find((c) => (c.flip === null || +c.flip === +!!g.hand.flip) && (c.out === null || +c.out === +!!g.hand.out));
+          h += '<div class="bstpl">' + pl + "</div>";
+          cap = on ? on.label : g.how || "";
+        }
+      }
+      return h + '</div><div class="bststrip"><span class="bsttip">' + esc(tip) + "</span>" + (cap ? '<span class="bstcap" title="Click a quarter of the plan to change it">' + esc(cap) + "</span>" : "") + "</div>";
+    } catch (e) {
+      return "";
+    }
+  }
+  function renderOpts(v) {
+    lastV = v;
+    groups = v.groups;
+    const toolKey = v.tool + (v.sel ? ":sel" : "");
+    if (tabTool !== toolKey) {
+      tabTool = toolKey;
+      for (const k in tabSel) delete tabSel[k];
+    }
+    const tray = [],
+      second = [],
+      inspL = [],
+      foot = [],
+      acts = [],
+      ends = [];
+    let swatches = false,
+      stageG = null;
+    for (let n = 0; n < groups.length; n++) {
+      const g = groups[n];
+      if (g.acts || (g.type === "action" && g.id && g.id.startsWith("s:") && g.tier)) {
+        acts.push('<button type="button" class="bchip' + (g.danger ? " danger" : "") + '" data-g="' + n + '" title="' + esc(g.title || g.name) + (g.key ? " (" + esc(g.key) + ")" : "") + '">' + svg(I[g.icon], 15) + "<span>" + esc(g.name) + "</span></button>");
+        continue;
+      }
+      if (g.id === "roofs") continue;   // the bar's Roofs toggle
+      if (g.tier || g.row === 2) {
+        if (g.id === "paint" || g.id === "pick") {
+          ends.push('<button type="button" class="btool" data-g="' + n + '" aria-pressed="' + !!g.on + '" title="' + esc(g.title || g.name) + '" aria-label="' + esc(g.name) + '">' + svg(I[g.icon], 20) + "</button>");
+          continue;
+        }
+        const arr = g.row === 2 ? second : tray;
+        if (g.type === "swatches") swatches = true;
+        // a catalogue by family: consecutive tile groups that share an id
+        if (g.type === "tiles" && groups[n + 1] && groups[n + 1].id === g.id && groups[n + 1].type === "tiles" && (groups[n + 1].tier || groups[n + 1].row === 2)) {
+          const run = [];
+          while (groups[n] && groups[n].id === g.id && groups[n].type === "tiles") run.push({ g: groups[n], n: n++ });
+          n--;
+          arr.push(tabbedHtml(run, toolKey));
+        } else if (g.id === "o:recent") arr.push('<div class="bgroup bocat brecent"><span class="blab">' + esc(g.label || "Recent") + '</span><div class="bitems bcards">' + g.items.map((x, m) => ocard(x, n, m, false)).join("") + "</div></div>");
+        else arr.push(groupHtml(g, n, true));
+      } else if (g.type === "stage") stageG = g;
+      else {
+        const h = groupHtml(g, n, false);
+        if (!h) continue;
+        if (g.foot) foot.push(h);
+        else inspL.push({ g, h });
+      }
+    }
+    const I_ = v.inspector || { has: false, open: false };
+    // the tray's end: Paint and Pick when there is a material to paint with, then More, which opens the inspector
+    const end =
+      (swatches ? ends.join("") + '<span class="sep" aria-hidden="true"></span>' : "") +
+      (I_.has ? '<button type="button" id="bmore" class="ui-btn" aria-expanded="' + !!I_.open + '" aria-pressed="' + !!I_.open + '" title="Every setting, with exact numbers (double-click a piece for its own)">' + svg(I.sliders, 18) + "<span>More</span>" + svg(I.right, 14) + "</button>" : "");
+    setHtml($("bacts"), acts.join(""));
+    setHtml(opts, tray.join("") + (end ? '<div class="btrayend">' + end + "</div>" : ""));
+    opts.hidden = !tray.length;
+    opts.classList.toggle("bocats", tray.some((h) => h.includes(" bocat")));
+    setHtml(row2, second.join(""));
+    row2.hidden = !second.length;
+    // the inspector
+    const show = !!(I_.open && I_.has && (inspL.length || stageG));
+    dpanel.hidden = !show;
+    stageV = show ? stageG : null;
+    dpanel.classList.toggle("bdes", !!stageV);
+    if (stageV) dpanel.dataset.kind = stageV.kind;
+    // the fit line: does the next or selected opening fit, and if not, what was done and the fixes
+    const fit = v.fit,
+      fitHtml = fit && fit.text ? '<span class="bfitt">' + svg(fit.ok ? I.done : I.warn, 15) + "<span>" + esc(fit.text) + "</span></span>" + (fit.fixes && fit.fixes.length ? '<span class="bfixes">' + fit.fixes.map((x, k) => '<button type="button" class="bchip bfix" data-fix="' + k + '">' + svg(I.right, 13) + "<span>" + esc(x.label) + "</span></button>").join("") + "</span>" : "") : "";
+    setHtml(dfit, show ? fitHtml : "");
+    dfit.hidden = !show || !fitHtml;
+    dfit.className = fit && !fit.ok ? "bad" : fit && fit.adjusted ? "adj" : "";
+    setHtml($("bfit"), !show && fit && !fit.ok ? fitHtml : "");
+    $("bfit").hidden = show || !fit || fit.ok;
+    // the foot: Flip and Delete for a selected unit; the next one says where it goes
+    setHtml(dfoot, show ? (stageV && stageV.mode !== "sel" ? '<span class="bdnext">' + svg(I.right, 14) + "<span>" + esc(stageV.next || "Click a wall to place it") + "</span></span>" : "") + foot.join("") : "");
+    dfoot.hidden = !show || !foot.length;
+    if (!show) return;
+    const head = dpanel.firstChild;
+    setHtml(head.firstChild, svg(I[I_.icon] || I.select, 22));
+    const h2 = head.querySelector("h2"),
+      sm = head.querySelector("small");
+    h2.textContent !== I_.title && (h2.textContent = I_.title || "");
+    sm.textContent !== (I_.sub || "") && (sm.textContent = I_.sub || "");
+    dpanel.dataset.mode = I_.mode || "next";
+    // the stage: kept out of the scrolling body so it stays in view (and keeps a drag's pointer while it redraws)
+    if (stageV) {
+      const k = JSON.stringify(stageV);
+      if (k !== stageKey) ((stageKey = k), (stageCache = stageHtml(stageV)));
+    }
+    setHtml(dstage, stageV ? stageCache : "");
+    dstage.hidden = !stageV;
+    let body;
+    if (stageV) {
+      // tabs from the sections view() gives, in its order; the Preview section's facts go at the foot of Size & place
+      const secs = [],
+        about = [];
+      for (const x of inspL) x.g.sec === "Preview" ? about.push(x.h) : x.g.sec && !secs.includes(x.g.sec) && secs.push(x.g.sec);
+      let cur = dtabSel[stageV.kind];
+      if (!secs.includes(cur)) cur = secs[0];
+      setHtml(dtabs, secs.map((s) => '<button type="button" role="tab" data-dt="' + secs.indexOf(s) + '" aria-selected="' + (s === cur) + '">' + esc(s) + "</button>").join(""));
+      dtabs.hidden = secs.length < 2;
+      dtabs._secs = secs;
+      // the tab's groups, in blocks: consecutive groups that share a `group` (height on the wall, along the wall) stand
+      // together
+      const blocks = [];
+      let key = {};
+      for (const x of inspL) {
+        if (x.g.sec !== cur) continue;
+        const k = x.g.group || (x.g.type === "info" ? "info" : "");
+        if (k !== key) blocks.push({ k, hs: [] }), (key = k);
+        blocks[blocks.length - 1].hs.push(x.h);
+      }
+      const blurb = stageV.blurb && stageV.blurb !== stageV.how ? stageV.blurb : "";
+      if (cur === secs[0] && (about.length || blurb)) blocks.push({ k: "about", hs: [(blurb ? '<p class="bblurb">' + esc(blurb) + "</p>" : "") + about.join("")] });
+      body = blocks.map((b) => '<section class="bsec bdblk' + (b.k ? " k-" + b.k : "") + '"><div class="bsecb">' + b.hs.join("") + "</div></section>").join("");
+      dbody.setAttribute("role", "tabpanel");
+    } else {
+      dtabs.hidden = true;
+      setHtml(dtabs, "");
+      const inspS = new Map(),
+        top = [];
+      for (const x of inspL) x.g.sec ? (inspS.get(x.g.sec) || inspS.set(x.g.sec, []).get(x.g.sec)).push(x.h) : top.push(x.h);
+      body = top.join("") + [...inspS].map(([name, hs]) => '<section class="bsec"><h3 class="bsech">' + esc(name) + '</h3><div class="bsecb">' + hs.join("") + "</div></section>").join("");
+      dbody.removeAttribute("role");
+    }
+    const was = dbody.querySelector("input:focus"),
+      top = dbody.scrollTop;
+    if (setHtml(dbody, body)) {
+      dbody.scrollTop = top;
+      if (was) {
+        const again = dbody.querySelector('input[data-g="' + was.dataset.g + '"]');
+        again && again.focus();
+      }
+    }
+  }
+  // a designer tab
+  dtabs.addEventListener("click", (e) => {
+    const t = e.target.closest("[data-dt]");
+    if (!t || !stageV || !dtabs._secs) return;
+    dtabSel[stageV.kind] = dtabs._secs[+t.dataset.dt];
+    dbody.scrollTop = 0;
+    lastV && renderOpts(lastV);
+  });
+  dtabs.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const ts = [...dtabs.children],
+      i = ts.findIndex((t) => t.getAttribute("aria-selected") === "true"),
+      j = (i + (e.key === "ArrowRight" ? 1 : -1) + ts.length) % ts.length;
+    e.preventDefault();
+    e.stopPropagation();
+    ts[j] && (ts[j].click(), dtabs.children[j] && dtabs.children[j].focus());
+  });
+
+  /* ---------- the stage's handles: drag an edge to resize, the middle to move. One choose per frame while a drag
+     is live; widths, heights and places go in 5 cm steps (Ctrl: 1 cm), through the same ids as the steppers ---------- */
+  let sdrag = null,
+    sdragRaf = 0;
+  const stageSvg = () => dstage.querySelector("svg.op-prev--stage");
+  function stageM(x, y, el) {
+    const r = el.getBoundingClientRect(),
+      vb = el.viewBox.baseVal,
+      k = +el.dataset.k,
+      px = ((x - r.left) * vb.width) / r.width,
+      py = ((y - r.top) * vb.height) / r.height;
+    return { u: (px - +el.dataset.ox) / k, y: (+el.dataset.oy - py) / k };
+  }
+  // where the unit stands now, in metres along its run and above the floor, and its designer numbers
+  function stageNow() {
+    const v = BL.view(),
+      g = v.groups.find((x) => x.type === "stage");
+    if (!g || !window.__openingPreview) return null;
+    const M = window.__openingPreview.metrics(g.spec, { size: "stage", wall: g.wall, at: g.at, width: stageW(g), height: stageH(g) }),
+      num = (id) => {
+        const x = v.groups.find((q) => q.id === id && q.type === "num");
+        return x ? parseFloat(String(x.value).replace(",", ".")) : NaN;
+      };
+    return { g, uL: (M.x0 - M.ox) / M.k, uR: (M.x1 - M.ox) / M.k, yT: (M.oy - M.y0) / M.k, yB: (M.oy - M.y1) / M.k, w: num("w:w"), h: num("w:h"), an: g.anchor || "sill", sel: g.mode === "sel", win: g.kind === "window" };
+  }
+  function stageStep() {
+    sdragRaf = 0;
+    const D = sdrag,
+      el = stageSvg();
+    if (!D || !el) return;
+    const p = stageM(D.x, D.y, el),
+      S = D.s,
+      st = (x) => (D.ctrl ? Math.round(x * 100) / 100 : Math.round(x * 20) / 20),
+      r2 = (x) => Math.round(x * 100) / 100,
+      out = [],
+      send = (id, val) => out.push([id, val]),
+      anY = (sill, head) => (S.an === "head" ? head : S.an === "centre" ? (sill + head) / 2 : sill),
+      w0 = S.uR - S.uL,
+      h0 = S.yT - S.yB;
+    if (D.k === "l" || D.k === "r") {
+      if (!isFinite(S.w)) return;
+      // the opposite edge stays put (the next unit has no place yet: it grows about its middle)
+      const want = D.k === "r" ? (S.sel ? p.u - S.uL : 2 * (p.u - (S.uL + S.uR) / 2)) : S.sel ? S.uR - p.u : 2 * ((S.uL + S.uR) / 2 - p.u),
+        w = r2(st(S.w + want - w0));
+      if (w <= 0) return;
+      send("w:w", w);
+      if (S.sel && D.k === "l") send("o:pos", r2(S.uR - (w0 + w - S.w)));
+      else if (S.sel) send("o:pos", r2(S.uL));
+    } else if (D.k === "t" || D.k === "b") {
+      if (!isFinite(S.h)) return;
+      const y = st(p.y),
+        h = r2(st(S.h + (D.k === "t" ? y - S.yB : S.yT - y) - h0));
+      if (h <= 0) return;
+      send("w:h", h);
+      // the other edge stays put: say where the anchored line is now
+      if (S.win) {
+        const sill = D.k === "t" ? S.yB : S.yT - (h0 + h - S.h),
+          head = D.k === "t" ? S.yB + h0 + h - S.h : S.yT;
+        if (!(D.k === "t" && S.an === "sill") && !(D.k === "b" && S.an === "head")) send("o:y", { anchor: S.an, y: r2(anY(sill, head)) });
+      }
+    } else if (D.k === "move") {
+      if (S.sel) send("o:pos", r2(st(S.uL + p.u - D.u0)));
+      if (S.win) send("o:y", { anchor: S.an, y: r2(st(anY(S.yB, S.yT) + p.y - D.y0)) });
+    }
+    // the same request as last frame changes nothing (and would only add steps to undo)
+    const j = JSON.stringify(out);
+    if (!out.length || j === D.sent) return;
+    D.sent = j;
+    for (const [id, val] of out) BL.choose(id, val);
+  }
+  dstage.addEventListener("pointerdown", (e) => {
+    const h = e.target.closest("[data-h]"),
+      el = stageSvg();
+    if (!h || !el || e.button > 0) return;
+    const s = stageNow();
+    if (!s) return;
+    e.preventDefault();
+    const p = stageM(e.clientX, e.clientY, el);
+    sdrag = { k: h.dataset.h, id: e.pointerId, x: e.clientX, y: e.clientY, u0: p.u, y0: p.y, s, sent: "", ctrl: e.ctrlKey || e.metaKey };
+    BL.choose("o:drag", "begin");
+    try {
+      dstage.setPointerCapture(e.pointerId);
+    } catch (err) {}
+    dstage.dataset.drag = sdrag.k;
+  });
+  dstage.addEventListener("pointermove", (e) => {
+    if (!sdrag || e.pointerId !== sdrag.id) return;
+    sdrag.x = e.clientX;
+    sdrag.y = e.clientY;
+    sdrag.ctrl = e.ctrlKey || e.metaKey;
+    sdragRaf || (sdragRaf = requestAnimationFrame(stageStep));
+  });
+  const stageEnd = (e) => {
+    if (!sdrag || e.pointerId !== sdrag.id) return;
+    sdragRaf && cancelAnimationFrame(sdragRaf);
+    e.type === "pointerup" && stageStep();
+    // one drag is one step to undo
+    BL.choose("o:drag", "end");
+    sdrag = null;
+    delete dstage.dataset.drag;
+    back();
+  };
+  dstage.addEventListener("pointerup", stageEnd);
+  dstage.addEventListener("pointercancel", stageEnd);
   const onPick = (e) => {
+    const tab = e.target.closest("button[data-tab]");
+    if (tab) return ((tabSel[tab.dataset.tab] = +tab.dataset.k), lastV && renderOpts(lastV));
+    if (e.target.closest("#bmore")) return (BL.choose("insp"), back());
+    const fix = e.target.closest("button[data-fix]");
+    if (fix) return (BL.choose("o:fix", +fix.dataset.fix), back());
+    const q = e.target.closest(".op-q");
+    if (q) {
+      const h = {};
+      for (const k of ["flip", "out"]) if (q.dataset[k] !== undefined) h[k] = +q.dataset[k];
+      return (BL.choose("o:hand", h), back());
+    }
     const b = e.target.closest("button[data-g]");
     if (!b) return;
     const g = groups[+b.dataset.g];
+    if (!g) return;
     BL.choose(g.id, g.type === "stepper" ? +b.dataset.i : g.type === "num" ? { step: +b.dataset.i } : g.items ? g.items[+b.dataset.i].v : undefined);
     back();
   };
-  opts.addEventListener("click", onPick);
-  $("bacts").addEventListener("click", onPick);
-  row2.addEventListener("click", onPick);
-  // pointing at a swatch or an icon names it in the group's label
+  // pointing at a swatch or a card names it in the group's label
   const named = (e) => e.target.closest(".bsw, .btile[data-i]");
-  opts.addEventListener("pointerover", (e) => {
-    const b = named(e);
-    if (!b) return;
-    const val = b.closest(".bgroup").querySelector(".bval");
-    if (val) val.textContent = b.title;
-  });
-  opts.addEventListener("pointerout", (e) => {
-    const b = named(e);
-    if (!b) return;
-    const g = groups[+b.dataset.g],
-      cur = g.items.find((x) => x.v === g.value),
-      val = b.closest(".bgroup").querySelector(".bval");
-    if (val) val.textContent = cur ? cur.name : g.value === null ? "mixed" : "";
-  });
-  // typed properties of the selection
-  dpanel.addEventListener("click", onPick);
-  for (const el of [row2, dpanel]) {
+  for (const el of [opts, row2, $("bacts"), dbody, dfit, dfoot, $("bfit"), dstage]) {
+    el.addEventListener("click", onPick);
+    el.addEventListener("pointerover", (e) => {
+      const b = named(e),
+        val = b && b.closest(".bgroup").querySelector(".bval");
+      if (val) val.textContent = b.title;
+    });
+    el.addEventListener("pointerout", (e) => {
+      const b = named(e),
+        g = b && groups[+b.dataset.g],
+        val = b && b.closest(".bgroup").querySelector(".bval");
+      if (!val || !g || !g.items) return;
+      const cur = g.items.find((x) => x.v === g.value);
+      val.textContent = cur ? cur.name : g.value === null ? "mixed" : "";
+    });
+    // typed properties: Enter sets, Esc puts the old number back
     el.addEventListener("keydown", (e) => {
       if (e.target.tagName !== "INPUT") return;
       e.stopPropagation();
@@ -400,28 +957,16 @@
       else if (e.key === "Escape") ((e.target.value = e.target.defaultValue), e.target.blur(), back());
     });
     el.addEventListener("change", (e) => {
+      const g = groups[+e.target.dataset.g];
+      if (!g) return;
+      if (e.target.tagName === "SELECT") return (BL.choose(g.id, g.items[+e.target.value].v), back());
       if (e.target.tagName !== "INPUT") return;
-      const g = groups[+e.target.dataset.g],
-        v = parseFloat(e.target.value.replace(",", "."));
+      if (g.text) return (BL.choose(g.id, e.target.value), back());
+      const v = parseFloat(e.target.value.replace(",", "."));
       isFinite(v) ? BL.choose(g.id, v) : (e.target.value = e.target.defaultValue);
       back();
     });
   }
-  opts.addEventListener("keydown", (e) => {
-    if (e.target.tagName !== "INPUT") return;
-    e.stopPropagation();
-    if (e.key === "Enter") e.target.blur();
-    else if (e.key === "Escape") ((e.target.value = e.target.defaultValue), e.target.blur(), back());
-  });
-  opts.addEventListener("change", (e) => {
-    const g = groups[+e.target.dataset.g];
-    if (e.target.tagName === "SELECT") return (BL.choose(g.id, g.items[+e.target.value].v), back());
-    if (e.target.tagName !== "INPUT") return;
-    if (g.text) return (BL.choose(g.id, e.target.value), back());
-    const v = parseFloat(e.target.value.replace(",", "."));
-    isFinite(v) ? BL.choose(g.id, v) : (e.target.value = e.target.defaultValue);
-    back();
-  });
 
   /* ---------- drawn over the view ---------- */
   const over = document.createElement("div");
@@ -518,39 +1063,123 @@
   for (const m of measEls) m.lastChild.addEventListener("click", () => (BL.measClear(m._n), back()));
 
   let barKey = "",
+    trayMax = 76,
+    peekH = 0,
     uiV = -1,
     ovV = -1,
     lastCam = NaN,
     typedV = -1,
     px = -1,
     py = -1,
-    cursor = "";
+    cursor = "",
+    levelsKey = "",
+    coachKey = "";
+  window.addEventListener("resize", () => ((uiV = -1), flyClose()));
+  function renderBar(v) {
+    if (v.tools.length !== TOOLS.length || v.tools.map((t) => t.id + ":" + catOf(t)).join() !== toolsKey) (flyClose(), drawSlots(v.tools));
+    // which slot is pressed; a group slot takes the face of the member in hand
+    const g = groupOfTool(v.top);
+    if (g && lastOf[g] !== v.top) {
+      lastOf[g] = v.top;
+      const s = pieces.querySelector('[data-group="' + g + '"]');
+      s.dataset.cur = v.top;
+      s.innerHTML = slotInner(toolOf(v.top), true);
+    }
+    for (const b of pieces.children) {
+      if (b.tagName !== "BUTTON") continue;
+      const on = b.dataset.piece ? b.dataset.piece === v.top : b.dataset.group === g;
+      b.getAttribute("aria-pressed") !== String(on) && b.setAttribute("aria-pressed", String(on));
+    }
+    if (!fly.hidden && flyTop !== v.top) flyClose();
+    $("bundo").disabled = !v.undo;
+    $("bredo").disabled = !v.redo;
+    $("bsnap").setAttribute("aria-pressed", v.snap ? "true" : "false");
+    // the view control and the task view's chip
+    const vc = v.viewc || null,
+      vw = $("bview"),
+      chip = $("bvchip");
+    show(vw, !!vc);
+    if (vc) for (const b of vw.children) b.getAttribute("aria-pressed") !== String(b.dataset.m === vc.mode) && b.setAttribute("aria-pressed", String(b.dataset.m === vc.mode));
+    const ct = vc && vc.mode === "auto" && vc.chip ? String(vc.chip) : "";
+    show(chip, !!ct);
+    text(chip.children[1], ct);
+    // on a phone the view control lives in the "..." sheet, beside the storeys
+    const xs = $("baidsheet");
+    if (xs && vw.parentElement !== xs) {
+      const lv = $("blevel");
+      lv && lv.parentElement === xs ? xs.insertBefore(vw, lv.nextSibling) : xs.appendChild(vw);
+    }
+    renderCut(vc);
+    const lk = JSON.stringify(v.levels);
+    if (lk !== levelsKey) {
+      levelsKey = lk;
+      $("blevel").innerHTML = (v.levels || [])
+        .map((l) => '<button type="button" data-l="' + l.l + '" aria-pressed="' + !!l.cur + '"' + (!l.has && l.l !== 0 ? ' class="dim"' : "") + ' title="' + esc(l.name === "+" ? "Start a storey above (Page Up)" : l.name === "Cellar" ? (l.has ? "The cellar" : "Dig a cellar: a storey below the ground") + " (Page Down)" : (l.l === 0 ? "The ground floor" : "Storey " + l.name) + (l.has ? "" : ": nothing here yet")) + '">' + (l.name === "+" ? svg(I.plus, 14) : esc(l.name)) + "</button>")
+        .join("");
+    }
+    const tot = $("bsched").lastChild,
+      tt = v.total ? money(v.total) : "";
+    tot.hidden = !tt;
+    text(tot, tt);
+    const ck = JSON.stringify(v.coach);
+    if (ck !== coachKey) {
+      coachKey = ck;
+      coachV = v.coach || [];
+      const next = coachV.findIndex((c) => !c.done);
+      $("bcoach").hidden = !v.coach;
+      $("bcoach").innerHTML = coachV.map((c, n) => '<button type="button" class="bcoach' + (c.done ? " done" : "") + (n === next ? " next" : "") + '" data-n="' + n + '" title="' + esc(c.done ? c.text + ": done" : c.tool ? "Pick the " + c.text + " tool" : "Leave build mode when the house is planned") + '"><b>' + (c.done ? svg(I.done, 12) : n + 1) + "</b><span>" + esc(c.text) + "</span></button>").join("");
+    }
+  }
+  // on a desktop the designer docks on the right down to the bar, and the hint row and tray keep to its left, so the
+  // stage and the Size & place tab have the height they need
+  let dockW = "";
+  function designerDock() {
+    const dock = !dpanel.hidden && dpanel.classList.contains("bdes") && !document.body.classList.contains("touch");
+    bar.classList.toggle("bdock", dock);
+    let w = "";
+    if (dock) {
+      const bm = $("bmain").getBoundingClientRect();
+      dpanel.style.bottom = Math.round(window.innerHeight - bm.top + 8) + "px";
+      w = Math.max(240, Math.round(dpanel.getBoundingClientRect().left - 12 - bar.getBoundingClientRect().left)) + "px";
+    }
+    if (w !== dockW) {
+      dockW = w;
+      for (const el of [opts, $("bhead")]) el.style.maxWidth = w;
+    }
+  }
   function frame() {
-    if (!B.on) return void (sched.hidden || (sched.hidden = true), dpanel.hidden || (dpanel.hidden = true), (uiV = -1));
+    if (!B.on) return void (sched.hidden || (sched.hidden = true), dpanel.hidden || (dpanel.hidden = true), cutEl.hidden || (cutEl.hidden = true), flyClose(), (uiV = -1));
     if (uiV !== B.uiVer) {
       uiV = B.uiVer;
       const v = BL.view();
       renderOpts(v);
       text($("bhint"), v.hint);
-      for (const b of pieces.children) b.dataset.piece && b.setAttribute("aria-pressed", b.dataset.piece === v.top ? "true" : "false");
-      $("bundo").disabled = !v.undo;
-      $("bredo").disabled = !v.redo;
-      $("bsnap").setAttribute("aria-pressed", v.snap ? "true" : "false");
-      $("bfree").setAttribute("aria-pressed", v.free ? "true" : "false");
-      text($("blname"), v.levelName);
+      $("bhint").title = v.hint;
+      renderBar(v);
       $("bstop").hidden = !v.busy;
       $("bstop").children[1].textContent = v.busy === "chain" ? "Finish" : v.busy === "copy" || v.busy === "move" ? "Put down" : "Stop";
-      renderSched(v.sched);
-      bar.classList.toggle("fold", !!v.fold);
-      $("bfold").setAttribute("aria-expanded", v.fold ? "false" : "true");
-      // how much of the view the bar covers: build mode frames the site in what is left above it
-      // (a steady figure: the bar with one row of options, whatever tool is in hand, so the view does not bob about)
-      const k = (v.fold ? "f" : "o") + window.innerWidth + "x" + window.innerHeight;
-      if (barKey !== k) {
-        barKey = k;
-        const r = bar.getBoundingClientRect();
-        B.barH = window.innerHeight - r.bottom + $("bhead").offsetHeight + $("bmain").offsetHeight + (v.fold ? 22 : 66);
-      }
+      renderSched(v.sched, v);
+      // how much of the view the bar covers: build mode frames the site in what is left above it. A steady figure (the
+      // bar, a tray's height and the hint row, whatever the tool), so the view does not bob about between tools.
+      // A door or window catalogue makes the tray taller than --tray-h: the tallest tray seen at this window size counts,
+      // so the frame moves once and then holds. A hint row lifted out of the stack (a phone in landscape) does not
+      // count. On a phone the inspector's sheet sits above the bar: its peek height counts (full does not; the frame
+      // keeps the peek's).
+      const k = window.innerWidth + "x" + window.innerHeight;
+      if (barKey !== k) ((barKey = k), (trayMax = parseFloat(getComputedStyle(bar).getPropertyValue("--tray-h")) || 76), (peekH = 0));
+      if (!opts.hidden) trayMax = Math.max(trayMax, opts.offsetHeight);
+      const touch = document.body.classList.contains("touch"),
+        sheet = touch && !dpanel.hidden && !(window.matchMedia && matchMedia("(orientation: landscape)").matches);
+      if (!sheet) peekH = 0;
+      else if (!dpanel.classList.contains("full")) peekH = dpanel.offsetHeight + 8;
+      const hd = $("bhead"),
+        headH = getComputedStyle(hd).position === "fixed" ? 0 : hd.offsetHeight;
+      B.barH = Math.round(window.innerHeight - $("bmain").getBoundingClientRect().top + trayMax + headH + 12 + peekH);
+      // the drawers end just above the bar (CSS anchors do it where they can; this is the fallback)
+      const above = Math.round(window.innerHeight - bar.getBoundingClientRect().top + 8) + "px";
+      for (const p of [dpanel, sched]) p.style.bottom !== above && (p.style.bottom = above);
+      designerDock();
+      placeCut();
     }
     if ((B.typedV || 0) !== typedV) ((typedV = B.typedV || 0), (typed.a = typed.b = ""));
     const m = G.camera.matrixWorld.elements,
@@ -632,11 +1261,6 @@
         y = Math.min(B.ptr.touch ? py - 46 : py + 20, top - 34);
       lb.style.transform = "translate(" + Math.round(x) + "px," + Math.round(y) + "px)";
     }
-    if (!dpanel.hidden) {
-      const top = Math.round(window.innerHeight - bar.getBoundingClientRect().top + 8);
-      if (dpanel._b !== top) ((dpanel._b = top), (dpanel.style.bottom = top + "px"));
-    }
-    if (B.on === false && !dpanel.hidden) dpanel.hidden = true;
     // over a door or window's edge handle: the resize arrows
     let edge = B.ores ? (B.ores.k === "l" || B.ores.k === "r" ? "ew-resize" : "ns-resize") : "";
     if (!edge && B.ov.handles && B.ov.handles.length && B.ov.handles[0][4] && !B.ptr.touch)
