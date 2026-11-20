@@ -56,7 +56,8 @@ const c2 = await G((id) => __vehicles.body(id), id);       // sampled with D hel
 await page.keyboard.up('KeyD'); await page.keyboard.up('KeyW');
 const wr = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 check('with the camera across the nose, W still drives straight ahead', Math.abs(wr(c1.yaw - c0.yaw)) < 0.1, wr(c1.yaw - c0.yaw).toFixed(3));
-check('D steers the vehicle right whatever the camera sees', c2.steer > 0.05, 'steer ' + c2.steer.toFixed(3) + ' at ' + c2.speed.toFixed(1) + ' m/s');
+// the drive model's positive steer turns toward the body's local +x, the rider's left: D (the rider's right) is negative
+check('D steers the vehicle to the rider\'s right whatever the camera sees', c2.steer < -0.05, 'steer ' + c2.steer.toFixed(3) + ' at ' + c2.speed.toFixed(1) + ' m/s');
 await page.keyboard.down('Space'); await frames(90); await page.keyboard.up('Space');
 
 // E: brakes, then steps off
