@@ -19,6 +19,7 @@ import { FIELD_GLSL, LIVE_GLSL, GROUND_GLSL, createSurfaceMaterial, VIEWS } from
 import { createGroundPatches } from './ground.js';
 import { createActors } from './actors.js';
 import { createObjects } from './objects.js';
+import { createClumps } from './clumps.js';
 
 (() => {
   const G = window.__game;
@@ -42,13 +43,14 @@ import { createObjects } from './objects.js';
     uSnowFlags: { value: new T.Vector4(1, 1, 1, 1) },                               // glints, scatter, rims, undulate
     uSnowFlags2: { value: new T.Vector4(1, 1, 0, 0) },                              // bury, surface
     uSnowView: { value: 0 },
+    uSnowStick: { value: 0 },                                                       // 0 dry powder (below -8 C) .. 1 sticky (-1 C and up)
     // the engine's sky-visibility map (__game.skyVis), so snow under crowns and in hollows is dimmer as its ground is
     uSkyMap: G.skyVis ? G.skyVis.map : { value: null }, uSkyK: G.skyVis ? G.skyVis.k : { value: 0 }, uSkySize: { value: G.skyVis ? G.skyVis.size : 512 },
   };
 
   // look switches, for comparing (kept in localStorage)
   const FLAG_KEY = 'snowFlags';
-  const flags = { surface: true, glints: true, scatter: true, rims: true, bury: true, undulate: true, objects: true };
+  const flags = { surface: true, glints: true, scatter: true, rims: true, bury: true, undulate: true, objects: true, clumps: true };
   try { Object.assign(flags, JSON.parse(localStorage.getItem(FLAG_KEY) || '{}')); } catch (e) { /* none saved */ }
   function applyFlags() {
     const b = (v) => (v ? 1 : 0);
@@ -90,6 +92,7 @@ import { createObjects } from './objects.js';
   }
   const actors = createActors(G, { stamp, bearing, sample });
   const objects = createObjects(G, U, { stamp });
+  const clumps = createClumps(G, U, flags);   // clumps.js: mounds of snow on the pines' boughs
 
   // the trees round you, for the snowpack (canopy interception, tree wells, where unloaded snow lands): sent when you
   // have moved 16 m or a tree has come down. Only when it is cold enough to snow or snow lies (the first fall is still caught); nothing in summer.
@@ -164,6 +167,7 @@ import { createObjects } from './objects.js';
     field.dispose(); field = null;
     ground.set(false, false);
     objects.set(false);
+    clumps.release();
     actors.release();
     active = false; tier = 'off';
   }
@@ -183,6 +187,7 @@ import { createObjects } from './objects.js';
     const windK = clamp((w.windMs - 4) / 8, 0, 1);
     U.uSnowRef.value.set(w.snowDepthM, rho / 600, w.tempC < 0 ? clamp(freshMm / 3, 0, 1) : 0, clamp((w.tempC + 0.5) / 2, 0, 1));
     U.uSnowWind.value.set(-Math.sin(w.windDirRad), Math.cos(w.windDirRad), w.windMs, windK);
+    U.uSnowStick.value = clamp((w.tempC + 8) / 7, 0, 1);
     tierT += dt;
     if (tierT > 1) {
       tierT = 0;
@@ -200,6 +205,7 @@ import { createObjects } from './objects.js';
     }
     actors.update(dt);
     objects.update(dt);
+    clumps.update(dt, flags.objects && objects.on);
     // tracks fill in while it snows, rims slump in the wind and the thaw (world time, every 0.25 s)
     decayT += dt;
     if (decayT >= 0.25) {
@@ -244,7 +250,7 @@ import { createObjects } from './objects.js';
       fieldBuilt: !!(field && field.built), fieldRev: field ? field.rev : 0, fieldMaxD: field ? +field.maxD.toFixed(3) : 0,
       groundSnow: clamp(((W() && W().snowDepthM) || 0) / 0.12, 0, 1), groundPatched: ground.patched && ground.on,
       stampsPerSec: stat.stampsSec, stamps: stat.stamps, stampsDrawn: live ? live.total : 0, liveDraws: live ? live.draws : 0,
-      objects: objects.on ? objects.count : 0, roofCells: objects.roofCells, pace: +actors.pace.toFixed(3),
+      objects: objects.on ? objects.count : 0, clumps: clumps.count, clumpCaps: clumps.caps, clumpTris: clumps.triangles, roofCells: objects.roofCells, pace: +actors.pace.toFixed(3),
       triangles: surf ? surf.triangles : 0, live: live ? live.n : 0, msPerFrame: +stat.msAvg.toFixed(3), pendingTreads: actors.pending(),
     }),
     debug: {
