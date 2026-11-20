@@ -78,18 +78,28 @@ function buildShapes(ctx, s) {
       walls.push({ ax: p.a.x, az: p.a.z, bx: p.b.x, bz: p.b.z, y1: p.y1, half: Math.max(0.1, (p.thickness || 0.13) / 2) });
     }
   }
+  // trees, bucketed by tile so a tile finds its own quickly; the ring's normalisation depends (nearly) only on the radius
+  const buckets = new Map();
   for (const t of s.obstacles.trees) {
-    const [x, z, R, ht, ev] = t;
-    let n = 0, sum = 0;
-    for (let j = Math.floor((z - R) / 0.5); j <= Math.floor((z + R) / 0.5); j++) for (let i = Math.floor((x - R) / 0.5); i <= Math.floor((x + R) / 0.5); i++) {
-      const d = Math.hypot((i + 0.5) * 0.5 - x, (j + 0.5) * 0.5 - z) / R;
-      if (d >= 1) continue;
-      n++; sum += ring(d);
+    const [x, z, R, ht, ev] = t, rk = Math.round(R * 4);
+    let norm = 0;
+    if (ev) {
+      norm = normCache.get(rk);
+      if (norm === undefined) {
+        let n = 0, sum = 0; const m = Math.ceil(R / 0.5);
+        for (let j = -m; j <= m; j++) for (let i = -m; i <= m; i++) { const d = Math.hypot(i * 0.5, j * 0.5) / R; if (d >= 1) continue; n++; sum += ring(d); }
+        norm = sum > 0 ? n / sum : 0; normCache.set(rk, norm);
+      }
     }
-    trees.push({ x, z, R, ht, ev: !!ev, norm: ev && sum > 0 ? n / sum : 0 });
+    const tr = { x, z, R, ht, ev: !!ev, norm };
+    trees.push(tr);
+    for (let tz = Math.floor((z - R) / SPAN); tz <= Math.floor((z + R) / SPAN); tz++) for (let tx = Math.floor((x - R) / SPAN); tx <= Math.floor((x + R) / SPAN); tx++) {
+      const k = KEY(tx, tz); let l = buckets.get(k); if (!l) buckets.set(k, l = []); l.push(tr);
+    }
   }
-  return { roofs, floors, walls, trees };
+  return { roofs, floors, walls, trees, buckets };
 }
+const normCache = new Map();
 // where unloaded snow lands: between 0.6 and 1.0 of the crown radius, heaviest between
 const ring = (d) => { const lo = CANOPY.ringLo, hi = CANOPY.ringHi, mid = (lo + hi) / 2; return d < lo || d > hi ? 0 : 1 - Math.abs(d - mid) / ((hi - lo) / 2); };
 const coverage = (d) => 1 - smooth(CANOPY.edgeFrac, 1, d);   // 1 inside the crown, fading at its edge
@@ -110,15 +120,28 @@ function segDist(wl, x, z) {   // distance to a wall's line, the side (+1 / -1 a
 function prepare(ctx, s) {
   const c = cacheOf(s), site = ctx.get('site'), gs = ctx.get('ground'), ls = ctx.get('landscape'), W = ctx.get('weather');
   const lat = (W && W.site && W.site.latitudeDeg) || 45, sv = site ? site.version : 0, ov = s.obstacles.v, gr = gs ? gs.rev : 0, lr = ls && ls.grid ? ls.grid.rev : 0;
-  if (c.sv !== sv || c.ov !== ov || c.gr !== gr || c.lr !== lr || c.lat !== lat) { c.tiles.clear(); c.shapes = null; c.sv = sv; c.ov = ov; c.gr = gr; c.lr = lr; c.lat = lat; }
+  // something changed: the shapes are rebuilt, but a tile's factors are kept unless what stands on THAT tile changed
+  // (its signature), so walking on (a new tree list every few metres) or digging somewhere costs only the tiles it touches
+  if (c.sv !== sv || c.ov !== ov || c.gr !== gr || c.lr !== lr || c.lat !== lat) { c.shapes = null; c.epoch = (c.epoch | 0) + 1; c.sv = sv; c.ov = ov; c.gr = gr; c.lr = lr; c.lat = lat; }
   return c;
+}
+function tileSig(ctx, c, tx, tz) {
+  const l = c.shapes.buckets.get(KEY(tx, tz)), x0 = tx * SPAN, z0 = tz * SPAN;
+  let a = l ? l.length : 0, b = 0;
+  if (l) for (const t of l) b += t.x * 3 + t.z * 7 + t.R * 13 + (t.ev ? 1 : 0);
+  let g = 0;
+  for (let j = 0; j <= 4; j++) for (let i = 0; i <= 4; i++) g += groundRead.surfaceY(ctx.state, x0 + i * SPAN / 4, z0 + j * SPAN / 4) * (1 + i + 5 * j);
+  return a + '|' + b.toFixed(2) + '|' + g.toFixed(2) + '|' + c.sv + '|' + c.lat;
 }
 function factorsFor(ctx, s, tx, tz) {
   const c = prepare(ctx, s), key = KEY(tx, tz);
   let f = c.tiles.get(key);
-  if (f) return f;
+  if (f && f.epoch === c.epoch) return f;
   if (!c.shapes) c.shapes = buildShapes(ctx, s);
+  const sig = tileSig(ctx, c, tx, tz);
+  if (f && f.sig === sig) { f.epoch = c.epoch; return f; }
   f = buildTile(ctx, c.shapes, tx, tz, c.lat);
+  f.sig = sig; f.epoch = c.epoch;
   c.tiles.set(key, f);
   return f;
 }
@@ -142,7 +165,7 @@ function buildTile(ctx, sh, tx, tz, lat) {
   const near = (bb, p) => bb[0] <= x1 + p && bb[2] >= x0 - p && bb[1] <= z1 + p && bb[3] >= z0 - p;
   const roofs = sh.roofs.filter((r) => near(r.bb, 0)), floors = sh.floors.filter((r) => near(r.bb, 0));
   const walls = sh.walls.filter((w) => near([Math.min(w.ax, w.bx), Math.min(w.az, w.bz), Math.max(w.ax, w.bx), Math.max(w.az, w.bz)], MELT.northReach + 1));
-  const trees = sh.trees.filter((t) => t.x + t.R >= x0 && t.x - t.R <= x1 && t.z + t.R >= z0 && t.z - t.R <= z1);
+  const trees = sh.buckets.get(KEY(tx, tz)) || [];
   for (let j = 0; j < TS; j++) for (let i = 0; i < TS; i++) {
     const n = j * TS + i, x = x0 + (i + 0.5) * GRID.step, z = z0 + (j + 0.5) * GRID.step;
     let th = 1, mf = mfl[(j >> 1) * NL + (i >> 1)], cn = 0;
