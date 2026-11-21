@@ -233,7 +233,8 @@ function diagnose(s, t, M, precip) {
   const f = G.f * F_SCALE, trend = clamp((G.g - G.f) * TREND_SCALE, -4, 4);
   const sd = c.anomalySdC[0] + (c.anomalySdC[1] - c.anomalySdC[0]) * summer;
   const airC = atDay(M.seasonalC, x) + sd * G.airmass + 1.5 * Math.tanh(trend);   // warm ahead of a front, cold behind
-  s.tempC = airC + G.blC - atDay(M.offsetC, x);
+  // sandboxC: a sandbox shift of the air (the debug menu's "winter now"); absent in a normal game
+  s.tempC = airC + G.blC - atDay(M.offsetC, x) + (s.sandboxC || 0);
   // humidity: the air mass carries a dew point; moist in fronts and rain, dry under clear high pressure
   let dep = (c.dewDepressionC[0] + (c.dewDepressionC[1] - c.dewDepressionC[0]) * summer) * (1.6 - 1.3 * s.cloud);
   let td = airC - Math.max(0.2, dep);
@@ -312,12 +313,20 @@ function setSite(ctx, p = {}) {
   s.site = { latitudeDeg: lat, climate };
 }
 
+// sandbox: shift the air temperature by c degrees (0 clears it). Saved with the game, so a forced winter survives a reload.
+function debugShift(ctx, p = {}) {
+  const c = clamp(+p.c || 0, -40, 40);
+  ctx.s.tempC += c - (ctx.s.sandboxC || 0);        // felt at once, not at the next weather step
+  if (c) ctx.s.sandboxC = c; else delete ctx.s.sandboxC;
+  return { ok: true, c };
+}
+
 export const weather = {
   name: 'weather',
   every: EVERY,
   init: (ctx) => freshState(defaultSite(), ctx.t, ctx.rng()),
   step,
-  commands: { 'weather.setSite': setSite },
+  commands: { 'weather.setSite': setSite, 'weather.debugShift': debugShift },
 };
 
 // Short condition word for readouts (src/weather-view.js uses the same rule).

@@ -3635,6 +3635,14 @@ const gfxPanel = (() => {
     });
     const copy = h('button', { type: 'button', textContent: 'Copy' });
     copy.addEventListener('click', async () => { try { await navigator.clipboard.writeText(benchText); copy.textContent = 'Copied'; } catch (e) { copy.textContent = 'Select and copy by hand'; } });
+    // sandbox: make it snow, hold winter, clear it (so the snow can be looked at in any season)
+    const snowSandbox = () => {
+      const D = window.__snow.debug, btn = (text, fn) => { const b2 = h('button', { type: 'button', textContent: text }); b2.addEventListener('click', () => { fn(); refresh(); canvas.focus(); }); return b2; };
+      const cold = D.cold();
+      return h('div', { className: 'row' }, h('span', { textContent: 'Snow sandbox' }),
+        btn('+10 cm', () => D.storm(10)), btn('+40 cm', () => D.storm(40)), btn('Thaw', () => D.thaw()),
+        btn(cold ? 'Winter: on' : 'Winter: off', () => D.cold(!cold)));
+    };
     box.replaceChildren(
       h('div', { className: 'head' }, h('h2', { textContent: 'Graphics' }), close),
       statsEl,
@@ -3646,6 +3654,7 @@ const gfxPanel = (() => {
           + 'Below 100%, the 3D view is enlarged with a sharpening upscaler; the HUD stays sharp.' }),
       fxMode ? seg('Lighting', [['full', 'Full'], ['no relight', 'No relight'], ['off', 'Off']], fxMode, (m) => { fx.setLighting(m); try { localStorage.setItem('fx-lighting', m); } catch (e) {} }) : '',
       window.__snow ? seg('Snow', [[true, 'Deep'], [false, 'Ground only']], window.__snow.flags.surface, (v) => window.__snow.set({ surface: v })) : '',
+      window.__snow ? snowSandbox() : '',
       h('div', { className: 'row' }, h('span', { textContent: 'Screen' }), fs),
       h('div', { className: 'sec', textContent: 'Grass and trees' }),
       chk('drawOrder', 'Draw trees, then grass, then ground', 'Skips pixels that end up covered. Looks the same, runs faster.'),

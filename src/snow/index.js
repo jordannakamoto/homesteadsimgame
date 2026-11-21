@@ -288,6 +288,13 @@ import { createRoofs } from './roofs.js';
         if (live) live.reseed();
         return W().snowDepthM;
       },
+      // winter now: the air 20 C colder (on) or as the calendar has it (off), so sandbox snow stays and what falls is snow.
+      // With no argument, says whether it is on.
+      cold(on) {
+        const w = W();
+        if (on !== undefined && w && has('weather.debugShift')) G.sim.commandNow('weather.debugShift', { c: on ? -20 : 0 });
+        return !!(w && w.sandboxC);
+      },
       // all the snow gone at once (sandbox only: clears the reference pack and the snowpack's cells)
       thaw() {
         const w = W(); w.snowSweMm = 0; w.snowDepthM = 0;
