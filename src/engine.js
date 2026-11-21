@@ -1661,6 +1661,8 @@ function buildBirch() {
   canopy(B, r, C, rad, 22, 1.1, 1.6, col(0x6c9a30), col(0xcbe060), ends);
   return finish(B);
 }
+// every needle spray card of the pine models (full, lite), in model space: where snow can lie on a bough (__game.pineBoughs)
+const PINE_BOUGHS = [[], []];
 function buildPine(lite) {
   // A conifer grown in whorls: each bough is a thin limb that sags and lifts at the tip,
   // carrying a flat spray of needles and a second one hanging beneath it.
@@ -1758,6 +1760,7 @@ function buildPine(lite) {
               .lerp(tipPale, c1 === 1 ? smoothstep(0.72, 1, T) * 0.55 : 0)
               .multiplyScalar(w);
         card(B, c, hv, tv.multiplyScalar(wd2), Q.pine, () => nf, cf);
+        PINE_BOUGHS[lite ? 1 : 0].push({ c: c.clone(), hv: hv.clone(), tw: tv.clone(), l, seg: segs.length === 1 ? 2 : c0 ? 1 : 0, len });
         !lite &&
           l < 0.45 &&
           card(
@@ -4962,6 +4965,8 @@ window.__game = {
   snow: snowRead,   // reads of the snowpack (src/sim/snow.js): at, window, bearing, ...; drawn by src/snow/
   // shared materials add-ons may patch (src/snow/objects.js): trees, crowns and logs; rocks and stumps
   materials: { tree: treeMat, solid: solidMat },
+  // the pines' spray cards (PINE_BOUGHS) and the crowns' wind and see-through uniforms, so add-ons can sit things on boughs
+  pineBoughs: PINE_BOUGHS, treeU: { time: U.time, playerPx: U.playerPx, playerDepth: U.playerDepth, fadeR: U.fadeR },
   // the sky-visibility map (SKY_MAP above): texture, how much applies, size (m, wrapped)
   skyVis: { map: U.skyMap, k: U.skyK, size: SKY_MAP_SIZE },
   // runs through a building's frame (src/sim/core/routefind.js over src/sim/content/frame-channels.js)

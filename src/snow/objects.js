@@ -14,11 +14,53 @@ import { FIELD_GLSL } from './shade.js';
 import { tmod } from './gpu.js';
 
 const N = 192, CELL = 0.5, NONE = -1e4, SHAKES = 8, MARGIN = 0.35;
-const U_NAMES = ['uSnowField', 'uSnowFieldWin', 'uSnowRef', 'uSnowWind', 'uSnowFlags', 'uSnowFlags2', 'uSnowRoof', 'uSnowRoofWin', 'uSnowObj', 'uSnowShake'];
+const U_NAMES = ['uSnowField', 'uSnowFieldWin', 'uSnowRef', 'uSnowWind', 'uSnowFlags', 'uSnowFlags2', 'uSnowRoof', 'uSnowRoofWin', 'uSnowObj', 'uSnowShake', 'uSnowClump', 'uSnowStick'];
 const CROWN_R = [0.25, 0.25, 0.4];   // crown radius over tree height: pine, birch, oak
 
-const PARS = /* glsl */ `
-uniform highp sampler2D uSnowRoof; uniform vec4 uSnowRoofWin; uniform vec4 uSnowObj; uniform vec4 uSnowShake[${SHAKES}];
+// a crown's snow cleared round where it was knocked off, back only once new snow has fallen on it (uSnowObj.z: the fall
+// so far, mm). Shared with the mounds on the boughs (clumps.js): they collapse with the crown's dusting.
+export const SHAKE_GLSL = /* glsl */ `
+uniform vec4 uSnowObj; uniform vec4 uSnowShake[${SHAKES}];
+float snowShaken(vec2 w) {
+  float k = 1.0;
+  for (int i = 0; i < ${SHAKES}; i++) {
+    vec4 s = uSnowShake[i];
+    if (s.z <= 0.0) continue;
+    float near = 1.0 - smoothstep(0.65 * s.z, s.z, distance(w, s.xy));
+    k *= 1.0 - near * (1.0 - clamp((uSnowObj.z - s.w) / 3.0, 0.0, 1.0));
+  }
+  return k;
+}`;
+// sunlight on snow lying on things (the snow surface's constants, shade.js): it wraps past the terminator and comes back
+// bluer where it travelled far through the snow; for a Lambert material, after lights_lambert_pars_fragment
+export const SNOW_LIGHT_GLSL = /* glsl */ `
+void RE_Direct_SnowLump(const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in LambertMaterial material, inout ReflectedLight reflectedLight) {
+  float ndl = dot(geometryNormal, directLight.direction);
+  float wrap = mix(saturate(ndl), clamp((ndl + 0.35) / 1.35, 0.0, 1.0), uSnowFlags.y);
+  vec3 tint = mix(vec3(1.0), mix(vec3(0.60, 0.80, 1.0), vec3(1.0), smoothstep(0.0, 0.5, ndl)), uSnowFlags.y);
+  reflectedLight.directDiffuse += directLight.color * wrap * tint * BRDF_Lambert(material.diffuseColor);
+}
+void RE_IndirectDiffuse_SnowLump(const in vec3 irradiance, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in LambertMaterial material, inout ReflectedLight reflectedLight) {
+  reflectedLight.indirectDiffuse += irradiance * BRDF_Lambert(material.diffuseColor) * vec3(0.86, 0.95, 1.12);
+}
+#undef RE_Direct
+#undef RE_IndirectDiffuse
+#define RE_Direct RE_Direct_SnowLump
+#define RE_IndirectDiffuse RE_IndirectDiffuse_SnowLump`;
+
+// a loaded bough bends down (more the stickier the snow, which is what makes it let go): model-space metres at model
+// point p of a pine, most at the tips of the long low whorls, none at the trunk or the leader. Needs uSnowObj, uSnowStick.
+export const DROOP_GLSL = /* glsl */ `
+float snowDroop(vec3 p) {
+  return uSnowObj.x * mix(0.5, 1.0, uSnowStick) * 0.13 * pow(clamp((length(p.xz) - 0.3) / 2.6, 0.0, 1.0), 1.5) * (1.0 - smoothstep(6.5, 8.6, p.y));
+}`;
+const V_DROOP = /* glsl */ `#include <begin_vertex>
+  #ifdef USE_MAP
+  if (vMapUv.x >= 0.5 && vMapUv.y < 0.5) transformed.y -= snowDroop(position);    // a pine's needles
+  #endif`;
+
+const PARS = SHAKE_GLSL + /* glsl */ `
+uniform highp sampler2D uSnowRoof; uniform vec4 uSnowRoofWin; uniform vec4 uSnowClump;
 // the height of whatever roofs this point (NONE where nothing does): the cell's roof plane, capped at its highest
 float snowRoofH(vec2 w) {
   if (uSnowRoofWin.w < 0.5) return ${NONE.toFixed(1)};
@@ -35,17 +77,6 @@ float snowCover(vec3 w, vec3 n, float depth) {
   float thr = mix(0.82, 0.3, smoothstep(0.01, 0.3, depth));
   float nz = snowNoise2(w.xz * 3.1 + w.y * 1.7) - 0.5 + 0.5 * (snowNoise2(w.xz * 11.0 - w.y * 5.0) - 0.5);
   return smoothstep(thr - 0.08, thr + 0.12, n.y + nz * 0.3) * smoothstep(0.0015, 0.02, depth);
-}
-// a crown's snow cleared round where it was knocked off, back only once new snow has fallen on it (uSnowObj.z: the fall so far, mm)
-float snowShaken(vec2 w) {
-  float k = 1.0;
-  for (int i = 0; i < ${SHAKES}; i++) {
-    vec4 s = uSnowShake[i];
-    if (s.z <= 0.0) continue;
-    float near = 1.0 - smoothstep(0.65 * s.z, s.z, distance(w, s.xy));
-    k *= 1.0 - near * (1.0 - clamp((uSnowObj.z - s.w) / 3.0, 0.0, 1.0));
-  }
-  return k;
 }
 varying vec3 vSnowOW;`;
 const V_WORLD = /* glsl */ `#include <project_vertex>
@@ -74,6 +105,10 @@ const F_COVER = (kind) => /* glsl */ `
       // (a light load reaches only the boughs' upper faces: the dark green shows beneath and between them)
       snD = (vMapUv.x >= 0.5 ? uSnowObj.x : uSnowObj.y) * 0.06;
       snK = snowShaken(vSnowOW.xz) * (0.55 + 0.45 * snowNoise2(vSnowOW.xz * 1.3 + vSnowOW.y * 0.9));
+      // with mounds on the boughs (uSnowObj.w, clumps.js) a pine's needles keep only a broken dusting: the mounds carry it
+      // (only as far as the mounds are drawn, uSnowClump: player x, z, fade start, end; beyond, the crown carries it all)
+      if (vMapUv.x >= 0.5) snK *= mix(1.0, 0.42 * smoothstep(0.32, 0.78, snowNoise2(vSnowOW.xz * 2.3 - vSnowOW.y * 1.9)),
+        uSnowObj.w * (1.0 - smoothstep(uSnowClump.z, uSnowClump.w, distance(vSnowOW.xz, uSnowClump.xy))));
     }
     #endif` : ''}
     float snC = snowCover(vSnowOW, snNw, snD) * snK;
@@ -88,7 +123,9 @@ export function createObjects(G, U, { stamp }) {
   const T = G.THREE;
   U.uSnowRoof = U.uSnowRoof || { value: null };
   U.uSnowRoofWin = U.uSnowRoofWin || { value: new T.Vector4() };
-  U.uSnowObj = U.uSnowObj || { value: new T.Vector4() };                      // crown snow (pine, broadleaf, 0..1), fall so far (mm)
+  U.uSnowObj = U.uSnowObj || { value: new T.Vector4() };                      // crown snow (pine, broadleaf, 0..1), fall so far (mm), mounds on (clumps.js)
+  U.uSnowClump = U.uSnowClump || { value: new T.Vector4(0, 0, 37, 45) };          // mounds drawn round x, z: fade start, end (m)
+  U.uSnowStick = U.uSnowStick || { value: 0 };                                   // 0 cold dry powder .. 1 sticky, near thaw
   U.uSnowShake = U.uSnowShake || { value: Array.from({ length: SHAKES }, () => new T.Vector4()) };
   const done = new WeakMap(), live = new Set();
   let on = false;
@@ -109,6 +146,7 @@ export function createObjects(G, U, { stamp }) {
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + FIELD_GLSL + '\nvarying vec3 vSnowOW;')
         .replace('#include <project_vertex>', V_WORLD);
       if (kind === 'litter') sh.vertexShader = sh.vertexShader.replace('#include <begin_vertex>', V_SINK);
+      if (kind === 'tree') sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform vec4 uSnowObj; uniform float uSnowStick;' + DROOP_GLSL).replace('#include <begin_vertex>', V_DROOP);
       sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + FIELD_GLSL + PARS)
         .replace('#include <lights_lambert_fragment>', F_COVER(kind));
     };
@@ -274,7 +312,7 @@ export function createObjects(G, U, { stamp }) {
       // the crowns' snow: the canopy store (mm water over the crown), or with no snowpack system a guess from the ground's
       const cm = G.snow && G.snow.canopyMm && st.sys.snow ? G.snow.canopyMm(st) : Math.min(3, (w.snowSweMm || 0) * 0.1);
       const a = Math.min(1, cm / 2.5);
-      U.uSnowObj.value.set(a, a * 0.35, fallNow(), 0);
+      U.uSnowObj.value.set(a, a * 0.35, fallNow(), U.uSnowObj.value.w);   // w: mounds on the pines (clumps.js)
       // new buildings and vehicles are covered soon after they appear (building changes at most twice a second: a
       // build in progress changes every frame), and the roof map follows; the rest is looked over every 2 s
       const B = window.__build, V = window.__vehicles;

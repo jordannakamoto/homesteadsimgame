@@ -1,11 +1,12 @@
 // The snow surface's mesh: nested square rings centred on the player and snapped to 0.8 m, so every vertex always
-// lands on its own world lattice and nothing swims as you walk: 12.8 m at 10 cm, 25.6 m at 20 cm, 51.2 m at 40 cm.
+// lands on its own world lattice and nothing swims as you walk: 6.4 m across at 5 cm (a boot print is 15 cm wide),
+// 12.8 m at 10 cm, 25.6 m at 20 cm, 51.2 m at 40 cm.
 // The vertex shader lifts each vertex to the ground plus the snow (shade.js). Quads are split along the same diagonal
 // as the terrain's, so on the finest ring the surface follows the ground's own facets. The outer row of each finer
 // ring has its odd vertices collapsed onto the even ones, so it meets the coarser ring without cracks.
 // position = (x, ring, z), local to the centre; the ring picks the live texture's mip.
 
-export const RINGS = { high: [[6.4, 0.1], [12.8, 0.2], [25.6, 0.4]], medium: [[6.4, 0.1], [12.8, 0.2]] };
+export const RINGS = { high: [[3.2, 0.05], [6.4, 0.1], [12.8, 0.2], [25.6, 0.4]], medium: [[6.4, 0.1], [12.8, 0.2]] };
 export const SNAP = 0.8;
 
 export function buildSurface(T, rings) {
